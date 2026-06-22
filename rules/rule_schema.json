@@ -1,0 +1,74 @@
+{
+  "game_system": "COC/BRP 混合",
+  "version": "0.1.0",
+  "attributes": [
+    { "id": "STR", "name": "力量", "description": "物理力量，影响近战伤害和力量对抗" },
+    { "id": "DEX", "name": "敏捷", "description": "灵活性和反应速度，影响闪避和先手" },
+    { "id": "CON", "name": "体质", "description": "耐力和生命值上限的基础" },
+    { "id": "INT", "name": "智力", "description": "分析、推理和知识回忆能力" },
+    { "id": "WIS", "name": "感知", "description": "直觉、观察力和意志力" },
+    { "id": "CHA", "name": "魅力", "description": "社交能力，影响说服和伪装" }
+  ],
+  "skill_check": {
+    "type": "d20_vs_dc",
+    "description": "掷 d20 + 属性修正 + 技能修正，结果 >= DC 则成功",
+    "formula": "d20 + attribute_modifier + skill_bonus >= difficulty_class",
+    "difficulty_class_scale": {
+      "trivial": 5,
+      "easy": 10,
+      "moderate": 15,
+      "hard": 20,
+      "very_hard": 25,
+      "nearly_impossible": 30
+    },
+    "critical": {
+      "success": { "desc": "自然骰出 20，自动成功且附带额外收益" },
+      "failure": { "desc": "自然骰出 1，自动失败且附带严重后果" }
+    }
+  },
+  "attribute_modifier_table": {
+    "1_10": -5,
+    "11_20": -4,
+    "21_30": -3,
+    "31_40": -2,
+    "41_50": -1,
+    "51_60": 0,
+    "61_70": 1,
+    "71_80": 2,
+    "81_90": 3,
+    "91_100": 5
+  },
+  "skills": [
+    { "id": "investigation", "name": "调查", "attribute": "INT", "description": "搜索线索、分析证据" },
+    { "id": "spot_hidden", "name": "侦查", "attribute": "WIS", "description": "发现隐藏物品或秘密通道" },
+    { "id": "persuasion", "name": "说服", "attribute": "CHA", "description": "通过言语影响他人" },
+    { "id": "stealth", "name": "潜行", "attribute": "DEX", "description": "无声移动、隐藏身形" },
+    { "id": "dodge", "name": "闪避", "attribute": "DEX", "description": "躲避攻击或危险" },
+    { "id": "occult", "name": "神秘学", "attribute": "INT", "description": "识别超自然现象和仪式" },
+    { "id": "first_aid", "name": "急救", "attribute": "WIS", "description": "处理伤口、稳定伤势" },
+    { "id": "firearms", "name": "火器", "attribute": "DEX", "description": "使用枪械进行攻击" },
+    { "id": "athletics", "name": "运动", "attribute": "STR", "description": "攀爬、游泳、跳跃等体能活动" }
+  ],
+  "combat": {
+    "initiative": "d20 + DEX_modifier",
+    "attack_roll": "d20 + attribute_modifier + skill_bonus",
+    "damage_types": ["物理", "火焰", "冰冻", "精神"],
+    "hp_zero": "角色生命值归零时进入濒死状态，需要进行 CON 检定来稳定伤势"
+  },
+  "sanity": {
+    "system": "COC",
+    "max_san": "based_on_WIS",
+    "sanity_loss_triggers": [
+      "目击超自然生物",
+      "阅读禁忌文本",
+      "经历极度恐怖事件",
+      "同伴死亡"
+    ],
+    "sanity_loss_amount": {
+      "minor": "1d4",
+      "moderate": "1d6+1",
+      "major": "2d6+2",
+      "catastrophic": "3d10"
+    }
+  }
+}

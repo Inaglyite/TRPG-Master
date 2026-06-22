@@ -1,0 +1,105 @@
+{
+  "module": "mansion_of_madness",
+  "current_scene": {
+    "id": "entrance_hall",
+    "name": "宅邸入口大厅",
+    "description": "厚重的大门在你身后缓缓关闭，发出沉闷的回响。你站在一座维多利亚式宅邸的入口大厅中，头顶的水晶吊灯积满灰尘，只有寥寥几支蜡烛还在燃烧。空气中弥漫着霉味和某种说不清的甜腻气息。正前方是通往二楼的宽大楼梯，左右两侧各有一扇紧闭的门。大厅中央的地毯上有一滩深色的污渍，你看不清那是什么。",
+    "exits": [
+      "grand_staircase",
+      "east_wing_door",
+      "west_wing_door"
+    ],
+    "npcs_present": [
+      "butler_gregory"
+    ]
+  },
+  "pc": {
+    "name": "爱德华·温斯洛",
+    "occupation": "私家侦探",
+    "hp": 12,
+    "max_hp": 12,
+    "san": 65,
+    "max_san": 65,
+    "attributes": {
+      "STR": 50,
+      "DEX": 55,
+      "CON": 45,
+      "INT": 70,
+      "WIS": 65,
+      "CHA": 40
+    },
+    "skills": {
+      "investigation": 70,
+      "spot_hidden": 60,
+      "persuasion": 35,
+      "stealth": 40,
+      "dodge": 45,
+      "occult": 25,
+      "first_aid": 30,
+      "firearms": 35
+    },
+    "inventory": [
+      "手电筒",
+      "怀表",
+      "笔记本与钢笔",
+      "38口径左轮手枪（6发）"
+    ],
+    "conditions": []
+  },
+  "npcs": [
+    {
+      "id": "butler_gregory",
+      "name": "管家格里高利",
+      "visible_tags": [
+        "老年男性",
+        "穿着旧式管家制服",
+        "面色苍白",
+        "举止拘谨"
+      ],
+      "secret": "格里高利并非活人——他在三十年前宅邸大火中丧生，如今是一个困在此地的幽灵。他不知道自己已经死了，每当被问及火灾，他的记忆会陷入混乱。",
+      "hp": 8,
+      "max_hp": 8,
+      "disposition": "nervous",
+      "current_location": "entrance_hall"
+    },
+    {
+      "id": "lady_elizabeth",
+      "name": "伊丽莎白夫人",
+      "visible_tags": [
+        "中年贵妇",
+        "身穿褪色的晚礼服",
+        "神情恍惚",
+        "说话轻声细语"
+      ],
+      "secret": "伊丽莎白夫人是宅邸火灾的元凶——她为了阻止丈夫的邪恶仪式，亲手点燃了地下室的炼金材料。她知道地下室封印着什么东西，但精神已濒临崩溃，无法直接说出真相。",
+      "hp": 6,
+      "max_hp": 6,
+      "disposition": "unstable",
+      "current_location": "east_wing_parlor"
+    },
+    {
+      "id": "shadow_creature",
+      "name": "暗影生物",
+      "visible_tags": [
+        "人形轮廓",
+        "不断扭曲的黑暗",
+        "发出低沉的嗡鸣"
+      ],
+      "secret": "这是被地下室封印法阵束缚的次元生物，只有在彻底黑暗的地方才能完全显形。光明可以暂时驱退它。它追逐宅邸中的生命气息，渴望吸收灵魂以挣脱封印。",
+      "hp": 20,
+      "max_hp": 20,
+      "disposition": "hostile",
+      "current_location": "basement_seal"
+    }
+  ],
+  "clues_found": [
+    "入口大厅地毯上的血迹——边缘呈喷射状，源自楼梯口方向，疑似暴力攻击所致"
+  ],
+  "flags": {
+    "front_door_locked": true,
+    "east_wing_explored": false,
+    "west_wing_explored": false,
+    "basement_accessible": false,
+    "ritual_circle_active": true
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "version": "0.1.0",
+  "critical_success": {
+    "enabled": true,
+    "description": "自然骰出 20 时触发暴击，检定自动成功并获得额外叙事收益"
+  },
+  "fumble": {
+    "enabled": true,
+    "description": "自然骰出 1 时触发大失败，检定自动失败并伴随严重负面后果"
+  },
+  "sanity_system": {
+    "enabled": true,
+    "description": "启用理智值系统（COC 风格）"
+  },
+  "combat_detailed": {
+    "enabled": false,
+    "description": "使用详细战斗规则（含部位命中、护甲减免等），false 则使用简化版"
+  },
+  "max_players": 4,
+  "skill_check_style": "d20_vs_dc"
+}
