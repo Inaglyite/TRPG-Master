@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""TRPG 确定性技能检定工具 —— 属性绑定 + 公式计算 + 掷骰 + DC 比较"""
+"""TRPG 技能检定工具 —— COC 第七版 d100 roll-under
+
+d100 ≤ 技能值 = 常规成功
+d100 ≤ 技能值/2 = 困难成功
+d100 ≤ 技能值/5 = 极难成功
+01 = 大成功, 100 = 大失败
+"""
 
 import json
 import random
 import sys
-import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = PROJECT_ROOT / "rules" / "rule_schema.json"
 STATE_PATH = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
+CONFIG_PATH = PROJECT_ROOT / "rules" / "rule_config.json"
 
 
 def load_json(path):
@@ -17,112 +23,136 @@ def load_json(path):
         return json.load(f)
 
 
-def get_attribute_modifier(attribute_value: int, modifier_table: dict) -> int:
-    """根据属性值查表返回修正值"""
-    for key, mod in modifier_table.items():
-        low, high = map(int, key.split("_"))
-        if low <= attribute_value <= high:
-            return mod
-    return 0
+def success_level(d100_roll: int, skill_value: int, bonus_dice: int = 0,
+                  penalty_dice: int = 0, is_push: bool = False) -> dict:
+    """执行 d100 roll-under 检定，返回完整结果。
 
+    Args:
+        d100_roll: 已掷出的 d100 值（用于测试重现），None 则随机
+        skill_value: 技能值 (0-99)
+        bonus_dice: 奖励骰数量
+        penalty_dice: 惩罚骰数量
+        is_push: 是否为孤注一掷
+    """
+    # 掷 d100（个位骰 + 十位骰）
+    tens = random.randint(0, 9)
+    ones = random.randint(0, 9)
 
-def skill_check(skill_name: str, dc: int, advantage: str | None = None):
-    schema = load_json(SCHEMA_PATH)
-    state = load_json(STATE_PATH)
+    # 奖惩骰：额外十位骰
+    extra_tens = []
+    net_penalty = penalty_dice - bonus_dice  # 正数=惩罚，负数=奖励
+    if net_penalty != 0:
+        for _ in range(abs(net_penalty)):
+            extra_tens.append(random.randint(0, 9))
 
-    # 查技能 → 属性映射
-    skills_map = {s["id"]: s for s in schema["skills"]}
-    skill_def = skills_map.get(skill_name)
-    if not skill_def:
-        result = {"success": False, "error": f"未知技能: {skill_name}"}
-        print(json.dumps(result, ensure_ascii=False))
-        sys.exit(1)
+    # 取最优/最劣十位
+    if net_penalty < 0:  # 奖励骰：取数值最小的十位（最接近 00 即成功）
+        tens = min([tens] + extra_tens)
+    elif net_penalty > 0:  # 惩罚骰：取数值最大的十位（最接近 100 即失败）
+        tens = max([tens] + extra_tens)
 
-    attr_id = skill_def["attribute"]
-    attr_defs = {a["id"]: a for a in schema["attributes"]}
-    attr_name = attr_defs[attr_id]["name"] if attr_id in attr_defs else attr_id
+    # 计算 d100
+    if tens == 0 and ones == 0:
+        d100 = 100  # 00 + 0 = 100
+    else:
+        d100 = tens * 10 + ones
+        if d100 == 0:
+            d100 = 100
 
-    # 读 PC 属性值
-    pc = state["pc"]
-    attr_value = pc["attributes"].get(attr_id, 50)
-    skill_value = pc["skills"].get(skill_name, 0)
+    # 判定成功等级
+    if d100 <= 1:
+        level = "critical_success"
+    elif d100 <= max(1, skill_value // 5):
+        level = "extreme_success"
+    elif d100 <= max(1, skill_value // 2):
+        level = "hard_success"
+    elif d100 <= skill_value:
+        level = "regular_success"
+    elif skill_value < 50 and d100 >= 96:
+        level = "fumble"
+    elif d100 >= 100:
+        level = "fumble"
+    else:
+        level = "failure"
 
-    # 计算修正
-    modifier_table = schema["attribute_modifier_table"]
-    attr_mod = get_attribute_modifier(attr_value, modifier_table)
-    skill_bonus = skill_value // 10  # 技能值 / 10 向下取整
+    # 读技能定义
+    try:
+        schema = load_json(SCHEMA_PATH)
+        skills_map = {s["id"]: s for s in schema.get("skills", [])}
+        skill_name = skills_map.get(skill_name_global, {}).get("name", skill_name_global)
+    except Exception:
+        skill_name = skill_name_global
 
-    # 掷骰
-    d20_roll = random.randint(1, 20)
-    if advantage == "advantage":
-        d20_roll = max(d20_roll, random.randint(1, 20))
-    elif advantage == "disadvantage":
-        d20_roll = min(d20_roll, random.randint(1, 20))
-
-    total = d20_roll + attr_mod + skill_bonus
-    success = total >= dc
-
-    # 暴击 / 大失败
-    rule_config_path = PROJECT_ROOT / "rules" / "rule_config.json"
-    config = load_json(rule_config_path) if rule_config_path.exists() else {}
-    critical_enabled = config.get("critical_success", {}).get("enabled", True)
-    fumble_enabled = config.get("fumble", {}).get("enabled", True)
-
-    is_critical = d20_roll == 20 and critical_enabled
-    is_fumble = d20_roll == 1 and fumble_enabled
-
-    if is_critical:
-        success = True
-    if is_fumble:
-        success = False
+    success = level in ("critical_success", "extreme_success", "hard_success", "regular_success")
 
     result = {
-        "skill": skill_name,
-        "skill_name": skill_def["name"],
-        "attribute": attr_id,
-        "attribute_name": attr_name,
-        "attribute_value": attr_value,
-        "attribute_modifier": attr_mod,
+        "skill": skill_name_global,
+        "skill_name": skill_name,
         "skill_value": skill_value,
-        "skill_bonus": skill_bonus,
-        "dc": dc,
-        "d20_roll": d20_roll,
-        "total": total,
+        "d100_roll": d100,
+        "tens_dice": [tens] + extra_tens,
+        "ones_dice": ones,
+        "bonus_dice": bonus_dice,
+        "penalty_dice": penalty_dice,
+        "difficulty_regular": skill_value,
+        "difficulty_hard": max(1, skill_value // 2),
+        "difficulty_extreme": max(1, skill_value // 5),
+        "level": level,
         "success": success,
-        "critical": is_critical,
-        "fumble": is_fumble,
-        "advantage": advantage if advantage else "normal",
+        "is_push": is_push,
     }
 
-    print(json.dumps(result, ensure_ascii=False))
+    print_json(result)
 
-    # 理智：极端结果时提示
-    if is_fumble:
-        print("!!! 大失败！检定自动失败，将触发严重后果。", file=sys.stderr)
-    if is_critical:
-        print("!!! 大成功！检定自动成功，将获得额外叙事收益。", file=sys.stderr)
+    if level == "fumble":
+        print("!!! 大失败！后果极其严重。", file=sys.stderr)
+    elif level == "critical_success":
+        print("!!! 大成功！额外收益。", file=sys.stderr)
+
+    return result
 
 
-def main():
-    if len(sys.argv) < 3:
-        print("用法: python skill_check.py <skill_name> <dc> [advantage|disadvantage]")
-        print("  skill_name: investigation, spot_hidden, persuasion, stealth, dodge, occult, first_aid, firearms, athletics")
-        print("  dc: 5=琐碎, 10=简单, 15=中等, 20=困难, 25=极难, 30=近乎不可能")
+skill_name_global = ""
+
+
+def console_check():
+    """命令行模式"""
+    if len(sys.argv) < 2:
+        print("用法: python skill_check.py <skill_id> [bonus_dice] [penalty_dice] [--push]")
+        print("  skill_id: spot_hidden, persuade, fighting_brawl, dodge, firearms_handgun, ...")
+        print("  bonus_dice: 奖励骰数量（默认 0）")
+        print("  penalty_dice: 惩罚骰数量（默认 0）")
+        print("  --push: 标记为孤注一掷")
         print("示例:")
-        print("  python skill_check.py investigation 15")
-        print("  python skill_check.py persuasion 20 advantage")
+        print("  python skill_check.py spot_hidden")
+        print("  python skill_check.py persuade 1 0         # 1个奖励骰")
+        print("  python skill_check.py dodge 0 1             # 1个惩罚骰")
+        print("  python skill_check.py library_use 0 0 --push # 孤注一掷")
         sys.exit(1)
 
-    skill_name = sys.argv[1]
-    dc = int(sys.argv[2])
-    advantage = sys.argv[3] if len(sys.argv) > 3 else None
+    global skill_name_global
+    skill_name_global = sys.argv[1]
+    bonus = 0
+    penalty = 0
+    is_push = False
 
-    if advantage and advantage not in ("advantage", "disadvantage"):
-        print(f"ERROR: 无效的优势参数 '{advantage}'，可用: advantage, disadvantage", file=sys.stderr)
-        sys.exit(1)
+    for i, arg in enumerate(sys.argv[2:], start=2):
+        if arg == "--push":
+            is_push = True
+        elif i == 2:
+            bonus = int(arg)
+        elif i == 3:
+            penalty = int(arg)
 
-    skill_check(skill_name, dc, advantage)
+    state = load_json(STATE_PATH)
+    skill_value = state["pc"]["skills"].get(skill_name_global, 50)
+
+    success_level(0, skill_value, bonus, penalty, is_push)
+
+
+def print_json(obj):
+    print(json.dumps(obj, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    main()
+    console_check()

@@ -139,6 +139,25 @@ def cmd_add_clue(text, category="investigation"):
     print(f"[{CATEGORY_NAMES.get(category, category)}] {text}")
 
 
+def cmd_add_item(item_name):
+    data = _load()
+    inv = data.setdefault("pc", {}).setdefault("inventory", [])
+    inv.append(item_name)
+    _save(data)
+    print(f"物品已添加: {item_name}")
+
+
+def cmd_remove_item(item_name):
+    data = _load()
+    inv = data.get("pc", {}).get("inventory", [])
+    if item_name in inv:
+        inv.remove(item_name)
+        _save(data)
+        print(f"物品已移除: {item_name}")
+    else:
+        print(f"物品不存在: {item_name}", file=sys.stderr)
+
+
 def cmd_usage():
     print("用法:")
     print("  python state_manager.py get <json_path>        读取字段（如 pc.hp, npcs.0.name）")
@@ -147,6 +166,8 @@ def cmd_usage():
     print("  python state_manager.py clues                  列出已发现线索")
     print("  python state_manager.py add-clue <text> [category]  添加线索")
     print("        category: investigation/event/task/npc，默认 investigation")
+    print("  python state_manager.py add-item <name>        添加物品到背包")
+    print("  python state_manager.py remove-item <name>     从背包移除物品")
 
 
 COMMANDS = {
@@ -155,6 +176,8 @@ COMMANDS = {
     "npcs": lambda _=None: cmd_list_npcs(),
     "clues": lambda _=None: cmd_list_clues(),
     "add-clue": cmd_add_clue,
+    "add-item": cmd_add_item,
+    "remove-item": cmd_remove_item,
 }
 
 
@@ -185,6 +208,16 @@ def main():
         cmd_list_npcs()
     elif cmd == "clues":
         cmd_list_clues()
+    elif cmd == "add-item":
+        if len(sys.argv) < 3:
+            print("ERROR: add-item 需要 <name>", file=sys.stderr)
+            sys.exit(1)
+        cmd_add_item(sys.argv[2])
+    elif cmd == "remove-item":
+        if len(sys.argv) < 3:
+            print("ERROR: remove-item 需要 <name>", file=sys.stderr)
+            sys.exit(1)
+        cmd_remove_item(sys.argv[2])
     else:
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()

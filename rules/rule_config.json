@@ -1,21 +1,31 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "game_system": "COC 第七版",
+  "skill_check_style": "d100_roll_under",
   "critical_success": {
     "enabled": true,
-    "description": "自然骰出 20 时触发暴击，检定自动成功并获得额外叙事收益"
+    "description": "骰出 01 时触发大成功——自动极难成功并附带额外叙事收益"
   },
   "fumble": {
     "enabled": true,
-    "description": "自然骰出 1 时触发大失败，检定自动失败并伴随严重负面后果"
+    "description": "骰出 100 时触发大失败；技能值 < 50 时 96-100 也是大失败"
   },
   "sanity_system": {
     "enabled": true,
-    "description": "启用理智值系统（COC 风格）"
+    "description": "COC 7e 理智系统：X/Y 格式损失 + 临时/不定/永久疯狂 + 疯狂发作表"
   },
   "combat_detailed": {
-    "enabled": false,
-    "description": "使用详细战斗规则（含部位命中、护甲减免等），false 则使用简化版"
+    "enabled": true,
+    "description": "COC 7e 详细战斗规则：反击/闪避对抗 + 重伤/濒死/即死 + 被围攻惩罚骰"
   },
-  "max_players": 4,
-  "skill_check_style": "d20_vs_dc"
+  "bonus_penalty_dice": {
+    "enabled": true,
+    "max_stack": 2,
+    "description": "奖励骰/惩罚骰系统，可叠加最多 2 个，互相对消"
+  },
+  "push_rolls": {
+    "enabled": true,
+    "description": "孤注一掷：失败后可再试一次，后果更严重。战斗技能/SAN检定/克苏鲁神话不可孤注一掷"
+  },
+  "max_players": 4
 }

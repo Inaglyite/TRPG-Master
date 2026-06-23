@@ -10,27 +10,33 @@ from .config import PROJECT_ROOT, STATE_FILE
 # ---------------------------------------------------------------------------
 
 TOOLS = [
-    # ---- 技能检定（属性绑定，确定性计算） ----
+    # ---- 技能检定（COC 第七版 d100 roll-under） ----
     {
         "type": "function",
         "function": {
             "name": "skill_check",
-            "description": "执行一次完整的技能检定。自动读取 PC 属性值、查属性修正表、计算技能加值、掷 d20、比较 DC。用于所有技能/属性判定。绝不手动掷骰心算修正——始终调用此函数。",
+            "description": "COC 7e d100 技能检定。自动读取 PC 技能值，掷 d100，判断成功等级。d100 ≤ 技能值 = 常规成功，≤ 半值 = 困难成功，≤ 五分之一 = 极难成功。01 = 大成功，100 = 大失败。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "skill": {
                         "type": "string",
-                        "description": "技能 ID: investigation, spot_hidden, persuasion, stealth, dodge, occult, first_aid, firearms, athletics"
+                        "description": "技能 ID: spot_hidden, persuade, dodge, fighting_brawl, firearms_handgun, stealth, library_use, listen, psychology, first_aid, occult, charm, fast_talk, intimidate, climb, locksmith, navigate, drive_auto, credit_rating, language_own, cthulhu_mythos, psychoanalysis 等(见 rule_schema.json)"
                     },
-                    "dc": {"type": "integer", "description": "难度等级 (5=琐碎, 10=简单, 15=中等, 20=困难, 25=极难)"},
-                    "advantage": {
-                        "type": "string",
-                        "enum": ["advantage", "disadvantage"],
-                        "description": "优势/劣势，不填则正常掷骰"
+                    "bonus_dice": {
+                        "type": "integer",
+                        "description": "奖励骰数量（额外十位骰取优），默认 0。多个可叠加，与惩罚骰抵消"
+                    },
+                    "penalty_dice": {
+                        "type": "integer",
+                        "description": "惩罚骰数量（额外十位骰取劣），默认 0。多个可叠加，与奖励骰抵消"
+                    },
+                    "push": {
+                        "type": "boolean",
+                        "description": "是否为孤注一掷。战斗技能/理智检定不可孤注一掷。push=true 则 is_push=true"
                     }
                 },
-                "required": ["skill", "dc"]
+                "required": ["skill"]
             }
         }
     },
@@ -38,30 +44,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "dice_roll",
-            "description": "掷骰子。仅用于先攻、随机事件等非技能场景。技能检定请用 skill_check。",
+            "description": "掷普通骰子。用于伤害、SAN损失、先攻、随机事件。技能检定请用 skill_check。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "spec": {"type": "string", "description": "骰子规格，如 d20, d100, 2d6, 3d8+2"}
+                    "spec": {"type": "string", "description": "骰子规格，如 d100, 1d6, 2d6, 1d10, 3d10"}
                 },
                 "required": ["spec"]
             }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "dice_roll_advantage",
-            "description": "d20 优势掷骰（两骰取高）。用于有利情境。",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "dice_roll_disadvantage",
-            "description": "d20 劣势掷骰（两骰取低）。用于不利情境。",
-            "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
     {
@@ -203,6 +193,35 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
+    # ---- 物品管理 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "state_add_item",
+            "description": "添加物品到 PC 背包。当玩家捡起、获得或购买物品时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "物品名称，如'黄铜钥匙''银质徽章'"}
+                },
+                "required": ["item"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "state_remove_item",
+            "description": "从 PC 背包移除物品。当玩家使用、丢弃或失去物品时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "物品名称"}
+                },
+                "required": ["item"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -278,9 +297,10 @@ TOOLS = [
 
 COMPLEX_FUNCTIONS = {
     "skill_check",
-    "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage",
+    "dice_roll",
     "apply_damage", "apply_heal",
     "sanity_loss", "sanity_restore", "sanity_check",
+    "create_character",
 }
 
 
@@ -335,18 +355,16 @@ def execute_function(name: str, args: dict) -> str:
     safe = lambda s: json.dumps(str(s), ensure_ascii=False)
 
     if name == "skill_check":
-        skill = args.get("skill", "investigation")
-        dc = args.get("dc", 15)
-        adv = args.get("advantage", "")
-        if adv in ("advantage", "disadvantage"):
-            return _run_cli(f"python3 tools/skill_check.py {skill} {dc} {adv}")
-        return _run_cli(f"python3 tools/skill_check.py {skill} {dc}")
+        skill = args.get("skill", "spot_hidden")
+        bonus = args.get("bonus_dice", 0) or 0
+        penalty = args.get("penalty_dice", 0) or 0
+        is_push = args.get("push", False)
+        cmd = f"python3 tools/skill_check.py {skill} {bonus} {penalty}"
+        if is_push:
+            cmd += " --push"
+        return _run_cli(cmd)
     elif name == "dice_roll":
         return _run_cli(f"python3 tools/dice.py {args.get('spec', 'd20')}")
-    elif name == "dice_roll_advantage":
-        return _run_cli("python3 tools/dice.py d20 adv")
-    elif name == "dice_roll_disadvantage":
-        return _run_cli("python3 tools/dice.py d20 dis")
     elif name == "state_get":
         return _run_cli(f"python3 tools/state_manager.py get {args.get('path', 'pc.hp')}")
     elif name == "state_set":
@@ -359,6 +377,10 @@ def execute_function(name: str, args: dict) -> str:
         text = safe(args.get("text", ""))
         cat = args.get("category", "investigation")
         return _run_cli(f"python3 tools/state_manager.py add-clue {text} {cat}")
+    elif name == "state_add_item":
+        return _run_cli(f"python3 tools/state_manager.py add-item {safe(args.get('item', ''))}")
+    elif name == "state_remove_item":
+        return _run_cli(f"python3 tools/state_manager.py remove-item {safe(args.get('item', ''))}")
     elif name == "apply_damage":
         target = args.get("target", "pc")
         amount = args.get("amount", 0)
@@ -367,11 +389,20 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "apply_heal":
         return _run_cli(f"python3 tools/damage.py heal {args.get('target', 'pc')} {args.get('amount', 0)}")
     elif name == "sanity_loss":
-        return _run_cli(f"python3 tools/sanity.py loss {args.get('severity', 'moderate')}")
+        sev = args.get("severity", "moderate")
+        src = safe(args.get("source", "未知恐怖"))
+        return _run_cli(f"python3 tools/sanity.py loss {sev}")
     elif name == "sanity_restore":
         return _run_cli(f"python3 tools/sanity.py restore {args.get('amount', 0)}")
     elif name == "sanity_check":
         return _run_cli("python3 tools/sanity.py check")
+    elif name == "create_character":
+        name = safe(args.get("name", "调查员"))
+        occupation = safe(args.get("occupation", "私家侦探"))
+        return _run_cli(f"python3 tools/character.py create {name} {occupation}")
+    elif name == "load_character":
+        path = args.get("path", "")
+        return _run_cli(f"python3 tools/character.py load {path}")
     elif name == "suggest_check":
         skill = args.get("skill", "?")
         attr = args.get("attribute", "?")
@@ -438,47 +469,41 @@ def execute_function(name: str, args: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def dice_summary(output: str) -> str | None:
-    """从 dice.py 或 skill_check.py 的 JSON 输出中提取摘要"""
+    """从 skill_check.py 或 dice.py 的 JSON 输出中提取摘要"""
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
         return None
 
-    # skill_check 输出（含属性绑定）
-    if "skill_name" in data:
-        skill = data["skill_name"]
-        attr = data["attribute_name"]
-        d20 = data["d20_roll"]
-        total = data["total"]
-        dc = data["dc"]
-        attr_mod = data["attribute_modifier"]
-        skill_bonus = data["skill_bonus"]
-        adv = data.get("advantage", "normal")
+    # skill_check d100 输出
+    if "d100_roll" in data:
+        skill = data.get("skill_name", data.get("skill", "?"))
+        roll = data["d100_roll"]
+        value = data["skill_value"]
+        level = data["level"]
+        bonus = data.get("bonus_dice", 0)
+        penalty = data.get("penalty_dice", 0)
+        is_push = data.get("is_push", False)
 
-        mod_str = ""
-        if attr_mod >= 0:
-            mod_str += f"+{attr_mod}"
-        else:
-            mod_str += f"{attr_mod}"
-        if skill_bonus >= 0:
-            mod_str += f"+{skill_bonus}"
-        else:
-            mod_str += f"{skill_bonus}"
+        level_emoji = {
+            "critical_success": "★ 大成功！",
+            "extreme_success": "✦ 极难成功",
+            "hard_success": "◆ 困难成功",
+            "regular_success": "✓ 成功",
+            "failure": "✗ 失败",
+            "fumble": "💀 大失败！"
+        }
 
-        adv_suffix = ""
-        if adv == "advantage":
-            adv_suffix = " (优势)"
-        elif adv == "disadvantage":
-            adv_suffix = " (劣势)"
-
-        status = "✓" if data["success"] else "✗"
-        if data["critical"]:
-            status = "★ 大成功！"
-        if data["fumble"]:
-            status = "💀 大失败！"
+        dice_note = ""
+        if bonus > 0:
+            dice_note = f" ({bonus}奖励骰)"
+        elif penalty > 0:
+            dice_note = f" ({penalty}惩罚骰)"
+        if is_push:
+            dice_note += " [孤注一掷]"
 
         return (
-            f"🎲 【{skill}】(d20={d20}{mod_str}={total}) vs DC {dc} → {status}"
+            f"🎲 【{skill}】d100={roll}{dice_note} vs {value} → {level_emoji.get(level, level)}"
         )
 
     # dice.py 输出
@@ -486,15 +511,9 @@ def dice_summary(output: str) -> str | None:
     total = data["total"]
     rolls = data.get("rolls", [total])
     mod = data.get("modifier", 0)
-    adv = data.get("advantage", False)
-    dis = data.get("disadvantage", False)
 
     rolls_str = ", ".join(str(r) for r in rolls)
-    if adv:
-        return f"🎲 {spec} (优势) → 取 {total}"
-    elif dis:
-        return f"🎲 {spec} (劣势) → 取 {total}"
-    elif mod:
+    if mod:
         return f"🎲 {rolls_str} +{mod} = {total}"
     else:
         return f"🎲 {spec} = {total}"

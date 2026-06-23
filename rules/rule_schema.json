@@ -1,74 +1,141 @@
 {
-  "game_system": "COC/BRP 混合",
-  "version": "0.1.0",
+  "game_system": "COC 第七版",
+  "version": "0.2.0",
+  "dice_system": "d100_roll_under",
+
   "attributes": [
-    { "id": "STR", "name": "力量", "description": "物理力量，影响近战伤害和力量对抗" },
-    { "id": "DEX", "name": "敏捷", "description": "灵活性和反应速度，影响闪避和先手" },
-    { "id": "CON", "name": "体质", "description": "耐力和生命值上限的基础" },
-    { "id": "INT", "name": "智力", "description": "分析、推理和知识回忆能力" },
-    { "id": "WIS", "name": "感知", "description": "直觉、观察力和意志力" },
-    { "id": "CHA", "name": "魅力", "description": "社交能力，影响说服和伪装" }
+    { "id": "STR", "name": "力量", "description": "物理力量，近战伤害加值、体格计算", "roll": "3d6x5" },
+    { "id": "DEX", "name": "敏捷", "description": "灵活性和反应速度，战斗行动顺序，闪避初始值(DEX/2)", "roll": "3d6x5" },
+    { "id": "CON", "name": "体质", "description": "耐力和生命力，HP计算，重伤/濒死检定", "roll": "3d6x5" },
+    { "id": "INT", "name": "智力", "description": "分析推理，灵感检定，兴趣技能点数(INT×2)", "roll": "2d6+6x5" },
+    { "id": "POW", "name": "意志", "description": "意志力，起始SAN值(POW)，魔法值(POW/5)", "roll": "3d6x5" },
+    { "id": "SIZ", "name": "体型", "description": "身材大小，HP计算(SIZ+CON)/10，伤害加值和体格", "roll": "2d6+6x5" },
+    { "id": "APP", "name": "外貌", "description": "外表吸引力，社交技能的辅助因素", "roll": "3d6x5" },
+    { "id": "EDU", "name": "教育", "description": "知识水平，母语初始值，职业技能点数", "roll": "2d6+6x5" }
   ],
-  "skill_check": {
-    "type": "d20_vs_dc",
-    "description": "掷 d20 + 属性修正 + 技能修正，结果 >= DC 则成功",
-    "formula": "d20 + attribute_modifier + skill_bonus >= difficulty_class",
-    "difficulty_class_scale": {
-      "trivial": 5,
-      "easy": 10,
-      "moderate": 15,
-      "hard": 20,
-      "very_hard": 25,
-      "nearly_impossible": 30
-    },
-    "critical": {
-      "success": { "desc": "自然骰出 20，自动成功且附带额外收益" },
-      "failure": { "desc": "自然骰出 1，自动失败且附带严重后果" }
+
+  "derived_stats": {
+    "HP": { "formula": "(SIZ + CON) / 10", "round": "down" },
+    "SAN": { "formula": "POW", "max_formula": "99 - cthulhu_mythos" },
+    "MP": { "formula": "POW / 5" },
+    "LUCK": { "formula": "3d6 x 5" },
+    "MOV": { "default": 8 },
+    "DB_BUILD": {
+      "description": "伤害加值和体格查 STR+SIZ 合计",
+      "table": {
+        "2_64": {"DB": "-2", "BUILD": -2},
+        "65_84": {"DB": "-1", "BUILD": -1},
+        "85_124": {"DB": "0", "BUILD": 0},
+        "125_164": {"DB": "+1D4", "BUILD": 1},
+        "165_204": {"DB": "+1D6", "BUILD": 2}
+      }
     }
   },
-  "attribute_modifier_table": {
-    "1_10": -5,
-    "11_20": -4,
-    "21_30": -3,
-    "31_40": -2,
-    "41_50": -1,
-    "51_60": 0,
-    "61_70": 1,
-    "71_80": 2,
-    "81_90": 3,
-    "91_100": 5
+
+  "skill_check": {
+    "type": "d100_roll_under",
+    "description": "投掷 d100，结果 ≤ 技能值则成功",
+    "difficulty_levels": {
+      "regular": {"name": "常规", "threshold": "技能值", "description": "适合普通挑战"},
+      "hard": {"name": "困难", "threshold": "技能值 / 2", "description": "专业级挑战"},
+      "extreme": {"name": "极难", "threshold": "技能值 / 5", "description": "人类极限挑战"}
+    },
+    "critical": {
+      "success": {"desc": "骰出 01 = 大成功，自动极难成功并附带额外收益"},
+      "failure": {"desc": "骰出 100 = 大失败；技能<50 时 96-100 也是大失败"}
+    },
+    "bonus_penalty_dice": {
+      "description": "额外投一个十位骰取优(奖励骰)或取劣(惩罚骰)，可叠加",
+      "max_stack": 2
+    },
+    "push_roll": {
+      "description": "检定失败后可孤注一掷再试一次，但失败后果更严重。战斗技能/理智检定/幸运检定不可孤注一掷",
+      "excluded_skills": ["fighting_brawl", "dodge", "firearms", "all_combat"]
+    },
+    "opposed_roll": {
+      "description": "双方各自投 d100，比较成功等级，等级高者胜",
+      "tiebreak": "技能值高者胜，仍相等则骰值低者胜"
+    }
   },
+
   "skills": [
-    { "id": "investigation", "name": "调查", "attribute": "INT", "description": "搜索线索、分析证据" },
-    { "id": "spot_hidden", "name": "侦查", "attribute": "WIS", "description": "发现隐藏物品或秘密通道" },
-    { "id": "persuasion", "name": "说服", "attribute": "CHA", "description": "通过言语影响他人" },
-    { "id": "stealth", "name": "潜行", "attribute": "DEX", "description": "无声移动、隐藏身形" },
-    { "id": "dodge", "name": "闪避", "attribute": "DEX", "description": "躲避攻击或危险" },
-    { "id": "occult", "name": "神秘学", "attribute": "INT", "description": "识别超自然现象和仪式" },
-    { "id": "first_aid", "name": "急救", "attribute": "WIS", "description": "处理伤口、稳定伤势" },
-    { "id": "firearms", "name": "火器", "attribute": "DEX", "description": "使用枪械进行攻击" },
-    { "id": "athletics", "name": "运动", "attribute": "STR", "description": "攀爬、游泳、跳跃等体能活动" }
+    { "id": "accounting", "name": "会计", "base": 5, "attribute": "INT", "sub": false },
+    { "id": "anthropology", "name": "人类学", "base": 1, "attribute": "INT", "sub": false },
+    { "id": "appraise", "name": "估价", "base": 5, "attribute": "INT", "sub": false },
+    { "id": "archaeology", "name": "考古学", "base": 1, "attribute": "INT", "sub": false },
+    { "id": "arts_craft", "name": "技艺", "base": 5, "attribute": "INT", "sub": true },
+    { "id": "charm", "name": "魅惑", "base": 15, "attribute": "APP", "sub": false },
+    { "id": "climb", "name": "攀爬", "base": 20, "attribute": "STR", "sub": false },
+    { "id": "credit_rating", "name": "信用评级", "base": 0, "attribute": "EDU", "sub": false },
+    { "id": "cthulhu_mythos", "name": "克苏鲁神话", "base": 0, "attribute": "INT", "sub": false },
+    { "id": "disguise", "name": "乔装", "base": 5, "attribute": "APP", "sub": false },
+    { "id": "dodge", "name": "闪避", "base": "DEX/2", "attribute": "DEX", "sub": false },
+    { "id": "drive_auto", "name": "汽车驾驶", "base": 20, "attribute": "DEX", "sub": false },
+    { "id": "elec_repair", "name": "电气维修", "base": 10, "attribute": "INT", "sub": false },
+    { "id": "fast_talk", "name": "话术", "base": 5, "attribute": "APP", "sub": false },
+    { "id": "fighting_brawl", "name": "斗殴", "base": 25, "attribute": "STR", "sub": false },
+    { "id": "firearms_handgun", "name": "手枪", "base": 20, "attribute": "DEX", "sub": false },
+    { "id": "firearms_rifle", "name": "步枪", "base": 25, "attribute": "DEX", "sub": false },
+    { "id": "first_aid", "name": "急救", "base": 30, "attribute": "INT", "sub": false },
+    { "id": "history", "name": "历史", "base": 5, "attribute": "EDU", "sub": false },
+    { "id": "intimidate", "name": "恐吓", "base": 15, "attribute": "STR", "sub": false },
+    { "id": "jump", "name": "跳跃", "base": 20, "attribute": "STR", "sub": false },
+    { "id": "language_own", "name": "母语", "base": "EDU", "attribute": "EDU", "sub": false },
+    { "id": "law", "name": "法律", "base": 5, "attribute": "EDU", "sub": false },
+    { "id": "library_use", "name": "图书馆使用", "base": 20, "attribute": "INT", "sub": false },
+    { "id": "listen", "name": "聆听", "base": 20, "attribute": "INT", "sub": false },
+    { "id": "locksmith", "name": "锁匠", "base": 1, "attribute": "DEX", "sub": false },
+    { "id": "mech_repair", "name": "机械维修", "base": 10, "attribute": "INT", "sub": false },
+    { "id": "medicine", "name": "医学", "base": 1, "attribute": "EDU", "sub": false },
+    { "id": "natural_world", "name": "自然学", "base": 10, "attribute": "INT", "sub": false },
+    { "id": "navigate", "name": "导航", "base": 10, "attribute": "INT", "sub": false },
+    { "id": "occult", "name": "神秘学", "base": 5, "attribute": "INT", "sub": false },
+    { "id": "op_hv_machine", "name": "操作重型机械", "base": 1, "attribute": "INT", "sub": false },
+    { "id": "persuade", "name": "说服", "base": 10, "attribute": "APP", "sub": false },
+    { "id": "pilot", "name": "驾驶", "base": 1, "attribute": "DEX", "sub": true },
+    { "id": "psychology", "name": "心理学", "base": 10, "attribute": "INT", "sub": false },
+    { "id": "psychoanalysis", "name": "精神分析", "base": 1, "attribute": "INT", "sub": false },
+    { "id": "ride", "name": "骑术", "base": 5, "attribute": "DEX", "sub": false },
+    { "id": "science", "name": "科学", "base": 1, "attribute": "INT", "sub": true },
+    { "id": "sleight_of_hand", "name": "妙手", "base": 10, "attribute": "DEX", "sub": false },
+    { "id": "spot_hidden", "name": "侦查", "base": 25, "attribute": "INT", "sub": false },
+    { "id": "stealth", "name": "潜行", "base": 20, "attribute": "DEX", "sub": false },
+    { "id": "survival", "name": "生存", "base": 10, "attribute": "INT", "sub": true },
+    { "id": "swim", "name": "游泳", "base": 20, "attribute": "STR", "sub": false },
+    { "id": "throw", "name": "投掷", "base": 20, "attribute": "DEX", "sub": false },
+    { "id": "track", "name": "追踪", "base": 10, "attribute": "INT", "sub": false }
   ],
+
   "combat": {
-    "initiative": "d20 + DEX_modifier",
-    "attack_roll": "d20 + attribute_modifier + skill_bonus",
+    "initiative": "按 DEX 从高到低，已准备好枪械者 DEX+50",
+    "round_structure": "每轮一个主要行动",
+    "melee": "攻击方声明 → 防御方选择反击(格斗)或闪避 → 双方投d100 → 比较成功等级",
+    "outnumbered": "每轮第一个反击/闪避后，后续对同目标的近战攻击获得奖励骰",
+    "firearms": "手枪每轮2-3发(每次惩罚骰)，不能闪避子弹，可用寻找掩体(闪避成功=攻击者惩罚骰)",
     "damage_types": ["物理", "火焰", "冰冻", "精神"],
-    "hp_zero": "角色生命值归零时进入濒死状态，需要进行 CON 检定来稳定伤势"
+    "extreme_damage": "极难成功时钝击造成最大伤害+DB，贯穿造成最大伤害+DB+额外武器骰",
+    "major_wound": "单次伤害 ≥ 最大HP的一半 → 重伤，倒地，CON检定否则昏迷",
+    "dying": "重伤且HP=0 → 濒死，每轮CON检定否则死亡，需急救(1临时HP)稳定",
+    "instant_death": "单次伤害 ≥ 最大HP → 即死",
+    "recovery": "轻伤每天1HP；重伤每周CON检定，成功恢复1D3"
   },
+
   "sanity": {
-    "system": "COC",
-    "max_san": "based_on_WIS",
-    "sanity_loss_triggers": [
-      "目击超自然生物",
-      "阅读禁忌文本",
-      "经历极度恐怖事件",
-      "同伴死亡"
+    "system": "COC7",
+    "starting_san": "POW",
+    "max_san": "99 - 克苏鲁神话技能值",
+    "loss_format": "X/Y（成功损失X / 失败损失Y）",
+    "temporary_insanity": "单次损失 ≥ 5 SAN → INT检定 → 成功=陷入1D10小时，失败=自保不疯",
+    "indefinite_insanity": "一天内损失 ≥ 当前SAN的1/5 → 长期治疗",
+    "permanent_insanity": "SAN降至0 → 角色永久疯狂",
+    "bout_of_madness_table": [
+      "失忆", "假性残疾", "暴力倾向", "偏执妄想", "人际依赖",
+      "昏厥", "逃避行为", "歇斯底里", "恐惧症", "躁狂症"
     ],
-    "sanity_loss_amount": {
-      "minor": "1d4",
-      "moderate": "1d6+1",
-      "major": "2d6+2",
-      "catastrophic": "3d10"
+    "recovery": {
+      "psychoanalysis": "每月一次，成功恢复1D3 SAN",
+      "self_help": "通过背景关键连接活动恢复",
+      "skill_90": "幕间成长技能达90+时恢复2D6 SAN"
     }
   }
 }
