@@ -10,9 +10,9 @@ from typing import Callable, Any
 from openai import OpenAI
 
 from .config import (
-    PROJECT_ROOT, SAVEFILE, API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, MAX_TOOL_ROUNDS,
+    PROJECT_ROOT, API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, MAX_TOOL_ROUNDS, AUTO_SAVE_SLOT,
 )
-from .persistence import load_system_prompt, save_game, load_game
+from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .tools import (
     TOOLS, COMPLEX_FUNCTIONS, tool_category,
     needs_pro_model, execute_function, dice_summary,
@@ -57,18 +57,27 @@ class GameEngine:
         self.current_model = MODEL_FLASH
 
     def has_save(self) -> bool:
-        return SAVEFILE.exists()
+        return has_save()
 
-    def save(self) -> bool:
-        return save_game(self.messages)
+    def save(self, slot_id: str | None = None) -> str:
+        """保存游戏。返回槽位 ID。"""
+        return save_game(self.messages, slot_id)
 
-    def load(self) -> int | None:
-        loaded = load_game()
-        if loaded:
-            system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
-            self.messages = [system_msg] + loaded[1:]
-            return len(loaded) - 1
-        return None
+    def list_saves(self) -> list[dict]:
+        return list_saves()
+
+    def load(self, slot_id: str | None = None) -> int | None:
+        """读取存档并恢复世界状态快照。返回消息数量或 None。"""
+        messages, snapshot = load_game(slot_id)
+        if messages is None:
+            return None
+        # 恢复世界状态快照（防止线索污染）
+        if snapshot:
+            restore_snapshot(snapshot)
+        # 保留当前 system prompt，恢复对话历史
+        system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
+        self.messages = [system_msg] + messages[1:]
+        return len(messages) - 1
 
     # ---- 流式 LLM ----
 

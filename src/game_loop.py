@@ -4,7 +4,7 @@ import json
 import sys
 import subprocess
 
-from .config import PROJECT_ROOT, SAVEFILE
+from .config import PROJECT_ROOT
 from .engine import GameEngine, EngineCallbacks
 
 
@@ -63,12 +63,11 @@ def game_loop():
     print("  /quit 退出  /save 存档  /load 读档  /state 状态")
     print("=" * 55)
 
-    if engine.has_save():
-        import json as _json
-        save_data = _json.loads(SAVEFILE.read_text(encoding="utf-8"))
-        msg_count = save_data.get("message_count", 0)
-        if msg_count > 0:
-            print(f"\n📜 发现存档 ({msg_count} 条消息)，输入 /load 恢复进度。\n")
+    saves = engine.list_saves()
+    if saves:
+        latest = saves[0]
+        print(f"\n📜 发现存档 ({len(saves)} 个)，最新: {latest.get('scene_name', '?')} ({latest.get('message_count', 0)} 条消息)")
+        print("   输入 /load 恢复进度，或直接开始新游戏。\n")
 
     need_gm_turn = True
 
@@ -108,16 +107,21 @@ def game_loop():
             continue
 
         if user_input.lower() == "/save":
-            if engine.save():
-                print("存档成功。")
+            sid = engine.save()  # 自动存档到 slot_000
+            print(f"已保存到 {sid}")
+            continue
+
+        if user_input.lower() == "/save-new":
+            sid = engine.save(slot_id=None)  # 新槽位
+            print(f"已保存到 {sid}")
             continue
 
         if user_input.lower() == "/load":
-            count = engine.load()
+            count = engine.load()  # 加载最新存档
             if count is None:
                 print("未找到存档。")
             else:
-                print(f"读档成功，恢复了 {count} 条消息。")
+                print(f"读档成功，恢复了 {count} 条消息（世界状态已恢复）。")
                 need_gm_turn = True
             continue
 

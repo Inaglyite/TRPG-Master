@@ -33,7 +33,7 @@ if _ENV_FILE.exists():
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
 from src.engine import GameEngine, EngineCallbacks
-from src.config import PROJECT_ROOT
+from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -120,10 +120,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
-    # 通知前端存档状态
-    has_save = engine.has_save()
-    if has_save:
-        await ws.send_json({"type": "save_available", "has_save": True})
+    # 通知前端存档列表
+    saves = engine.list_saves()
+    await ws.send_json({"type": "save_list", "saves": saves[:10]})
 
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
@@ -155,25 +154,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 run_turn(engine.handle_action, None)
 
             elif msg_type == "continue":
-                # 继续游戏：读档 + 续写 prompt（不 reset，保留当前开场消息）
-                count = engine.load()
+                # 继续游戏：读档 + 恢复快照 + 续写 prompt
+                slot = data.get("slot_id")  # 可选：指定槽位
+                count = engine.load(slot)
                 if count is None:
                     await ws.send_json({"type": "error", "message": "未找到存档，请开始新游戏。"})
                 else:
-                    # 追加续写提示，告诉模型当前进度和任务
                     engine.messages.append({
                         "role": "user",
                         "content": (
-                            "（游戏继续。你刚刚读取了之前的存档。"
+                            "（游戏继续。你刚刚读取了之前的存档，世界状态已恢复。"
                             "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
                             "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
                             "不要从头开场，不要重新介绍世界观。）"
                         )
-                    })
-                    await ws.send_json({
-                        "type": "save_available",
-                        "has_save": True,
-                        "message_count": count
                     })
                     await ws.send_json({"type": "gm_turn_start"})
                     run_turn(engine.handle_action, None)
@@ -189,8 +183,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                         suggest_box["event"].set()
 
             elif msg_type == "save":
-                ok = engine.save()
-                await ws.send_json({"type": "saved", "ok": ok})
+                is_manual = data.get("manual", False)
+                slot_id = None if is_manual else AUTO_SAVE_SLOT
+                sid = engine.save(slot_id)
+                await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
 
             elif msg_type == "load":
                 count = engine.load()

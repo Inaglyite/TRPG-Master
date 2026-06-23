@@ -83,7 +83,8 @@ function handleMessage(e: MessageEvent) {
     case "done": onDone(); break;
     case "error": addMsg("error", data.message); if (gameStarting) resetStartButton(); break;
     case "saved": addMsg("system", data.ok ? "存档成功。" : "存档失败。"); break;
-    case "save_available": onSaveAvailable(data); break;
+    case "save_list": onSaveList(data); break;
+    case "save_available": onSaveAvailable(data); break;  // 兼容旧版
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
     case "state_data": updateCharPanel(data.data); updateCluePanel(data.clues); break;
   }
@@ -145,6 +146,17 @@ function onSaveAvailable(data: any) {
   if (data.has_save) {
     btnContinue.classList.remove("hidden");
     btnStart.textContent = "🕯 开始新游戏";
+  }
+}
+
+function onSaveList(data: any) {
+  const saves = data.saves || [];
+  if (saves.length > 0) {
+    btnContinue.classList.remove("hidden");
+    btnStart.textContent = "🕯 开始新游戏";
+    const latest = saves[0];
+    document.getElementById("start-hint")!.textContent =
+      `最近存档: ${latest.scene_name || "?"} | HP ${latest.hp || "?"} SAN ${latest.san || "?"} | ${latest.clue_count || 0} 条线索`;
   }
 }
 
