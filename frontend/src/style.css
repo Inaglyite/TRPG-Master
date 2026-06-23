@@ -427,7 +427,7 @@ body {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
-  z-index: 100;
+  z-index: 300;
   animation: fade-in 0.2s ease;
 }
 #save-panel-overlay.hidden { display: none; }

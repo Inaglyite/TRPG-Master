@@ -474,12 +474,16 @@ function disconnectCleanly() {
 
 // ---- 存档面板 ----
 function openSavePanel() {
+  // 如果开始界面还在显示，先隐藏
+  if (!gameStarted) startOverlay.classList.add("hidden");
   savePanelOverlay.classList.remove("hidden");
   safeSend(JSON.stringify({ type: "save_list" }));
 }
 
 function closeSavePanel() {
   savePanelOverlay.classList.add("hidden");
+  // 如果游戏还没开始，恢复开始界面
+  if (!gameStarted) startOverlay.classList.remove("hidden");
 }
 
 function renderSavePanel(saves: any[]) {
