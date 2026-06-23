@@ -6,7 +6,7 @@ from pathlib import Path
 # ---- 路径 ----
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
-SAVEFILE = PROJECT_ROOT / "mod" / "mansion_of_madness" / "savegame.json"
+SAVEFILE = PROJECT_ROOT / "saves" / "autosave.json"
 STATE_FILE = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
 
 # ---- DeepSeek API ----
