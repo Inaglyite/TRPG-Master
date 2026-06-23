@@ -94,10 +94,12 @@ function handleMessage(e: MessageEvent) {
       }
       break;
     case "save_deleted":
-      addMsg("system", `已删除存档 ${data.slot_id}。`);
-      if (!savePanelOverlay.classList.contains("hidden")) {
-        safeSend(JSON.stringify({ type: "save_list" }));
-      }
+      addMsg("system", "存档已删除。");
+      safeSend(JSON.stringify({ type: "save_list" }));
+      break;
+    case "save_renamed":
+      addMsg("system", `存档已重命名为「${data.label || "(默认)"}」。`);
+      safeSend(JSON.stringify({ type: "save_list" }));
       break;
     case "quit_ok": addMsg("system", "进度已保存。"); disconnectCleanly(); break;
     case "game_over": showEnding(data); break;
@@ -486,41 +488,50 @@ function renderSavePanel(saves: any[]) {
     return;
   }
   let html = "";
-  for (const s of saves) {
+  for (let i = 0; i < saves.length; i++) {
+    const s = saves[i];
     const isAuto = s.id === "slot_000";
+    const isLatest = i === 0;
     let timeStr = "未知时间";
+    let relative = "";
     if (s.created_at) {
       try {
         const d = new Date(s.created_at);
+        const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
         timeStr = d.toLocaleString("zh-CN", {
-          year: "numeric", month: "2-digit", day: "2-digit",
+          month: "2-digit", day: "2-digit",
           hour: "2-digit", minute: "2-digit"
         });
+        if (diffMin < 1) relative = "刚刚";
+        else if (diffMin < 60) relative = `${diffMin}分钟前`;
+        else if (diffMin < 1440) relative = `${Math.floor(diffMin/60)}小时前`;
+        else relative = `${Math.floor(diffMin/1440)}天前`;
       } catch {}
     }
     const sceneName = s.scene_name || "未知场景";
+    const displayName = s.label || sceneName;
     const hpStr = s.hp || "?";
     const sanStr = s.san || "?";
     const clueCount = s.clue_count ?? 0;
     const msgCount = s.message_count ?? 0;
 
-    html += `<div class="save-slot-entry" data-slot="${s.id}">
+    html += `<div class="save-slot-entry${isLatest ? " save-latest" : ""}" data-slot="${s.id}">
       <div class="save-slot-info">
         <div class="save-slot-title">
-          <span class="save-slot-name">${isAuto ? "💾 自动存档" : "📁 " + s.id}</span>
-          <span class="save-slot-time">${timeStr}</span>
+          <span class="save-slot-name">${isLatest ? '<span class="save-badge">最新</span> ' : ""}${isAuto ? "💾" : "📁"} ${displayName}</span>
+          <span class="save-slot-time">${relative} · ${timeStr}</span>
         </div>
         <div class="save-slot-meta">
           <span>${sceneName}</span>
-          <span>HP ${hpStr}</span>
-          <span>SAN ${sanStr}</span>
-          <span>📜 ${clueCount}</span>
-          <span>💬 ${msgCount}</span>
+          <span>HP ${hpStr} SAN ${sanStr}</span>
+          <span>📜 ${clueCount} 线索</span>
+          <span>💬 ${msgCount} 消息</span>
         </div>
       </div>
       <div class="save-slot-actions">
-        <button class="save-action-load" data-slot="${s.id}">📂 加载</button>
-        ${isAuto ? "" : `<button class="save-action-del" data-slot="${s.id}">🗑 删除</button>`}
+        <button class="save-action-load" data-slot="${s.id}">📂</button>
+        <button class="save-action-rename" data-slot="${s.id}">✏️</button>
+        ${isAuto ? "" : `<button class="save-action-del" data-slot="${s.id}">🗑</button>`}
       </div>
     </div>`;
   }
@@ -533,6 +544,17 @@ function renderSavePanel(saves: any[]) {
       closeSavePanel();
       addMsg("system", "正在读档…");
       safeSend(JSON.stringify({ type: "save_load", slot_id: slot }));
+    });
+  });
+
+  // Bind rename buttons
+  savePanelList.querySelectorAll(".save-action-rename").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const slot = (btn as HTMLElement).getAttribute("data-slot") || "";
+      const label = prompt("存档名称（留空用场景名）：");
+      if (label !== null) {
+        safeSend(JSON.stringify({ type: "save_rename", slot_id: slot, label: label.trim() }));
+      }
     });
   });
 

@@ -189,3 +189,18 @@ def delete_save(slot_id: str):
     slot_dir = _slot_dir(slot_id)
     if slot_dir.exists():
         shutil.rmtree(slot_dir)
+
+
+def rename_save(slot_id: str, label: str) -> bool:
+    """重命名存档——更新 meta.json 中的 label 字段"""
+    slot_dir = _slot_dir(slot_id)
+    meta_file = slot_dir / "meta.json"
+    if not meta_file.exists():
+        return False
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        meta["label"] = label
+        meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+    except Exception:
+        return False

@@ -240,6 +240,13 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 sid = engine.save(slot_id)
                 await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
 
+            elif msg_type == "save_rename":
+                slot_id = data.get("slot_id", "")
+                label = data.get("label", "")
+                from src.persistence import rename_save
+                ok = rename_save(slot_id, label)
+                await ws.send_json({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
+
             elif msg_type == "quit":
                 engine.save("slot_000")  # 退出时存档
                 await ws.send_json({"type": "quit_ok"})
