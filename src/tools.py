@@ -10,11 +10,35 @@ from .config import PROJECT_ROOT, STATE_FILE
 # ---------------------------------------------------------------------------
 
 TOOLS = [
+    # ---- 技能检定（属性绑定，确定性计算） ----
+    {
+        "type": "function",
+        "function": {
+            "name": "skill_check",
+            "description": "执行一次完整的技能检定。自动读取 PC 属性值、查属性修正表、计算技能加值、掷 d20、比较 DC。用于所有技能/属性判定。绝不手动掷骰心算修正——始终调用此函数。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill": {
+                        "type": "string",
+                        "description": "技能 ID: investigation, spot_hidden, persuasion, stealth, dodge, occult, first_aid, firearms, athletics"
+                    },
+                    "dc": {"type": "integer", "description": "难度等级 (5=琐碎, 10=简单, 15=中等, 20=困难, 25=极难)"},
+                    "advantage": {
+                        "type": "string",
+                        "enum": ["advantage", "disadvantage"],
+                        "description": "优势/劣势，不填则正常掷骰"
+                    }
+                },
+                "required": ["skill", "dc"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
             "name": "dice_roll",
-            "description": "掷骰子。用于技能/属性检定、先攻、随机事件。每次检定必须掷骰，不得编造结果。",
+            "description": "掷骰子。仅用于先攻、随机事件等非技能场景。技能检定请用 skill_check。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -233,6 +257,7 @@ TOOLS = [
 # ---------------------------------------------------------------------------
 
 COMPLEX_FUNCTIONS = {
+    "skill_check",
     "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage",
     "apply_damage", "apply_heal",
     "sanity_loss", "sanity_restore", "sanity_check",
@@ -240,6 +265,8 @@ COMPLEX_FUNCTIONS = {
 
 
 def tool_category(name: str) -> str:
+    if name == "skill_check":
+        return "dice"
     if name.startswith("dice"):
         return "dice"
     if name.startswith("sanity"):
@@ -287,7 +314,14 @@ def _run_cli(cmd: str) -> str:
 def execute_function(name: str, args: dict) -> str:
     safe = lambda s: json.dumps(str(s))
 
-    if name == "dice_roll":
+    if name == "skill_check":
+        skill = args.get("skill", "investigation")
+        dc = args.get("dc", 15)
+        adv = args.get("advantage", "")
+        if adv in ("advantage", "disadvantage"):
+            return _run_cli(f"python3 tools/skill_check.py {skill} {dc} {adv}")
+        return _run_cli(f"python3 tools/skill_check.py {skill} {dc}")
+    elif name == "dice_roll":
         return _run_cli(f"python3 tools/dice.py {args.get('spec', 'd20')}")
     elif name == "dice_roll_advantage":
         return _run_cli("python3 tools/dice.py d20 adv")
@@ -367,24 +401,63 @@ def execute_function(name: str, args: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def dice_summary(output: str) -> str | None:
-    """从 dice.py 的 JSON 输出中提取玩家友好的摘要，如 '🎲 d20 = 14'"""
+    """从 dice.py 或 skill_check.py 的 JSON 输出中提取摘要"""
     try:
         data = json.loads(output)
-        spec = data.get("spec", "?").upper()
-        total = data["total"]
-        rolls = data.get("rolls", [total])
-        mod = data.get("modifier", 0)
-        adv = data.get("advantage", False)
-        dis = data.get("disadvantage", False)
-
-        rolls_str = ", ".join(str(r) for r in rolls)
-        if adv:
-            return f"🎲 {spec} (优势) → 取 {total}"
-        elif dis:
-            return f"🎲 {spec} (劣势) → 取 {total}"
-        elif mod:
-            return f"🎲 {rolls_str} +{mod} = {total}"
-        else:
-            return f"🎲 {spec} = {total}"
-    except (json.JSONDecodeError, KeyError):
+    except json.JSONDecodeError:
         return None
+
+    # skill_check 输出（含属性绑定）
+    if "skill_name" in data:
+        skill = data["skill_name"]
+        attr = data["attribute_name"]
+        d20 = data["d20_roll"]
+        total = data["total"]
+        dc = data["dc"]
+        attr_mod = data["attribute_modifier"]
+        skill_bonus = data["skill_bonus"]
+        adv = data.get("advantage", "normal")
+
+        mod_str = ""
+        if attr_mod >= 0:
+            mod_str += f"+{attr_mod}"
+        else:
+            mod_str += f"{attr_mod}"
+        if skill_bonus >= 0:
+            mod_str += f"+{skill_bonus}"
+        else:
+            mod_str += f"{skill_bonus}"
+
+        adv_suffix = ""
+        if adv == "advantage":
+            adv_suffix = " (优势)"
+        elif adv == "disadvantage":
+            adv_suffix = " (劣势)"
+
+        status = "✓" if data["success"] else "✗"
+        if data["critical"]:
+            status = "★ 大成功！"
+        if data["fumble"]:
+            status = "💀 大失败！"
+
+        return (
+            f"🎲 【{skill}】(d20={d20}{mod_str}={total}) vs DC {dc} → {status}"
+        )
+
+    # dice.py 输出
+    spec = data.get("spec", "?").upper()
+    total = data["total"]
+    rolls = data.get("rolls", [total])
+    mod = data.get("modifier", 0)
+    adv = data.get("advantage", False)
+    dis = data.get("disadvantage", False)
+
+    rolls_str = ", ".join(str(r) for r in rolls)
+    if adv:
+        return f"🎲 {spec} (优势) → 取 {total}"
+    elif dis:
+        return f"🎲 {spec} (劣势) → 取 {total}"
+    elif mod:
+        return f"🎲 {rolls_str} +{mod} = {total}"
+    else:
+        return f"🎲 {spec} = {total}"

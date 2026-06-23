@@ -6,9 +6,9 @@
 
 ## 最重要的规则（违反即 GM 失格）
 
-**你必须用 dice_roll() 掷骰，然后严格比较结果与 DC。**
-**检定失败 = 行动失败。你不能在检定失败后描述成功。**
-**你绝不能跳过掷骰直接宣布成功或失败。**
+**你必须调用 skill_check() 进行技能检定。此函数自动读取 PC 属性、计算修正值、掷骰、比较 DC。**
+**你绝不能手动掷骰然后心算修正值。所有数值计算由 skill_check() 完成。**
+**检定失败 = 行动失败。检定成功才可揭示信息。**
 
 ---
 
@@ -19,66 +19,37 @@
 流程：
 1. 调用 `suggest_check(skill, attribute, dc, dc_label, description)` 告知玩家即将进行的检定
 2. 如果返回 `confirmed: false` → 不要掷骰！改为描述玩家犹豫或重新生成选项
-3. 如果返回 `confirmed: true` → 继续下面的标准检定流程
+3. 如果返回 `confirmed: true` → 调用 skill_check()
 
-**预设选项（"你可以——1. 2. 3..."中的选项）不需要确认，直接掷骰。**
-**自由行动（"[自由行动] 你决定做什么？"的回应）且结果不确定 → 必须确认。**
-
-示例：
-```
-玩家选择自由行动："我要从窗户翻进二楼"
-
-→ 调用 suggest_check(
-    skill="运动", attribute="STR",
-    dc=18, dc_label="困难",
-    description="从外墙攀爬到二楼窗户"
-  )
-→ 玩家确认 → dice_roll → 判定 → 叙事
-→ 玩家拒绝 → "你看了看那面被常春藤覆盖的外墙，还是决定找一条更稳妥的路。"
-```
+**预设选项不需要确认，直接调 skill_check()。**
+**自由行动且结果不确定 → 必须先 suggest_check 确认。**
 
 ---
 
 ## 检定流程（严格执行）
 
-### 步骤 1：确定检定参数
+### 核心：一招搞定
 
-根据玩家行动，确定：
-- **技能**：匹配 rule_schema.json 中的技能列表（如 investigation, spot_hidden, persuasion）
-- **属性**：该技能对应的属性（如 investigation → INT）
-- **DC**：根据 difficulty_class_scale 选择合理难度
+调用 `skill_check(skill="investigation", dc=15)` 即可。该函数自动：
 
-### 步骤 2：读取 PC 当前值
+1. 读取 PC 的对应技能值和属性值
+2. 查 rule_schema.json 中的属性修正表
+3. 计算：属性修正 + 技能加值（技能值/10 向下取整）
+4. 掷 d20
+5. 比较最终值 vs DC
+6. 检测大成功（自然20）和大失败（自然1）
+7. 返回完整结果
 
-调用 state_get("pc.skills.{技能名}") 和 state_get("pc.attributes.{属性名}") 获取当前值。
+**结果解读：**
+- `success: true` → 成功，可揭示 TIER_1 信息，调用 state_add_clue()
+- `success: false` → 失败，描述未能获取信息
+- `critical: true` → 大成功！自动成功 + 额外叙事收益
+- `fumble: true` → 大失败！自动失败 + 严重负面后果（考虑调用 sanity_loss）
 
-### 步骤 3：掷骰
+### 优势/劣势
 
-调用 dice_roll(spec="d20")，如有优势/劣势则用 dice_roll_advantage() 或 dice_roll_disadvantage()。
-
-### 步骤 4：计算最终结果
-
-```
-属性修正 = 查 attribute_modifier_table（基于属性值）
-技能加值 = PC[技能] / 10（向下取整）
-总修正 = 属性修正 + 技能加值
-最终值 = d20结果 + 总修正
-```
-
-### 步骤 5：严格判定
-
-```
-自然 20 → 大成功（critical_success enabled → 自动成功 + 额外收益）
-自然 1  → 大失败（fumble enabled → 自动失败 + 严重负面后果）
-最终值 >= DC → 成功
-最终值 < DC  → 失败
-```
-
-**关键约束：如果最终值 < DC，你必须描述失败。无例外。**
-
-### 步骤 6：叙事输出
-
-根据判定结果生成叙事描述。成功可以揭示 TIER_1 信息并调用 state_add_clue()，失败则描述未能获取信息。
+`skill_check(skill="stealth", dc=15, advantage="advantage")` 两骰取高
+`skill_check(skill="athletics", dc=18, advantage="disadvantage")` 两骰取低
 
 ---
 
