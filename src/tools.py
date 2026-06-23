@@ -89,13 +89,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "state_add_clue",
-            "description": "记录新发现的线索。只在检定成功时调用。",
+            "description": "记录新发现的线索。只在检定成功或确凿发现了信息时调用。根据线索性质选择分类：investigation(探案/现场证据)、event(事件/剧情)、task(任务/目标)、npc(人物相关发现)。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "线索文本描述"}
+                    "text": {"type": "string", "description": "线索文本描述"},
+                    "category": {
+                        "type": "string",
+                        "enum": ["investigation", "event", "task", "npc"],
+                        "description": "线索分类"
+                    }
                 },
-                "required": ["text"]
+                "required": ["text", "category"]
             }
         }
     },
@@ -297,7 +302,9 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "state_clues":
         return _run_cli("python3 tools/state_manager.py clues")
     elif name == "state_add_clue":
-        return _run_cli(f"python3 tools/state_manager.py add-clue {safe(args.get('text', ''))}")
+        text = safe(args.get("text", ""))
+        cat = args.get("category", "investigation")
+        return _run_cli(f"python3 tools/state_manager.py add-clue {text} {cat}")
     elif name == "apply_damage":
         target = args.get("target", "pc")
         amount = args.get("amount", 0)

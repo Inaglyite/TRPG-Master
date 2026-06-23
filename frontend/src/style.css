@@ -264,6 +264,14 @@ body {
 #inv-list div, #clues-list div { padding: 3px 0; line-height: 1.5; }
 #inv-list div::before { content: "◈ "; color: var(--gold-dim); }
 #clues-list div::before { content: "❖ "; color: var(--purple); }
+.clue-cat {
+  font-size: 12px; color: var(--gold); letter-spacing: 1px;
+  margin-top: 10px; padding: 4px 0;
+  border-top: 1px solid var(--border);
+  text-transform: none;
+}
+.clue-cat::before { content: none !important; }
+.clue-item::before { content: none !important; }
 
 /* ---- 弹窗 ---- */
 #modal-overlay {

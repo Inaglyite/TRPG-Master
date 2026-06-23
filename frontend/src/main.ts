@@ -85,7 +85,7 @@ function handleMessage(e: MessageEvent) {
     case "saved": addMsg("system", data.ok ? "存档成功。" : "存档失败。"); break;
     case "save_available": onSaveAvailable(data); break;
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
-    case "state_data": updateCharPanel(data.data); break;
+    case "state_data": updateCharPanel(data.data); updateCluePanel(data.clues); break;
   }
 }
 
@@ -334,6 +334,35 @@ function updateCharPanel(raw: string) {
 
     const inv = document.getElementById("inv-list")!;
     inv.innerHTML = (data.inventory || []).map((s: string) => `<div>• ${s}</div>`).join("");
+  } catch {}
+}
+
+function updateCluePanel(cluesRaw: string) {
+  try {
+    const clues = JSON.parse(cluesRaw);
+    const names: Record<string, string> = {
+      investigation: "🔍 探案线索",
+      event: "📜 事件线索",
+      task: "🎯 任务线索",
+      npc: "👤 人物线索",
+    };
+    const cluesList = document.getElementById("clues-list")!;
+    let html = "";
+    if (typeof clues === "object" && !Array.isArray(clues)) {
+      for (const cat of ["investigation", "event", "task", "npc"]) {
+        const items = clues[cat] || [];
+        if (items.length > 0) {
+          html += `<div class="clue-cat">${names[cat] || cat}</div>`;
+          for (const item of items) {
+            html += `<div class="clue-item">• ${item.text}</div>`;
+          }
+        }
+      }
+    }
+    if (!html) {
+      html = '<div class="clue-item" style="color:var(--text-faint)">暂无记录</div>';
+    }
+    cluesList.innerHTML = html;
   } catch {}
 }
 

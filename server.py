@@ -197,11 +197,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
 
             elif msg_type == "state":
-                result = subprocess.run(
+                # 同时获取 PC 数据和线索（结构化）
+                pc = subprocess.run(
                     ["python3", "tools/state_manager.py", "get", "pc"],
                     capture_output=True, text=True, cwd=PROJECT_ROOT
                 )
-                await ws.send_json({"type": "state_data", "data": result.stdout})
+                clues = subprocess.run(
+                    ["python3", "tools/state_manager.py", "get", "clues_found"],
+                    capture_output=True, text=True, cwd=PROJECT_ROOT
+                )
+                await ws.send_json({
+                    "type": "state_data",
+                    "data": pc.stdout,
+                    "clues": clues.stdout
+                })
 
     except WebSocketDisconnect:
         pass

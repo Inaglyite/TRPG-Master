@@ -87,21 +87,56 @@ def cmd_list_npcs():
         print(f"[{i}] {npc['name']} — tags: {', '.join(npc.get('visible_tags', []))}")
 
 
+CLUE_CATEGORIES = ["investigation", "event", "task", "npc"]
+
+CATEGORY_NAMES = {
+    "investigation": "探案线索",
+    "event": "事件线索",
+    "task": "任务线索",
+    "npc": "人物线索",
+}
+
+
 def cmd_list_clues():
     data = _load()
-    clues = data.get("clues_found", [])
-    if not clues:
+    clues = data.get("clues_found", {})
+    if isinstance(clues, list):
+        # 兼容旧格式
+        if not clues:
+            print("（尚未发现任何线索）")
+        else:
+            for c in clues:
+                print(f"• {c}")
+        return
+
+    total = sum(len(v) for v in clues.values())
+    if total == 0:
         print("（尚未发现任何线索）")
-    else:
-        for c in clues:
-            print(f"• {c}")
+        return
+
+    for cat in CLUE_CATEGORIES:
+        items = clues.get(cat, [])
+        if items:
+            print(f"\n【{CATEGORY_NAMES.get(cat, cat)}】")
+            for i, c in enumerate(items):
+                print(f"  {i+1}. {c['text']}")
 
 
-def cmd_add_clue(clue_text):
+def cmd_add_clue(text, category="investigation"):
+    if category not in CLUE_CATEGORIES:
+        category = "investigation"
     data = _load()
-    data.setdefault("clues_found", []).append(clue_text)
+    c = data.setdefault("clues_found", {})
+    # 兼容旧格式（数组 → 字典）
+    if isinstance(c, list):
+        old = c
+        c = {k: [] for k in CLUE_CATEGORIES}
+        for item in old:
+            c["investigation"].append({"text": item} if isinstance(item, str) else item)
+    c.setdefault(category, []).append({"text": text})
+    data["clues_found"] = c
     _save(data)
-    print(f"线索已添加: {clue_text}")
+    print(f"[{CATEGORY_NAMES.get(category, category)}] {text}")
 
 
 def cmd_usage():
@@ -110,7 +145,8 @@ def cmd_usage():
     print("  python state_manager.py set <json_path> <val>  修改字段（值用 JSON 格式）")
     print("  python state_manager.py npcs                   列出所有 NPC")
     print("  python state_manager.py clues                  列出已发现线索")
-    print("  python state_manager.py add-clue <text>        添加线索")
+    print("  python state_manager.py add-clue <text> [category]  添加线索")
+    print("        category: investigation/event/task/npc，默认 investigation")
 
 
 COMMANDS = {
@@ -141,9 +177,10 @@ def main():
         cmd_set(sys.argv[2], sys.argv[3])
     elif cmd == "add-clue":
         if len(sys.argv) < 3:
-            print("ERROR: add-clue 需要一个 <text> 参数", file=sys.stderr)
+            print("ERROR: add-clue 需要 <text> [category] 参数", file=sys.stderr)
             sys.exit(1)
-        cmd_add_clue(sys.argv[2])
+        cat = sys.argv[3] if len(sys.argv) > 3 else "investigation"
+        cmd_add_clue(sys.argv[2], cat)
     elif cmd == "npcs":
         cmd_list_npcs()
     elif cmd == "clues":
