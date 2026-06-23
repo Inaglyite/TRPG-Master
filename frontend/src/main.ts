@@ -153,14 +153,34 @@ function onSaveAvailable(data: any) {
 
 function onSaveList(data: any) {
   const saves = data.saves || [];
+  const hint = document.getElementById("start-hint")!;
   if (saves.length > 0) {
     btnContinue.classList.remove("hidden");
     btnStart.textContent = "🕯 开始新游戏";
-    const latest = saves[0];
-    document.getElementById("start-hint")!.textContent =
-      `最近存档: ${latest.scene_name || "?"} | HP ${latest.hp || "?"} SAN ${latest.san || "?"} | ${latest.clue_count || 0} 条线索`;
+    // 构建存档列表
+    let html = "";
+    saves.slice(0, 5).forEach((s: any) => {
+      const isAuto = s.id === "slot_000";
+      html += `<div class="save-slot" data-slot="${s.id}" style="margin:6px 0;padding:8px 12px;background:var(--bg3);border-radius:6px;cursor:pointer;text-align:left;font-size:13px">
+        <b>${isAuto ? "💾 自动存档" : "📁 " + s.id}</b>
+        <span style="float:right;color:var(--text-dim)">${s.scene_name || "?"} | HP ${s.hp || "?"} SAN ${s.san || "?"} | ${s.clue_count || 0} 线索</span>
+      </div>`;
+    });
+    hint.innerHTML = html + `<div style="margin-top:8px;font-size:12px;color:var(--text-faint)">点击存档槽位继续，或开始新游戏</div>`;
+    // 点击存档槽位加载
+    hint.querySelectorAll(".save-slot").forEach(el => {
+      el.addEventListener("click", () => {
+        const slot = el.getAttribute("data-slot") || "";
+        if (gameStarting) return;
+        gameStarting = true;
+        btnStart.disabled = true;
+        btnContinue.disabled = true;
+        btnContinue.textContent = "正在读档……";
+        safeSend(JSON.stringify({ type: "continue", slot_id: slot }));
+      });
+    });
   } else {
-    document.getElementById("start-hint")!.textContent = "还未有存档。开始游戏后进度将自动保存。";
+    hint.textContent = "还未有存档。开始游戏后进度将自动保存。";
   }
 }
 

@@ -43,7 +43,14 @@ class GameEngine:
         self.cb = EngineCallbacks()
 
     def reset(self):
-        """开始新游戏"""
+        """开始新游戏——重置对话 + 世界状态"""
+        import shutil
+
+        # 重置世界状态到初始
+        initial = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state_initial.json"
+        if initial.exists():
+            shutil.copy(initial, PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json")
+
         self.messages = [{"role": "system", "content": load_system_prompt()}]
         self.messages.append({
             "role": "user",
