@@ -24,11 +24,20 @@ GLM_MODEL = os.environ.get("GLM_MODEL", "glm-4-flash-250414")
 
 # ---- Skill 加载顺序 ----
 SKILL_LOAD_ORDER = [
-    "no_spoiler.skill",
-    "narrative.skill",
-    "skill_check.skill",
-    "combat.skill",
-    "trpg_master.skill",
+    "core/dice_system.skill",
+    "core/no_spoiler.skill",
+    "core/trpg_master.skill",
+    "keeper/keeper_core.skill",
+    "keeper/keeper_atmosphere.skill",
+    "keeper/keeper_npc.skill",
+    "keeper/keeper_clues.skill",
+    "keeper/keeper_combat.skill",
+    "keeper/keeper_sanity.skill",
+    "keeper/keeper_magic.skill",
+    "investigator/investigator_skills.skill",
+    "investigator/investigator_creation.skill",
+    "investigator/investigator_methods.skill",
+    "modules/mansion_madness.skill",
 ]
 
 MAX_TOOL_ROUNDS = 5
