@@ -62,6 +62,17 @@
 | sanity_restore(amount) | 恢复理智 |
 | sanity_check() | 查看当前理智状态 |
 
+### 结局
+| 函数 | 说明 |
+|------|------|
+| end_game(ending_type, title, summary) | 结束游戏，触发结局画面。ending_type: good(真相大白)/bad(死亡疯狂)/neutral(撤退) |
+
+**何时调用 end_game：**
+- 玩家揭开核心真相并采取最终行动（good）
+- 角色 HP 或 SAN 归零且无法挽回（bad）
+- 玩家选择离开或放弃调查（neutral）
+- 故事自然收束，主要谜团已解决
+
 ---
 
 ## 模型模式

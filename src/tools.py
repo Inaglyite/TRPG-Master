@@ -239,6 +239,26 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "end_game",
+            "description": "结束游戏。当故事到达结局时调用：侦探成功破案、角色死亡/疯狂、真相大白等。调用后游戏将进入结局画面。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ending_type": {
+                        "type": "string",
+                        "enum": ["good", "bad", "neutral"],
+                        "description": "结局类型：good=真相大白/成功破案，bad=死亡/疯狂/失败，neutral=撤退/不了了之"
+                    },
+                    "title": {"type": "string", "description": "结局标题，如「真相大白」「疯狂之末」"},
+                    "summary": {"type": "string", "description": "结局概要，200字以内，总结整个冒险的关键发现和最终命运"}
+                },
+                "required": ["ending_type", "title", "summary"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
             "description": "读取项目中的文件内容。",
             "parameters": {
@@ -383,6 +403,23 @@ def execute_function(name: str, args: dict) -> str:
             return json.dumps({"cached": True, "scene_id": scene_id})
         except Exception as e:
             return json.dumps({"cached": False, "error": str(e)})
+
+    elif name == "end_game":
+        ending = args.get("ending_type", "neutral")
+        title = args.get("title", "故事结束")
+        summary = args.get("summary", "")
+        state_path = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
+        with open(state_path, "r+", encoding="utf-8") as f:
+            data = json.load(f)
+            data["game_over"] = {
+                "type": ending,
+                "title": title,
+                "summary": summary
+            }
+            f.seek(0)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.truncate()
+        return json.dumps({"game_over": True, "ending_type": ending, "title": title, "summary": summary})
 
     elif name == "read_file":
         path = args.get("path", "")

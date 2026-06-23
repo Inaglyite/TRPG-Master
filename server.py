@@ -117,6 +117,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_done():
         emit({"type": "done"})
 
+    def on_game_over(ending_type: str, title: str, summary: str):
+        emit({"type": "game_over", "ending_type": ending_type, "title": title, "summary": summary})
+
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
@@ -131,6 +134,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         on_glm_summary=on_glm_summary,
         on_suggest=on_suggest,
         on_done=on_done,
+        on_game_over=on_game_over,
         on_error=on_error,
     )
 

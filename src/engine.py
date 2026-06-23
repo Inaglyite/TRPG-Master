@@ -29,6 +29,7 @@ class EngineCallbacks:
     on_glm_summary: Callable[[str], None] = lambda text: None    # 快速摘要
     on_suggest: Callable[[dict], bool] = lambda info: False      # 检定确认，返回 True/False
     on_done: Callable[[], None] = lambda: None                   # 回合结束
+    on_game_over: Callable[[str, str, str], None] = lambda t, ti, s: None  # 游戏结束
     on_error: Callable[[str], None] = lambda msg: None           # 错误
 
 
@@ -219,6 +220,19 @@ class GameEngine:
 
                 if name in COMPLEX_FUNCTIONS:
                     tool_outputs.append((name, output))
+
+                # 检测游戏结束
+                if name == "end_game":
+                    try:
+                        end_data = json.loads(output)
+                        self.cb.on_game_over(
+                            end_data.get("ending_type", "neutral"),
+                            end_data.get("title", "故事结束"),
+                            end_data.get("summary", "")
+                        )
+                    except json.JSONDecodeError:
+                        pass
+                    return  # 不再继续叙事
 
             # GLM 快速摘要
             if tool_outputs:

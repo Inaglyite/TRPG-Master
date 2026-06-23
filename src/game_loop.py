@@ -38,6 +38,19 @@ def game_loop():
     def on_done():
         pass
 
+    def on_game_over(ending_type: str, title: str, summary: str):
+        print(f"\n{'='*50}")
+        print(f"  {title}")
+        print(f"{'='*50}")
+        print(f"\n{summary}\n")
+        if ending_type == "good":
+            print("🏆 真相大白 —— 你成功揭开了宅邸的秘密。")
+        elif ending_type == "bad":
+            print("💀 黑暗吞噬了你 —— 你的故事到此为止。")
+        else:
+            print("🌫 你离开了宅邸 —— 有些秘密或许永远不该被揭开。")
+        print()
+
     def on_error(msg: str):
         print(f"\n（{msg}）\n")
 

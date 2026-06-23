@@ -84,6 +84,7 @@ function handleMessage(e: MessageEvent) {
     case "error": addMsg("error", data.message); if (gameStarting) resetStartButton(); break;
     case "saved": addMsg("system", data.ok ? `存档成功 (${data.slot_id})。` : "存档失败。"); break;
     case "quit_ok": addMsg("system", "进度已保存。"); disconnectCleanly(); break;
+    case "game_over": showEnding(data); break;
     case "save_list": onSaveList(data); break;
     case "save_available": onSaveAvailable(data); break;  // 兼容旧版
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
@@ -399,6 +400,22 @@ function updateCluePanel(cluesRaw: string) {
 
 function loadState() {
   safeSend(JSON.stringify({ type: "state" }));
+}
+
+function showEnding(data: any) {
+  removeLoading();
+  const emoji = data.ending_type === "good" ? "🏆" : data.ending_type === "bad" ? "💀" : "🌫";
+  const html = `
+    <div class="ending-box">
+      <div class="ending-emoji">${emoji}</div>
+      <div class="ending-title">${data.title}</div>
+      <div class="ending-summary">${data.summary}</div>
+    </div>
+  `;
+  const el = addMsg("gm", html);
+  el.classList.add("ending");
+  enableInput(false);
+  optionsBar.innerHTML = "";
 }
 
 function disconnectCleanly() {

@@ -158,6 +158,19 @@ body {
   border: 1px solid var(--red); border-radius: 6px;
 }
 
+/* 结局画面 */
+.msg.ending {
+  align-self: center; text-align: center;
+  background: linear-gradient(180deg, rgba(200,162,78,0.12) 0%, rgba(200,162,78,0.04) 100%);
+  border: 2px solid var(--gold); border-radius: 12px;
+  padding: 32px 40px; max-width: 500px;
+  box-shadow: 0 0 40px rgba(200,162,78,0.2);
+  animation: msg-in 0.6s ease-out;
+}
+.ending-emoji { font-size: 48px; margin-bottom: 12px; }
+.ending-title { font-size: 22px; color: var(--gold-bright); letter-spacing: 3px; margin-bottom: 16px; }
+.ending-summary { font-size: 14px; color: var(--text-dim); line-height: 1.8; text-align: left; }
+
 /* 流式光标 */
 .streaming-cursor::after {
   content: "▊"; animation: blink 0.8s infinite; color: var(--gold-bright);
