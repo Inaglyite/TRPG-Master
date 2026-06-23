@@ -312,7 +312,7 @@ def _run_cli(cmd: str) -> str:
 
 
 def execute_function(name: str, args: dict) -> str:
-    safe = lambda s: json.dumps(str(s))
+    safe = lambda s: json.dumps(str(s), ensure_ascii=False)
 
     if name == "skill_check":
         skill = args.get("skill", "investigation")
