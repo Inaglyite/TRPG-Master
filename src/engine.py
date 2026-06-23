@@ -203,7 +203,7 @@ class GameEngine:
                     "role": "tool", "tool_call_id": tc["id"], "content": output
                 })
 
-                if name in ("dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
+                if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
                     summary = dice_summary(output)
                     if summary:
                         self.cb.on_dice(summary)

@@ -219,22 +219,23 @@ function onDone() {
     streamTarget.classList.remove("streaming-cursor");
     streamTarget = null;
   }
-  // 解析选项
-  const lastMsg = messagesEl.lastElementChild;
-  if (!lastMsg) return;
-
-  const text = lastMsg.innerHTML;
-  const lines = text.split("<br>");
+  // 解析选项：从最近的 GM 消息中提取（跳过骰子、摘要等非叙事消息）
   const opts: { label: string; isFree: boolean }[] = [];
-
-  for (const line of lines) {
-    // 匹配 "1. xxx" 或 "1. **xxx**" 格式
-    const m = line.match(/^\d+\.\s*(.+)/);
-    if (m) {
-      const label = m[1].replace(/<[^>]+>/g, "");
-      const isFree = label.includes("自由行动") || label.includes("你决定做什么");
-      opts.push({ label, isFree });
+  const children = messagesEl.children;
+  for (let i = children.length - 1; i >= 0; i--) {
+    const el = children[i];
+    if (!el.classList.contains("gm")) continue;
+    const text = el.innerHTML;
+    const lines = text.split("<br>");
+    for (const line of lines) {
+      const m = line.match(/^\d+\.\s*(.+)/);
+      if (m) {
+        const label = m[1].replace(/<[^>]+>/g, "");
+        const isFree = label.includes("自由行动") || label.includes("你决定做什么");
+        opts.push({ label, isFree });
+      }
     }
+    break;  // 只查最近一条 GM 消息
   }
 
   if (opts.length > 0) {
