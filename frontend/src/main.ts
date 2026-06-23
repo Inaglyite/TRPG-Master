@@ -23,6 +23,11 @@ function setConn(state: "connecting" | "connected" | "disconnected") {
     state === "connected" ? "已连接到守秘人" :
     state === "connecting" ? "连接中…" : "连接已断开，正在重试";
 }
+const savePanelOverlay = document.getElementById("save-panel-overlay")!;
+const savePanelClose = document.getElementById("save-panel-close")!;
+const savePanelNew = document.getElementById("save-panel-new")!;
+const savePanelList = document.getElementById("save-panel-list")!;
+
 const modalOverlay = document.getElementById("modal-overlay")!;
 const modalText = document.getElementById("modal-text")!;
 const modalYes = document.getElementById("modal-yes")!;
@@ -82,10 +87,26 @@ function handleMessage(e: MessageEvent) {
     case "suggest_check": onSuggest(data); break;
     case "done": onDone(); break;
     case "error": addMsg("error", data.message); if (gameStarting) resetStartButton(); break;
-    case "saved": addMsg("system", data.ok ? `存档成功 (${data.slot_id})。` : "存档失败。"); break;
+    case "saved":
+      addMsg("system", data.ok ? `存档成功 (${data.slot_id})。` : "存档失败。");
+      if (!savePanelOverlay.classList.contains("hidden")) {
+        safeSend(JSON.stringify({ type: "save_list" }));
+      }
+      break;
+    case "save_deleted":
+      addMsg("system", `已删除存档 ${data.slot_id}。`);
+      if (!savePanelOverlay.classList.contains("hidden")) {
+        safeSend(JSON.stringify({ type: "save_list" }));
+      }
+      break;
     case "quit_ok": addMsg("system", "进度已保存。"); disconnectCleanly(); break;
     case "game_over": showEnding(data); break;
-    case "save_list": onSaveList(data); break;
+    case "save_list":
+      onSaveList(data);
+      if (!savePanelOverlay.classList.contains("hidden")) {
+        renderSavePanel(data.saves || []);
+      }
+      break;
     case "save_available": onSaveAvailable(data); break;  // 兼容旧版
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
     case "state_data": updateCharPanel(data.data); updateCluePanel(data.clues); break;
@@ -467,6 +488,81 @@ function disconnectCleanly() {
   }
 }
 
+// ---- 存档面板 ----
+function openSavePanel() {
+  savePanelOverlay.classList.remove("hidden");
+  safeSend(JSON.stringify({ type: "save_list" }));
+}
+
+function closeSavePanel() {
+  savePanelOverlay.classList.add("hidden");
+}
+
+function renderSavePanel(saves: any[]) {
+  if (!saves || saves.length === 0) {
+    savePanelList.innerHTML = '<div class="save-empty">暂无存档</div>';
+    return;
+  }
+  let html = "";
+  for (const s of saves) {
+    const isAuto = s.id === "slot_000";
+    let timeStr = "未知时间";
+    if (s.created_at) {
+      try {
+        const d = new Date(s.created_at);
+        timeStr = d.toLocaleString("zh-CN", {
+          year: "numeric", month: "2-digit", day: "2-digit",
+          hour: "2-digit", minute: "2-digit"
+        });
+      } catch {}
+    }
+    const sceneName = s.scene_name || "未知场景";
+    const hpStr = s.hp || "?";
+    const sanStr = s.san || "?";
+    const clueCount = s.clue_count ?? 0;
+    const msgCount = s.message_count ?? 0;
+
+    html += `<div class="save-slot-entry" data-slot="${s.id}">
+      <div class="save-slot-info">
+        <div class="save-slot-title">
+          <span class="save-slot-name">${isAuto ? "💾 自动存档" : "📁 " + s.id}</span>
+          <span class="save-slot-time">${timeStr}</span>
+        </div>
+        <div class="save-slot-meta">
+          <span>${sceneName}</span>
+          <span>HP ${hpStr}</span>
+          <span>SAN ${sanStr}</span>
+          <span>📜 ${clueCount}</span>
+          <span>💬 ${msgCount}</span>
+        </div>
+      </div>
+      <div class="save-slot-actions">
+        <button class="save-action-load" data-slot="${s.id}">📂 加载</button>
+        ${isAuto ? "" : `<button class="save-action-del" data-slot="${s.id}">🗑 删除</button>`}
+      </div>
+    </div>`;
+  }
+  savePanelList.innerHTML = html;
+
+  // Bind load buttons
+  savePanelList.querySelectorAll(".save-action-load").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const slot = (btn as HTMLElement).getAttribute("data-slot") || "";
+      closeSavePanel();
+      addMsg("system", "正在读档…");
+      safeSend(JSON.stringify({ type: "save_load", slot_id: slot }));
+    });
+  });
+
+  // Bind delete buttons
+  savePanelList.querySelectorAll(".save-action-del").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const slot = (btn as HTMLElement).getAttribute("data-slot") || "";
+      safeSend(JSON.stringify({ type: "save_delete", slot_id: slot }));
+    });
+  });
+}
+
 // ---- 按钮事件 ----
 btnSend.onclick = () => {
   const text = userInput.value.trim();
@@ -479,8 +575,8 @@ userInput.onkeydown = (e) => {
     btnSend.click();
   }
 };
-btnSave.onclick = () => safeSend(JSON.stringify({ type: "save" }));
-btnLoad.onclick = () => safeSend(JSON.stringify({ type: "load" }));
+btnSave.onclick = openSavePanel;
+btnLoad.onclick = openSavePanel;
 btnNew.onclick = () => location.reload();
 btnPanel.onclick = () => {
   charPanel.classList.toggle("collapsed");
@@ -490,6 +586,15 @@ modalYes.onclick = () => sendSuggestReply(true);
 modalNo.onclick = () => sendSuggestReply(false);
 btnStart.onclick = startGame;
 btnContinue.onclick = continueGame;
+savePanelClose.onclick = closeSavePanel;
+savePanelNew.onclick = () => {
+  safeSend(JSON.stringify({ type: "save_create" }));
+  addMsg("system", "正在保存…");
+};
+// Click outside panel to close
+savePanelOverlay.onclick = (e) => {
+  if (e.target === savePanelOverlay) closeSavePanel();
+};
 
 // ---- 启动 ----
 // loadState 由 connect() 的 onopen 触发，无需在此调用

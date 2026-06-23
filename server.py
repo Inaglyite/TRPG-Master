@@ -34,6 +34,7 @@ if _ENV_FILE.exists():
 
 from src.engine import GameEngine, EngineCallbacks
 from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT
+from src.persistence import delete_save
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -125,7 +126,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
     # 通知前端存档列表
     saves = engine.list_saves()
-    await ws.send_json({"type": "save_list", "saves": saves[:10]})
+    await ws.send_json({"type": "save_list", "saves": saves})
 
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
@@ -189,6 +190,53 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             elif msg_type == "save":
                 is_manual = data.get("manual", False)
                 slot_id = None if is_manual else AUTO_SAVE_SLOT
+                sid = engine.save(slot_id)
+                await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
+
+            elif msg_type == "save_list":
+                saves = engine.list_saves()
+                await ws.send_json({"type": "save_list", "saves": saves})
+
+            elif msg_type == "save_load":
+                slot_id = data.get("slot_id", "")
+                cnt = engine.load(slot_id)
+                if cnt is not None:
+                    engine.messages.append({
+                        "role": "user",
+                        "content": (
+                            "（游戏继续。你刚刚读取了之前的存档，世界状态已恢复。"
+                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+                            "不要从头开场，不要重新介绍世界观。）"
+                        )
+                    })
+                    await ws.send_json({"type": "loaded", "ok": True, "slot_id": slot_id, "count": cnt})
+                    await ws.send_json({"type": "gm_turn_start"})
+                    run_turn(engine.handle_action, None)
+                else:
+                    await ws.send_json({"type": "error", "message": "未找到存档。"})
+
+            elif msg_type == "save_delete":
+                slot_id = data.get("slot_id", "")
+                if slot_id == AUTO_SAVE_SLOT:
+                    await ws.send_json({"type": "error", "message": "自动存档不可手动删除。"})
+                else:
+                    delete_save(slot_id)
+                    await ws.send_json({"type": "save_deleted", "slot_id": slot_id})
+
+            elif msg_type == "save_create":
+                existing = engine.list_saves()
+                used = set()
+                for s in existing:
+                    if s["id"].startswith("slot_") and s["id"] != AUTO_SAVE_SLOT:
+                        try:
+                            used.add(int(s["id"].split("_")[1]))
+                        except (ValueError, IndexError):
+                            pass
+                n = 1
+                while n in used:
+                    n += 1
+                slot_id = f"slot_{n:03d}"
                 sid = engine.save(slot_id)
                 await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
 

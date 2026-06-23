@@ -418,3 +418,129 @@ body {
   margin-top: 24px; font-size: 12px; color: var(--text-faint);
   font-style: italic;
 }
+
+/* ---- 存档管理面板 ---- */
+#save-panel-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  animation: fade-in 0.2s ease;
+}
+#save-panel-overlay.hidden { display: none; }
+
+#save-panel {
+  background: linear-gradient(180deg, var(--bg3) 0%, var(--bg2) 100%);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  width: 560px; max-width: 90vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.7), var(--shadow-glow);
+  animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#save-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+#save-panel-header h3 {
+  font-size: 17px; color: var(--gold-bright);
+  letter-spacing: 2px; font-weight: normal;
+  text-shadow: 0 0 8px var(--gold-glow);
+}
+
+.panel-close-btn {
+  background: transparent; border: none;
+  color: var(--text-dim); font-size: 20px;
+  cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  transition: all 0.18s ease;
+}
+.panel-close-btn:hover {
+  color: var(--gold-bright);
+  background: var(--bg4);
+}
+
+#save-panel-body {
+  padding: 16px 22px 22px;
+  overflow-y: auto; flex: 1;
+}
+
+.save-new-btn {
+  width: 100%;
+  background: linear-gradient(180deg, var(--bg4) 0%, var(--bg3) 100%);
+  border: 1px dashed var(--gold-dim);
+  color: var(--gold);
+  font-family: var(--font); font-size: 15px;
+  padding: 12px; border-radius: 6px; cursor: pointer;
+  transition: all 0.18s ease; margin-bottom: 14px;
+}
+.save-new-btn:hover {
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-dim) 100%);
+  color: var(--bg);
+  border-style: solid;
+  box-shadow: 0 0 14px var(--gold-glow);
+}
+
+#save-panel-list {
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.save-slot-entry {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px 14px;
+  transition: all 0.18s ease;
+}
+.save-slot-entry:hover {
+  border-color: var(--gold-dim);
+  background: var(--bg4);
+}
+
+.save-slot-info {
+  flex: 1; min-width: 0;
+}
+.save-slot-title {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 4px;
+}
+.save-slot-name {
+  font-size: 14px; color: var(--gold-bright);
+  letter-spacing: 1px;
+}
+.save-slot-time {
+  font-size: 12px; color: var(--text-faint);
+}
+.save-slot-meta {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  font-size: 12px; color: var(--text-dim);
+}
+
+.save-slot-actions {
+  display: flex; gap: 6px; flex-shrink: 0;
+  margin-left: 12px;
+}
+.save-slot-actions button {
+  font-family: var(--font); font-size: 13px;
+  padding: 6px 10px; border-radius: 4px;
+  border: 1px solid var(--border-bright);
+  background: var(--bg4); color: var(--text-dim);
+  cursor: pointer; transition: all 0.15s ease;
+}
+.save-action-load:hover {
+  background: var(--gold); color: var(--bg);
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 8px var(--gold-glow);
+}
+.save-action-del:hover {
+  background: var(--red); color: white;
+  border-color: var(--red-bright);
+  box-shadow: 0 0 8px rgba(201, 80, 80, 0.4);
+}
+
+.save-empty {
+  text-align: center; padding: 30px 0;
+  color: var(--text-faint); font-size: 14px;
+  font-style: italic;
+}
