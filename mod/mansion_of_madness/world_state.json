@@ -1,8 +1,8 @@
 {
   "module": "mansion_of_madness",
   "current_scene": {
-    "id": "entrance_hall",
-    "name": "宅邸入口大厅",
+    "id": "east_wing_parlor",
+    "name": "\\u4e1c\\u5385\\u4f1a\\u5ba2\\u5385",
     "description": "厚重的大门在你身后缓缓关闭，发出沉闷的回响。你站在一座维多利亚式宅邸的入口大厅中，头顶的水晶吊灯积满灰尘，只有寥寥几支蜡烛还在燃烧。空气中弥漫着霉味和某种说不清的甜腻气息。正前方是通往二楼的宽大楼梯，左右两侧各有一扇紧闭的门。大厅中央的地毯上有一滩深色的污渍，你看不清那是什么。",
     "exits": [
       "grand_staircase",
@@ -10,7 +10,8 @@
       "west_wing_door"
     ],
     "npcs_present": [
-      "butler_gregory"
+      "butler_gregory",
+      "lady_elizabeth"
     ]
   },
   "pc": {
@@ -18,7 +19,7 @@
     "occupation": "私家侦探",
     "hp": 12,
     "max_hp": 12,
-    "san": 65,
+    "san": 62,
     "max_san": 65,
     "attributes": {
       "STR": 50,
@@ -93,13 +94,17 @@
     }
   ],
   "clues_found": [
-    "入口大厅地毯上的血迹——边缘呈喷射状，源自楼梯口方向，疑似暴力攻击所致"
+    "入口大厅地毯上的血迹——边缘呈喷射状，源自楼梯口方向，疑似暴力攻击所致",
+    "\\u5730\\u6bef\\u8840\\u8ff9\\u8be6\\u7ec6\\u5206\\u6790\\uff1a\\u52a8\\u8109\\u55b7\\u6e85\\u578b\\u8840\\u8ff9\\uff0c\\u6307\\u5411\\u697c\\u68af\\u53e3\\uff1b\\u5916\\u56f4\\u6709\\u5306\\u5fd9\\u64e6\\u62ed\\u75d5\\u8ff9\\uff1b\\u64e6\\u62ed\\u75d5\\u8ff9\\u4e2d\\u5939\\u6742\\u66f4\\u65b0\\u3001\\u66f4\\u6de1\\u7684\\u8840\\u5370\\uff0c\\u4f3c\\u4e4e\\u662f\\u8fd1\\u671f\\u7559\\u4e0b\\u3002"
   ],
   "flags": {
     "front_door_locked": true,
-    "east_wing_explored": false,
+    "east_wing_explored": true,
     "west_wing_explored": false,
     "basement_accessible": false,
     "ritual_circle_active": true
+  },
+  "scene_cache": {
+    "east_wing_parlor": "厚重的大门在你身后缓缓关闭，发出一声沉闷的回响，仿佛将整个世界隔绝在外。你站在一座维多利亚式宅邸的入口大厅中——这是一间曾经恢弘的东厅会客厅，如今却弥漫着衰败的气息。头顶的水晶吊灯积满灰尘，只有寥寥几支蜡烛在昏暗中颤抖着燃烧，勉强勾勒出周围的轮廓。空气中混杂着陈霉的气味和某种说不清的甜腻——像是腐败的花，又像是更古老、更不安的东西。"
   }
 }

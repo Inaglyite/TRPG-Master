@@ -88,6 +88,14 @@ def interactive_config():
     if pro_model:
         cfg["pro_model"] = pro_model
 
+    print("\n--- GLM-4 Flash（免费快速模型，检定摘要用）---")
+    glm_key = input(f"GLM API Key [{cfg.get('glm_api_key', '未设置')[:20]}...]: ").strip()
+    if glm_key:
+        cfg["glm_api_key"] = glm_key
+    glm_model = input(f"GLM 模型 [{cfg.get('glm_model', 'glm-4-flash-250414')}]: ").strip()
+    if glm_model:
+        cfg["glm_model"] = glm_model
+
     save_config(cfg)
 
 
@@ -99,6 +107,9 @@ def run_game():
     env.setdefault("OPENAI_BASE_URL", cfg.get("base_url", "https://api.deepseek.com"))
     env.setdefault("TRPG_FLASH_MODEL", cfg.get("flash_model", "deepseek-v4-flash"))
     env.setdefault("TRPG_PRO_MODEL", cfg.get("pro_model", "deepseek-v4-pro"))
+    if cfg.get("glm_api_key"):
+        env.setdefault("GLM_API_KEY", cfg["glm_api_key"])
+    env.setdefault("GLM_MODEL", cfg.get("glm_model", "glm-4-flash-250414"))
 
     if not env["OPENAI_API_KEY"]:
         print("\n错误: 未配置 API Key")
