@@ -221,7 +221,7 @@ class GameEngine:
                 if name in COMPLEX_FUNCTIONS:
                     tool_outputs.append((name, output))
 
-                # 检测游戏结束
+                # 检测游戏结束：模型提议，不直接结束——让玩家决定
                 if name == "end_game":
                     try:
                         end_data = json.loads(output)
@@ -230,9 +230,10 @@ class GameEngine:
                             end_data.get("title", "故事结束"),
                             end_data.get("summary", "")
                         )
+                        # 不 return，继续正常叙事循环。模型应该描述结局场景并提供
+                        # 「确认离开」和「继续探索」两个选项给玩家选择。
                     except json.JSONDecodeError:
                         pass
-                    return  # 不再继续叙事
 
             # GLM 快速摘要
             if tool_outputs:

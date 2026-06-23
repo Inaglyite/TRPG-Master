@@ -405,17 +405,39 @@ function loadState() {
 function showEnding(data: any) {
   removeLoading();
   const emoji = data.ending_type === "good" ? "🏆" : data.ending_type === "bad" ? "💀" : "🌫";
-  const html = `
-    <div class="ending-box">
-      <div class="ending-emoji">${emoji}</div>
-      <div class="ending-title">${data.title}</div>
-      <div class="ending-summary">${data.summary}</div>
-    </div>
-  `;
-  const el = addMsg("gm", html);
-  el.classList.add("ending");
-  enableInput(false);
+  // 显示结局提议按钮
+  const btnConfirm = document.createElement("button");
+  btnConfirm.className = "opt-btn";
+  btnConfirm.style.cssText = "flex:2;background:var(--gold);color:var(--bg);font-weight:bold";
+  btnConfirm.textContent = emoji + " 确认结束 —— " + data.title;
+  btnConfirm.id = "btn-end-confirm";
+
+  const btnContinue = document.createElement("button");
+  btnContinue.className = "opt-btn";
+  btnContinue.textContent = "🔄 继续探索";
+  btnContinue.id = "btn-end-continue";
+
   optionsBar.innerHTML = "";
+  optionsBar.appendChild(btnConfirm);
+  optionsBar.appendChild(btnContinue);
+
+  btnConfirm.onclick = () => {
+    const html = [
+      '<div class="ending-box">',
+      '<div class="ending-emoji">' + emoji + '</div>',
+      '<div class="ending-title">' + data.title + '</div>',
+      '<div class="ending-summary">' + data.summary + '</div>',
+      '</div>'
+    ].join("");
+    const el = addMsg("gm", html);
+    el.classList.add("ending");
+    optionsBar.innerHTML = "";
+    enableInput(false);
+  };
+
+  btnContinue.onclick = () => {
+    sendAction("继续探索");
+  };
 }
 
 function disconnectCleanly() {
