@@ -40,11 +40,13 @@
 6. 检测大成功（自然20）和大失败（自然1）
 7. 返回完整结果
 
-**结果解读：**
-- `success: true` → 成功，可揭示 TIER_1 信息，调用 state_add_clue()
-- `success: false` → 失败，描述未能获取信息
-- `critical: true` → 大成功！自动成功 + 额外叙事收益
-- `fumble: true` → 大失败！自动失败 + 严重负面后果（考虑调用 sanity_loss）
+**结果解读与强制线索记录：**
+- `success: true` → 成功。**必须立即调用 state_add_clue(text="发现内容", category="investigation") 记录新发现**。即使你觉得这是"玩家本该知道的信息"，也必须记录为正式线索。线索记录 = 游戏进度。
+- `success: false` → 失败，描述未能获取信息。不得调用 state_add_clue。
+- `critical: true` → 大成功！自动成功 + 额外叙事收益。必须记录线索。
+- `fumble: true` → 大失败！自动失败 + 严重负面后果。考虑调用 sanity_loss。
+
+**重要：每次 skill_check 成功后，state_add_clue 和叙事都必须做，缺一不可。**
 
 ### 优势/劣势
 
