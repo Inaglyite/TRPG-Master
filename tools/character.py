@@ -92,22 +92,25 @@ OCCUPATIONS = {
 # ── 创建角色 ──────────────────────────────────────────────
 
 def roll_attribute(dice_formula: str) -> int:
-    """掷属性: 3D6*5, 2D6+6*5 等"""
-    if "x5" in dice_formula or "*5" in dice_formula:
-        dice_formula = dice_formula.replace("x5", "").replace("*5", "").strip()
-        multiplier = 5
-    else:
-        multiplier = 1
+    """掷属性: 3D6×5, 2D6+6×5 等"""
+    # Normalize: uppercase→lowercase, ×→*
+    formula = dice_formula.upper().replace("×", "*").replace("X", "*")
+    multiplier = 5 if "*5" in formula else 1
+    formula = formula.replace("*5", "").strip()
 
-    if "+" in dice_formula:
-        parts = dice_formula.split("+")
-        count, sides = map(int, parts[0].split("d") if "d" in parts[0] else [int(parts[0].split("d")[0]), 6])
-        add = int(parts[1])
+    add = 0
+    if "+" in formula:
+        dice_part, add_part = formula.split("+", 1)
+        add = int(add_part.strip())
     else:
-        parts = dice_formula.split("d")
-        count = int(parts[0]) if parts[0] else 1
-        sides = int(parts[1]) if len(parts) > 1 else 6
-        add = 0
+        dice_part = formula
+
+    if "D" in dice_part:
+        count_str, sides_str = dice_part.split("D", 1)
+        count = int(count_str) if count_str else 1
+        sides = int(sides_str)
+    else:
+        count, sides = 1, 6
 
     total = sum(random.randint(1, sides) for _ in range(count)) + add
     return total * multiplier
@@ -147,7 +150,7 @@ def _build(total: int) -> int:
 def parse_skill_points(formula: str, attrs: dict) -> int:
     """解析职业技能点公式: EDU*2 + DEX*2 → int"""
     total = 0
-    for part in formula.split("+"):
+    for part in formula.upper().split("+"):
         part = part.strip()
         if "*" in part:
             attr_name, mul = part.split("*")
