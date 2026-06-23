@@ -233,4 +233,7 @@ class GameEngine:
         else:
             self.cb.on_error("守秘人陷入了沉思……")
 
+        # 每回合结束后自动存档到 slot_000
+        self.save("slot_000")
+
         self.cb.on_done()

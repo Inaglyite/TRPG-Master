@@ -82,7 +82,8 @@ function handleMessage(e: MessageEvent) {
     case "suggest_check": onSuggest(data); break;
     case "done": onDone(); break;
     case "error": addMsg("error", data.message); if (gameStarting) resetStartButton(); break;
-    case "saved": addMsg("system", data.ok ? "存档成功。" : "存档失败。"); break;
+    case "saved": addMsg("system", data.ok ? `存档成功 (${data.slot_id})。` : "存档失败。"); break;
+    case "quit_ok": addMsg("system", "进度已保存。"); disconnectCleanly(); break;
     case "save_list": onSaveList(data); break;
     case "save_available": onSaveAvailable(data); break;  // 兼容旧版
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
@@ -157,6 +158,8 @@ function onSaveList(data: any) {
     const latest = saves[0];
     document.getElementById("start-hint")!.textContent =
       `最近存档: ${latest.scene_name || "?"} | HP ${latest.hp || "?"} SAN ${latest.san || "?"} | ${latest.clue_count || 0} 条线索`;
+  } else {
+    document.getElementById("start-hint")!.textContent = "还未有存档。开始游戏后进度将自动保存。";
   }
 }
 
@@ -381,6 +384,13 @@ function updateCluePanel(cluesRaw: string) {
 
 function loadState() {
   safeSend(JSON.stringify({ type: "state" }));
+}
+
+function disconnectCleanly() {
+  // 发送 quit 后等服务端回复 quit_ok，然后关闭连接
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.close(1000, "user quit");
+  }
 }
 
 // ---- 按钮事件 ----

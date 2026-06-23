@@ -188,6 +188,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 sid = engine.save(slot_id)
                 await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
 
+            elif msg_type == "quit":
+                engine.save("slot_000")  # 退出时存档
+                await ws.send_json({"type": "quit_ok"})
+                break  # 退出消息循环
+
             elif msg_type == "load":
                 count = engine.load()
                 await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
