@@ -4,3 +4,6 @@ __pycache__/
 .env.json
 mod/*/savegame.json
 .claude/
+node_modules/
+frontend/dist/
+frontend/release/

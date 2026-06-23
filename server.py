@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""TRPG Agent WebSocket 服务器 —— GameEngine + FastAPI"""
+
+import json
+import sys
+import asyncio
+import subprocess
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# ---- 从 .env.json 加载配置到环境变量（与 start.py 行为一致）----
+# 必须在 import src.* 之前完成，因为 src/config.py 在导入时就读取 os.environ。
+_ENV_FILE = Path(__file__).resolve().parent / ".env.json"
+if _ENV_FILE.exists():
+    try:
+        _cfg = json.loads(_ENV_FILE.read_text(encoding="utf-8"))
+        os_environ = __import__("os").environ
+        _mapping = {
+            "api_key": "OPENAI_API_KEY",
+            "base_url": "OPENAI_BASE_URL",
+            "flash_model": "TRPG_FLASH_MODEL",
+            "pro_model": "TRPG_PRO_MODEL",
+            "glm_api_key": "GLM_API_KEY",
+            "glm_base_url": "GLM_BASE_URL",
+            "glm_model": "GLM_MODEL",
+        }
+        for cfg_key, env_key in _mapping.items():
+            val = _cfg.get(cfg_key)
+            if val and env_key not in os_environ:
+                os_environ[env_key] = val
+    except Exception as e:
+        print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
+
+from src.engine import GameEngine, EngineCallbacks
+from src.config import PROJECT_ROOT
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="TRPG Agent API")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket 会话 —— 把引擎回调桥接到 WebSocket
+# ---------------------------------------------------------------------------
+
+async def run_ws_session(ws: WebSocket, engine: GameEngine):
+    """在 WebSocket 连接上下文中运行引擎。
+
+    线程模型：GameEngine.handle_action 是同步阻塞的，通过 run_in_executor
+    跑在线程池线程里。引擎从该线程同步调用下面这些回调，因此回调必须是
+    普通同步函数；它们用 run_coroutine_threadsafe 把 ws.send_json 安全地
+    调度到主事件循环（FastAPI/uvicorn 所在的 loop）。
+    """
+    import threading
+
+    loop = asyncio.get_running_loop()
+    # suggest_check 的跨线程握手：工作线程发事件并阻塞，主循环收到回复后置位
+    suggest_box: dict = {"event": threading.Event(), "result": False}
+    suggest_lock = threading.Lock()
+    suggest_active = [False]  # 当前是否有待回复的 suggest
+    # 回合锁：保证同一时间只有一个 handle_action 在跑，避免并发修改 messages
+    turn_lock = threading.Lock()
+
+    def run_turn(coro_fn, *args):
+        """在 executor 里跑一个回合，用 turn_lock 串行化。fire-and-forget。"""
+        def _wrapped():
+            with turn_lock:
+                try:
+                    coro_fn(*args)
+                except Exception as e:
+                    print(f"[ws] 回合异常: {e}", file=sys.stderr)
+        loop.run_in_executor(None, _wrapped)
+
+    def emit(payload: dict):
+        """线程安全地把一条消息发到主循环。"""
+        try:
+            asyncio.run_coroutine_threadsafe(
+                ws.send_json(payload), loop
+            )
+        except Exception as e:
+            print(f"[ws] emit 失败: {e}", file=sys.stderr)
+
+    # ---- 同步回调（被引擎在工作线程里同步调用）----
+    def on_narrative(text: str):
+        emit({"type": "narrative_chunk", "text": text})
+
+    def on_tension(text: str, cat: str):
+        emit({"type": "tension", "text": text, "category": cat})
+
+    def on_dice(summary: str):
+        emit({"type": "dice_result", "summary": summary})
+
+    def on_glm_summary(text: str):
+        emit({"type": "glm_summary", "text": text})
+
+    def on_suggest(info: dict) -> bool:
+        """向客户端发起检定确认，阻塞当前工作线程等待回复。
+
+        用 threading.Event 做跨线程握手，避免 asyncio.Future 跨线程的复杂性：
+        工作线程在这里阻塞等 event，主循环的 suggest_reply 处理器置位 event。
+        """
+        ev = threading.Event()
+        with suggest_lock:
+            suggest_box["event"] = ev
+            suggest_box["result"] = False
+            suggest_active[0] = True
+        emit({"type": "suggest_check", **info})
+        # 阻塞工作线程，直到 suggest_reply 处理器 ev.set()
+        ev.wait(timeout=120)
+        with suggest_lock:
+            suggest_active[0] = False
+            return suggest_box["result"]
+
+    def on_done():
+        emit({"type": "done"})
+
+    def on_error(msg: str):
+        emit({"type": "error", "message": msg})
+
+    engine.cb = EngineCallbacks(
+        on_narrative=on_narrative,
+        on_tension=on_tension,
+        on_dice=on_dice,
+        on_glm_summary=on_glm_summary,
+        on_suggest=on_suggest,
+        on_done=on_done,
+        on_error=on_error,
+    )
+
+    # 消息循环
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = data.get("type", "")
+
+            if msg_type == "ping":
+                await ws.send_json({"type": "pong"})
+
+            elif msg_type == "start":
+                # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
+                await ws.send_json({"type": "gm_turn_start"})
+                # fire-and-forget（不 await），否则 on_suggest 阻塞时主循环死锁。
+                # run_turn 用 turn_lock 串行化，回合中的 action 会排队等待。
+                run_turn(engine.handle_action, None)
+
+            elif msg_type == "action":
+                # 同上：不 await，避免 on_suggest 阻塞时主循环死锁
+                run_turn(engine.handle_action, data.get("content", ""))
+
+            elif msg_type == "suggest_reply":
+                with suggest_lock:
+                    if suggest_active[0]:
+                        suggest_box["result"] = data.get("confirmed", False)
+                        suggest_box["event"].set()
+
+            elif msg_type == "save":
+                ok = engine.save()
+                await ws.send_json({"type": "saved", "ok": ok})
+
+            elif msg_type == "load":
+                count = engine.load()
+                await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
+
+            elif msg_type == "state":
+                result = subprocess.run(
+                    ["python3", "tools/state_manager.py", "get", "pc"],
+                    capture_output=True, text=True, cwd=PROJECT_ROOT
+                )
+                await ws.send_json({"type": "state_data", "data": result.stdout})
+
+    except WebSocketDisconnect:
+        pass
+    except RuntimeError:
+        # 连接已断开（客户端关闭窗口等），收尾即可
+        pass
+
+
+@app.websocket("/ws")
+async def game_ws(ws: WebSocket):
+    await ws.accept()
+    try:
+        engine = GameEngine()
+        engine.reset()
+    except Exception as e:
+        # 配置/初始化失败时，把错误发回客户端而不是静默断开
+        await ws.send_json({"type": "error", "message": f"游戏引擎初始化失败：{e}"})
+        await ws.close()
+        return
+    await run_ws_session(ws, engine)
+
+
+# ---- 静态文件 ----
+FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+else:
+    @app.get("/")
+    async def root():
+        return HTMLResponse("<h2>前端未构建。运行: cd frontend && npm run build</h2>")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🎲 TRPG Agent WebSocket 服务器")
+    print(f"   ws://localhost:8765/ws    前端: http://localhost:8765/")
+    uvicorn.run(app, host="0.0.0.0", port=8765)

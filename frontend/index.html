@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>疯狂宅邸 — TRPG Agent</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 顶栏 -->
+    <header id="header">
+      <h1>🏛 疯狂宅邸<span id="conn-status" class="connecting" title="连接中…"></span></h1>
+      <div id="toolbar">
+        <button id="btn-save" title="存档">💾</button>
+        <button id="btn-load" title="读档">📂</button>
+        <button id="btn-new" title="新游戏">🆕</button>
+        <button id="btn-panel" title="角色面板">📋</button>
+      </div>
+    </header>
+
+    <!-- 主体 -->
+    <main id="main">
+      <!-- 聊天区 -->
+      <div id="chat-panel">
+        <div id="messages"></div>
+        <div id="bottom">
+          <div id="options-bar"></div>
+          <div id="input-bar">
+            <input id="user-input" type="text" placeholder="等待守秘人叙述……" disabled />
+            <button id="btn-send" disabled>⏎</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 角色面板 -->
+      <aside id="char-panel" class="collapsed">
+        <div id="char-content">
+          <h3>爱德华·温斯洛</h3>
+          <p class="sub">私家侦探</p>
+          <div class="stat-row"><span>HP</span> <span id="hp-bar">12 / 12</span></div>
+          <div class="stat-row"><span>SAN</span> <span id="san-bar">62 / 65</span></div>
+          <hr />
+          <div id="attr-list"></div>
+          <hr />
+          <h4>物品</h4>
+          <div id="inv-list"></div>
+          <hr />
+          <h4>线索</h4>
+          <div id="clues-list"></div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 开始游戏遮罩 -->
+    <div id="start-overlay">
+      <div id="start-box">
+        <div id="start-title">🏛 疯狂宅邸</div>
+        <div id="start-subtitle">A TRPG of Madness &amp; Mystery</div>
+        <button id="btn-start">🕯 点燃烛火，开始故事</button>
+        <div id="start-hint">若想恢复之前的进度，可先点右上角 📂 读档</div>
+      </div>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div id="modal-overlay" class="hidden">
+      <div id="modal-box">
+        <p id="modal-text"></p>
+        <div id="modal-actions">
+          <button id="modal-yes" class="btn-danger">🎲 确定尝试</button>
+          <button id="modal-no" class="btn-safe">↩ 放弃</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+{
+  "name": "trpg-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "description": "疯狂宅邸 — TRPG Agent 桌面应用",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "electron:dev": "NODE_ENV=dev npx electron .",
+    "electron:start": "vite build && npx electron .",
+    "dist": "vite build && npx electron-builder --linux AppImage --x64"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.7",
+    "vite": "^6.0"
+  },
+  "build": {
+    "appId": "com.trpg.mansion-of-madness",
+    "productName": "疯狂宅邸",
+    "directories": { "output": "release" },
+    "files": [
+      "dist/**/*",
+      "electron/main.cjs"
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Game"
+    }
+  }
+}
