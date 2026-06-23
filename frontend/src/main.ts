@@ -207,6 +207,11 @@ function onTension(text: string) {
 
 function onDice(text: string) {
   removeLoading();
+  // 结束当前流式气泡，骰子后的叙事另开新气泡
+  if (streamTarget) {
+    streamTarget.classList.remove("streaming-cursor");
+    streamTarget = null;
+  }
   addMsg("dice", text);
 }
 
