@@ -157,12 +157,8 @@ function startGame() {
 }
 
 function continueGame() {
-  if (gameStarting) return;
-  gameStarting = true;
-  btnStart.disabled = true;
-  btnContinue.disabled = true;
-  btnContinue.textContent = "正在读档……";
-  safeSend(JSON.stringify({ type: "continue" }));
+  // 打开存档面板让玩家选——不直接加载最新档
+  openSavePanel();
 }
 
 function onSaveAvailable(data: any) {
