@@ -29,6 +29,7 @@ const modalYes = document.getElementById("modal-yes")!;
 const modalNo = document.getElementById("modal-no")!;
 const startOverlay = document.getElementById("start-overlay")!;
 const btnStart = document.getElementById("btn-start") as HTMLButtonElement;
+const btnContinue = document.getElementById("btn-continue") as HTMLButtonElement;
 
 // ---- WebSocket ----
 let ws: WebSocket;
@@ -82,6 +83,7 @@ function handleMessage(e: MessageEvent) {
     case "done": onDone(); break;
     case "error": addMsg("error", data.message); if (gameStarting) resetStartButton(); break;
     case "saved": addMsg("system", data.ok ? "存档成功。" : "存档失败。"); break;
+    case "save_available": onSaveAvailable(data); break;
     case "loaded": addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。"); break;
     case "state_data": updateCharPanel(data.data); break;
   }
@@ -114,18 +116,36 @@ function showGmThinking() {
 }
 
 function resetStartButton() {
-  // 开场失败时恢复按钮，允许重试
   gameStarting = false;
   btnStart.disabled = false;
-  btnStart.textContent = "🕯 点燃烛火，开始故事";
+  btnContinue.disabled = false;
+  btnStart.textContent = btnContinue.classList.contains("hidden") ? "🕯 点燃烛火，开始故事" : "🕯 开始新游戏";
+  btnContinue.textContent = "📜 继续游戏";
 }
 
 function startGame() {
   if (gameStarting) return;
   gameStarting = true;
   btnStart.disabled = true;
+  btnContinue.disabled = true;
   btnStart.textContent = "守秘人正在布景……";
   safeSend(JSON.stringify({ type: "start" }));
+}
+
+function continueGame() {
+  if (gameStarting) return;
+  gameStarting = true;
+  btnStart.disabled = true;
+  btnContinue.disabled = true;
+  btnContinue.textContent = "正在读档……";
+  safeSend(JSON.stringify({ type: "continue" }));
+}
+
+function onSaveAvailable(data: any) {
+  if (data.has_save) {
+    btnContinue.classList.remove("hidden");
+    btnStart.textContent = "🕯 开始新游戏";
+  }
 }
 
 // ---- 消息渲染 ----
@@ -343,6 +363,7 @@ btnPanel.onclick = () => {
 modalYes.onclick = () => sendSuggestReply(true);
 modalNo.onclick = () => sendSuggestReply(false);
 btnStart.onclick = startGame;
+btnContinue.onclick = continueGame;
 
 // ---- 启动 ----
 // loadState 由 connect() 的 onopen 触发，无需在此调用

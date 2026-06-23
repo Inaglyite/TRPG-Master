@@ -375,6 +375,24 @@ body {
   background: var(--bg3); color: var(--text-dim);
   box-shadow: none; transform: none;
 }
+#btn-continue {
+  background: transparent; border: 1px solid var(--gold);
+  color: var(--gold);
+  font-family: var(--font); font-size: 16px; letter-spacing: 2px;
+  padding: 12px 40px; border-radius: 8px; cursor: pointer;
+  margin-top: 14px;
+  transition: all 0.2s ease;
+}
+#btn-continue:hover {
+  background: rgba(200, 162, 78, 0.15);
+  box-shadow: 0 0 20px var(--gold-glow);
+  transform: translateY(-1px);
+}
+#btn-continue:disabled {
+  opacity: 0.4; cursor: wait;
+}
+#btn-continue.hidden { display: none; }
+
 #start-hint {
   margin-top: 24px; font-size: 12px; color: var(--text-faint);
   font-style: italic;

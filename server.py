@@ -120,6 +120,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
+    # 通知前端存档状态
+    has_save = engine.has_save()
+    if has_save:
+        await ws.send_json({"type": "save_available", "has_save": True})
+
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
         on_tension=on_tension,
@@ -147,9 +152,31 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
                 await ws.send_json({"type": "gm_turn_start"})
-                # fire-and-forget（不 await），否则 on_suggest 阻塞时主循环死锁。
-                # run_turn 用 turn_lock 串行化，回合中的 action 会排队等待。
                 run_turn(engine.handle_action, None)
+
+            elif msg_type == "continue":
+                # 继续游戏：读档 + 续写 prompt（不 reset，保留当前开场消息）
+                count = engine.load()
+                if count is None:
+                    await ws.send_json({"type": "error", "message": "未找到存档，请开始新游戏。"})
+                else:
+                    # 追加续写提示，告诉模型当前进度和任务
+                    engine.messages.append({
+                        "role": "user",
+                        "content": (
+                            "（游戏继续。你刚刚读取了之前的存档。"
+                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+                            "不要从头开场，不要重新介绍世界观。）"
+                        )
+                    })
+                    await ws.send_json({
+                        "type": "save_available",
+                        "has_save": True,
+                        "message_count": count
+                    })
+                    await ws.send_json({"type": "gm_turn_start"})
+                    run_turn(engine.handle_action, None)
 
             elif msg_type == "action":
                 # 同上：不 await，避免 on_suggest 阻塞时主循环死锁
