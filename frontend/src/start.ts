@@ -107,16 +107,12 @@ export function populateModuleList(modules: any[], active: string) {
     if (m.id === active) { opt.selected = true; activeModule = m.id; }
     sel.appendChild(opt);
   });
-  sel.onchange = async () => {
+  sel.onchange = () => {
     const chosen = sel.value;
     if (chosen === activeModule) return;
-    const resp = await fetch("/api/modules/switch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ module: chosen }),
-    });
-    const result = await resp.json();
-    if (result.ok) { activeModule = chosen; location.reload(); }
+    // 通过 WS 切换模组（electron 下 fetch 不可用，且 WS 切换无需 reload）
+    activeModule = chosen;
+    safeSend(JSON.stringify({ type: "switch_module", module: chosen }));
   };
 }
 

@@ -29,10 +29,16 @@ def load_system_prompt() -> str:
             content = path.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
-    # 模组专属 skill（mod/*/skills/*.skill）
-    mod_dir = SKILLS_DIR.parent / "mod"
-    if mod_dir.exists():
-        for mod_skill in sorted(mod_dir.glob("*/skills/*.skill")):
+    # 当前模组的剧情设定（module.md）——让 GM 知道本模组的故事背景
+    module_md = cfg.MODULE_DIR / "module.md"
+    if module_md.exists():
+        content = module_md.read_text(encoding="utf-8").strip()
+        if content:
+            parts.append(content)
+    # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
+    mod_skills_dir = cfg.MODULE_DIR / "skills"
+    if mod_skills_dir.exists():
+        for mod_skill in sorted(mod_skills_dir.glob("*.skill")):
             content = mod_skill.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)

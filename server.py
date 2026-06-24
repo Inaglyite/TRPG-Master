@@ -44,6 +44,30 @@ from fastapi.staticfiles import StaticFiles
 app = FastAPI(title="TRPG Agent API")
 
 
+def _load_theme() -> dict:
+    """读取当前模组的 theme.json"""
+    if cfg.THEME_FILE.exists():
+        return json.loads(cfg.THEME_FILE.read_text(encoding="utf-8"))
+    return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
+
+
+def _list_mods() -> list:
+    """列出所有可用模组"""
+    mods = []
+    mods_dir = PROJECT_ROOT / "mod"
+    if not mods_dir.exists():
+        return mods
+    for d in sorted(mods_dir.iterdir()):
+        if d.is_dir() and (d / "module.md").exists():
+            theme = {}
+            tf = d / "theme.json"
+            if tf.exists():
+                theme = json.loads(tf.read_text(encoding="utf-8"))
+            mods.append({"id": d.name, "title": theme.get("title", d.name),
+                         "description": theme.get("description", "")})
+    return mods
+
+
 # ---------------------------------------------------------------------------
 # WebSocket 会话 —— 把引擎回调桥接到 WebSocket
 # ---------------------------------------------------------------------------
@@ -125,7 +149,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
-    # 通知前端模组列表 + 存档列表
+    # 通知前端模组列表 + 存档列表 + 当前主题
     mods_dir = PROJECT_ROOT / "mod"
     mods = []
     for d in sorted(mods_dir.iterdir()):
@@ -137,6 +161,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             mods.append({"id": d.name, "title": theme.get("title", d.name),
                          "description": theme.get("description", "")})
     await ws.send_json({"type": "module_list", "modules": mods, "active": cfg.MODULE_NAME})
+
+    # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
+    # 故主题也走 WS 下发）
+    await ws.send_json({"type": "theme", "theme": _load_theme()})
 
     saves = engine.list_saves()
     await ws.send_json({"type": "save_list", "saves": saves})
@@ -165,6 +193,21 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
             if msg_type == "ping":
                 await ws.send_json({"type": "pong"})
+
+            elif msg_type == "switch_module":
+                # 切换活跃模组（开场前在下拉框选择）
+                name = data.get("module", cfg.MODULE_NAME)
+                target = PROJECT_ROOT / "mod" / name
+                if not target.exists() or not (target / "module.md").exists():
+                    await ws.send_json({"type": "error", "message": f"模组'{name}'不存在"})
+                else:
+                    cfg.set_active_module(name)
+                    # 重置 engine 以使用新模组的 system prompt + 世界状态
+                    engine.reset()
+                    # 下发新主题 + 新存档列表
+                    await ws.send_json({"type": "theme", "theme": _load_theme()})
+                    await ws.send_json({"type": "module_list", "modules": _list_mods(), "active": name})
+                    await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
 
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）

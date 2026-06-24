@@ -15,6 +15,7 @@ import { onGmTurnStart, resetStartButton, getGameStarting, onSaveList, onSaveAva
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
 import { onSuggest, onDone } from "./options";
 import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel } from "./panels";
+import { applyTheme } from "./main";
 
 // ---- 后端地址 ----
 const WS_HOST = location.hostname || "localhost";
@@ -125,6 +126,9 @@ function handleMessage(e: MessageEvent) {
       break;
     case "module_list":
       populateModuleList(data.modules, data.active);
+      break;
+    case "theme":
+      applyTheme(data.theme);
       break;
     case "save_list":
       onSaveList(data);
