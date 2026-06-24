@@ -1,15 +1,47 @@
 /**
  * main.ts — 入口
  *
- * 职责仅限于导入各模块（触发模块内按钮绑定）→ loadTheme() → connect()。
- * 所有功能逻辑已拆分到以下模块：
- *   dom.ts       DOM 元素引用     panels.ts    角色/存档/结局面板
- *   ws.ts        WebSocket 通信   options.ts   选项/输入/检定弹窗
- *   renderer.ts  消息渲染/流式    start.ts     开局流程/游戏状态
+ * 职责：加载模块列表 → 加载主题 → 连接
  */
 
 import { connect } from "./ws";
 import { btnStart } from "./dom";
+
+let activeModule = "";
+
+// ---- 加载模块列表 ----
+async function loadModules() {
+  try {
+    const resp = await fetch("/api/modules");
+    const data = await resp.json();
+    const sel = document.getElementById("module-select") as HTMLSelectElement;
+    if (!sel) return;
+
+    sel.innerHTML = "";
+    data.modules.forEach((m: any) => {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.title;
+      if (m.id === data.active) { opt.selected = true; activeModule = m.id; }
+      sel.appendChild(opt);
+    });
+
+    sel.onchange = async () => {
+      const chosen = sel.value;
+      if (chosen === activeModule) return;
+      const resp = await fetch("/api/modules/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module: chosen }),
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        activeModule = chosen;
+        await loadTheme();  // 重新加载新模组的主题
+      }
+    };
+  } catch { /* 列表加载失败不影响启动 */ }
+}
 
 // ---- 加载主题 ----
 async function loadTheme() {
@@ -19,24 +51,12 @@ async function loadTheme() {
     // 应用颜色
     if (theme.colors) {
       const map: Record<string, string> = {
-        bg: "--bg",
-        bg2: "--bg2",
-        bg3: "--bg3",
-        bg4: "--bg4",
-        text: "--text",
-        textDim: "--text-dim",
-        textFaint: "--text-faint",
-        gold: "--gold",
-        goldDim: "--gold-dim",
-        goldBright: "--gold-bright",
-        red: "--red",
-        redBright: "--red-bright",
-        green: "--green",
-        blue: "--blue",
-        blueBright: "--blue-bright",
-        purple: "--purple",
-        border: "--border",
-        borderBright: "--border-bright",
+        bg: "--bg", bg2: "--bg2", bg3: "--bg3", bg4: "--bg4",
+        text: "--text", textDim: "--text-dim", textFaint: "--text-faint",
+        gold: "--gold", goldDim: "--gold-dim", goldBright: "--gold-bright",
+        red: "--red", redBright: "--red-bright",
+        green: "--green", blue: "--blue", blueBright: "--blue-bright",
+        purple: "--purple", border: "--border", borderBright: "--border-bright",
       };
       Object.entries(theme.colors).forEach(([k, v]) => {
         if (map[k]) document.documentElement.style.setProperty(map[k], v as string);
@@ -54,10 +74,8 @@ async function loadTheme() {
     const startSub = document.getElementById("start-subtitle");
     if (startSub && theme.subtitle) startSub.textContent = theme.subtitle;
     if (btnStart && theme.startButtonText) btnStart.textContent = theme.startButtonText;
-  } catch {
-    // 主题加载失败不影响后续连接
-  }
+  } catch { /* 主题加载失败不影响后续连接 */ }
 }
 
 // ---- 启动 ----
-loadTheme().then(() => connect());
+loadModules().then(() => loadTheme()).then(() => connect());

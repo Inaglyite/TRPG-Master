@@ -43,3 +43,13 @@ SKILL_LOAD_ORDER = [
 ]
 
 MAX_TOOL_ROUNDS = 5
+
+# 运行时模块切换
+def set_active_module(name: str):
+    global MODULE_NAME, MODULE_DIR, STATE_FILE, INITIAL_STATE_FILE, SAVES_DIR, THEME_FILE
+    MODULE_NAME = name
+    MODULE_DIR = PROJECT_ROOT / "mod" / name
+    STATE_FILE = MODULE_DIR / "world_state.json"
+    INITIAL_STATE_FILE = MODULE_DIR / "world_state_initial.json"
+    SAVES_DIR = PROJECT_ROOT / "saves" / name
+    THEME_FILE = MODULE_DIR / "theme.json"

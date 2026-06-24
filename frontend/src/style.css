@@ -375,7 +375,26 @@ body {
 }
 #start-subtitle {
   font-size: 14px; color: var(--text-dim); letter-spacing: 4px;
-  font-style: italic; margin-bottom: 40px;
+  font-style: italic; margin-bottom: 24px;
+}
+
+#module-selector {
+  margin-bottom: 28px;
+}
+#module-selector label {
+  display: block; font-size: 12px; color: var(--text-faint);
+  letter-spacing: 2px; margin-bottom: 6px;
+}
+#module-select {
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); font-family: var(--font); font-size: 14px;
+  padding: 8px 16px; border-radius: 6px; cursor: pointer;
+  width: 260px; outline: none;
+  transition: border-color 0.2s;
+}
+#module-select:focus { border-color: var(--gold); }
+#module-select option {
+  background: var(--bg2); color: var(--text);
 }
 #btn-start {
   background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 100%);

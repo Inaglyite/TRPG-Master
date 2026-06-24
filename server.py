@@ -33,7 +33,8 @@ if _ENV_FILE.exists():
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
 from src.engine import GameEngine, EngineCallbacks
-from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT, MODULE_DIR, THEME_FILE, MODULE_NAME
+from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT
+import src.config as cfg
 from src.persistence import delete_save
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -282,8 +283,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 @app.get("/api/theme")
 async def get_theme():
     """返回当前模组的主题配置"""
-    if THEME_FILE.exists():
-        return json.loads(THEME_FILE.read_text(encoding="utf-8"))
+    if cfg.THEME_FILE.exists():
+        return json.loads(cfg.THEME_FILE.read_text(encoding="utf-8"))
     return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
 
 
@@ -303,7 +304,18 @@ async def list_modules():
                 "title": theme.get("title", d.name),
                 "description": theme.get("description", "")
             })
-    return {"modules": mods, "active": MODULE_NAME}
+    return {"modules": mods, "active": cfg.MODULE_NAME}
+
+
+@app.post("/api/modules/switch")
+async def switch_module(data: dict):
+    """切换活跃模组"""
+    name = data.get("module", cfg.MODULE_NAME)
+    target = PROJECT_ROOT / "mod" / name
+    if not target.exists() or not (target / "module.md").exists():
+        return {"ok": False, "error": f"模组'{name}'不存在"}
+    cfg.set_active_module(name)
+    return {"ok": True, "module": name}
 
 
 @app.websocket("/ws")

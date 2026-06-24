@@ -14,7 +14,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from .config import SKILLS_DIR, SKILL_LOAD_ORDER, SAVES_DIR, STATE_FILE, AUTO_SAVE_SLOT
+from .config import SKILLS_DIR, SKILL_LOAD_ORDER, AUTO_SAVE_SLOT
+from . import config as cfg
 
 
 # ---- Skill 加载 ----
@@ -41,14 +42,14 @@ def load_system_prompt() -> str:
 # ---- 存档 ----
 
 def _slot_dir(slot_id: str) -> Path:
-    return SAVES_DIR / slot_id
+    return cfg.SAVES_DIR / slot_id
 
 
 def _next_slot() -> str:
     """返回下一个可用的手动存档槽位 ID"""
     existing = sorted(
         int(d.name.split("_")[1])
-        for d in SAVES_DIR.iterdir()
+        for d in cfg.SAVES_DIR.iterdir()
         if d.is_dir() and d.name.startswith("slot_") and d.name != AUTO_SAVE_SLOT
     )
     n = 1
@@ -98,7 +99,7 @@ def save_game(messages: list, slot_id: str | None = None) -> str:
 
     # 读取当前世界状态作为快照
     try:
-        world_state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        world_state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
         world_state = {}
 
@@ -155,7 +156,7 @@ def restore_snapshot(snapshot: dict) -> bool:
     if not snapshot:
         return False
     try:
-        STATE_FILE.write_text(
+        cfg.STATE_FILE.write_text(
             json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         return True
@@ -166,10 +167,10 @@ def restore_snapshot(snapshot: dict) -> bool:
 def list_saves() -> list[dict]:
     """列出所有存档的元数据，按时间倒序"""
     result = []
-    if not SAVES_DIR.exists():
+    if not cfg.SAVES_DIR.exists():
         return result
 
-    for d in sorted(SAVES_DIR.iterdir(), reverse=True):
+    for d in sorted(cfg.SAVES_DIR.iterdir(), reverse=True):
         if not d.is_dir() or not d.name.startswith("slot_"):
             continue
         meta_file = d / "meta.json"

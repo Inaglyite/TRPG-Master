@@ -45,19 +45,21 @@ class GameEngine:
     def reset(self):
         """开始新游戏——重置对话 + 世界状态"""
         import shutil
+        from . import config as cfg
 
         # 重置世界状态到初始
-        initial = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state_initial.json"
+        initial = cfg.MODULE_DIR / "world_state_initial.json"
         if initial.exists():
-            shutil.copy(initial, PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json")
+            shutil.copy(str(initial), str(cfg.STATE_FILE))
 
         self.messages = [{"role": "system", "content": load_system_prompt()}]
+        mod_path = f"mod/{cfg.MODULE_NAME}/world_state.json"
         self.messages.append({
             "role": "user",
             "content": (
-                "（游戏开始。请调用 read_file 读取以下文件来初始化："
+                f"（游戏开始。请调用 read_file 读取以下文件来初始化："
                 "rules/rule_schema.json、rules/rule_config.json、"
-                "mod/mansion_of_madness/world_state.json。"
+                f"{mod_path}。"
                 "然后调用 state_clues 确认已知线索。"
                 "最后描述开场场景并提供选项。）"
             )
