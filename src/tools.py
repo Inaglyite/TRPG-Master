@@ -237,6 +237,36 @@ TOOLS = [
             }
         }
     },
+    # ---- 角色管理 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "create_character",
+            "description": "按 COC 7e 规则创建新角色。随机掷八项属性，分配职业技能点和兴趣技能点。可用职业：私家侦探/记者/医生/教授/古董商/警察/牧师/作家/神秘学家。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "角色姓名"},
+                    "occupation": {"type": "string", "description": "职业名称"}
+                },
+                "required": ["name", "occupation"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_character",
+            "description": "从 JSON 文件加载已有角色卡并应用到当前游戏。路径如 characters/黄千陆.json。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "角色卡 JSON 文件路径"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {

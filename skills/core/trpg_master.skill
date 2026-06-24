@@ -47,6 +47,17 @@
 |------|------|
 | read_file(path) | 读取项目文件 |
 
+### 模组管理
+| 函数 | 说明 |
+|------|------|
+| import_module(path) | 从 Markdown 文件导入新模组 |
+
+### 角色管理
+| 函数 | 说明 |
+|------|------|
+| create_character(name, occupation) | 按 COC 7e 规则创建新角色（9种职业可选） |
+| load_character(path) | 从 JSON 角色卡加载应用到当前游戏 |
+
 ### 状态管理
 | 函数 | 说明 |
 |------|------|
