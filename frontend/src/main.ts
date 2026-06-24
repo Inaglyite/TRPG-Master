@@ -32,9 +32,13 @@ async function loadTheme() {
       if (theme.fonts.body) document.documentElement.style.setProperty("--font", theme.fonts.body);
       if (theme.fonts.mono) document.documentElement.style.setProperty("--font-mono", theme.fonts.mono);
     }
-    if (theme.title) document.title = theme.title;
-    const el = document.getElementById("start-title");
-    if (el && theme.title) el.textContent = `🏛 ${theme.title}`;
+    if (theme.title) {
+      document.title = theme.title;
+      const h1 = document.querySelector("#header h1");
+      if (h1) h1.innerHTML = `🏛 ${theme.title}<span id=\"conn-status\" class=\"connecting\"></span>`;
+      const el = document.getElementById("start-title");
+      if (el) el.textContent = `🏛 ${theme.title}`;
+    }
     const sub = document.getElementById("start-subtitle");
     if (sub && theme.subtitle) sub.textContent = theme.subtitle;
     if (btnStart && theme.startButtonText) btnStart.textContent = theme.startButtonText;
