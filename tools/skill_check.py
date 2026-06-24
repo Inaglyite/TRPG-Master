@@ -8,13 +8,15 @@ d100 ≤ 技能值/5 = 极难成功
 """
 
 import json
+import os
 import random
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = PROJECT_ROOT / "rules" / "rule_schema.json"
-STATE_PATH = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
+MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
 CONFIG_PATH = PROJECT_ROOT / "rules" / "rule_config.json"
 
 

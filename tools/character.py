@@ -9,8 +9,9 @@ from pathlib import Path
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-STATE_PATH = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
-CHARS_DIR = PROJECT_ROOT / "mod" / "mansion_of_madness" / "characters"
+MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
+CHARS_DIR = PROJECT_ROOT / "mod" / MODULE / "characters"
 
 # ── COC 7e 职业库 ──────────────────────────────────────────
 
@@ -336,7 +337,7 @@ def load_character(path: str) -> dict | None:
 
 def apply_character(char: dict) -> dict:
     """将角色卡应用到当前世界状态"""
-    state_path = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
+    state_path = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
     with open(state_path, "r", encoding="utf-8") as f:
         state = json.load(f)
 

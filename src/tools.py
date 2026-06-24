@@ -458,8 +458,8 @@ def execute_function(name: str, args: dict) -> str:
         ending = args.get("ending_type", "neutral")
         title = args.get("title", "故事结束")
         summary = args.get("summary", "")
-        state_path = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
-        with open(state_path, "r+", encoding="utf-8") as f:
+        from . import config as _cfg
+        with open(_cfg.STATE_FILE, "r+", encoding="utf-8") as f:
             data = json.load(f)
             data["game_over"] = {
                 "type": ending,

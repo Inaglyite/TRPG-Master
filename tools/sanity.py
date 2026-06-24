@@ -9,7 +9,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SM = os.path.join(PROJECT_ROOT, "tools", "state_manager.py")
-STATE_PATH = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
+MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
 
 
 def _cli(*args):
