@@ -1,12 +1,12 @@
-# 🎲 TRPG Agent 内核 — 疯狂宅邸
+# 🎲 TRPG Agent 内核
 
-可插拔模组的 TRPG 跑团引擎。规则执行、状态管理、骰子判定、约束生成——纯内核，可接入任意前端。
+可插拔模组的克苏鲁的呼唤第七版跑团引擎。规则执行、状态管理、d100 检定、约束生成——纯内核，可接入任意前端。
 
-## 架构概览
+## 架构
 
 ```
 玩家 → Electron / 浏览器 (TS + Vite)
-          ↕  WebSocket
+          ↕  WebSocket (流式文本 + 结构化事件)
        FastAPI 服务器 (server.py)
           ↕  同步回调
        GameEngine 内核 (src/engine.py)
@@ -14,27 +14,26 @@
        DeepSeek V4 Flash/Pro + GLM-4 Flash + Python Tools
 ```
 
-### 分层职责
-
 | 层 | 技术栈 | 职责 |
 |---|---|---|
-| **前端** | Vite + TypeScript + Electron | 聊天 UI、流式文本渲染、检定确认弹窗、角色面板、线索分类展示 |
-| **接口层** | FastAPI + WebSocket | 桥接：引擎回调事件 → WS 消息，WS 消息 → 引擎动作 |
+| **前端** | Vite + TypeScript + Electron | 聊天 UI、流式文本、检定弹窗、角色面板、模组选择器 |
+| **接口层** | FastAPI + WebSocket | 引擎回调 → WS 消息，WS 消息 → 引擎动作 |
 | **内核** | `src/engine.py`（回调驱动） | 游戏循环、LLM 调用、工具执行——零界面依赖 |
-| **规则 & 工具** | `rules/*.json` + `tools/*.py` | 规则是数据（不是提示词），工具是确定性 Python 脚本 |
+| **规则** | `rules/*.json` + `skills/` (14文件3500行) | COC 7e 完整规则——守秘人/调查员/核心三层架构 |
+| **工具** | `tools/*.py` | 确定性 Python 脚本——d100 检定、SAN 三阶段疯狂、角色创建、模组导入 |
 
 ## 项目结构
 
 ```
 trpg-master/
-├── src/                          # 内核（纯 Python，零界面依赖）
-│   ├── engine.py                 # GameEngine — 回调驱动的游戏循环
-│   ├── config.py                 # 路径、API 配置、常量
-│   ├── tools.py                  # Function Calling Schema + 工具执行器
-│   ├── llm.py                    # 流式 LLM 调用 + GLM 快速摘要
-│   ├── persistence.py            # Skill 加载 + 存档/读档（多槽位）
-│   └── game_loop.py              # 终端壳（print/input 回调）
-├── server.py                     # WebSocket 服务器（接口层）
+├── src/                          # 内核（零界面依赖）
+│   ├── engine.py                 # GameEngine — 回调驱动游戏循环
+│   ├── config.py                 # 路径/API配置/动态模块切换
+│   ├── tools.py                  # Function Calling Schema + 执行器
+│   ├── llm.py                    # 流式 LLM + GLM 快速摘要
+│   ├── persistence.py            # Skill加载 + 多槽位存档/读档
+│   └── game_loop.py              # 终端壳
+├── server.py                     # WebSocket 服务器
 ├── game_loop.py                  # 终端版入口
 ├── start_desktop.sh              # 桌面版一键启动
 ├── start.py / start.sh           # 跨平台启动器
@@ -42,162 +41,174 @@ trpg-master/
 ├── frontend/                     # Electron 桌面应用
 │   ├── electron/main.cjs         # Electron 主进程
 │   ├── src/
-│   │   ├── main.ts               # 渲染进程（WS 客户端 + UI）
-│   │   └── style.css             # 克苏鲁暗色主题（旧羊皮纸 + 烛火金）
+│   │   ├── main.ts               # 入口（主题加载 + 启动）
+│   │   ├── ws.ts                 # WebSocket 通信
+│   │   ├── renderer.ts           # 消息渲染/流式文本
+│   │   ├── options.ts            # 选项解析/检定弹窗
+│   │   ├── panels.ts             # 角色面板/存档面板/结局
+│   │   ├── start.ts              # 开局流程/模组选择
+│   │   ├── dom.ts                # DOM 引用集中管理
+│   │   └── style.css             # 克苏鲁暗色主题
 │   ├── index.html
 │   ├── vite.config.ts
 │   └── package.json
 │
 ├── tools/                        # 确定性 Python 工具
-│   ├── state_manager.py          # 世界状态读写（唯一真理之源）
-│   ├── skill_check.py            # 技能检定（属性绑定，查表计算）
-│   ├── dice.py                   # 纯骰子（d20/d100/优势劣势）
+│   ├── skill_check.py            # d100 roll-under + 三难度 + 奖惩骰
+│   ├── dice.py                   # 通用骰子
 │   ├── damage.py                 # 伤害/治疗
-│   └── sanity.py                 # COC 理智值
+│   ├── sanity.py                 # X/Y SAN损失 + 三阶段疯狂 + 发作表
+│   ├── character.py              # COC 7e 角色创建 (9职业)
+│   ├── module_loader.py          # Markdown→world_state.json 导入
+│   └── state_manager.py          # 世界状态读写 (唯一真理之源)
 │
-├── skills/                       # 约束型提示模板
-│   ├── trpg_master.skill         # 守秘人入口（工具列表 + 约束）
-│   ├── narrative.skill           # 场景叙事 + 选项生成 + 缓存
-│   ├── skill_check.skill         # 技能检定流程（强制调用 skill_check）
-│   ├── combat.skill              # 战斗流程
-│   └── no_spoiler.skill          # 防剧透硬约束（四级边界 + 线索分类指南）
+├── skills/                       # 约束型提示模板 (COC 7e 完整规则)
+│   ├── core/                     # d100检定/防剧透/入口
+│   ├── keeper/                   # 守秘人方法论/氛围/NPC/线索/战斗/理智/魔法
+│   ├── investigator/             # 技能详解/角色创建/调查方法
+│   └── (旧顶层文件保留桥接)
 │
-├── rules/                        # 规则数据（结构化 JSON）
-│   ├── rule_schema.json          # 属性、技能、修正表、检定公式
-│   └── rule_config.json          # 规则开关（暴击/大失败/理智）
+├── rules/                        # 规则数据 (结构化 JSON)
+│   ├── rule_schema.json          # COC 8属性 + 41技能 + 衍生值 + 检定/战斗/理智
+│   └── rule_config.json          # 规则开关
 │
-├── saves/                        # 存档目录（多槽位 + 世界快照）
-│   └── slot_000/                 # 自动存档槽
-│       ├── messages.json         # LLM 对话历史
-│       ├── snapshot.json         # 世界状态快照（读档时恢复）
-│       └── meta.json             # { 时间, 场景, HP, SAN, 线索数 }
+├── saves/                        # 存档 (按模组隔离)
+│   └── <module_name>/
+│       ├── slot_000/             # 自动存档
+│       │   ├── messages.json     # LLM 对话历史
+│       │   ├── snapshot.json     # 世界状态快照 (读档恢复)
+│       │   └── meta.json         # 元数据
+│       └── slot_NNN/             # 手动存档
 │
-└── mod/                          # 模组目录
-    └── mansion_of_madness/       # 示范模组：疯狂宅邸
-        └── world_state.json      # PC、NPC、场景、线索、标志
+├── mod/                          # 模组目录 (可自由加载)
+│   ├── mansion_of_madness/       # 疯狂宅邸 (示范)
+│   │   ├── module.md             # Markdown 模组定义
+│   │   ├── world_state.json      # 当前游戏状态
+│   │   ├── world_state_initial.json  # 初始状态 (新游戏恢复)
+│   │   ├── theme.json            # 配色/字体/标题
+│   │   ├── characters/           # 角色卡
+│   │   ├── skills/               # 模组专属守秘人指南
+│   │   └── assets/               # 素材
+│   └── 猩红文档/                   # 猩红文档模组
+│       ├── module.md             # 413行完整定义
+│       ├── theme.json            # 血色暗黑主题
+│       ├── scenes/               # 详细场景构造文档
+│       ├── skills/               # 守秘人指南 (403行)
+│       └── assets/               # 15张 NPC/场景素材
+│
+└── rules/ skillsucai/            # COC 7e 规则书原文 (3本)
+    ├── 克苏鲁的呼唤守秘人规则书.md
+    ├── 克苏鲁的呼唤第七版调查员手册.md
+    └── 快速入门手册-基础规则.md
 ```
 
 ## 设计原则
 
-1. **规则是数据，不是提示词** — 所有规则系统用结构化 JSON 存放，模型读取执行
+1. **规则是数据，不是提示词** — COC 7e 规则用 JSON + Skill 存放，模型读取执行
 2. **Tool 是确定性 Python 脚本** — 数值计算全部由脚本完成，属性绑定在代码层
 3. **Skill 是约束型提示模板** — 只告诉模型「何时调哪个 Tool、如何描述、不能透露什么」
-4. **状态是唯一真理之源** — 所有状态变更通过 `state_manager.py`，模型不能直接改文件
-5. **强制防剧透** — NPC 秘密、未揭示线索绝对不能泄露（四级信息边界系统）
+4. **状态是唯一真理之源** — 所有变更通过 `state_manager.py`，模型不能直接改文件
+5. **强制防剧透** — NPC 秘密、未揭示线索绝对不能泄露（TIER 四级信息边界）
 
 ## 快速开始
 
 ### 前置条件
 
-- Python 3.10+
-- Node.js 18+
+- Python 3.10+, Node.js 18+
 - DeepSeek API Key
-- （可选）智谱 GLM API Key（免费，用于检定即时摘要）
+- (可选) 智谱 GLM API Key (免费)
 
-### 1. 配置
+### 配置与启动
 
 ```bash
-python3 start.py --setup    # 创建 venv 并安装依赖
-python3 start.py --config   # 交互式配置 API Key
-```
+python3 start.py --setup    # 创建 venv + 安装依赖
+python3 start.py --config   # 配置 API Key
 
-或手动创建 `.env.json`：
+bash start_desktop.sh       # 桌面版 (Electron优先/浏览器兜底)
+python3 game_loop.py        # 终端版
 
-```json
-{
-  "api_key": "sk-your-deepseek-key",
-  "base_url": "https://api.deepseek.com",
-  "flash_model": "deepseek-v4-flash",
-  "pro_model": "deepseek-v4-pro",
-  "glm_api_key": "your-glm-key",
-  "glm_model": "glm-4-flash-250414"
-}
-```
-
-### 2. 启动
-
-**桌面版**（推荐）：
-```bash
-bash start_desktop.sh
-```
-优先 Electron 窗口，不可用时自动回退浏览器。
-
-**终端版**：
-```bash
-python3 game_loop.py
+# 切换模组
+TRPG_MODULE="猩红文档" python3 server.py
 ```
 
 ## 游戏机制
 
-### 检定流程（属性绑定）
+### COC 第七版 d100 检定
 
 ```
-玩家行动 → skill_check(skill="investigation", dc=15)
-         → 自动读取 PC 属性 → 查修正表 → 计算技能加值 → 掷 d20
-         → 🎲 【调查】(d20=14+1+7=22) vs DC 15 → ✓
-         → 成功则 state_add_clue() 记录线索
-         → GLM-4 Flash 快速摘要 + DeepSeek 流式叙事
+skill_check(skill="spot_hidden")  → 自动读 PC 技能值 → 掷 d100
+d100 ≤ 技能值 = 常规成功  |  ≤ 半值 = 困难成功  |  ≤ 1/5 = 极难成功
+01 = 大成功  |  100 = 大失败  |  支持奖励骰/惩罚骰/孤注一掷
 ```
-
-- **自由行动**：先 `suggest_check` 确认难度并给反悔机会
-- **预设选项**：直接 `skill_check`，不确认
-- **属性绑定**：CHA=40 → -2 修正，INT=70 → +1 修正——完全由代码查表计算
-
-### 线索系统（四分类）
-
-| 分类 | 说明 | 示例 |
-|------|------|------|
-| 🔍 探案线索 | 现场证据、物理发现 | "地毯血迹呈喷射状指向楼梯口" |
-| 📜 事件线索 | 剧情推进、NPC陈述 | "管家称三十年前圣诞夜发生火灾" |
-| 🎯 任务线索 | 目标、下一步 | "需要找到二楼右侧第二扇门" |
-| 👤 人物线索 | NPC相关发现 | "管家对楼梯口存在记忆空白" |
-
-线索在角色面板中按分类展示。`skill_check` 成功后强制记录。
-
-### 存档系统（文件夹式多槽位）
-
-- `saves/slot_000/` — 自动存档（退出时）
-- `saves/slot_NNN/` — 手动存档
-- 每槽含 `messages.json`（对话）+ `snapshot.json`（世界快照）+ `meta.json`
-- **读档时从 snapshot 恢复世界状态**，彻底杜绝线索跨存档污染
-- 新游戏不覆盖已有存档
-
-### 防剧透系统
-
-| 层级 | 示例 | 何时可用 |
-|------|------|----------|
-| TIER_0 公开 | "一位面色苍白的老管家站在壁炉旁" | 进入场景立即可见 |
-| TIER_1 观察 | "地毯上的污渍是血迹" | 检定成功 |
-| TIER_2 推理 | "血迹喷射方向指向楼梯口" | 多线索关联 |
-| TIER_3 秘密 | NPC 的 `secret` 字段 | **绝不主动透露** |
 
 ### 模型路由
 
 | 场景 | 模型 |
 |------|------|
-| 叙事、对话、场景 | DeepSeek V4 Flash（1M 上下文） |
-| 技能检定、战斗、理智 | DeepSeek V4 Pro（自动切换） |
-| 检定后即时摘要 | GLM-4 Flash（免费，<1s） |
+| 叙事、对话、场景 | DeepSeek V4 Flash (1M 上下文) |
+| 技能检定、战斗、理智 | DeepSeek V4 Pro (自动切换) |
+| 检定后即时摘要 | GLM-4 Flash (免费, <1s) |
 
-## 自定义模组
+### 存档系统
 
-编辑 `mod/mansion_of_madness/world_state.json`：
+- 文件夹式多槽位: `saves/<模组>/slot_NNN/`
+- 每槽含对话历史 + 世界快照 + 元数据
+- 读档恢复快照——杜绝线索跨存档污染
+- 新游戏不覆盖已有存档
+- 存档面板支持新建/加载/删除/重命名
 
-- `pc` — 调查员属性、技能、物品
-- `npcs` — NPC（含 `visible_tags` 和 `secret`）
-- `current_scene` — 初始场景
-- `flags` — 游戏标志
-- `scene_cache` — 场景描述缓存（首次生成后自动写入）
+### 线索系统（四分类）
 
-规则定制：`rules/rule_schema.json` + `rules/rule_config.json`
+| 🔍 探案 | 📜 事件 | 🎯 任务 | 👤 人物 |
+|---|---|---|---|
+| 现场证据 | 剧情推进 | 目标方向 | NPC发现 |
+
+### 防剧透（TIER 四级）
+
+| 层级 | 示例 | 可用时机 |
+|------|------|----------|
+| TIER_0 | "面色苍白的管家站在壁炉旁" | 进入场景 |
+| TIER_1 | "地毯污渍是陈旧血迹" | 检定成功 |
+| TIER_2 | "喷溅方向指向楼梯口" | 多线索关联 |
+| TIER_3 | NPC secret 字段 | **绝不透露** |
+
+## 模组开发
+
+### Markdown 模组格式
+
+模组通过 `module.md` 定义，支持以下段：
+
+| 段 | 说明 |
+|----|------|
+| `# PC` | 调查员建议、属性范围 |
+| `# NPC` | 所有 NPC (id/name/visible_tags/secret/skills/hp/disposition) |
+| `# 场景` | 场景描述/出口/NPC位置 (支持 detail_file 引用详细构造文档) |
+| `# 线索` | 初始线索列表 (investigation/event/task/npc) |
+| `# 标志` | 游戏标志 (flags) |
+| `# 规则` | 模组专属规则——怪物面板/SAN触发/物品/法术 |
+| `# 开场` | 开幕叙事 Hook |
+| `# 结局` | 多种结局条件与描述 |
+
+导入: `python3 tools/module_loader.py mod/<name>/module.md`
+
+### 主题配置
+
+`theme.json` 定义配色/字体/标题，前端启动自动加载。切换模组时主题跟随。
 
 ## 技术栈
 
 | 组件 | 技术 |
 |------|------|
 | 后端 | Python 3.12, FastAPI, Uvicorn |
-| 内核 LLM | DeepSeek V4 Flash + DeepSeek V4 Pro（OpenAI 兼容 API） |
-| 快速模型 | 智谱 GLM-4 Flash（免费） |
-| 前端 | Vite + TypeScript（vanilla） + Electron |
-| 通信 | WebSocket（流式文本 + 结构化事件） |
-| 主题 | 克苏鲁暗色 — 旧羊皮纸 + 烛火金 + 暗红血迹 |
+| 内核 LLM | DeepSeek V4 Flash/Pro (OpenAI 兼容) |
+| 快速摘要 | 智谱 GLM-4 Flash (免费) |
+| 前端 | Vite + TypeScript vanilla + Electron |
+| 通信 | WebSocket (流式文本 + 结构化事件) |
+| 规则体系 | COC 第七版 d100 (14 skill 文件 3500 行) |
+
+## 可用模组
+
+| 模组 | 说明 | NPC | 场景 |
+|------|------|-----|------|
+| 🏛 疯狂宅邸 | 维多利亚式宅邸中的克苏鲁恐怖 | 3 | 2 |
+| 📜 猩红文档 | 密斯卡托尼克大学学者离奇死亡，女巫审判文档下落不明 | 11 | 8 |
