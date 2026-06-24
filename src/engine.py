@@ -52,6 +52,9 @@ class GameEngine:
         if initial.exists():
             shutil.copy(str(initial), str(cfg.STATE_FILE))
 
+        # 如果初始 PC 没有名字（模组未预设具体调查员），从 characters/ 加载预设调查员
+        self._ensure_pc_from_characters()
+
         self.messages = [{"role": "system", "content": load_system_prompt()}]
         mod_path = f"mod/{cfg.MODULE_NAME}/world_state.json"
         self.messages.append({
@@ -65,6 +68,43 @@ class GameEngine:
             )
         })
         self.current_model = MODEL_FLASH
+
+    def _ensure_pc_from_characters(self):
+        """若 world_state.json 的 pc 没有名字，从模组 characters/ 加载第一个预设调查员。
+        角色卡文件结构（derived.HP / skills / attributes）映射到 world_state 的 pc 结构。
+        """
+        from . import config as cfg
+        try:
+            state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        pc = state.get("pc", {})
+        if pc.get("name"):  # 已有名字，无需填充
+            return
+        chars_dir = cfg.MODULE_DIR / "characters"
+        if not chars_dir.exists():
+            return
+        char_files = sorted(chars_dir.glob("*.json"))
+        if not char_files:
+            return
+        try:
+            char = json.loads(char_files[0].read_text(encoding="utf-8"))
+        except Exception:
+            return
+        derived = char.get("derived", {})
+        pc.update({
+            "name": char.get("name", ""),
+            "occupation": char.get("occupation", ""),
+            "hp": derived.get("HP", pc.get("hp", 10)),
+            "max_hp": derived.get("max_HP", pc.get("max_hp", 10)),
+            "san": derived.get("SAN", pc.get("san", 50)),
+            "max_san": derived.get("max_SAN", pc.get("max_san", 50)),
+            "attributes": char.get("attributes", pc.get("attributes", {})),
+            "skills": char.get("skills", pc.get("skills", {})),
+            "inventory": char.get("inventory", pc.get("inventory", [])),
+        })
+        state["pc"] = pc
+        cfg.STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def has_save(self) -> bool:
         return has_save()

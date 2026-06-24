@@ -313,19 +313,18 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
 
             elif msg_type == "state":
-                # 同时获取 PC 数据和线索（结构化）
-                pc = subprocess.run(
-                    ["python3", "tools/state_manager.py", "get", "pc"],
-                    capture_output=True, text=True, cwd=PROJECT_ROOT
-                )
-                clues = subprocess.run(
-                    ["python3", "tools/state_manager.py", "get", "clues_found"],
-                    capture_output=True, text=True, cwd=PROJECT_ROOT
-                )
+                # 直接读取当前模组的 world_state.json（不走 state_manager.py 子进程，
+                # 否则子进程的 TRPG_MODULE 环境变量不会随运行时模组切换更新）
+                try:
+                    _ws = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+                    pc_data = _ws.get("pc", {})
+                    clues_data = _ws.get("clues_found", {})
+                except Exception:
+                    pc_data, clues_data = {}, {}
                 await ws.send_json({
                     "type": "state_data",
-                    "data": pc.stdout,
-                    "clues": clues.stdout
+                    "data": json.dumps(pc_data, ensure_ascii=False),
+                    "clues": json.dumps(clues_data, ensure_ascii=False)
                 })
 
     except WebSocketDisconnect:
