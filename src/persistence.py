@@ -21,10 +21,18 @@ from .config import SKILLS_DIR, SKILL_LOAD_ORDER, SAVES_DIR, STATE_FILE, AUTO_SA
 
 def load_system_prompt() -> str:
     parts = []
+    # 核心 skill
     for name in SKILL_LOAD_ORDER:
         path = SKILLS_DIR / name
         if path.exists():
             content = path.read_text(encoding="utf-8").strip()
+            if content:
+                parts.append(content)
+    # 模组专属 skill（mod/*/skills/*.skill）
+    mod_dir = SKILLS_DIR.parent / "mod"
+    if mod_dir.exists():
+        for mod_skill in sorted(mod_dir.glob("*/skills/*.skill")):
+            content = mod_skill.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
     return "\n\n---\n\n".join(parts)

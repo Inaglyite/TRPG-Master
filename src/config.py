@@ -37,7 +37,6 @@ SKILL_LOAD_ORDER = [
     "investigator/investigator_skills.skill",
     "investigator/investigator_creation.skill",
     "investigator/investigator_methods.skill",
-    "modules/mansion_madness.skill",
 ]
 
 MAX_TOOL_ROUNDS = 5

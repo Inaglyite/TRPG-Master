@@ -10,7 +10,7 @@ from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
-CHARS_DIR = PROJECT_ROOT / "characters"
+CHARS_DIR = PROJECT_ROOT / "mod" / "mansion_of_madness" / "characters"
 
 # ── COC 7e 职业库 ──────────────────────────────────────────
 
