@@ -6,9 +6,9 @@ from pathlib import Path
 # ---- 路径 ----
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
-SAVES_DIR = PROJECT_ROOT / "saves"
 STATE_FILE = PROJECT_ROOT / "mod" / "mansion_of_madness" / "world_state.json"
 INITIAL_STATE_FILE = STATE_FILE  # 新游戏时从此文件复制初始状态
+SAVES_DIR = PROJECT_ROOT / "mod" / "mansion_of_madness" / "saves"
 AUTO_SAVE_SLOT = "slot_000"
 
 # ---- DeepSeek API ----
