@@ -55,6 +55,13 @@
 | state_npcs() | 列出所有 NPC 及 visible_tags |
 | state_clues() | 列出已发现线索（**每次叙事前必须调用**） |
 | state_add_clue(text, category) | 记录新发现的线索（**只在检定成功时调用**） |
+| state_add_item(item) | 添加物理物品到背包（捡起日记、钥匙、徽章等实物时调用） |
+| state_remove_item(item) | 从背包移除物品（使用、丢弃时调用） |
+
+**物品 vs 线索——何时用哪个：**
+- **物理物品**（日记本、黄铜钥匙、银质徽章、墨渍样本、镜子碎片）→ `state_add_item`
+- **信息发现**（日记内容、血迹分析、NPC透露的秘密）→ `state_add_clue`
+- **两者经常同时触发**——捡到日记本时：`state_add_item("莱特的日记")` + `state_add_clue("莱特日记记录了...")`
 
 ### 骰子与技能检定
 | 函数 | 说明 |
