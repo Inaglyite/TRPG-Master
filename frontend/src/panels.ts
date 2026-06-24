@@ -27,6 +27,12 @@ import { enableInput, sendAction } from "./options";
 export function updateCharPanel(raw: string) {
   try {
     const data = JSON.parse(raw);
+    // 名字和职业随模组动态更新
+    const nameEl = document.getElementById("char-name");
+    if (nameEl && data.name) nameEl.textContent = data.name;
+    const occEl = document.getElementById("char-occupation");
+    if (occEl && data.occupation) occEl.textContent = data.occupation;
+
     document.getElementById("hp-bar")!.textContent = `${data.hp} / ${data.max_hp}`;
     document.getElementById("san-bar")!.textContent = `${data.san} / ${data.max_san}`;
     const hpPct = (data.hp / data.max_hp) * 100;
