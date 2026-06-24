@@ -3,8 +3,7 @@ __pycache__/
 *.pyc
 .env.json
 mod/*/savegame.json
-saves/slot_*/
-mod/*/saves/
+saves/
 .claude/
 node_modules/
 frontend/dist/
