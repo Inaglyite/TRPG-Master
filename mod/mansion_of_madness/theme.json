@@ -1,0 +1,33 @@
+{
+  "title": "疯狂宅邸",
+  "subtitle": "A TRPG of Madness & Mystery",
+  "description": "私家侦探爱德华·温斯洛收到一封匿名信，邀请他前往布莱克伍德庄园……",
+
+  "colors": {
+    "bg": "#14100c",
+    "bg2": "#1e1812",
+    "bg3": "#2a221a",
+    "bg4": "#36291f",
+    "text": "#ddd0bc",
+    "textDim": "#8c7e6a",
+    "textFaint": "#5e5346",
+    "gold": "#c8a24e",
+    "goldDim": "#8a6e30",
+    "goldBright": "#ecd07a",
+    "red": "#9a3b3b",
+    "redBright": "#c95050",
+    "green": "#6b9a52",
+    "blue": "#4a7a9a",
+    "blueBright": "#6aa6c8",
+    "purple": "#7a5a9a",
+    "border": "#3a2f24",
+    "borderBright": "#5a4836"
+  },
+
+  "fonts": {
+    "body": "\"Georgia\", \"Noto Serif SC\", \"Songti SC\", serif",
+    "mono": "\"Courier New\", monospace"
+  },
+
+  "startButtonText": "🕯 点燃烛火，开始故事"
+}

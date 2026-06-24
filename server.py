@@ -279,6 +279,15 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         pass
 
 
+@app.get("/api/theme")
+async def get_theme():
+    """返回当前模组的主题配置"""
+    theme_path = PROJECT_ROOT / "mod" / "mansion_of_madness" / "theme.json"
+    if theme_path.exists():
+        return json.loads(theme_path.read_text(encoding="utf-8"))
+    return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
+
+
 @app.websocket("/ws")
 async def game_ws(ws: WebSocket):
     await ws.accept()

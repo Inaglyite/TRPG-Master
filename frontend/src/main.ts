@@ -605,5 +605,38 @@ savePanelOverlay.onclick = (e) => {
 };
 
 // ---- 启动 ----
-// loadState 由 connect() 的 onopen 触发，无需在此调用
-connect();
+async function loadTheme() {
+  try {
+    const resp = await fetch("/api/theme");
+    const theme = await resp.json();
+    // 应用颜色
+    if (theme.colors) {
+      const map: Record<string, string> = {
+        bg: "--bg", bg2: "--bg2", bg3: "--bg3", bg4: "--bg4",
+        text: "--text", textDim: "--text-dim", textFaint: "--text-faint",
+        gold: "--gold", goldDim: "--gold-dim", goldBright: "--gold-bright",
+        red: "--red", redBright: "--red-bright",
+        green: "--green", blue: "--blue", blueBright: "--blue-bright",
+        purple: "--purple", border: "--border", borderBright: "--border-bright",
+      };
+      Object.entries(theme.colors).forEach(([k, v]) => {
+        if (map[k]) document.documentElement.style.setProperty(map[k], v as string);
+      });
+    }
+    // 应用字体
+    if (theme.fonts) {
+      if (theme.fonts.body) document.documentElement.style.setProperty("--font", theme.fonts.body);
+      if (theme.fonts.mono) document.documentElement.style.setProperty("--font-mono", theme.fonts.mono);
+    }
+    // 应用标题
+    if (theme.title) document.title = theme.title;
+    const startTitle = document.getElementById("start-title");
+    if (startTitle && theme.title) startTitle.textContent = `🏛 ${theme.title}`;
+    const startSub = document.getElementById("start-subtitle");
+    if (startSub && theme.subtitle) startSub.textContent = theme.subtitle;
+    const startBtn = document.getElementById("btn-start") as HTMLButtonElement;
+    if (startBtn && theme.startButtonText) startBtn.textContent = theme.startButtonText;
+  } catch {}
+}
+
+loadTheme().then(() => connect());
