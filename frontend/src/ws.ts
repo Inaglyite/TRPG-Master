@@ -11,7 +11,7 @@
 
 import { setConn, savePanelOverlay } from "./dom";
 import { addMsg } from "./renderer";
-import { onGmTurnStart, resetStartButton, getGameStarting, onSaveList, onSaveAvailable } from "./start";
+import { onGmTurnStart, resetStartButton, getGameStarting, onSaveList, onSaveAvailable, populateModuleList } from "./start";
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
 import { onSuggest, onDone } from "./options";
 import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel } from "./panels";
@@ -122,6 +122,9 @@ function handleMessage(e: MessageEvent) {
       break;
     case "game_over":
       showEnding(data);
+      break;
+    case "module_list":
+      populateModuleList(data.modules, data.active);
       break;
     case "save_list":
       onSaveList(data);

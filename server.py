@@ -125,7 +125,19 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
-    # 通知前端存档列表
+    # 通知前端模组列表 + 存档列表
+    mods_dir = PROJECT_ROOT / "mod"
+    mods = []
+    for d in sorted(mods_dir.iterdir()):
+        if d.is_dir() and (d / "module.md").exists():
+            theme = {}
+            tf = d / "theme.json"
+            if tf.exists():
+                theme = json.loads(tf.read_text(encoding="utf-8"))
+            mods.append({"id": d.name, "title": theme.get("title", d.name),
+                         "description": theme.get("description", "")})
+    await ws.send_json({"type": "module_list", "modules": mods, "active": cfg.MODULE_NAME})
+
     saves = engine.list_saves()
     await ws.send_json({"type": "save_list", "saves": saves})
 

@@ -92,6 +92,34 @@ export function onSaveList(data: any) {
   renderSavePanel(saves);
 }
 
+// ==================== 模组下拉框（由 WS module_list 事件填充） ====================
+
+let activeModule = "";
+
+export function populateModuleList(modules: any[], active: string) {
+  const sel = document.getElementById("module-select") as HTMLSelectElement;
+  if (!sel) return;
+  sel.innerHTML = "";
+  modules.forEach((m: any) => {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.title;
+    if (m.id === active) { opt.selected = true; activeModule = m.id; }
+    sel.appendChild(opt);
+  });
+  sel.onchange = async () => {
+    const chosen = sel.value;
+    if (chosen === activeModule) return;
+    const resp = await fetch("/api/modules/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ module: chosen }),
+    });
+    const result = await resp.json();
+    if (result.ok) { activeModule = chosen; location.reload(); }
+  };
+}
+
 // ==================== 按钮事件绑定 ====================
 
 btnStart.onclick = startGame;
