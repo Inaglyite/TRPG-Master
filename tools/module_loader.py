@@ -58,7 +58,8 @@ def parse_module(md_path: str) -> dict:
         "npcs": [],
         "clues_found": {"investigation": [], "event": [], "task": [], "npc": []},
         "flags": {},
-        "scene_cache": {}
+        "scene_cache": {},
+        "module_rules": {}
     }
 
     # ── YAML frontmatter ──
@@ -147,6 +148,21 @@ def parse_module(md_path: str) -> dict:
     flag_blocks = _extract_yaml_blocks(flag_section)
     if flag_blocks:
         state["flags"] = flag_blocks[0]
+
+    # ── 规则区 ──
+    rules_section = _find_section(text, r'# 规则') or _find_section(text, r'# Rules')
+    if rules_section.strip():
+        rules_data = {}
+        for m in re.finditer(r'##\s+(\w+)\s*\n(.*?)(?=\n##|\Z)', rules_section, re.DOTALL):
+            key = m.group(1)
+            sub = m.group(2)
+            yaml_blocks = _extract_yaml_blocks(sub)
+            if yaml_blocks:
+                if key == "monsters":
+                    rules_data["monsters"] = yaml_blocks[0] if isinstance(yaml_blocks[0], list) else yaml_blocks
+                elif key in ("san_triggers", "items", "spells", "custom_mechanics"):
+                    rules_data[key] = yaml_blocks[0] if isinstance(yaml_blocks[0], list) else yaml_blocks
+        state["module_rules"] = rules_data
 
     # ── 结局区 ──
     ending_section = _find_section(text, r'# 结局') or _find_section(text, r'# Ending')

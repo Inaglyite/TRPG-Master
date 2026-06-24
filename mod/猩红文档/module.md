@@ -383,6 +383,173 @@ gangsters_dealt_with: false
 monster_defeated: false
 ```
 
+# 规则 Rules
+
+本模组特有的机械规则——怪物数据、SAN损失、特殊物品、法术。
+
+## monsters
+```yaml
+- id: ink_monster
+  name: 墨中怪物
+  description: 被17世纪女巫凯夏·梅森封印在墨水字迹中的异界存在。形态为由粘稠黑色液体构成的蠕动触手团块，中心有一枚发出幽绿光芒的独眼。它通过任何被污染的文本显形——阅读特定手稿的读者会在字里行间看到自己的映像，而后怪物从映像中挣脱。
+  attributes:
+    STR: 110
+    CON: 80
+    SIZ: 120
+    DEX: 50
+    INT: 85
+    POW: 75
+  hp: 20
+  armor: 2 (粘稠保护)
+  build: 3
+  attacks:
+    - name: 触手抽打
+      skill: 60
+      damage: 1D6 + DB
+    - name: 吞噬
+      skill: 40
+      damage: 2D6 (无视护甲)
+  san_loss: 1D4/1D10
+  special:
+    - 对火焰伤害加倍
+    - 半固态躯体可渗入裂缝——不受物理障碍限制
+    - 在完全黑暗中获得一个奖励骰于所有攻击
+
+- id: ghoul_aberath
+  name: 阿伯那·维克 (混血食尸鬼)
+  description: 表面是古董商，实为食尸鬼混血。外表基本人形，但皮肤粗糙偏灰、牙齿略尖。会在夜晚袭击独行者，将受害者割喉切片。
+  attributes:
+    STR: 85
+    CON: 65
+    SIZ: 60
+    DEX: 60
+    INT: 55
+    POW: 45
+  hp: 15
+  armor: 1 (坚韧表皮)
+  build: 1
+  attacks:
+    - name: 利爪
+      skill: 50
+      damage: 1D6 + DB
+  san_loss: 0/1D6
+  spells:
+    - 尸食术 (Consume Flesh): 吃死者血肉获得其部分记忆，持续1D4小时
+    - 接触控制术 (Dominate): 消耗5MP，目标POW对抗，失败则被控制1小时
+
+- id: ghoul_minions
+  name: 赫克托与卡拉·费德曼 (食尸鬼混血)
+  description: 维克的两名手下，兄妹关系。外表与常人无异但动作异常敏捷，在黑暗中视力极好。
+  attributes:
+    STR: 65
+    CON: 55
+    SIZ: 55
+    DEX: 70
+    INT: 40
+    POW: 35
+  hp: 11
+  armor: 0
+  build: 0
+  attacks:
+    - name: 小刀
+      skill: 45
+      damage: 1D4 + DB
+  san_loss: 0/1D4
+
+- id: cecil_hunt
+  name: 塞西尔·亨特 (精神崩溃的造假者)
+  description: 莱特的造假同伙。精神已被怪物侵蚀，眼神涣散、喃喃自语、皮肤上有黑色墨水般的纹路。他无意中成了怪物进入这个世界的通道。
+  attributes:
+    STR: 35
+    CON: 30
+    SIZ: 50
+    DEX: 40
+    INT: 65
+    POW: 10
+  hp: 8
+  armor: 0
+  build: 0
+  attacks:
+    - name: 徒手
+      skill: 25
+      damage: 1D3 + DB
+  san_loss: 1/1D4+1 (被墨水侵蚀的脸孔)
+  special:
+    - 体内寄宿怪物碎片——死亡时墨中怪物从尸体内爆发而出
+    - POW只有10，极易被控制或精神攻击
+```
+
+## san_triggers
+```yaml
+- trigger: 第一次阅读女巫审判文档中的手写段落
+  severity: 0/1D3
+
+- trigger: 在莱特办公室发现带有烧焦眼球特征的尸体照片
+  severity: 0/1D4
+
+- trigger: 目睹墨中怪物从文字/尸体中显形
+  severity: 1D4/1D10
+
+- trigger: 在阿伯那·维克的地下室发现被割喉的尸体收藏
+  severity: 1/1D6+1
+
+- trigger: 触碰被墨中怪物污染的文本后，在镜中看到自己的倒影变成怪物的眼睛
+  severity: 0/1D6
+
+- trigger: 塞西尔·亨特在调查员面前突然死亡，墨水从七窍涌出
+  severity: 1/1D8
+
+- trigger: 成功封印/摧毁墨中怪物
+  restore: 1D6
+
+- trigger: 发现阿伯那·维克是食尸鬼——他在你面前撕开了一名受害者的喉管
+  severity: 1D3/1D8
+```
+
+## items
+```yaml
+- id: witch_trial_documents
+  name: 阿卡姆女巫审判文档
+  description: 17世纪90年代审判期间霍布豪斯法官与多名当事人的秘密通信。纸张泛黄易碎，以古英语手写。详细记载了凯夏·梅森被指控、审判和处决的过程——以及她死前用血和墨水混合书写的一道"最终证词"。
+  category: 关键物品
+  effect: |
+    阅读需要图书馆使用检定（常规）。成功=了解基本历史。困难成功=识别出凯夏证词中隐藏的拉丁文封印咒语。极难成功=完全理解封印机制并找到逆向执行的方法。
+    阅读者需进行一次SAN检定（0/1D3）。
+
+- id: aberrant_seal
+  name: 阿伯那的封印徽章
+  description: 维克藏在古董店柜台下面的银质徽章，刻有五角星与蛇形环绕图案。背面刻有拉丁铭文"通过此印，关闭通道"。
+  category: 关键物品
+  effect: |
+    持有者可以使用它执行一次封印仪式（需要神秘学检定，困难）。成功可将墨中怪物锁回文本。失败则徽章碎裂，怪物获得一个附加回合。
+
+- id: leitz_diary
+  name: 莱特的私人日记
+  description: 藏在莱特办公桌暗格中。记录了莱特如何发现霍布豪斯文档中"隐藏的墨水书写层"、塞西尔·亨特的加入、以及他在接触文档文本数日后开始做噩梦的经历。
+  category: 线索物品
+  effect: 阅读后自动获得线索："莱特日记——通过特殊光照可显现文档隐藏层，内容涉及女巫凯夏·梅森的死亡诅咒"
+
+- id: forged_silhouette
+  name: 被污染的拓印本
+  description: 塞西尔·亨特制作的阿卡姆审判文档复制件。纸张表面有深黑色墨水晕染痕迹，在烛光下似乎能看到墨迹微微蠕动。触摸时指尖会感到异常的温热感。
+  category: 危险物品
+  effect: |
+    任何持有此物超过1小时者，每晚需进行一次POW检定（常规）。失败=做噩梦，损失0/1 SAN。连续三次失败=墨中怪物通过复制品感知到持有者的位置。
+```
+
+## spells
+```yaml
+- name: 封印墨中怪物
+  source: 女巫审判文档隐藏层（图书馆使用，困难成功发现）
+  cost: 10 MP + 1D3 SAN
+  casting_time: 3轮
+  effect: |
+    执行者需用银器在墨迹周围刻下封印圆阵，同时口念拉丁文封印咒语。
+    仪式技能检定：神秘学 (occult)，困难难度。
+    成功=怪物被锁回文本，文本上的墨迹永久凝固。
+    失败=消耗翻倍且怪物立即获得一次攻击机会。
+```
+
 # 开场 Hook
 
 ```
