@@ -86,5 +86,15 @@ async function loadTheme() {
   } catch { /* 主题加载失败不影响后续连接 */ }
 }
 
+// ---- 兜底：强制至少有一个选项 ----
+setTimeout(() => {
+  const sel = document.getElementById("module-select") as HTMLSelectElement;
+  if (sel && sel.options.length === 0) {
+    const opt = document.createElement("option");
+    opt.textContent = "疯狂宅邸";
+    sel.appendChild(opt);
+  }
+}, 3000);
+
 // ---- 启动 ----
 loadModules().then(() => loadTheme()).then(() => connect());
