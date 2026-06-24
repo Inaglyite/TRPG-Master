@@ -1,0 +1,38 @@
+{
+  "title": "猩红文档",
+  "subtitle": "Crimson Letters — A Call of Cthulhu Mystery",
+  "description": "密斯卡托尼克大学学者离奇死亡，珍贵文档下落不明，封印在墨水中的怪物正逐渐苏醒……",
+
+  "colors": {
+    "bg": "#0a0608",
+    "bg2": "#140a0c",
+    "bg3": "#1f0f12",
+    "bg4": "#2d1418",
+    "text": "#d4c4b0",
+    "textDim": "#8c7068",
+    "textFaint": "#5a3e38",
+    "gold": "#b88a4a",
+    "goldDim": "#7a5a2e",
+    "goldBright": "#e0b86a",
+    "red": "#8a1a1a",
+    "redDim": "#5c1010",
+    "redBright": "#c42828",
+    "crimson": "#6b1218",
+    "crimsonBright": "#a61c24",
+    "green": "#5a7a3a",
+    "blue": "#3a6a8a",
+    "blueBright": "#5a9aba",
+    "purple": "#6a3a7a",
+    "ink": "#1a0e10",
+    "border": "#3a1a1e",
+    "borderBright": "#5a2a2e"
+  },
+
+  "fonts": {
+    "body": "\"Georgia\", \"Noto Serif SC\", \"Songti SC\", serif",
+    "mono": "\"Courier New\", \"Fira Code\", monospace",
+    "heading": "\"Palatino Linotype\", \"Noto Serif SC\", \"STSong\", serif"
+  },
+
+  "startButtonText": "打开猩红文档"
+}
