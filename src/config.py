@@ -6,10 +6,12 @@ from pathlib import Path
 # ---- 路径 ----
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
-MODULE_NAME = "mansion_of_madness"
-STATE_FILE = PROJECT_ROOT / "mod" / MODULE_NAME / "world_state.json"
-INITIAL_STATE_FILE = STATE_FILE
+MODULE_NAME = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+MODULE_DIR = PROJECT_ROOT / "mod" / MODULE_NAME
+STATE_FILE = MODULE_DIR / "world_state.json"
+INITIAL_STATE_FILE = MODULE_DIR / "world_state_initial.json"
 SAVES_DIR = PROJECT_ROOT / "saves" / MODULE_NAME
+THEME_FILE = MODULE_DIR / "theme.json"
 AUTO_SAVE_SLOT = "slot_000"
 
 # ---- DeepSeek API ----

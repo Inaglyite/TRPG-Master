@@ -6,7 +6,7 @@ import sys
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULE = "mansion_of_madness"
+MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
 STATE_PATH = os.path.join(PROJECT_ROOT, "mod", MODULE, "world_state.json")
 
 
