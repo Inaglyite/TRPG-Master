@@ -37,10 +37,19 @@ async function loadModules() {
       const result = await resp.json();
       if (result.ok) {
         activeModule = chosen;
-        await loadTheme();  // 重新加载新模组的主题
+        await loadTheme();
       }
     };
-  } catch { /* 列表加载失败不影响启动 */ }
+  } catch (e) {
+    console.error("loadModules failed:", e);
+    // 列表加载失败：填充默认选项
+    const sel = document.getElementById("module-select") as HTMLSelectElement;
+    if (sel && sel.options.length === 0) {
+      const opt = document.createElement("option");
+      opt.textContent = "疯狂宅邸";
+      sel.appendChild(opt);
+    }
+  }
 }
 
 // ---- 加载主题 ----
