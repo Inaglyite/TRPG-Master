@@ -85,7 +85,13 @@
       "故乡的信物（一枚磨损的铜钱）",
       ".38口径左轮手枪（6发）"
     ],
-    "conditions": []
+    "conditions": [],
+    "psychological_profile": {
+      "traits": [],
+      "key_relationships": [],
+      "phobias": [],
+      "manias": []
+    }
   },
   "npcs": [
     {

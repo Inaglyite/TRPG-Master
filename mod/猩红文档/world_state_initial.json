@@ -24,7 +24,13 @@
     "attributes": {},
     "skills": {},
     "inventory": [],
-    "conditions": []
+    "conditions": [],
+    "psychological_profile": {
+      "traits": [],
+      "key_relationships": [],
+      "phobias": [],
+      "manias": []
+    }
   },
   "npcs": [
     {

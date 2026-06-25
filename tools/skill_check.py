@@ -122,13 +122,17 @@ def console_check():
     if len(sys.argv) < 2:
         print("用法: python skill_check.py <skill_id> [bonus_dice] [penalty_dice] [--push]")
         print("  skill_id: spot_hidden, persuade, fighting_brawl, dodge, firearms_handgun, ...")
+        print("  或 attribute: STR, DEX, CON, INT, POW, SIZ, APP, EDU（属性裸检定）")
         print("  bonus_dice: 奖励骰数量（默认 0）")
         print("  penalty_dice: 惩罚骰数量（默认 0）")
         print("  --push: 标记为孤注一掷")
         print("示例:")
         print("  python skill_check.py spot_hidden")
-        print("  python skill_check.py persuade 1 0         # 1个奖励骰")
-        print("  python skill_check.py dodge 0 1             # 1个惩罚骰")
+        print("  python skill_check.py STR               # 力量属性检定")
+        print("  python skill_check.py INT               # 智力属性检定（灵感）")
+        print("  python skill_check.py POW               # 意志属性检定")
+        print("  python skill_check.py persuade 1 0      # 1个奖励骰")
+        print("  python skill_check.py dodge 0 1         # 1个惩罚骰")
         print("  python skill_check.py library_use 0 0 --push # 孤注一掷")
         sys.exit(1)
 
@@ -146,10 +150,18 @@ def console_check():
         elif i == 3:
             penalty = int(arg)
 
+    # 判断是技能检定还是属性检定
+    ATTRIBUTES = {"STR", "DEX", "CON", "INT", "POW", "SIZ", "APP", "EDU"}
     state = load_json(STATE_PATH)
-    skill_value = state["pc"]["skills"].get(skill_name_global, 50)
 
-    success_level(0, skill_value, bonus, penalty, is_push)
+    if skill_name_global in ATTRIBUTES:
+        # 属性裸检定：d100 ≤ 属性值
+        attr_value = state["pc"]["attributes"].get(skill_name_global, 50)
+        success_level(0, attr_value, bonus, penalty, is_push)
+    else:
+        # 技能检定
+        skill_value = state["pc"]["skills"].get(skill_name_global, 50)
+        success_level(0, skill_value, bonus, penalty, is_push)
 
 
 def print_json(obj):

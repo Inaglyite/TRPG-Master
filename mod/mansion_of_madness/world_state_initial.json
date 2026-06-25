@@ -61,7 +61,13 @@
       "38口径左轮手枪（6发）"
     ],
     "conditions": [],
-    "age": 34
+    "age": 34,
+    "psychological_profile": {
+      "traits": [],
+      "key_relationships": [],
+      "phobias": [],
+      "manias": []
+    }
   },
   "npcs": [
     {

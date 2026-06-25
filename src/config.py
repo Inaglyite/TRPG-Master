@@ -36,6 +36,7 @@ SKILL_LOAD_ORDER = [
     "keeper/keeper_clues.skill",
     "keeper/keeper_combat.skill",
     "keeper/keeper_sanity.skill",
+    "keeper/keeper_psychology.skill",
     "keeper/keeper_magic.skill",
     "investigator/investigator_skills.skill",
     "investigator/investigator_creation.skill",

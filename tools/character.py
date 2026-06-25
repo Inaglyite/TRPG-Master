@@ -304,6 +304,12 @@ def create_character(name: str, occupation: str, quick: bool = False) -> dict:
             "treasured_possession": "",
             "traits": "",
             "key_connection": ""
+        },
+        "psychological_profile": {
+            "traits": [],
+            "key_relationships": [],
+            "phobias": [],
+            "manias": []
         }
     }
 
@@ -353,6 +359,14 @@ def apply_character(char: dict) -> dict:
     pc["max_san"] = derived.get("max_SAN", pc.get("max_san", 65))
     pc["inventory"] = char.get("inventory", pc.get("inventory", []))
     pc["credit_rating"] = char.get("credit_rating", 30)
+    # 心理特质：优先用角色卡中已有的，否则初始化空结构
+    if "psychological_profile" in char:
+        pc["psychological_profile"] = char["psychological_profile"]
+    elif "psychological_profile" not in pc:
+        pc["psychological_profile"] = {
+            "traits": [], "key_relationships": [],
+            "phobias": [], "manias": []
+        }
 
     with open(state_path, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)

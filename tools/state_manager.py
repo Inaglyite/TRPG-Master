@@ -232,6 +232,38 @@ def cmd_private_memory_update(section, value_str):
     print(json.dumps({"ok": True, "section": section, "updated": True}, ensure_ascii=False))
 
 
+def cmd_psychological_trait(category, name, context=""):
+    """添加或覆盖心理特质（恐惧症/躁狂症/性格特质/重要关系）"""
+    data = _load()
+    pc = data.setdefault("pc", {})
+    profile = pc.setdefault("psychological_profile", {
+        "traits": [], "key_relationships": [],
+        "phobias": [], "manias": []
+    })
+
+    if category == "phobia":
+        entry = {"name": name, "acquired_from": context or "madness_bout"}
+        profile["phobias"].append(entry)
+    elif category == "mania":
+        entry = {"name": name, "acquired_from": context or "madness_bout"}
+        profile["manias"].append(entry)
+    elif category == "trait":
+        profile["traits"].append(name)
+    elif category == "relationship":
+        profile["key_relationships"].append({"name": name, "context": context or ""})
+    else:
+        print(f"ERROR: 未知分类 '{category}'。可选: phobia, mania, trait, relationship", file=sys.stderr)
+        sys.exit(1)
+
+    _save(data)
+    print(json.dumps({
+        "ok": True,
+        "category": category,
+        "name": name,
+        "psychological_profile": profile
+    }, ensure_ascii=False, indent=2))
+
+
 def cmd_usage():
     print("用法:")
     print("  python state_manager.py get <json_path>        读取字段（如 pc.hp, npcs.0.name）")
@@ -261,6 +293,7 @@ COMMANDS = {
     "npc-secret": cmd_npc_secret,
     "private-memory": lambda _=None: cmd_private_memory(),
     "private-memory-update": cmd_private_memory_update,
+    "psych-trait": cmd_psychological_trait,
 }
 
 
@@ -318,6 +351,12 @@ def main():
             print("ERROR: private-memory-update 需要 <section> <json_value>", file=sys.stderr)
             sys.exit(1)
         cmd_private_memory_update(sys.argv[2], sys.argv[3])
+    elif cmd == "psych-trait":
+        if len(sys.argv) < 4:
+            print("ERROR: psych-trait 需要 <category> <name> [context]", file=sys.stderr)
+            sys.exit(1)
+        ctx = sys.argv[4] if len(sys.argv) > 4 else ""
+        cmd_psychological_trait(sys.argv[2], sys.argv[3], ctx)
     else:
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()

@@ -71,6 +71,11 @@
 | state_add_item(item) | 添加物理物品到背包（捡起日记、钥匙、徽章等实物时调用） |
 | state_remove_item(item) | 从背包移除物品（使用、丢弃时调用） |
 
+### 心理特质管理
+| 函数 | 说明 |
+|------|------|
+| set_psychological_trait(category, name, context) | 记录 PC 心理特质。category=phobia/mania/trait/relationship。恐惧症必须锚定实际游戏事件 |
+
 ### NPC 信息边界管理（2026 新增 — 私有工作记忆系统）
 | 函数 | 说明 |
 |------|------|
@@ -89,6 +94,8 @@
 |------|------|
 | dice_roll(spec) | 掷骰（如 1d100, 1d6, 2d10, 3d6） |
 | skill_check(skill, bonus_dice, penalty_dice, push) | d100 技能检定 |
+| attribute_check(attribute, bonus_dice, penalty_dice) | 裸属性检定（STR/DEX/CON/INT/POW/SIZ/APP/EDU）。INT=灵感浮现，EDU=常识知识，APP=第一印象 |
+| luck_check() | 幸运检定（d100≤POW），用于外部环境因素，不可孤注一掷 |
 
 **skill_check 参数说明：**
 - `skill`（必填）：技能英文 ID，如 "spot_hidden", "library_use", "fighting_brawl"
@@ -117,9 +124,12 @@
 ### 理智值（SAN）
 | 函数 | 说明 |
 |------|------|
-| sanity_loss(severity) | 理智损失（minor/moderate/major/catastrophic）。自动处理 X/Y 格式。 |
+| sanity_trigger(description) | 判断当前场景是否应触发SAN损失及建议严重度。**在玩家遭遇恐怖/震惊事件时必须优先调用** |
+| sanity_loss(severity) | 理智损失（trivial/minor/moderate/major/catastrophic 或自定义 X/Y）。自动处理 X/Y 格式和临时/不定/永久疯狂判定 |
 | sanity_restore(amount) | 恢复理智 |
 | sanity_check() | 查看当前理智状态 |
+| psychoanalysis(target) | 精神分析治疗——技能检定成功恢复 1D3 SAN，压制恐惧症1小时。同目标同日限一次 |
+| reality_check() | 现实认知检定——仅用于潜在疯狂期调查员鉴别幻觉 |
 
 ### 结局（玩家确认制）
 | 函数 | 说明 |

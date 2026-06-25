@@ -334,7 +334,93 @@ TOOLS = [
             }
         }
     },
+    # ---- 属性检定与核心机制 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "attribute_check",
+            "description": "裸属性检定（非技能）。d100 ≤ 属性值 = 成功。用于纯体力/智力/意志行动。STR=撞门搬物, DEX=接物平衡, CON=抗毒抗病, INT=理解信息/灵感浮现, POW=意志对抗, SIZ=挤入窄缝, APP=第一印象(暗骰), EDU=常识知识。APP检定应为暗骰，不告知玩家数值。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attribute": {
+                        "type": "string",
+                        "enum": ["STR", "DEX", "CON", "INT", "POW", "SIZ", "APP", "EDU"],
+                        "description": "属性缩写"
+                    },
+                    "bonus_dice": {"type": "integer", "description": "奖励骰数量"},
+                    "penalty_dice": {"type": "integer", "description": "惩罚骰数量"}
+                },
+                "required": ["attribute"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "luck_check",
+            "description": "幸运检定。d100 ≤ 当前 POW → 成功。用于外部环境因素（停车位、设备是否正常、恰巧遇到某人）。不可孤注一掷。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    # ---- 心理与精神分析 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "psychoanalysis",
+            "description": "精神分析治疗。进行 psychoanalysis 技能检定，成功恢复目标 1D3 SAN 并暂时压制恐惧症1小时。同一目标同一天只能受益一次。用于安抚恐慌队友或缓解疯狂症状。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标路径，pc 或 NPC ID"}
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reality_check",
+            "description": "现实认知检定。仅用于处于潜在疯狂期的调查员鉴别所见是否为幻觉。SAN检定（d100≤当前SAN）→成功看穿幻觉获得抗性；失败失去1SAN并可能触发疯狂发作。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sanity_trigger",
+            "description": "判断当前场景是否应触发SAN损失及严重度。不掷骰，只输出建议。在玩家遭遇恐怖/震惊/超自然事件时，先调用此工具获得severity建议，再调用sanity_loss。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "场景简述，如'玩家第一次看到血肉模糊的尸体''NPC突然表现出超自然特征'"}
+                },
+                "required": ["description"]
+            }
+        }
+    },
     # ---- NPC 信息边界管理 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "set_psychological_trait",
+            "description": "记录 PC 的心理特质（恐惧症/躁狂症/性格特质/重要关系）。疯狂发作触发恐惧症或躁狂症时调用。自定义内容必须锚定于实际游戏事件（创伤场景），不可凭空编造无关内容。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["phobia", "mania", "trait", "relationship"],
+                        "description": "phobia=恐惧症, mania=躁狂症, trait=性格特质, relationship=重要关系"
+                    },
+                    "name": {"type": "string", "description": "特质名称。恐惧症格式如'墨水恐惧——对任何黑色液体的非理性恐惧'。必须与游戏中的触发事件相关。"},
+                    "context": {"type": "string", "description": "触发/来源背景，如'在地下室目睹怪物从墨水中显形后产生'"}
+                },
+                "required": ["category", "name"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -400,6 +486,8 @@ COMPLEX_FUNCTIONS = {
     "apply_damage", "apply_heal",
     "sanity_loss", "sanity_restore", "sanity_check",
     "create_character",
+    "attribute_check", "luck_check",
+    "psychoanalysis", "reality_check",
 }
 
 
@@ -563,6 +651,50 @@ def execute_function(name: str, args: dict) -> str:
         if not full_path.exists():
             return f"[错误] 文件不存在: {path}"
         return full_path.read_text(encoding="utf-8")
+    elif name == "attribute_check":
+        attr = args.get("attribute", "STR")
+        bonus = args.get("bonus_dice", 0) or 0
+        penalty = args.get("penalty_dice", 0) or 0
+        return _run_cli(f"python3 tools/skill_check.py {attr} {bonus} {penalty}")
+    elif name == "luck_check":
+        return _run_cli("python3 tools/skill_check.py POW")
+    elif name == "psychoanalysis":
+        target = args.get("target", "pc")
+        return _run_cli(f"python3 tools/sanity.py psychoanalysis {target}")
+    elif name == "reality_check":
+        return _run_cli("python3 tools/sanity.py reality-check")
+    elif name == "sanity_trigger":
+        desc = args.get("description", "")
+        # 基于关键词的 severity 建议
+        desc_lower = desc.lower()
+        if any(w in desc for w in ["直视", "伟大", "克苏鲁", "神话生物完全显形"]):
+            suggestion = "catastrophic"
+        elif any(w in desc for w in ["朋友被杀", "目击死亡", "尸雨", "严刑拷打", "割喉"]):
+            suggestion = "major"
+        elif any(w in desc for w in ["恐怖尸体", "血肉模糊", "超自然", "非人", "不是人类", "食尸鬼", "深潜者", "怪物显形", "第一次杀人"]):
+            suggestion = "moderate"
+        elif any(w in desc for w in ["尸体", "血迹", "诡异", "禁忌文本", "噩梦", "幻觉", "异常倒影", "第一次目睹"]):
+            suggestion = "minor"
+        elif any(w in desc for w in ["不安", "违和感", "奇怪", "不对劲"]):
+            suggestion = "trivial"
+        else:
+            suggestion = "moderate"  # 默认
+        return json.dumps({
+            "suggestion": suggestion,
+            "note": "这是建议的严重度，最终由守秘人根据具体情境决定。确认后调用 sanity_loss(severity=...)",
+            "severity_options": {
+                "trivial": "0/1 (几乎无损失)",
+                "minor": "0/1D4 (轻微不适)",
+                "moderate": "1/1D6+1 (明显冲击)",
+                "major": "1D4/2D6+2 (严重创伤)",
+                "catastrophic": "1D10/1D100 (终极恐怖)"
+            }
+        }, ensure_ascii=False)
+    elif name == "set_psychological_trait":
+        cat = args.get("category", "phobia")
+        name_val = safe(args.get("name", ""))
+        ctx = safe(args.get("context", ""))
+        return _run_cli(f"python3 tools/state_manager.py psych-trait {cat} {name_val} {ctx}")
     elif name == "npc_reveal":
         npc_id = args.get("npc_id", "")
         tier = str(args.get("tier", 1))
