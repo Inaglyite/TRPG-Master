@@ -87,7 +87,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "state_npcs",
-            "description": "列出所有 NPC 及其 visible_tags。",
+            "description": "列出所有 NPC 及其 visible_tags、揭示程度（revealed_level 和 revealed_entries）。每次叙事前应调用以确认信息边界。",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
@@ -333,6 +333,60 @@ TOOLS = [
                 "required": ["path"]
             }
         }
+    },
+    # ---- NPC 信息边界管理 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "npc_reveal",
+            "description": "记录 PC 对 NPC 秘密的揭示进度。当检定成功获得 NPC 相关信息时调用。tier: 1=表层观察(紧张/回避等行为线索), 2=部分推断(拼凑多条线索后的结论), 3=完全揭露(NPC主动坦白或无可辩驳的证据)。调用后该 NPC 的 revealed_level 会自动更新。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "npc_id": {"type": "string", "description": "NPC ID，如 butler_gregory, lady_elizabeth"},
+                    "tier": {"type": "integer", "description": "揭示层级：1/2/3"},
+                    "entry_text": {"type": "string", "description": "揭示的具体信息，如'管家在提及楼梯口时表现出异常紧张'"}
+                },
+                "required": ["npc_id", "tier", "entry_text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_npc_secret",
+            "description": "获取 NPC 的完整秘密信息（守秘人专用）。仅在需要确认 NPC 幕后设定时调用——绝不在叙事中直接引用返回值。调用后你仍然只能基于已揭示的 tier 层级来描述信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "npc_id": {"type": "string", "description": "NPC ID"}
+                },
+                "required": ["npc_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_private_memory",
+            "description": "读取守秘人私有工作记忆。包含幕后计划、隐藏事实、推理笔记。用于确认当前信息边界——哪些秘密尚未揭示、当前剧情推进方向。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_private_memory",
+            "description": "更新私有工作记忆的指定字段。在剧情推进或秘密被揭示后调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "section": {"type": "string", "description": "要更新的字段：goals_and_plans / hidden_facts / inference_notes"},
+                    "value": {"type": "string", "description": "新值（JSON 字符串或纯文本）"}
+                },
+                "required": ["section", "value"]
+            }
+        }
     }
 ]
 
@@ -509,6 +563,20 @@ def execute_function(name: str, args: dict) -> str:
         if not full_path.exists():
             return f"[错误] 文件不存在: {path}"
         return full_path.read_text(encoding="utf-8")
+    elif name == "npc_reveal":
+        npc_id = args.get("npc_id", "")
+        tier = str(args.get("tier", 1))
+        text = safe(args.get("entry_text", ""))
+        return _run_cli(f"python3 tools/state_manager.py npc-reveal {npc_id} {tier} {text}")
+    elif name == "get_npc_secret":
+        npc_id = args.get("npc_id", "")
+        return _run_cli(f"python3 tools/state_manager.py npc-secret {npc_id}")
+    elif name == "get_private_memory":
+        return _run_cli("python3 tools/state_manager.py private-memory")
+    elif name == "update_private_memory":
+        section = args.get("section", "")
+        value = safe(args.get("value", ""))
+        return _run_cli(f"python3 tools/state_manager.py private-memory-update {section} {value}")
     else:
         return f"[错误] 未知函数: {name}"
 

@@ -77,7 +77,11 @@
       "hp": 8,
       "max_hp": 8,
       "disposition": "nervous",
-      "current_location": "entrance_hall"
+      "current_location": "entrance_hall",
+      "revealed": {
+        "level": 0,
+        "entries": []
+      }
     },
     {
       "id": "lady_elizabeth",
@@ -92,7 +96,11 @@
       "hp": 6,
       "max_hp": 6,
       "disposition": "unstable",
-      "current_location": "east_wing_parlor"
+      "current_location": "east_wing_parlor",
+      "revealed": {
+        "level": 0,
+        "entries": []
+      }
     },
     {
       "id": "shadow_creature",
@@ -106,7 +114,11 @@
       "hp": 20,
       "max_hp": 20,
       "disposition": "hostile",
-      "current_location": "basement_seal"
+      "current_location": "basement_seal",
+      "revealed": {
+        "level": 0,
+        "entries": []
+      }
     }
   ],
   "clues_found": {
@@ -122,5 +134,14 @@
     "basement_accessible": false,
     "ritual_circle_active": true
   },
-  "scene_cache": {}
+  "scene_cache": {},
+  "private_memory": {
+    "goals_and_plans": "管家尚未意识到自己已死；伊丽莎白夫人的精神正在崩溃；暗影生物在封印减弱中逐渐获得力量。PC需要探索宅邸，收集线索，最终面对地下室的真相。",
+    "hidden_facts": {
+      "butler_gregory": "已死的幽灵。手会穿物、回避火灾话题、对楼梯口有记忆空白。目前仅表现出紧张，尚未给出任何超自然暗示。",
+      "lady_elizabeth": "火灾元凶。知道封印存在但无法直接说出。会自言自语、逻辑跳跃。尚未与PC有任何接触。",
+      "shadow_creature": "封印在 basement_seal 的次元生物。怕光。只有在地下室彻底黑暗时才能完全显形。目前玩家完全不知道它的存在。"
+    },
+    "inference_notes": "玩家刚进入宅邸，仅见到了管家。地下室、东厅、西厅均未探索。暗影生物的存在完全未知。"
+  }
 }

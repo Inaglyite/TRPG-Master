@@ -41,6 +41,14 @@ class GameEngine:
         self.messages: list[dict] = []
         self.current_model = MODEL_FLASH
         self.cb = EngineCallbacks()
+        # 记忆管理
+        self._round_count = 0
+        self._tier_last_injected = -99  # 首次必定注入
+        self._last_turn_high_risk = False
+        self._summary_token_estimate = 0
+        # 摘要阈值：消息超过此数或 token 估算超过窗口 60% 时触发压缩
+        self.SUMMARY_MSG_THRESHOLD = 30
+        self.SUMMARY_TOKEN_THRESHOLD = 8000
 
     def reset(self):
         """开始新游戏——重置对话 + 世界状态"""
@@ -63,11 +71,16 @@ class GameEngine:
                 f"（游戏开始。请调用 read_file 读取以下文件来初始化："
                 "rules/rule_schema.json、rules/rule_config.json、"
                 f"{mod_path}。"
-                "然后调用 state_clues 确认已知线索。"
+                "然后调用 get_private_memory 了解当前信息边界。"
+                "再调用 state_clues 和 state_npcs 确认已知线索和 NPC 揭示状态。"
                 "最后描述开场场景并提供选项。）"
             )
         })
         self.current_model = MODEL_FLASH
+        self._round_count = 0
+        self._tier_last_injected = -99
+        self._last_turn_high_risk = False
+        self._summary_token_estimate = 0
 
     def _ensure_pc_from_characters(self):
         """若 world_state.json 的 pc 没有名字，从模组 characters/ 加载第一个预设调查员。
@@ -127,6 +140,11 @@ class GameEngine:
         # 保留当前 system prompt，恢复对话历史
         system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
         self.messages = [system_msg] + messages[1:]
+        # 重置记忆管理状态
+        self._round_count = 0
+        self._tier_last_injected = -99
+        self._last_turn_high_risk = False
+        self._summary_token_estimate = 0
         return len(messages) - 1
 
     # ---- 流式 LLM ----
@@ -197,16 +215,181 @@ class GameEngine:
                 return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
         return execute_function(name, args)
 
+    # ---- 记忆管理 ----
+
+    def _estimate_tokens(self) -> int:
+        """粗略估算消息列表的 token 数。中文约 1.5 字符/token，英文约 4 字符/token。"""
+        total = 0
+        for m in self.messages:
+            content = m.get("content", "") or ""
+            # 混合文本粗略估算
+            total += len(content) // 2  # 取中值 ~2 chars/token
+            if "tool_calls" in m:
+                total += len(json.dumps(m["tool_calls"])) // 2
+        self._summary_token_estimate = total
+        return total
+
+    def _should_summarize(self) -> bool:
+        """检查是否需要压缩上下文"""
+        msg_count = len(self.messages)
+        if msg_count >= self.SUMMARY_MSG_THRESHOLD:
+            return True
+        if self._estimate_tokens() >= self.SUMMARY_TOKEN_THRESHOLD:
+            return True
+        return False
+
+    def _summarize_history(self):
+        """使用 GLM-4 Flash 将旧消息压缩为 ENGRAM 风格结构化摘要。
+        保留 system prompt + 最近 10 条消息，中间部分替换为摘要。
+        """
+        from .llm import _get_glm
+
+        glm = _get_glm()
+        if glm is None:
+            self.cb.on_error("（摘要模型不可用，跳过上下文压缩）")
+            return
+
+        # 保留：system prompt（索引0）+ 最近 N 条消息
+        KEEP_RECENT = 10
+        if len(self.messages) <= KEEP_RECENT + 5:
+            return  # 太少，不压缩
+
+        # 找到安全的切割点 —— 必须在完整的 user→assistant 周期边界
+        cutoff = len(self.messages) - KEEP_RECENT
+        # 向前调整到最近的 user 消息（确保不切断 tool 调用链）
+        while cutoff > 1 and self.messages[cutoff].get("role") != "user":
+            cutoff -= 1
+        if cutoff <= 1:
+            return  # 无法安全切割
+
+        old_messages = self.messages[1:cutoff]  # 保留 system prompt
+        recent_messages = self.messages[cutoff:]
+
+        # 构建摘要请求
+        old_text_parts = []
+        for m in old_messages:
+            role = m.get("role", "?")
+            content = m.get("content", "") or ""
+            if role == "tool":
+                # 截断工具输出
+                content = content[:300] + "..." if len(content) > 300 else content
+            if content.strip():
+                old_text_parts.append(f"[{role}]: {content}")
+
+        old_text = "\n\n".join(old_text_parts)
+        if len(old_text) > 8000:
+            old_text = old_text[:8000] + "\n...(后续内容已截断)"
+
+        summary_prompt = (
+            "你是TRPG游戏记录员。请将以下游戏对话历史压缩为结构化JSON摘要。\n\n"
+            "输出格式（严格遵守）：\n"
+            '{"episodic":[{"turn":1,"event":"简述"}],"semantic":{"pc_knowledge":{},'
+            '"revealed_clues":[],"world_state_changes":{}},"current_objective":"","last_scene":""}\n\n'
+            "规则：\n"
+            "1. episodic: 按时间顺序列出关键剧情事件，每条包含回合号和简述\n"
+            "2. semantic.pc_knowledge: 以NPC名为key，记录PC已了解的信息（仅已揭示的，不推测秘密）\n"
+            "3. semantic.revealed_clues: 已发现的关键线索列表\n"
+            "4. semantic.world_state_changes: 场景/标志等状态变化\n"
+            "5. current_objective: 当前主要目标（一句话）\n"
+            "6. last_scene: 最后所在场景名称\n"
+            "7. 只输出JSON，不要任何额外文本\n"
+            "8. 技能检定和骰子结果必须保留\n"
+            "9. 不要编造任何对话中不存在的信息\n\n"
+            f"对话历史：\n{old_text}"
+        )
+
+        try:
+            resp = glm.chat.completions.create(
+                model="glm-4-flash-250414",
+                messages=[
+                    {"role": "system", "content": "你是TRPG游戏记录员。只输出JSON，不输出任何其他内容。"},
+                    {"role": "user", "content": summary_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1500,
+            )
+            summary_text = resp.choices[0].message.content.strip()
+            # 清理可能的 markdown 代码块包装
+            if summary_text.startswith("```"):
+                summary_text = summary_text.split("```")[1]
+                if summary_text.startswith("json"):
+                    summary_text = summary_text[4:]
+            summary_text = summary_text.strip()
+
+            # 验证是有效 JSON
+            summary_data = json.loads(summary_text)
+            summary_str = json.dumps(summary_data, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.cb.on_error(f"（摘要生成失败: {e}）")
+            return
+
+        # 重建消息列表：system prompt + 摘要 + 最近消息
+        system_msg = self.messages[0]
+        summary_msg = {
+            "role": "user",
+            "content": (
+                "（会话摘要——以下是此前冒险的关键记录。"
+                "你仍然知道所有发生过的事，但信息已在下方压缩。"
+                "技能检定结果、已发现线索、NPC互动记录均已保留。\n\n"
+                f"{summary_str}\n\n"
+                "——摘要结束。以下是最近的对话——）"
+            )
+        }
+        self.messages = [system_msg, summary_msg] + recent_messages
+        self._summary_token_estimate = self._estimate_tokens()
+        self.cb.on_glm_summary("📋 上下文已压缩，保留关键信息。")
+
+    # ---- TIER 规则滑动窗口 ----
+
+    TIER_REMINDER = (
+        "[核心约束 — 信息边界]\n"
+        "1. 绝不主动提及任何 NPC 的 secret 字段内容。\n"
+        "2. 叙事仅基于 visible_tags + 已揭示线索 + NPC revealed_entries。\n"
+        "3. 不确定某信息是否可透露 → 保守处理，用模糊描述代替。\n"
+        "4. 若需参考 NPC 幕后设定，先调用 get_npc_secret() 确认，再基于已揭示 tier 给出暗示。"
+    )
+
+    def _inject_tier_reminder(self):
+        """在最新 user 消息前注入 TIER 规则提醒（防止上下文稀释导致泄密）"""
+        # 找到最后一条 user 消息
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i]["role"] == "user":
+                content = self.messages[i]["content"]
+                # 避免重复注入
+                if "[核心约束" not in content:
+                    self.messages[i]["content"] = self.TIER_REMINDER + "\n\n" + content
+                break
+        self._tier_last_injected = self._round_count
+
+    def _maybe_inject_tier(self):
+        """滑动窗口检查：距离上次注入 ≥5 轮 且 上轮为高危场景时注入。
+        前 3 轮不注入（规则新鲜），之后每 10 轮至少注入一次防稀释。"""
+        if self._round_count <= 2:
+            return  # 前几轮规则还新鲜，不注入
+        rounds_since = self._round_count - self._tier_last_injected
+        if rounds_since >= 5 and self._last_turn_high_risk:
+            self._inject_tier_reminder()
+        elif rounds_since >= 10:
+            # 即使没有高危场景，每 10 轮也注入一次防止规则稀释
+            self._inject_tier_reminder()
+
     # ---- 主回合 ----
 
     def handle_action(self, user_content: str | None = None):
         """执行一个完整回合"""
         if user_content:
+            # TIER 滑动窗口注入（在追加用户消息前检查）
+            self._maybe_inject_tier()
             self.messages.append({"role": "user", "content": user_content})
+
+        # 上下文压缩检查（在 LLM 调用前）
+        if self._should_summarize():
+            self._summarize_history()
 
         tool_round = 0
         narrative = ""
         self.current_model = MODEL_FLASH
+        turn_had_check = False  # 本回合是否涉及检定/战斗/理智
 
         while tool_round <= MAX_TOOL_ROUNDS:
             text, tool_calls = self._stream_llm(self.current_model)
@@ -233,6 +416,8 @@ class GameEngine:
 
             # 沉浸式提示
             complex_hit = any(tc["function"]["name"] in COMPLEX_FUNCTIONS for tc in tool_calls)
+            if complex_hit:
+                turn_had_check = True  # 标记高危回合
             if complex_hit and tool_round == 0:
                 cat = "dice"
                 for tc in tool_calls:
@@ -299,5 +484,9 @@ class GameEngine:
 
         # 每回合结束后自动存档到 slot_000
         self.save("slot_000")
+
+        # 更新记忆管理状态
+        self._last_turn_high_risk = turn_had_check
+        self._round_count += 1
 
         self.cb.on_done()

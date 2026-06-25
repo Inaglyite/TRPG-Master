@@ -59,7 +59,12 @@ def parse_module(md_path: str) -> dict:
         "clues_found": {"investigation": [], "event": [], "task": [], "npc": []},
         "flags": {},
         "scene_cache": {},
-        "module_rules": {}
+        "module_rules": {},
+        "private_memory": {
+            "goals_and_plans": "",
+            "hidden_facts": {},
+            "inference_notes": "游戏刚开始。所有 NPC 秘密均未揭示。"
+        }
     }
 
     # ── YAML frontmatter ──
@@ -100,7 +105,16 @@ def parse_module(md_path: str) -> dict:
         if yaml_blocks:
             data = yaml_blocks[0]
             data["id"] = npc_id
+            # 初始化 revealed 追踪字段
+            if "revealed" not in data:
+                data["revealed"] = {"level": 0, "entries": []}
             state["npcs"].append(data)
+            # 构建 private_memory 中的 hidden_facts
+            secret = data.get("secret", "")
+            if secret:
+                state["private_memory"]["hidden_facts"][npc_id] = (
+                    secret[:150] + "..." if len(secret) > 150 else secret
+                )
 
     # ── 场景区 ──
     scene_section = _find_section(text, r'# 场景')

@@ -84,7 +84,12 @@ def cmd_list_npcs():
     data = _load()
     npcs = data.get("npcs", [])
     for i, npc in enumerate(npcs):
-        print(f"[{i}] {npc['name']} — tags: {', '.join(npc.get('visible_tags', []))}")
+        revealed = npc.get("revealed", {})
+        rlevel = revealed.get("level", 0)
+        rentries = len(revealed.get("entries", []))
+        level_label = {0: "未揭示", 1: "表层观察", 2: "部分推断", 3: "完全揭露"}.get(rlevel, "未知")
+        extra = f" — 揭示: Lv.{rlevel}({level_label}), {rentries}条记录" if rentries > 0 else ""
+        print(f"[{i}] {npc['name']} — tags: {', '.join(npc.get('visible_tags', []))}{extra}")
 
 
 CLUE_CATEGORIES = ["investigation", "event", "task", "npc"]
@@ -158,16 +163,90 @@ def cmd_remove_item(item_name):
         print(f"物品不存在: {item_name}", file=sys.stderr)
 
 
+def cmd_npc_reveal(npc_id, tier, entry_text):
+    """记录 NPC 信息揭示。tier: 1=表层观察, 2=推断, 3=完全揭露"""
+    data = _load()
+    npcs = data.get("npcs", [])
+    tier_int = int(tier)
+    found = False
+    for npc in npcs:
+        if npc.get("id") == npc_id:
+            revealed = npc.setdefault("revealed", {"level": 0, "entries": []})
+            revealed["entries"].append({"tier": tier_int, "text": entry_text})
+            # 自动升级 level 到最高已揭示 tier
+            max_tier = max(e["tier"] for e in revealed["entries"])
+            revealed["level"] = max_tier
+            found = True
+            _save(data)
+            print(json.dumps({
+                "ok": True,
+                "npc_id": npc_id,
+                "npc_name": npc["name"],
+                "revealed_level": revealed["level"],
+                "new_entry": {"tier": tier_int, "text": entry_text}
+            }, ensure_ascii=False))
+            break
+    if not found:
+        print(f"ERROR: NPC '{npc_id}' 不存在", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_npc_secret(npc_id):
+    """获取 NPC 完整秘密（仅守秘人使用）"""
+    data = _load()
+    npcs = data.get("npcs", [])
+    for npc in npcs:
+        if npc.get("id") == npc_id:
+            revealed = npc.get("revealed", {"level": 0, "entries": []})
+            print(json.dumps({
+                "npc_id": npc_id,
+                "name": npc["name"],
+                "visible_tags": npc.get("visible_tags", []),
+                "secret": npc.get("secret", ""),
+                "disposition": npc.get("disposition", ""),
+                "revealed_level": revealed.get("level", 0),
+                "revealed_entries": revealed.get("entries", [])
+            }, ensure_ascii=False, indent=2))
+            return
+    print(f"ERROR: NPC '{npc_id}' 不存在", file=sys.stderr)
+    sys.exit(1)
+
+
+def cmd_private_memory():
+    """读取私有工作记忆"""
+    data = _load()
+    pm = data.get("private_memory", {})
+    print(json.dumps(pm, ensure_ascii=False, indent=2))
+
+
+def cmd_private_memory_update(section, value_str):
+    """更新私有工作记忆的指定字段"""
+    data = _load()
+    pm = data.setdefault("private_memory", {})
+    try:
+        parsed = json.loads(value_str)
+    except json.JSONDecodeError:
+        parsed = value_str
+    pm[section] = parsed
+    _save(data)
+    print(json.dumps({"ok": True, "section": section, "updated": True}, ensure_ascii=False))
+
+
 def cmd_usage():
     print("用法:")
     print("  python state_manager.py get <json_path>        读取字段（如 pc.hp, npcs.0.name）")
     print("  python state_manager.py set <json_path> <val>  修改字段（值用 JSON 格式）")
-    print("  python state_manager.py npcs                   列出所有 NPC")
+    print("  python state_manager.py npcs                   列出所有 NPC（含揭示程度）")
     print("  python state_manager.py clues                  列出已发现线索")
     print("  python state_manager.py add-clue <text> [category]  添加线索")
     print("        category: investigation/event/task/npc，默认 investigation")
     print("  python state_manager.py add-item <name>        添加物品到背包")
     print("  python state_manager.py remove-item <name>     从背包移除物品")
+    print("  python state_manager.py npc-reveal <id> <tier> <text>  记录NPC信息揭示")
+    print("        tier: 1=表层观察, 2=推断, 3=完全揭露")
+    print("  python state_manager.py npc-secret <id>        获取NPC完整秘密（守秘人专用）")
+    print("  python state_manager.py private-memory         读取私有工作记忆")
+    print("  python state_manager.py private-memory-update <section> <json>  更新私有记忆")
 
 
 COMMANDS = {
@@ -178,6 +257,10 @@ COMMANDS = {
     "add-clue": cmd_add_clue,
     "add-item": cmd_add_item,
     "remove-item": cmd_remove_item,
+    "npc-reveal": cmd_npc_reveal,
+    "npc-secret": cmd_npc_secret,
+    "private-memory": lambda _=None: cmd_private_memory(),
+    "private-memory-update": cmd_private_memory_update,
 }
 
 
@@ -218,6 +301,23 @@ def main():
             print("ERROR: remove-item 需要 <name>", file=sys.stderr)
             sys.exit(1)
         cmd_remove_item(sys.argv[2])
+    elif cmd == "npc-reveal":
+        if len(sys.argv) < 5:
+            print("ERROR: npc-reveal 需要 <npc_id> <tier> <text>", file=sys.stderr)
+            sys.exit(1)
+        cmd_npc_reveal(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif cmd == "npc-secret":
+        if len(sys.argv) < 3:
+            print("ERROR: npc-secret 需要 <npc_id>", file=sys.stderr)
+            sys.exit(1)
+        cmd_npc_secret(sys.argv[2])
+    elif cmd == "private-memory":
+        cmd_private_memory()
+    elif cmd == "private-memory-update":
+        if len(sys.argv) < 4:
+            print("ERROR: private-memory-update 需要 <section> <json_value>", file=sys.stderr)
+            sys.exit(1)
+        cmd_private_memory_update(sys.argv[2], sys.argv[3])
     else:
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()
