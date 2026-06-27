@@ -97,7 +97,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 try:
                     coro_fn(*args)
                 except Exception as e:
+                    import traceback
                     print(f"[ws] 回合异常: {e}", file=sys.stderr)
+                    traceback.print_exc(file=sys.stderr)
         loop.run_in_executor(None, _wrapped)
 
     def emit(payload: dict):

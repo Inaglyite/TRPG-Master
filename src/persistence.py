@@ -157,11 +157,43 @@ def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
     return messages, snapshot
 
 
+def _migrate_snapshot(snapshot: dict) -> dict:
+    """将旧版快照迁移到最新数据结构（向下兼容）。"""
+    migrated = False
+
+    # v2: private_memory
+    if "private_memory" not in snapshot:
+        snapshot["private_memory"] = {
+            "goals_and_plans": "",
+            "hidden_facts": {},
+            "inference_notes": "（从旧存档迁移，请守秘人根据对话历史手动补充）"
+        }
+        migrated = True
+
+    # v2: NPC revealed 字段
+    for npc in snapshot.get("npcs", []):
+        if "revealed" not in npc:
+            npc["revealed"] = {"level": 0, "entries": []}
+            migrated = True
+
+    # v2: PC psychological_profile
+    pc = snapshot.get("pc", {})
+    if "psychological_profile" not in pc:
+        pc["psychological_profile"] = {
+            "traits": [], "key_relationships": [],
+            "phobias": [], "manias": []
+        }
+        migrated = True
+
+    return snapshot
+
+
 def restore_snapshot(snapshot: dict) -> bool:
-    """将世界状态快照恢复到 world_state.json。返回是否成功。"""
+    """将世界状态快照恢复到 world_state.json（自动迁移旧版数据结构）。返回是否成功。"""
     if not snapshot:
         return False
     try:
+        snapshot = _migrate_snapshot(snapshot)
         cfg.STATE_FILE.write_text(
             json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
         )

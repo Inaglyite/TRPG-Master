@@ -10,7 +10,8 @@ from typing import Callable, Any
 from openai import OpenAI
 
 from .config import (
-    PROJECT_ROOT, API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, MAX_TOOL_ROUNDS, AUTO_SAVE_SLOT,
+    PROJECT_ROOT, API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, FORCE_PRO,
+    MAX_TOOL_ROUNDS, AUTO_SAVE_SLOT, OPTIONAL_SKILL_HINTS,
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .tools import (
@@ -46,6 +47,8 @@ class GameEngine:
         self._tier_last_injected = -99  # 首次必定注入
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
+        # 按需 skill 加载追踪：本会话已提示/加载过的 skill 路径，避免重复提示
+        self._loaded_optional_skills: set[str] = set()
         # 摘要阈值：消息超过此数或 token 估算超过窗口 60% 时触发压缩
         self.SUMMARY_MSG_THRESHOLD = 30
         self.SUMMARY_TOKEN_THRESHOLD = 8000
@@ -76,11 +79,12 @@ class GameEngine:
                 "最后描述开场场景并提供选项。）"
             )
         })
-        self.current_model = MODEL_FLASH
+        self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
         self._round_count = 0
         self._tier_last_injected = -99
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
+        self._loaded_optional_skills = set()
 
     def _ensure_pc_from_characters(self):
         """若 world_state.json 的 pc 没有名字，从模组 characters/ 加载第一个预设调查员。
@@ -145,6 +149,7 @@ class GameEngine:
         self._tier_last_injected = -99
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
+        self._loaded_optional_skills = set()
         return len(messages) - 1
 
     # ---- 流式 LLM ----
@@ -215,6 +220,54 @@ class GameEngine:
                 return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
         return execute_function(name, args)
 
+    # ---- 按需 Skill 加载提示 ----
+
+    # 玩家消息关键词 → 对应按需 skill（引擎侧主动检测，不依赖模型判断）
+    _KEYWORD_SKILL_MAP = {
+        "skills/keeper/keeper_combat.skill": [
+            "开枪", "射击", "攻击", "挥拳", "拔枪", "拔刀", "砍", "刺", "砸",
+            "战斗", "搏斗", "斗殴", "反击", "闪避", "伤害", "受伤", "倒地",
+            "武器", "手枪", "左轮", "刀", "棍", "枪", "弹药",
+        ],
+        "skills/keeper/keeper_psychology.skill": [
+            "疯狂", "崩溃", "失控", "幻觉", "尖叫", "发疯", "恐惧症", "躁狂",
+        ],
+        "skills/keeper/keeper_magic.skill": [
+            "魔法", "咒语", "施法", "仪式", "召唤", "神话典籍", "诅咒", "克苏鲁神话",
+        ],
+    }
+
+    def _maybe_hint_optional_skill(self, tool_name: str):
+        """工具调用后,若该工具对应一个按需 skill 且本会话尚未提示过,
+        追加一条轻量 user 消息引导模型 read_file 加载该 skill。"""
+        skill_path = OPTIONAL_SKILL_HINTS.get(tool_name)
+        if not skill_path or skill_path in self._loaded_optional_skills:
+            return
+        self._loaded_optional_skills.add(skill_path)
+        self.messages.append({
+            "role": "user",
+            "content": (
+                f"（系统提示：你刚调用了 {tool_name}，"
+                f"如需完整规则/叙事模板，请调用 read_file(path=\"{skill_path}\") 加载对应 Skill。）"
+            )
+        })
+
+    def _detect_content_skill_hint(self, content: str):
+        """检测玩家消息内容,若包含战斗/魔法/疯狂等关键词且对应 skill 未加载,
+        主动注入按需加载提示。这是"第三重保险"——不依赖模型判断,引擎直接检测。"""
+        for skill_path, keywords in self._KEYWORD_SKILL_MAP.items():
+            if skill_path in self._loaded_optional_skills:
+                continue
+            if any(kw in content for kw in keywords):
+                self._loaded_optional_skills.add(skill_path)
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        f"（系统检测：玩家行动涉及{'战斗' if 'combat' in skill_path else '魔法' if 'magic' in skill_path else '疯狂'}场景。"
+                        f"请先调用 read_file(path=\"{skill_path}\") 加载完整规则,再执行对应检定和叙事。）"
+                    )
+                })
+
     # ---- 记忆管理 ----
 
     def _estimate_tokens(self) -> int:
@@ -239,114 +292,232 @@ class GameEngine:
         return False
 
     def _summarize_history(self):
-        """使用 GLM-4 Flash 将旧消息压缩为 ENGRAM 风格结构化摘要。
-        保留 system prompt + 最近 10 条消息，中间部分替换为摘要。
+        """压缩旧消息。优先 GLM-4 Flash（免费快速），失败则 DeepSeek Pro（可靠），
+        都失败才降级为简单截断。
+
+        关键设计：
+        - 不因消息数少就跳过——只要 token 超标且有可压缩的旧消息就尝试。
+          （system prompt 本身很大时，即使对话少，token 仍可能超标，
+           此时仍应压缩对话部分以腾出空间。）
+        - JSON 解析失败时降级接受纯文本摘要，而非丢弃整段输出。
         """
         from .llm import _get_glm
 
-        glm = _get_glm()
-        if glm is None:
-            self.cb.on_error("（摘要模型不可用，跳过上下文压缩）")
-            return
-
-        # 保留：system prompt（索引0）+ 最近 N 条消息
-        KEEP_RECENT = 10
-        if len(self.messages) <= KEEP_RECENT + 5:
-            return  # 太少，不压缩
-
-        # 找到安全的切割点 —— 必须在完整的 user→assistant 周期边界
+        KEEP_RECENT = 12
+        # 只在"旧消息太少不值得压缩"时跳过：系统消息+开场prompt之后几乎没有对话
         cutoff = len(self.messages) - KEEP_RECENT
-        # 向前调整到最近的 user 消息（确保不切断 tool 调用链）
         while cutoff > 1 and self.messages[cutoff].get("role") != "user":
             cutoff -= 1
         if cutoff <= 1:
-            return  # 无法安全切割
+            return  # 没有足够的旧消息可压缩
 
-        old_messages = self.messages[1:cutoff]  # 保留 system prompt
+        old_messages = self.messages[1:cutoff]
         recent_messages = self.messages[cutoff:]
+        system_msg = self.messages[0]
+        if len(old_messages) < 3:
+            return  # 旧消息太少，压缩意义不大
 
-        # 构建摘要请求
-        old_text_parts = []
-        for m in old_messages:
-            role = m.get("role", "?")
-            content = m.get("content", "") or ""
-            if role == "tool":
-                # 截断工具输出
-                content = content[:300] + "..." if len(content) > 300 else content
-            if content.strip():
-                old_text_parts.append(f"[{role}]: {content}")
+        # 构建旧消息文本（复用于各级摘要）
+        old_text = self._build_summary_input(old_messages)
 
-        old_text = "\n\n".join(old_text_parts)
-        if len(old_text) > 8000:
-            old_text = old_text[:8000] + "\n...(后续内容已截断)"
+        # 第一级：GLM-4 Flash（免费）
+        glm = _get_glm()
+        if glm is not None:
+            summary = self._try_model_summary(glm, "glm-4-flash-250414", old_text)
+            if summary is not None:
+                self._apply_summary(system_msg, summary, recent_messages, "GLM-4 Flash")
+                return
 
-        summary_prompt = (
-            "你是TRPG游戏记录员。请将以下游戏对话历史压缩为结构化JSON摘要。\n\n"
-            "输出格式（严格遵守）：\n"
-            '{"episodic":[{"turn":1,"event":"简述"}],"semantic":{"pc_knowledge":{},'
-            '"revealed_clues":[],"world_state_changes":{}},"current_objective":"","last_scene":""}\n\n'
-            "规则：\n"
-            "1. episodic: 按时间顺序列出关键剧情事件，每条包含回合号和简述\n"
-            "2. semantic.pc_knowledge: 以NPC名为key，记录PC已了解的信息（仅已揭示的，不推测秘密）\n"
-            "3. semantic.revealed_clues: 已发现的关键线索列表\n"
-            "4. semantic.world_state_changes: 场景/标志等状态变化\n"
-            "5. current_objective: 当前主要目标（一句话）\n"
-            "6. last_scene: 最后所在场景名称\n"
-            "7. 只输出JSON，不要任何额外文本\n"
-            "8. 技能检定和骰子结果必须保留\n"
-            "9. 不要编造任何对话中不存在的信息\n\n"
-            f"对话历史：\n{old_text}"
-        )
-
-        try:
-            resp = glm.chat.completions.create(
-                model="glm-4-flash-250414",
-                messages=[
-                    {"role": "system", "content": "你是TRPG游戏记录员。只输出JSON，不输出任何其他内容。"},
-                    {"role": "user", "content": summary_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1500,
-            )
-            summary_text = resp.choices[0].message.content.strip()
-            # 清理可能的 markdown 代码块包装
-            if summary_text.startswith("```"):
-                summary_text = summary_text.split("```")[1]
-                if summary_text.startswith("json"):
-                    summary_text = summary_text[4:]
-            summary_text = summary_text.strip()
-
-            # 验证是有效 JSON
-            summary_data = json.loads(summary_text)
-            summary_str = json.dumps(summary_data, ensure_ascii=False, indent=2)
-        except Exception as e:
-            self.cb.on_error(f"（摘要生成失败: {e}）")
+        # 第二级：DeepSeek Pro（付费但可靠）
+        self.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
+        summary = self._try_model_summary(self.client, MODEL_PRO, old_text)
+        if summary is not None:
+            self._apply_summary(system_msg, summary, recent_messages, "DeepSeek Pro")
             return
 
-        # 重建消息列表：system prompt + 摘要 + 最近消息
-        system_msg = self.messages[0]
+        # 第三级：简单截断（最后手段）
+        dropped = len(old_messages)
+        note = {
+            "role": "user",
+            "content": (
+                f"（上下文压缩——摘要模型均不可用，已丢弃最早的 {dropped} 条消息。"
+                "当前世界状态保存在 world_state.json 中，"
+                "请调用 state_clues() 和 state_npcs() 查询线索和 NPC 揭示状态，然后继续。）"
+            )
+        }
+        self.messages = [system_msg, note] + recent_messages
+        self._summary_token_estimate = self._estimate_tokens()
+        self.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
+
+    def _apply_summary(self, system_msg, summary, recent_messages, model_name):
+        """将摘要应用到消息列表。"""
         summary_msg = {
             "role": "user",
             "content": (
-                "（会话摘要——以下是此前冒险的关键记录。"
-                "你仍然知道所有发生过的事，但信息已在下方压缩。"
-                "技能检定结果、已发现线索、NPC互动记录均已保留。\n\n"
-                f"{summary_str}\n\n"
+                "（会话摘要——此前冒险的关键记录已压缩如下。"
+                "技能检定、已发现线索、NPC互动记录均已保留。\n\n"
+                f"{summary}\n\n"
                 "——摘要结束。以下是最近的对话——）"
             )
         }
         self.messages = [system_msg, summary_msg] + recent_messages
         self._summary_token_estimate = self._estimate_tokens()
-        self.cb.on_glm_summary("📋 上下文已压缩，保留关键信息。")
+        self.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
+
+    def _build_summary_input(self, old_messages: list) -> str:
+        """从旧消息构建摘要输入文本。截断 tool 输出，保留 user/assistant 核心内容。"""
+        parts = []
+        for m in old_messages:
+            role = m.get("role", "?")
+            content = m.get("content", "") or ""
+            if not content.strip():
+                continue
+            if role == "tool":
+                content = content[:200] + "..." if len(content) > 200 else content
+            elif role in ("user", "assistant"):
+                content = content[:500] + "..." if len(content) > 500 else content
+            else:
+                continue
+            parts.append(f"[{role}]: {content}")
+
+        old_text = "\n".join(parts)
+        MAX_INPUT = 6000
+        if len(old_text) > MAX_INPUT:
+            half = MAX_INPUT // 2
+            old_text = old_text[:half] + "\n...(中间内容省略)...\n" + old_text[-half:]
+        return old_text
+
+    def _try_model_summary(self, client, model: str, old_text: str) -> str | None:
+        """用指定模型生成摘要。返回摘要文本或 None。
+
+        尝试2次（API偶发网络错误时重试）。JSON 解析失败时降级接受纯文本摘要，
+        不再因格式问题丢弃整段输出。
+        """
+        prompt = (
+            "你是TRPG记录员。将以下对话历史压缩为结构化摘要。\n"
+            "要求: 按时间顺序列出关键事件(episodic)、PC已知信息(pc_knowledge)、"
+            "已发现线索(revealed_clues)、当前目标(current_objective)、"
+            "最后场景(last_scene)。保留技能检定和骰子结果，不编造信息。\n"
+            "优先输出JSON格式，但内容完整性比格式正确更重要。\n\n"
+            f"{old_text}"
+        )
+
+        last_err = None
+        for attempt in range(2):
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "你是TRPG记录员。尽量输出JSON，但务必保证内容完整。"},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=3000,
+                )
+                raw = resp.choices[0].message.content.strip()
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    continue  # 重试一次
+                return None
+
+            # 优先解析为 JSON
+            parsed = self._parse_summary_json(raw)
+            if parsed is not None:
+                return parsed
+
+            # JSON 解析失败：降级接受纯文本摘要（只要有实质内容）
+            if len(raw) > 50 and attempt == 1:
+                # 第二次也失败，用纯文本兜底
+                return f"（纯文本摘要）\n{raw}"
+
+            if attempt == 0:
+                continue  # 第一次失败，重试
+
+        return None
+
+    def _parse_summary_json(self, raw: str) -> str | None:
+        """从模型输出中提取并验证 JSON。支持多种格式，尽力容错。"""
+        import re
+        if not raw:
+            return None
+        # 尝试1: 直接解析
+        try:
+            json.loads(raw)
+            return raw
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # 尝试2: 提取 markdown 代码块中的 JSON
+        m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw, re.DOTALL)
+        if m:
+            try:
+                json.loads(m.group(1))
+                return m.group(1)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # 尝试3: 找到第一个 { 和最后一个 }
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start >= 0 and end > start:
+            try:
+                candidate = raw[start:end+1]
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # 尝试4: 修复常见问题（尾部逗号、单引号、缺右括号）
+        if start >= 0 and end > start:
+            try:
+                candidate = raw[start:end+1]
+                candidate = re.sub(r',\s*}', '}', candidate)
+                candidate = re.sub(r',\s*]', ']', candidate)
+                # 补全缺失的右括号
+                depth = 0
+                for ch in candidate:
+                    if ch == '{': depth += 1
+                    elif ch == '}': depth -= 1
+                if depth > 0:
+                    candidate += '}' * depth
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+        # 尝试5: JSON 被截断——尝试补全（长对话输出接近 max_tokens 时常见）
+        if start >= 0:
+            candidate = raw[start:]
+            candidate = re.sub(r',\s*$', '', candidate)
+            # 统计未闭合的括号
+            depth_brace = 0
+            depth_bracket = 0
+            in_string = False
+            esc = False
+            for ch in candidate:
+                if esc:
+                    esc = False; continue
+                if ch == '\\': esc = True; continue
+                if ch == '"': in_string = not in_string; continue
+                if in_string: continue
+                if ch == '{': depth_brace += 1
+                elif ch == '}': depth_brace -= 1
+                elif ch == '[': depth_bracket += 1
+                elif ch == ']': depth_bracket -= 1
+            candidate += ']' * max(depth_bracket, 0)
+            candidate += '}' * max(depth_brace, 0)
+            try:
+                json.loads(candidate)
+                return candidate
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return None
 
     # ---- TIER 规则滑动窗口 ----
 
     TIER_REMINDER = (
-        "[核心约束 — 信息边界]\n"
+        "[核心约束 — 信息边界 + 规则加载]\n"
         "1. 绝不主动提及任何 NPC 的 secret 字段内容。\n"
         "2. 叙事仅基于 visible_tags + 已揭示线索 + NPC revealed_entries。\n"
         "3. 不确定某信息是否可透露 → 保守处理，用模糊描述代替。\n"
-        "4. 若需参考 NPC 幕后设定，先调用 get_npc_secret() 确认，再基于已揭示 tier 给出暗示。"
+        "4. 涉及战斗/疯狂叙事/魔法时，务必先 read_file 加载对应 skill（参考 trpg_master.skill 路由表）。"
     )
 
     def _inject_tier_reminder(self):
@@ -381,6 +552,8 @@ class GameEngine:
             # TIER 滑动窗口注入（在追加用户消息前检查）
             self._maybe_inject_tier()
             self.messages.append({"role": "user", "content": user_content})
+            # 检测玩家消息是否涉及战斗/魔法/疯狂→主动注入按需 skill 提示
+            self._detect_content_skill_hint(user_content)
 
         # 上下文压缩检查（在 LLM 调用前）
         if self._should_summarize():
@@ -388,8 +561,10 @@ class GameEngine:
 
         tool_round = 0
         narrative = ""
-        self.current_model = MODEL_FLASH
-        turn_had_check = False  # 本回合是否涉及检定/战斗/理智
+        self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
+        turn_had_check = FORCE_PRO  # Pro 模式每回合都提醒 TIER 规则（可选）
+        if FORCE_PRO:
+            turn_had_check = True  # 全程 Pro 时每回合都视为 "高危"，确保 TIER 提醒不遗漏
 
         while tool_round <= MAX_TOOL_ROUNDS:
             text, tool_calls = self._stream_llm(self.current_model)
@@ -446,6 +621,9 @@ class GameEngine:
                 self.messages.append({
                     "role": "tool", "tool_call_id": tc["id"], "content": output
                 })
+
+                # 按需 skill 提示：特定工具调用后引导模型加载对应 skill
+                self._maybe_hint_optional_skill(name)
 
                 if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
                     summary = dice_summary(output)
