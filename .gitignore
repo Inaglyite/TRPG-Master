@@ -10,3 +10,4 @@ frontend/dist/
 frontend/release/
 skillsucai/
 mod/*/characters/*.json
+logs/
