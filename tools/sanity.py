@@ -15,7 +15,7 @@ STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
 
 def _cli(*args):
     import subprocess
-    cmd = ["python3", SM] + list(args)
+    cmd = [sys.executable, SM] + list(args)
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())

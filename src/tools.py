@@ -1,6 +1,7 @@
 """Tool 定义（Function Calling Schema）+ 执行器 + 骰子摘要"""
 
 import json
+import sys
 import subprocess
 from .config import PROJECT_ROOT, STATE_FILE
 
@@ -546,54 +547,54 @@ def execute_function(name: str, args: dict) -> str:
         bonus = args.get("bonus_dice", 0) or 0
         penalty = args.get("penalty_dice", 0) or 0
         is_push = args.get("push", False)
-        cmd = f"python3 tools/skill_check.py {skill} {bonus} {penalty}"
+        cmd = f"{sys.executable} tools/skill_check.py {skill} {bonus} {penalty}"
         if is_push:
             cmd += " --push"
         return _run_cli(cmd)
     elif name == "dice_roll":
-        return _run_cli(f"python3 tools/dice.py {args.get('spec', 'd20')}")
+        return _run_cli(f"{sys.executable} tools/dice.py {args.get('spec', 'd20')}")
     elif name == "state_get":
-        return _run_cli(f"python3 tools/state_manager.py get {args.get('path', 'pc.hp')}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py get {args.get('path', 'pc.hp')}")
     elif name == "state_set":
-        return _run_cli(f"python3 tools/state_manager.py set {args.get('path', '')} {safe(args.get('value', ''))}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py set {args.get('path', '')} {safe(args.get('value', ''))}")
     elif name == "state_npcs":
-        return _run_cli("python3 tools/state_manager.py npcs")
+        return _run_cli("{sys.executable} tools/state_manager.py npcs")
     elif name == "state_clues":
-        return _run_cli("python3 tools/state_manager.py clues")
+        return _run_cli("{sys.executable} tools/state_manager.py clues")
     elif name == "state_add_clue":
         text = safe(args.get("text", ""))
         cat = args.get("category", "investigation")
-        return _run_cli(f"python3 tools/state_manager.py add-clue {text} {cat}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py add-clue {text} {cat}")
     elif name == "state_add_item":
-        return _run_cli(f"python3 tools/state_manager.py add-item {safe(args.get('item', ''))}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py add-item {safe(args.get('item', ''))}")
     elif name == "state_remove_item":
-        return _run_cli(f"python3 tools/state_manager.py remove-item {safe(args.get('item', ''))}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py remove-item {safe(args.get('item', ''))}")
     elif name == "apply_damage":
         target = args.get("target", "pc")
         amount = args.get("amount", 0)
         dtype = args.get("damage_type", "物理")
-        return _run_cli(f"python3 tools/damage.py damage {target} {amount} {dtype}")
+        return _run_cli(f"{sys.executable} tools/damage.py damage {target} {amount} {dtype}")
     elif name == "apply_heal":
-        return _run_cli(f"python3 tools/damage.py heal {args.get('target', 'pc')} {args.get('amount', 0)}")
+        return _run_cli(f"{sys.executable} tools/damage.py heal {args.get('target', 'pc')} {args.get('amount', 0)}")
     elif name == "sanity_loss":
         sev = args.get("severity", "moderate")
         src = safe(args.get("source", "未知恐怖"))
-        return _run_cli(f"python3 tools/sanity.py loss {sev}")
+        return _run_cli(f"{sys.executable} tools/sanity.py loss {sev}")
     elif name == "sanity_restore":
-        return _run_cli(f"python3 tools/sanity.py restore {args.get('amount', 0)}")
+        return _run_cli(f"{sys.executable} tools/sanity.py restore {args.get('amount', 0)}")
     elif name == "sanity_check":
-        return _run_cli("python3 tools/sanity.py check")
+        return _run_cli("{sys.executable} tools/sanity.py check")
     elif name == "import_module":
         path = safe(args.get("path", ""))
-        output = _run_cli(f"python3 tools/module_loader.py {path}")
+        output = _run_cli(f"{sys.executable} tools/module_loader.py {path}")
         return output
     elif name == "create_character":
         name = safe(args.get("name", "调查员"))
         occupation = safe(args.get("occupation", "私家侦探"))
-        return _run_cli(f"python3 tools/character.py create {name} {occupation}")
+        return _run_cli(f"{sys.executable} tools/character.py create {name} {occupation}")
     elif name == "load_character":
         path = args.get("path", "")
-        return _run_cli(f"python3 tools/character.py load {path}")
+        return _run_cli(f"{sys.executable} tools/character.py load {path}")
     elif name == "suggest_check":
         skill = args.get("skill", "?")
         attr = args.get("attribute", "?")
@@ -655,14 +656,14 @@ def execute_function(name: str, args: dict) -> str:
         attr = args.get("attribute", "STR")
         bonus = args.get("bonus_dice", 0) or 0
         penalty = args.get("penalty_dice", 0) or 0
-        return _run_cli(f"python3 tools/skill_check.py {attr} {bonus} {penalty}")
+        return _run_cli(f"{sys.executable} tools/skill_check.py {attr} {bonus} {penalty}")
     elif name == "luck_check":
-        return _run_cli("python3 tools/skill_check.py POW")
+        return _run_cli("{sys.executable} tools/skill_check.py POW")
     elif name == "psychoanalysis":
         target = args.get("target", "pc")
-        return _run_cli(f"python3 tools/sanity.py psychoanalysis {target}")
+        return _run_cli(f"{sys.executable} tools/sanity.py psychoanalysis {target}")
     elif name == "reality_check":
-        return _run_cli("python3 tools/sanity.py reality-check")
+        return _run_cli("{sys.executable} tools/sanity.py reality-check")
     elif name == "sanity_trigger":
         desc = args.get("description", "")
         # 基于关键词的 severity 建议
@@ -694,21 +695,21 @@ def execute_function(name: str, args: dict) -> str:
         cat = args.get("category", "phobia")
         name_val = safe(args.get("name", ""))
         ctx = safe(args.get("context", ""))
-        return _run_cli(f"python3 tools/state_manager.py psych-trait {cat} {name_val} {ctx}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py psych-trait {cat} {name_val} {ctx}")
     elif name == "npc_reveal":
         npc_id = args.get("npc_id", "")
         tier = str(args.get("tier", 1))
         text = safe(args.get("entry_text", ""))
-        return _run_cli(f"python3 tools/state_manager.py npc-reveal {npc_id} {tier} {text}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py npc-reveal {npc_id} {tier} {text}")
     elif name == "get_npc_secret":
         npc_id = args.get("npc_id", "")
-        return _run_cli(f"python3 tools/state_manager.py npc-secret {npc_id}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py npc-secret {npc_id}")
     elif name == "get_private_memory":
-        return _run_cli("python3 tools/state_manager.py private-memory")
+        return _run_cli("{sys.executable} tools/state_manager.py private-memory")
     elif name == "update_private_memory":
         section = args.get("section", "")
         value = safe(args.get("value", ""))
-        return _run_cli(f"python3 tools/state_manager.py private-memory-update {section} {value}")
+        return _run_cli(f"{sys.executable} tools/state_manager.py private-memory-update {section} {value}")
     else:
         return f"[错误] 未知函数: {name}"
 

@@ -19,6 +19,8 @@ from .tools import (
     needs_pro_model, execute_function, dice_summary,
 )
 from .llm import stream_llm as raw_stream_llm, tension, glm_quick_summary
+from .logger import tool as log_tool, error as log_error, summary_event as log_summary, \
+    tier_inject as log_tier, game_event as log_game, san as log_san
 
 
 @dataclass
@@ -58,6 +60,7 @@ class GameEngine:
         import shutil
         from . import config as cfg
 
+        log_game(f"新游戏 | 模组={cfg.MODULE_NAME}")
         # 重置世界状态到初始
         initial = cfg.MODULE_DIR / "world_state_initial.json"
         if initial.exists():
@@ -161,6 +164,7 @@ class GameEngine:
         try:
             stream = self.client.chat.completions.create(**kwargs)
         except Exception as e:
+            log_error(f"API: {e}")
             self.cb.on_error(f"API 错误: {e}")
             return "", []
 
@@ -362,6 +366,7 @@ class GameEngine:
         }
         self.messages = [system_msg, summary_msg] + recent_messages
         self._summary_token_estimate = self._estimate_tokens()
+        log_summary(model_name, "成功")
         self.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
 
     def _build_summary_input(self, old_messages: list) -> str:
@@ -530,6 +535,7 @@ class GameEngine:
                 if "[核心约束" not in content:
                     self.messages[i]["content"] = self.TIER_REMINDER + "\n\n" + content
                 break
+        log_tier(self._round_count)
         self._tier_last_injected = self._round_count
 
     def _maybe_inject_tier(self):
@@ -622,6 +628,9 @@ class GameEngine:
                     "role": "tool", "tool_call_id": tc["id"], "content": output
                 })
 
+                # 日志记录
+                log_tool(name, args)
+
                 # 按需 skill 提示：特定工具调用后引导模型加载对应 skill
                 self._maybe_hint_optional_skill(name)
 
@@ -658,6 +667,7 @@ class GameEngine:
         if narrative.strip():
             self.messages.append({"role": "assistant", "content": narrative.strip()})
         else:
+            log_error("空回合：模型未生成任何叙述或工具调用")
             self.cb.on_error("守秘人陷入了沉思……")
 
         # 每回合结束后自动存档到 slot_000

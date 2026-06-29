@@ -110,8 +110,8 @@ def game_loop():
 
         if user_input.lower() == "/state":
             print()
-            subprocess.run(["python3", "tools/state_manager.py", "get", "pc"], cwd=PROJECT_ROOT)
-            subprocess.run(["python3", "tools/state_manager.py", "clues"], cwd=PROJECT_ROOT)
+            subprocess.run([sys.executable, "tools/state_manager.py", "get", "pc"], cwd=PROJECT_ROOT)
+            subprocess.run([sys.executable, "tools/state_manager.py", "clues"], cwd=PROJECT_ROOT)
             print()
             continue
 
