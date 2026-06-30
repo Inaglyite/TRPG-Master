@@ -14,7 +14,7 @@ import { addMsg } from "./renderer";
 import { onGmTurnStart, resetStartButton, getGameStarting, onSaveList, onSaveAvailable, populateModuleList } from "./start";
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
 import { onSuggest, onDone } from "./options";
-import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel } from "./panels";
+import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel, showHandout } from "./panels";
 import { applyTheme } from "./main";
 
 // ---- 后端地址 ----
@@ -145,6 +145,9 @@ function handleMessage(e: MessageEvent) {
     case "state_data":
       updateCharPanel(data.data);
       updateCluePanel(data.clues);
+      break;
+    case "handout":
+      showHandout(data);
       break;
   }
 }

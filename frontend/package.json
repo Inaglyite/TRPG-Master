@@ -21,7 +21,9 @@
   "build": {
     "appId": "com.trpg.mansion-of-madness",
     "productName": "疯狂宅邸",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "electron/main.cjs"
@@ -30,5 +32,8 @@
       "target": "AppImage",
       "category": "Game"
     }
+  },
+  "dependencies": {
+    "marked": "^18.0.5"
   }
 }

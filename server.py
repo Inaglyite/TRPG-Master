@@ -38,8 +38,9 @@ import src.config as cfg
 from src.persistence import delete_save
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+import mimetypes
 
 app = FastAPI(title="TRPG Agent API")
 
@@ -148,6 +149,13 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_game_over(ending_type: str, title: str, summary: str):
         emit({"type": "game_over", "ending_type": ending_type, "title": title, "summary": summary})
 
+    def on_handout(info: dict):
+        emit({"type": "handout", "file": info.get("file", ""),
+              "label": info.get("label", ""),
+              "asset_data_uri": info.get("asset_data_uri", ""),   # base64 data URI（electron 兼容）
+              "asset_url": info.get("asset_url", ""),             # HTTP URL（web 兼容，fallback）
+              "entity_type": info.get("entity_type", ""), "entity_id": info.get("entity_id", "")})
+
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
@@ -179,6 +187,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         on_suggest=on_suggest,
         on_done=on_done,
         on_game_over=on_game_over,
+        on_handout=on_handout,
         on_error=on_error,
     )
 
@@ -387,6 +396,21 @@ async def game_ws(ws: WebSocket):
         return
     await run_ws_session(ws, engine)
 
+
+# ---- 资产文件 ----
+@app.get("/api/assets/{module_name}/{filename}")
+async def serve_asset(module_name: str, filename: str):
+    """服务模组资产图片，带路径遍历保护。"""
+    asset_path = (PROJECT_ROOT / "mod" / module_name / "assets" / filename).resolve()
+    allowed = (PROJECT_ROOT / "mod" / module_name / "assets").resolve()
+    if not str(asset_path).startswith(str(allowed)):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not asset_path.exists():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "not found"}, status_code=404)
+    mime, _ = mimetypes.guess_type(str(asset_path))
+    return FileResponse(asset_path, media_type=mime or "image/png")
 
 # ---- 静态文件 ----
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"

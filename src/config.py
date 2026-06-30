@@ -12,6 +12,7 @@ STATE_FILE = MODULE_DIR / "world_state.json"
 INITIAL_STATE_FILE = MODULE_DIR / "world_state_initial.json"
 SAVES_DIR = PROJECT_ROOT / "saves" / MODULE_NAME
 THEME_FILE = MODULE_DIR / "theme.json"
+ASSETS_DIR = MODULE_DIR / "assets"
 AUTO_SAVE_SLOT = "slot_000"
 
 # ---- DeepSeek API ----
@@ -54,10 +55,13 @@ MAX_TOOL_ROUNDS = 5
 
 # 运行时模块切换
 def set_active_module(name: str):
-    global MODULE_NAME, MODULE_DIR, STATE_FILE, INITIAL_STATE_FILE, SAVES_DIR, THEME_FILE
+    global MODULE_NAME, MODULE_DIR, STATE_FILE, INITIAL_STATE_FILE, SAVES_DIR, THEME_FILE, ASSETS_DIR
     MODULE_NAME = name
     MODULE_DIR = PROJECT_ROOT / "mod" / name
     STATE_FILE = MODULE_DIR / "world_state.json"
     INITIAL_STATE_FILE = MODULE_DIR / "world_state_initial.json"
     SAVES_DIR = PROJECT_ROOT / "saves" / name
     THEME_FILE = MODULE_DIR / "theme.json"
+    ASSETS_DIR = MODULE_DIR / "assets"
+    # 同步到环境变量——子进程（state_manager/sanity 等）通过 os.environ 读取模块名
+    os.environ["TRPG_MODULE"] = name

@@ -33,6 +33,7 @@ class EngineCallbacks:
     on_suggest: Callable[[dict], bool] = lambda info: False      # 检定确认，返回 True/False
     on_done: Callable[[], None] = lambda: None                   # 回合结束
     on_game_over: Callable[[str, str, str], None] = lambda t, ti, s: None  # 游戏结束
+    on_handout: Callable[[dict], None] = lambda info: None       # 展示材料
     on_error: Callable[[str], None] = lambda msg: None           # 错误
 
 
@@ -222,6 +223,17 @@ class GameEngine:
                                    "attribute": info["attribute"], "dc": info["dc"]})
             else:
                 return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
+
+        if name == "show_handout":
+            result = execute_function(name, args)
+            try:
+                info = json.loads(result)
+                if info.get("found") and info.get("asset_data_uri"):
+                    self.cb.on_handout(info)
+            except Exception:
+                pass
+            return result
+
         return execute_function(name, args)
 
     # ---- 按需 Skill 加载提示 ----

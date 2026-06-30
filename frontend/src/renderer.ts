@@ -5,7 +5,14 @@
  * 流式输出目标 streamTarget 通过 getter/setter 供 options.ts 访问。
  */
 
+import { marked } from "marked";
 import { messagesEl } from "./dom";
+
+// ---- Markdown 解析器（一次性配置） ----
+// 禁用图片渲染——资产图通过 handout 系统分发，不通过 markdown
+const renderer = new marked.Renderer();
+renderer.image = () => "";
+marked.setOptions({ breaks: true, gfm: true, renderer });
 
 // ---- 流式输出目标 ----
 let streamTarget: HTMLElement | null = null;
@@ -21,16 +28,12 @@ export function setStreamTarget(el: HTMLElement | null) {
 // ---- 消息 ID 计数器 ----
 let msgIdCounter = 0;
 
-// ---- 添加消息 ----
+// ---- 添加消息（完整 Markdown 解析） ----
 export function addMsg(kind: string, text: string): HTMLElement {
   const el = document.createElement("div");
   el.className = `msg ${kind}`;
   el.id = `msg-${++msgIdCounter}`;
-  el.innerHTML = text
-    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-    .replace(/\*(.+?)\*/g, "<i>$1</i>")
-    .replace(/---/g, "<hr>")
-    .replace(/\n/g, "<br>");
+  el.innerHTML = marked.parse(text) as string;
   messagesEl.appendChild(el);
   scrollDown();
   return el;
@@ -61,17 +64,19 @@ export function showGmThinking() {
   scrollDown();
 }
 
+// ---- 流式文本缓冲 ----
+let streamBuffer = "";
+
 // ---- 流式文本到达 ----
 export function onNarrativeChunk(text: string) {
   removeLoading();
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
     streamTarget = addMsg("gm", "");
     streamTarget.classList.add("streaming-cursor");
+    streamBuffer = "";
   }
-  streamTarget.innerHTML += text
-    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-    .replace(/\*(.+?)\*/g, "<i>$1</i>")
-    .replace(/\n/g, "<br>");
+  streamBuffer += text;
+  streamTarget.innerHTML = marked.parse(streamBuffer) as string;
   scrollDown();
 }
 
@@ -87,6 +92,7 @@ export function onDice(text: string) {
   if (streamTarget) {
     streamTarget.classList.remove("streaming-cursor");
     streamTarget = null;
+    streamBuffer = "";
   }
   addMsg("dice", text);
 }

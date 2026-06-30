@@ -124,24 +124,159 @@ def cmd_list_clues():
         if items:
             print(f"\n【{CATEGORY_NAMES.get(cat, cat)}】")
             for i, c in enumerate(items):
-                print(f"  {i+1}. {c['text']}")
+                cid = c.get("id", "")
+                ctype = c.get("type", "")
+                asset = c.get("asset")
+                prefix = ""
+                if ctype == "hidden": prefix = "[隐秘] "
+                elif ctype == "inferred": prefix = "[推理] "
+                extra = f" ({cid})" if cid else ""
+                print(f"  {i+1}. {prefix}{c['text']}{extra}")
+                if asset and asset.get("file"):
+                    print(f"     📎 {asset['file']}")
 
 
-def cmd_add_clue(text, category="investigation"):
+def _clue_counter(data: dict) -> int:
+    """返回下一个线索 ID 编号。"""
+    max_id = 0
+    for cat in CLUE_CATEGORIES:
+        for item in data.get("clues_found", {}).get(cat, []):
+            cid = item.get("id", "")
+            if cid.startswith("clue_"):
+                try:
+                    max_id = max(max_id, int(cid.split("_")[1]))
+                except ValueError:
+                    pass
+    return max_id + 1
+
+
+def _migrate_old_clue_format(data: dict):
+    """将旧版扁平线索格式迁移到新版结构化格式。"""
+    clues = data.get("clues_found", {})
+    if isinstance(clues, list):
+        # 数组 → 字典
+        old = clues
+        clues = {k: [] for k in CLUE_CATEGORIES}
+        for item in old:
+            if isinstance(item, str):
+                clues["investigation"].append({"text": item})
+            else:
+                clues.setdefault("investigation", []).append(item)
+        data["clues_found"] = clues
+    # 给没有 id 的线索补上
+    next_num = _clue_counter(data)
+    for cat in CLUE_CATEGORIES:
+        for item in clues.get(cat, []):
+            if "id" not in item or not item["id"]:
+                item["id"] = f"clue_{next_num:03d}"
+                next_num += 1
+            if "type" not in item:
+                item["type"] = "obvious"
+            if "tier" not in item:
+                item["tier"] = 1
+            if "source" not in item:
+                item["source"] = None
+            if "related_npcs" not in item:
+                item["related_npcs"] = []
+            if "related_scenes" not in item:
+                item["related_scenes"] = []
+            if "discovered_at" not in item:
+                item["discovered_at"] = None
+            if "asset" not in item:
+                item["asset"] = None
+    data.setdefault("clue_links", [])
+
+
+def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
+                  source=None, related_npcs="", related_scenes="", asset_file=None):
+    """添加线索。向后兼容旧版纯 text 调用。"""
     if category not in CLUE_CATEGORIES:
         category = "investigation"
     data = _load()
-    c = data.setdefault("clues_found", {})
-    # 兼容旧格式（数组 → 字典）
-    if isinstance(c, list):
-        old = c
-        c = {k: [] for k in CLUE_CATEGORIES}
-        for item in old:
-            c["investigation"].append({"text": item} if isinstance(item, str) else item)
-    c.setdefault(category, []).append({"text": text})
-    data["clues_found"] = c
+    _migrate_old_clue_format(data)
+
+    next_id = _clue_counter(data)
+    clue = {
+        "id": f"clue_{next_id:03d}",
+        "text": text,
+        "type": clue_type,
+        "tier": int(tier),
+        "source": source if source else None,
+        "related_npcs": [n.strip() for n in related_npcs.split(",") if n.strip()] if related_npcs else [],
+        "related_scenes": [s.strip() for s in related_scenes.split(",") if s.strip()] if related_scenes else [],
+        "discovered_at": __import__("datetime").datetime.now().isoformat(),
+        "asset": {"file": asset_file, "label": text[:80]} if asset_file else None
+    }
+    data["clues_found"][category].append(clue)
     _save(data)
-    print(f"[{CATEGORY_NAMES.get(category, category)}] {text}")
+    print(json.dumps({"ok": True, "clue": clue}, ensure_ascii=False))
+
+
+def cmd_link_clues(from_id, to_id, reasoning):
+    """创建两条线索的关联，自动生成一条 TIER_2 推理线索。"""
+    data = _load()
+    _migrate_old_clue_format(data)
+
+    # 校验两条线索都存在
+    all_clue_ids = set()
+    for cat in CLUE_CATEGORIES:
+        for item in data.get("clues_found", {}).get(cat, []):
+            if item.get("id"):
+                all_clue_ids.add(item["id"])
+    if from_id not in all_clue_ids or to_id not in all_clue_ids:
+        print(json.dumps({"ok": False, "error": f"线索不存在: from={from_id} to={to_id}"}, ensure_ascii=False))
+        return
+
+    # 校验重复关联
+    links = data.setdefault("clue_links", [])
+    for link in links:
+        if {link.get("from"), link.get("to")} == {from_id, to_id}:
+            print(json.dumps({"ok": False, "error": "关联已存在", "link": link}, ensure_ascii=False))
+            return
+
+    link_id = f"link_{len(links)+1:03d}"
+    link = {
+        "id": link_id,
+        "from": from_id,
+        "to": to_id,
+        "reasoning": reasoning,
+        "created_by": "inference",
+        "created_at": __import__("datetime").datetime.now().isoformat()
+    }
+    links.append(link)
+
+    # 自动生成 TIER_2 推理线索
+    next_id = _clue_counter(data)
+    inference = {
+        "id": f"clue_{next_id:03d}",
+        "text": f"推理：{reasoning}",
+        "type": "inferred",
+        "tier": 2,
+        "source": "inference",
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": __import__("datetime").datetime.now().isoformat(),
+        "asset": None,
+        "inference_from": [from_id, to_id]
+    }
+    data["clues_found"].setdefault("investigation", []).append(inference)
+    _save(data)
+    print(json.dumps({"ok": True, "link": link, "inference": inference}, ensure_ascii=False))
+
+
+def cmd_show_handout(entity_type, entity_id):
+    """查找资产映射，返回图片文件信息。"""
+    data = _load()
+    asset_map = data.get("asset_map", {})
+    section = asset_map.get(entity_type + "s", {})  # npcs / scenes / clues
+    entry = section.get(entity_id)
+    if entry:
+        result = {"found": True, "entity_type": entity_type, "entity_id": entity_id,
+                  "file": entry["file"], "label": entry.get("label", "")}
+    else:
+        result = {"found": False, "entity_type": entity_type, "entity_id": entity_id,
+                  "hint": f"资产映射中未找到 {entity_type}={entity_id}"}
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def cmd_add_item(item_name):
@@ -294,6 +429,8 @@ COMMANDS = {
     "private-memory": lambda _=None: cmd_private_memory(),
     "private-memory-update": cmd_private_memory_update,
     "psych-trait": cmd_psychological_trait,
+    "link-clues": cmd_link_clues,
+    "show-handout": cmd_show_handout,
 }
 
 
@@ -357,6 +494,16 @@ def main():
             sys.exit(1)
         ctx = sys.argv[4] if len(sys.argv) > 4 else ""
         cmd_psychological_trait(sys.argv[2], sys.argv[3], ctx)
+    elif cmd == "link-clues":
+        if len(sys.argv) < 5:
+            print("ERROR: link-clues 需要 <from_id> <to_id> <reasoning>", file=sys.stderr)
+            sys.exit(1)
+        cmd_link_clues(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif cmd == "show-handout":
+        if len(sys.argv) < 4:
+            print("ERROR: show-handout 需要 <entity_type> <entity_id>", file=sys.stderr)
+            sys.exit(1)
+        cmd_show_handout(sys.argv[2], sys.argv[3])
     else:
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()

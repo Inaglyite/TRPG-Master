@@ -380,34 +380,114 @@
   "clues_found": {
     "investigation": [
       {
-        "text": "法伦主任告知：莱特教授在紧锁的办公室内死亡，官方死因为\"严重突发心力衰竭\""
+        "text": "法伦主任告知：莱特教授在紧锁的办公室内死亡，官方死因为\"严重突发心力衰竭\"",
+        "id": "clue_001",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "法伦主任告知：莱特生前负责评估霍布豪斯家族文档，如今阿卡姆女巫审判文档下落不明"
+        "text": "法伦主任告知：莱特生前负责评估霍布豪斯家族文档，如今阿卡姆女巫审判文档下落不明",
+        "id": "clue_002",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "法伦主任告知：莱特可能过着双重生活，他对莱特的了解仅限于工作层面"
+        "text": "法伦主任告知：莱特可能过着双重生活，他对莱特的了解仅限于工作层面",
+        "id": "clue_003",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "法伦主任透露：哈兰德·洛奇和艾米莉亚·考特也卷入了此事"
+        "text": "法伦主任透露：哈兰德·洛奇和艾米莉亚·考特也卷入了此事",
+        "id": "clue_004",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "法伦主任可以借出莱特办公室和家门的钥匙"
+        "text": "法伦主任可以借出莱特办公室和家门的钥匙",
+        "id": "clue_005",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "惠特克罗夫特医生的死亡证明存疑——尸体眼部组织遭受严重热损伤，所有器官同时衰竭"
+        "text": "惠特克罗夫特医生的死亡证明存疑——尸体眼部组织遭受严重热损伤，所有器官同时衰竭",
+        "id": "clue_006",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "莱特的尸体面部凝固着恐惧尖叫的神情"
+        "text": "莱特的尸体面部凝固着恐惧尖叫的神情",
+        "id": "clue_007",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "莱特死前行为日益反常，表现出妄想狂倾向，想要逃离镇子"
+        "text": "莱特死前行为日益反常，表现出妄想狂倾向，想要逃离镇子",
+        "id": "clue_008",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "莱特欠大西洋城黑帮巨额赌债——约11000美元"
+        "text": "莱特欠大西洋城黑帮巨额赌债——约11000美元",
+        "id": "clue_009",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       },
       {
-        "text": "塞西尔·亨特——被密斯卡托尼克大学开除的学生，莱特的造假同伙，目前已精神崩溃入住阿卡姆疗养院"
+        "text": "塞西尔·亨特——被密斯卡托尼克大学开除的学生，莱特的造假同伙，目前已精神崩溃入住阿卡姆疗养院",
+        "id": "clue_010",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": null,
+        "asset": null
       }
     ],
     "event": [],
@@ -471,5 +551,74 @@
       "monster_in_the_ink": "这是被女巫凯夏·梅森在17世纪90年代束缚在阿卡姆女巫审判文档中的异界存在。它被血与墨封印在书页的角度与文字之中。亨特复制图示的行为释放了它的一部分束缚。它正在冲击现实屏障，每次显形都会获得更多力量和实体。它可以附身在任何触碰过文档的人身上..."
     },
     "inference_notes": "游戏刚开始。PC在密斯卡托尼克大学与法伦主任会面。所有NPC的秘密均未揭示。"
-  }
+  },
+  "asset_map": {
+    "npcs": {
+      "bryce_fallon": {
+        "file": "布莱斯·法伦.png",
+        "label": "布莱斯·法伦——密斯卡托尼克大学行政处主任"
+      },
+      "john_whitcroft": {
+        "file": "约翰·惠特克罗夫特医生.png",
+        "label": "约翰·惠特克罗夫特医生——内科医师"
+      },
+      "emilia_court": {
+        "file": "艾米莉亚·考特.png",
+        "label": "艾米莉亚·考特——研究生"
+      },
+      "harland_lodge": {
+        "file": "哈兰德·洛奇.png",
+        "label": "哈兰德·洛奇——学者"
+      },
+      "anthony_flinders": {
+        "file": "安东尼·弗林德斯.png",
+        "label": "安东尼·弗林德斯——历史系本科学生"
+      },
+      "lucy_stone": {
+        "file": "露西·斯通.png",
+        "label": "露西·斯通——希布酒馆女服务员"
+      },
+      "abner_wick": {
+        "file": "阿伯那·维克.png",
+        "label": "阿伯那·维克——\"轻率琐事\"古董店老板"
+      },
+      "ox_and_shanassy": {
+        "file": "奥克斯与肖纳西.png",
+        "label": "奥克斯与肖纳西——大西洋城黑帮打手"
+      },
+      "cecil_hunter": {
+        "file": "塞西尔·亨特.png",
+        "label": "塞西尔·亨特——被开除的学生"
+      },
+      "monster_in_the_ink": {
+        "file": "墨中怪物.png",
+        "label": "墨中怪物——被封印在文档中的异界存在"
+      }
+    },
+    "scenes": {
+      "wright_cottage": {
+        "file": "莱特的小屋.png",
+        "label": "莱特的小屋——校园附近的教职员住宅"
+      },
+      "trivial_pursuits": {
+        "file": "阿伯那·维克的店.png",
+        "label": "阿伯那·维克古董店——\"轻率琐事\""
+      }
+    },
+    "clues": {
+      "wright_body": {
+        "file": "莱特教授的尸体.png",
+        "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫"
+      },
+      "monster_manifest": {
+        "file": "墨中怪物显形.png",
+        "label": "墨中怪物从文字中显形"
+      },
+      "wick_dinner": {
+        "file": "与阿伯那·维克的晚餐会.png",
+        "label": "与阿伯那·维克的晚餐——古董店的秘密交易"
+      }
+    }
+  },
+  "clue_links": []
 }

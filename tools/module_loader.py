@@ -60,6 +60,8 @@ def parse_module(md_path: str) -> dict:
         "flags": {},
         "scene_cache": {},
         "module_rules": {},
+        "asset_map": {"npcs": {}, "scenes": {}, "clues": {}},
+        "clue_links": [],
         "private_memory": {
             "goals_and_plans": "",
             "hidden_facts": {},
@@ -177,6 +179,19 @@ def parse_module(md_path: str) -> dict:
                 elif key in ("san_triggers", "items", "spells", "custom_mechanics"):
                     rules_data[key] = yaml_blocks[0] if isinstance(yaml_blocks[0], list) else yaml_blocks
         state["module_rules"] = rules_data
+
+    # ── 展示材料区 ──
+    handout_section = _find_section(text, r'# 展示材料') or _find_section(text, r'# Handout')
+    for yaml_block in _extract_yaml_blocks(handout_section):
+        if isinstance(yaml_block, dict):
+            for entity_type in ("npcs", "scenes", "clues"):
+                items = yaml_block.get(entity_type, {})
+                if isinstance(items, dict):
+                    for eid, entry in items.items():
+                        if isinstance(entry, str):
+                            state["asset_map"][entity_type][eid] = {"file": entry, "label": eid}
+                        elif isinstance(entry, dict):
+                            state["asset_map"][entity_type][eid] = entry
 
     # ── 结局区 ──
     ending_section = _find_section(text, r'# 结局') or _find_section(text, r'# Ending')

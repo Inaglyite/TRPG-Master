@@ -47,24 +47,54 @@ export function onDone() {
   for (let i = children.length - 1; i >= 0; i--) {
     const el = children[i];
     if (!el.classList.contains("gm")) continue;
-    const text = el.innerHTML;
-    const lines = text.split("<br>");
 
-    // 只在"你可以"之后解析选项——避免叙事正文中带编号的内容被误判
-    let startIdx = 0;
-    for (let j = lines.length - 1; j >= 0; j--) {
-      if (/你可以|您可以/.test(lines[j])) {
-        startIdx = j;
-        break;
+    // 优先从最后一个 <ol> 提取（marked 渲染的编号列表），
+    // 且该 <ol> 必须在"你可以"之后出现，避免把叙事中的编号列表误判为选项
+    const olElements = el.querySelectorAll("ol");
+    if (olElements.length > 0) {
+      const html = el.innerHTML;
+      // 找到"你可以"在 HTML 中的位置
+      const markerMatch = html.match(/你可以|您可以/);
+      const markerIdx = markerMatch && markerMatch.index != null ? markerMatch.index : -1;
+
+      // 取最后一个 <ol>，但如果它与"你可以"的距离合理（在其之后），就用它
+      let targetOl: Element | null = null;
+      for (let i = olElements.length - 1; i >= 0; i--) {
+        const olHtml = olElements[i].outerHTML;
+        const olIdx = html.indexOf(olHtml);
+        if (markerIdx < 0 || olIdx > markerIdx) {
+          targetOl = olElements[i];
+          break;
+        }
       }
+      // 如果没找到"你可以"之后的 <ol>，就用最后一个
+      if (!targetOl) targetOl = olElements[olElements.length - 1];
+
+      const liElements = targetOl.querySelectorAll("li");
+      liElements.forEach((li) => {
+        const label = (li.textContent || "").trim();
+        if (label) {
+          const isFree = label.includes("自由行动") || label.includes("你决定做什么");
+          opts.push({ label, isFree });
+        }
+      });
     }
 
-    for (let j = startIdx; j < lines.length; j++) {
-      const m = lines[j].match(/^\d+\.\s*(.+)/);
-      if (m) {
-        const label = m[1].replace(/<[^>]+>/g, "");
-        const isFree = label.includes("自由行动") || label.includes("你决定做什么");
-        opts.push({ label, isFree });
+    // 降级：<br> 分隔的纯文本格式
+    if (opts.length === 0) {
+      const text = el.textContent || "";
+      const lines = text.split("\n");
+      let startIdx = 0;
+      for (let j = lines.length - 1; j >= 0; j--) {
+        if (/你可以|您可以/.test(lines[j])) { startIdx = j; break; }
+      }
+      for (let j = startIdx; j < lines.length; j++) {
+        const m = lines[j].trim().match(/^\d+\.\s*(.+)/);
+        if (m) {
+          const label = m[1].trim();
+          const isFree = label.includes("自由行动") || label.includes("你决定做什么");
+          opts.push({ label, isFree });
+        }
       }
     }
     break; // 只查最近一条 GM 消息

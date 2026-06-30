@@ -286,6 +286,44 @@ body {
 .clue-cat::before { content: none !important; }
 .clue-item::before { content: none !important; }
 
+/* ---- 展示材料（Handout） ---- */
+#handout-container {
+  position: fixed; top: 60px; right: 20px; z-index: 80;
+  display: flex; flex-direction: column; gap: 10px;
+  max-width: 260px;
+}
+.handout-card {
+  background: var(--bg-panel, #1a1a2e);
+  border: 1px solid var(--accent, #6c5ce7);
+  border-radius: 8px; overflow: hidden;
+  animation: fade-in 0.3s ease;
+  cursor: default;
+}
+.handout-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 10px; background: rgba(108, 92, 231, 0.15);
+}
+.handout-label { font-size: 12px; color: var(--accent, #6c5ce7); }
+.handout-close {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 14px; padding: 0 2px;
+}
+.handout-card img {
+  width: 100%; display: block; cursor: zoom-in;
+  max-height: 180px; object-fit: cover;
+}
+.handout-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  z-index: 200; display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.handout-overlay img { max-width: 90vw; max-height: 90vh; }
+
+/* 线索面板中的缩略图 */
+.clue-thumb { max-width: 120px; max-height: 80px; border-radius: 4px; margin-top: 4px; cursor: zoom-in; }
+.clue-tier { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--accent); color: #fff; margin-left: 4px; }
+.clue-tier.inferred { background: #e17055; }
+
 /* ---- 弹窗 ---- */
 #modal-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);

@@ -97,8 +97,14 @@ export function updateCluePanel(cluesRaw: string) {
         const items = clues[cat] || [];
         if (items.length > 0) {
           html += `<div class="clue-cat">${names[cat] || cat}</div>`;
-          for (const item of items) {
-            html += `<div class="clue-item">• ${item.text}</div>`;
+for (const item of items) {
+          // 缩略图：electron file:// 下 HTTP URL 不可用，线索面板不直接嵌图（通过 show_handout 弹窗展示）
+          let tierBadge = "";
+          if (item.tier === 2) tierBadge = ' <span class="clue-tier">TIER2</span>';
+          if (item.type === "inferred") tierBadge = ' <span class="clue-tier inferred">推理</span>';
+          let assetBadge = "";
+          if (item.asset && item.asset.file) assetBadge = ' <span class="clue-tier asset">🖼</span>';
+          html += `<div class="clue-item">• ${item.text}${tierBadge}${assetBadge}</div>`;
           }
         }
       }
@@ -115,6 +121,38 @@ export function updateCluePanel(cluesRaw: string) {
 // ---- 请求角色状态 ----
 export function loadState() {
   safeSend(JSON.stringify({ type: "state" }));
+}
+
+// ---- 展示材料（Handout） ----
+export function showHandout(data: { file: string; label: string; asset_data_uri: string; asset_url: string; entity_type: string; entity_id: string }) {
+  const container = document.getElementById("handout-container");
+  if (!container) return;
+
+  // 优先用 base64 data URI（electron file:// 下 HTTP URL 不可用），回退到 HTTP URL（web 模式）
+  const imgSrc = data.asset_data_uri || data.asset_url;
+  if (!imgSrc) return;  // 无图片则不弹窗
+
+  const card = document.createElement("div");
+  card.className = "handout-card";
+  card.innerHTML = `
+    <div class="handout-header">
+      <span class="handout-label">${data.label || data.file}</span>
+      <button class="handout-close" onclick="this.parentElement!.parentElement!.remove()">✕</button>
+    </div>
+    <img src="${imgSrc}" alt="${data.label}" loading="lazy" />
+  `;
+  // 点击图片放大
+  card.querySelector("img")!.onclick = () => {
+    const overlay = document.createElement("div");
+    overlay.className = "handout-overlay";
+    overlay.innerHTML = `<img src="${imgSrc}" alt="${data.label}" />`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+  };
+  container.appendChild(card);
+
+  // 10 秒后自动消失
+  setTimeout(() => { if (card.parentElement) card.remove(); }, 10000);
 }
 
 // ---- 结局展示 ----

@@ -149,5 +149,11 @@
       "shadow_creature": "封印在 basement_seal 的次元生物。怕光。只有在地下室彻底黑暗时才能完全显形。目前玩家完全不知道它的存在。"
     },
     "inference_notes": "玩家刚进入宅邸，仅见到了管家。地下室、东厅、西厅均未探索。暗影生物的存在完全未知。"
-  }
+  },
+  "asset_map": {
+    "npcs": {},
+    "scenes": {},
+    "clues": {}
+  },
+  "clue_links": []
 }

@@ -2,8 +2,13 @@
 
 import json
 import sys
+import os
+import base64
+import mimetypes
 import subprocess
+from pathlib import Path
 from .config import PROJECT_ROOT, STATE_FILE
+from . import config as _cfg
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +406,38 @@ TOOLS = [
             }
         }
     },
+    # ---- 展示材料与线索关联 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "show_handout",
+            "description": "向玩家展示视觉材料（NPC肖像/场景图/线索图片）。当玩家首次遇到NPC、进入新场景、或发现关键线索时调用。引擎自动查找资产映射并推送到前端。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {"type": "string", "enum": ["npc", "scene", "clue"], "description": "实体类型"},
+                    "entity_id": {"type": "string", "description": "实体ID（NPC ID/场景ID/线索ID）"}
+                },
+                "required": ["entity_type", "entity_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "link_clues",
+            "description": "创建两条线索的关联推理，自动生成TIER_2推理线索条目。当玩家/守秘人发现两条线索之间存在逻辑关联时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_id": {"type": "string", "description": "源线索ID"},
+                    "to_id": {"type": "string", "description": "目标线索ID"},
+                    "reasoning": {"type": "string", "description": "关联推理描述，如'血迹方向指向楼梯口，管家恰好对楼梯口存在记忆空白'"}
+                },
+                "required": ["from_id", "to_id", "reasoning"]
+            }
+        }
+    },
     # ---- NPC 信息边界管理 ----
     {
         "type": "function",
@@ -524,9 +561,12 @@ def needs_pro_model(tool_calls: list) -> bool:
 
 def _run_cli(cmd: str) -> str:
     try:
+        # 传入 TRPG_MODULE 环境变量,确保子进程读写的 world_state.json
+        # 与运行时切换后的活跃模组一致(set_active_module 不写 os.environ)
+        env = {**os.environ, "TRPG_MODULE": _cfg.MODULE_NAME}
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=PROJECT_ROOT
+            timeout=30, cwd=PROJECT_ROOT, env=env
         )
         output = result.stdout.strip()
         if result.returncode != 0:
@@ -558,9 +598,9 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "state_set":
         return _run_cli(f"{sys.executable} tools/state_manager.py set {args.get('path', '')} {safe(args.get('value', ''))}")
     elif name == "state_npcs":
-        return _run_cli("{sys.executable} tools/state_manager.py npcs")
+        return _run_cli(f"{sys.executable} tools/state_manager.py npcs")
     elif name == "state_clues":
-        return _run_cli("{sys.executable} tools/state_manager.py clues")
+        return _run_cli(f"{sys.executable} tools/state_manager.py clues")
     elif name == "state_add_clue":
         text = safe(args.get("text", ""))
         cat = args.get("category", "investigation")
@@ -583,7 +623,7 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "sanity_restore":
         return _run_cli(f"{sys.executable} tools/sanity.py restore {args.get('amount', 0)}")
     elif name == "sanity_check":
-        return _run_cli("{sys.executable} tools/sanity.py check")
+        return _run_cli(f"{sys.executable} tools/sanity.py check")
     elif name == "import_module":
         path = safe(args.get("path", ""))
         output = _run_cli(f"{sys.executable} tools/module_loader.py {path}")
@@ -658,12 +698,12 @@ def execute_function(name: str, args: dict) -> str:
         penalty = args.get("penalty_dice", 0) or 0
         return _run_cli(f"{sys.executable} tools/skill_check.py {attr} {bonus} {penalty}")
     elif name == "luck_check":
-        return _run_cli("{sys.executable} tools/skill_check.py POW")
+        return _run_cli(f"{sys.executable} tools/skill_check.py POW")
     elif name == "psychoanalysis":
         target = args.get("target", "pc")
         return _run_cli(f"{sys.executable} tools/sanity.py psychoanalysis {target}")
     elif name == "reality_check":
-        return _run_cli("{sys.executable} tools/sanity.py reality-check")
+        return _run_cli(f"{sys.executable} tools/sanity.py reality-check")
     elif name == "sanity_trigger":
         desc = args.get("description", "")
         # 基于关键词的 severity 建议
@@ -696,6 +736,30 @@ def execute_function(name: str, args: dict) -> str:
         name_val = safe(args.get("name", ""))
         ctx = safe(args.get("context", ""))
         return _run_cli(f"{sys.executable} tools/state_manager.py psych-trait {cat} {name_val} {ctx}")
+    elif name == "show_handout":
+        ent_type = args.get("entity_type", "npc")
+        ent_id = args.get("entity_id", "")
+        result = _run_cli(f"{sys.executable} tools/state_manager.py show-handout {ent_type} {ent_id}")
+        # 读取资产文件并转 base64 data URI（electron file:// 下 HTTP URL 不可用）
+        try:
+            info = json.loads(result)
+            if info.get("found") and info.get("file"):
+                asset_path = _cfg.MODULE_DIR / "assets" / info["file"]
+                if asset_path.exists():
+                    mime = mimetypes.guess_type(str(asset_path))[0] or "image/png"
+                    data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
+                    info["asset_data_uri"] = f"data:{mime};base64,{data}"
+                    # 同时保留 URL 供 web 模式使用
+                    info["asset_url"] = f"/api/assets/{_cfg.MODULE_NAME}/{info['file']}"
+                    result = json.dumps(info, ensure_ascii=False)
+        except Exception:
+            pass
+        return result
+    elif name == "link_clues":
+        from_id = args.get("from_id", "")
+        to_id = args.get("to_id", "")
+        reasoning = safe(args.get("reasoning", ""))
+        return _run_cli(f"{sys.executable} tools/state_manager.py link-clues {from_id} {to_id} {reasoning}")
     elif name == "npc_reveal":
         npc_id = args.get("npc_id", "")
         tier = str(args.get("tier", 1))
@@ -705,7 +769,7 @@ def execute_function(name: str, args: dict) -> str:
         npc_id = args.get("npc_id", "")
         return _run_cli(f"{sys.executable} tools/state_manager.py npc-secret {npc_id}")
     elif name == "get_private_memory":
-        return _run_cli("{sys.executable} tools/state_manager.py private-memory")
+        return _run_cli(f"{sys.executable} tools/state_manager.py private-memory")
     elif name == "update_private_memory":
         section = args.get("section", "")
         value = safe(args.get("value", ""))
