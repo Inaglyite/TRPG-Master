@@ -270,6 +270,12 @@ export function showEnding(data: any) {
   optionsBar.appendChild(btnContinueBtn);
 
   btnConfirm.onclick = () => {
+    safeSend(JSON.stringify({
+      type: "settle_case",
+      ending_type: data.ending_type,
+      title: data.title,
+      summary: data.summary,
+    }));
     const html = [
       '<div class="ending-box">',
       '<div class="ending-emoji">' + emoji + "</div>",
@@ -334,6 +340,7 @@ export function renderSavePanel(saves: any[]) {
     }
     const sceneName = s.scene_name || "未知场景";
     const displayName = s.label || sceneName;
+    const characterName = s.character_name || "未知调查员";
     const hpStr = s.hp || "?";
     const sanStr = s.san || "?";
     const clueCount = s.clue_count ?? 0;
@@ -347,6 +354,7 @@ export function renderSavePanel(saves: any[]) {
         </div>
         <div class="save-slot-meta">
           <span>${sceneName}</span>
+          <span>${characterName}</span>
           <span>HP ${hpStr} SAN ${sanStr}</span>
           <span>📜 ${clueCount} 线索</span>
           <span>💬 ${msgCount} 消息</span>

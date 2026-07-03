@@ -13,6 +13,7 @@ from .config import (
     OPTIONAL_SKILL_HINTS,
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
+from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
 from .tools import (
     TOOLS, execute_function,
 )
@@ -55,7 +56,17 @@ class GameEngine:
         self.SUMMARY_TOKEN_THRESHOLD = 8000
         self._turn_graph = build_turn_graph()
 
-    def reset(self):
+    def prepare_session(self):
+        """准备一条界面连接使用的空会话，不重置 world_state。"""
+        self.messages = [{"role": "system", "content": load_system_prompt()}]
+        self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
+        self._round_count = 0
+        self._tier_last_injected = -99
+        self._last_turn_high_risk = False
+        self._summary_token_estimate = 0
+        self._loaded_optional_skills = set()
+
+    def reset(self, character_ref: dict | None = None):
         """开始新游戏——重置对话 + 世界状态"""
         import shutil
         from . import config as cfg
@@ -66,10 +77,9 @@ class GameEngine:
         if initial.exists():
             shutil.copy(str(initial), str(cfg.STATE_FILE))
 
-        # 如果初始 PC 没有名字（模组未预设具体调查员），从 characters/ 加载预设调查员
-        self._ensure_pc_from_characters()
+        self._apply_starting_character(character_ref)
 
-        self.messages = [{"role": "system", "content": load_system_prompt()}]
+        self.prepare_session()
         mod_path = f"mod/{cfg.MODULE_NAME}/world_state.json"
         self.messages.append({
             "role": "user",
@@ -82,49 +92,21 @@ class GameEngine:
                 "最后描述开场场景并提供选项。）"
             )
         })
-        self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
-        self._round_count = 0
-        self._tier_last_injected = -99
-        self._last_turn_high_risk = False
-        self._summary_token_estimate = 0
-        self._loaded_optional_skills = set()
 
-    def _ensure_pc_from_characters(self):
-        """若 world_state.json 的 pc 没有名字，从模组 characters/ 加载第一个预设调查员。
-        角色卡文件结构（derived.HP / skills / attributes）映射到 world_state 的 pc 结构。
-        """
+    def _apply_starting_character(self, character_ref: dict | None):
+        """将选择的调查员复制进当前模组 world_state.pc。"""
         from . import config as cfg
         try:
             state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             return
-        pc = state.get("pc", {})
-        if pc.get("name"):  # 已有名字，无需填充
+
+        selected_ref = character_ref or default_character_ref(cfg.MODULE_NAME)
+        if not selected_ref:
             return
-        chars_dir = cfg.MODULE_DIR / "characters"
-        if not chars_dir.exists():
-            return
-        char_files = sorted(chars_dir.glob("*.json"))
-        if not char_files:
-            return
-        try:
-            char = json.loads(char_files[0].read_text(encoding="utf-8"))
-        except Exception:
-            return
-        derived = char.get("derived", {})
-        pc.update({
-            "name": char.get("name", ""),
-            "occupation": char.get("occupation", ""),
-            "hp": derived.get("HP", pc.get("hp", 10)),
-            "max_hp": derived.get("max_HP", pc.get("max_hp", 10)),
-            "san": derived.get("SAN", pc.get("san", 50)),
-            "max_san": derived.get("max_SAN", pc.get("max_san", 50)),
-            "attributes": char.get("attributes", pc.get("attributes", {})),
-            "skills": char.get("skills", pc.get("skills", {})),
-            "inventory": char.get("inventory", pc.get("inventory", [])),
-        })
-        state["pc"] = pc
-        cfg.STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        applied = apply_character_to_state(selected_ref, state, cfg.MODULE_NAME)
+        if applied:
+            cfg.STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def has_save(self) -> bool:
         return has_save()
@@ -154,6 +136,25 @@ class GameEngine:
         self._summary_token_estimate = 0
         self._loaded_optional_skills = set()
         return len(messages) - 1
+
+    def settle_case(self, ending_type: str, title: str, summary: str) -> dict:
+        """将已确认结局写入长期角色履历。"""
+        from . import config as cfg
+        try:
+            world_state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            return {"ok": False, "error": f"读取世界状态失败: {e}"}
+        result = settle_character_case(
+            world_state,
+            ending_type=ending_type,
+            title=title,
+            summary=summary,
+            module_name=cfg.MODULE_NAME,
+        )
+        if result.get("ok"):
+            cfg.STATE_FILE.write_text(json.dumps(world_state, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.save("slot_000")
+        return result
 
     # ---- 流式 LLM ----
 

@@ -14,6 +14,11 @@ SAVES_DIR = PROJECT_ROOT / "saves" / MODULE_NAME
 THEME_FILE = MODULE_DIR / "theme.json"
 ASSETS_DIR = MODULE_DIR / "assets"
 AUTO_SAVE_SLOT = "slot_000"
+CHARACTERS_DIR = PROJECT_ROOT / "characters"
+DEFAULT_CHARACTERS_DIR = CHARACTERS_DIR / "default"
+CUSTOM_CHARACTERS_DIR = CHARACTERS_DIR / "custom"
+PROFILES_DIR = PROJECT_ROOT / "profiles"
+PLAYER_PROFILE_FILE = PROFILES_DIR / "player_profile.json"
 
 # ---- DeepSeek API ----
 API_KEY = os.environ.get("OPENAI_API_KEY", "")

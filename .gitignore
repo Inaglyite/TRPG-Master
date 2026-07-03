@@ -10,4 +10,6 @@ frontend/dist/
 frontend/release/
 skillsucai/
 mod/*/characters/*.json
+characters/custom/*.json
+profiles/player_profile.json
 logs/

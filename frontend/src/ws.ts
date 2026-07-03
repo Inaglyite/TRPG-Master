@@ -11,7 +11,15 @@
 
 import { setConn, savePanelOverlay } from "./dom";
 import { addMsg } from "./renderer";
-import { onGmTurnStart, resetStartButton, getGameStarting, onSaveList, onSaveAvailable, populateModuleList } from "./start";
+import {
+  onGmTurnStart,
+  resetStartButton,
+  getGameStarting,
+  onSaveList,
+  onSaveAvailable,
+  populateModuleList,
+  populateCharacterList,
+} from "./start";
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
 import { onSuggest, onDone } from "./options";
 import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel, showHandout } from "./panels";
@@ -128,6 +136,9 @@ function handleMessage(e: MessageEvent) {
     case "module_list":
       populateModuleList(data.modules, data.active);
       break;
+    case "character_list":
+      populateCharacterList(data.groups || []);
+      break;
     case "theme":
       applyTheme(data.theme);
       break;
@@ -142,6 +153,9 @@ function handleMessage(e: MessageEvent) {
       break;
     case "loaded":
       addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。");
+      break;
+    case "case_settled":
+      addMsg("system", data.ok ? "案件经历已写入调查员长期履历。" : `履历写入失败：${data.error || "未知错误"}`);
       break;
     case "state_data":
       updateCharPanel(data.data);

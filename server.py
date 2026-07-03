@@ -40,6 +40,7 @@ from src.engine import GameEngine, EngineCallbacks
 from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT
 import src.config as cfg
 from src.persistence import delete_save
+from src.characters import list_character_options
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
@@ -196,18 +197,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
-    # 通知前端模组列表 + 存档列表 + 当前主题
-    mods_dir = PROJECT_ROOT / "mod"
-    mods = []
-    for d in sorted(mods_dir.iterdir()):
-        if d.is_dir() and (d / "module.md").exists():
-            theme = {}
-            tf = d / "theme.json"
-            if tf.exists():
-                theme = json.loads(tf.read_text(encoding="utf-8"))
-            mods.append({"id": d.name, "title": theme.get("title", d.name),
-                         "description": theme.get("description", "")})
-    await ws.send_json({"type": "module_list", "modules": mods, "active": cfg.MODULE_NAME})
+    # 通知前端模组列表 + 角色列表 + 存档列表 + 当前主题
+    await ws.send_json({"type": "module_list", "modules": _list_mods(), "active": cfg.MODULE_NAME})
+    await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
 
     # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
     # 故主题也走 WS 下发）
@@ -250,15 +242,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     await ws.send_json({"type": "error", "message": f"模组'{name}'不存在"})
                 else:
                     cfg.set_active_module(name)
-                    # 重置 engine 以使用新模组的 system prompt + 世界状态
-                    engine.reset()
+                    # 切换 system prompt，但不重置 world_state；真正的新游戏重置在 start 时发生。
+                    engine.prepare_session()
                     # 下发新主题 + 新存档列表
                     await ws.send_json({"type": "theme", "theme": _load_theme()})
                     await ws.send_json({"type": "module_list", "modules": _list_mods(), "active": name})
+                    await ws.send_json({"type": "character_list", **list_character_options(name)})
                     await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
 
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
+                engine.reset(data.get("character_ref"))
                 await ws.send_json({"type": "gm_turn_start"})
                 run_turn(engine.handle_action, None)
 
@@ -300,6 +294,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             elif msg_type == "save_list":
                 saves = engine.list_saves()
                 await ws.send_json({"type": "save_list", "saves": saves})
+
+            elif msg_type == "character_list":
+                await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
 
             elif msg_type == "save_load":
                 slot_id = data.get("slot_id", "")
@@ -350,6 +347,16 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 from src.persistence import rename_save
                 ok = rename_save(slot_id, label)
                 await ws.send_json({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
+
+            elif msg_type == "settle_case":
+                result = engine.settle_case(
+                    data.get("ending_type", "neutral"),
+                    data.get("title", "故事结束"),
+                    data.get("summary", ""),
+                )
+                await ws.send_json({"type": "case_settled", **result})
+                await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
+                await ws.send_json({"type": "state"})
 
             elif msg_type == "quit":
                 engine.save("slot_000")  # 退出时存档
@@ -409,6 +416,12 @@ async def list_modules():
     return {"modules": mods, "active": cfg.MODULE_NAME}
 
 
+@app.get("/api/characters")
+async def list_characters():
+    """列出可用于当前模组的新游戏调查员。"""
+    return list_character_options(cfg.MODULE_NAME)
+
+
 @app.post("/api/modules/switch")
 async def switch_module(data: dict):
     """切换活跃模组"""
@@ -425,7 +438,7 @@ async def game_ws(ws: WebSocket):
     await ws.accept()
     try:
         engine = GameEngine()
-        engine.reset()
+        engine.prepare_session()
     except Exception as e:
         # 配置/初始化失败时，把错误发回客户端而不是静默断开
         await ws.send_json({"type": "error", "message": f"游戏引擎初始化失败：{e}"})

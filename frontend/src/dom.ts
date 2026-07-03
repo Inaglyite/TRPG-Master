@@ -37,3 +37,5 @@ export const modalNo = document.getElementById("modal-no")!;
 export const startOverlay = document.getElementById("start-overlay")!;
 export const btnStart = document.getElementById("btn-start") as HTMLButtonElement;
 export const btnContinue = document.getElementById("btn-continue") as HTMLButtonElement;
+export const characterChoiceList = document.getElementById("character-choice-list")!;
+export const characterSelectedSummary = document.getElementById("character-selected-summary")!;

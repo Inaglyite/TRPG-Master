@@ -7,7 +7,14 @@
  * 同时绑定开始 / 继续 / 新游戏按钮事件。
  */
 
-import { startOverlay, btnStart, btnContinue, btnNew } from "./dom";
+import {
+  startOverlay,
+  btnStart,
+  btnContinue,
+  btnNew,
+  characterChoiceList,
+  characterSelectedSummary,
+} from "./dom";
 import { safeSend } from "./ws";
 import { addMsg, showGmThinking } from "./renderer";
 import { openSavePanel, renderSavePanel } from "./panels";
@@ -16,6 +23,39 @@ import { enableInput } from "./options";
 // ---- 全局游戏状态 ----
 export let gameStarted = false; // 游戏是否已开始（隐藏开场遮罩用）
 export let gameStarting = false; // 开场回合是否进行中（防重复点击）
+
+type CharacterRef = {
+  source: string;
+  id?: string;
+  module?: string;
+  file?: string;
+  path?: string;
+};
+
+type CharacterOption = {
+  ref: CharacterRef;
+  id: string;
+  name: string;
+  occupation: string;
+  source_label: string;
+  hp: number;
+  max_hp: number;
+  san: number;
+  max_san: number;
+  reputation: number;
+  completed_modules: number;
+  top_skills?: { id: string; value: number }[];
+  description?: string;
+};
+
+type CharacterGroup = {
+  id: string;
+  title: string;
+  characters: CharacterOption[];
+};
+
+let selectedCharacterRef: CharacterRef | null = null;
+let selectedCharacterId = "";
 
 export function getGameStarted(): boolean {
   return gameStarted;
@@ -55,7 +95,7 @@ export function startGame() {
   btnStart.disabled = true;
   btnContinue.disabled = true;
   btnStart.textContent = "守秘人正在布景……";
-  safeSend(JSON.stringify({ type: "start" }));
+  safeSend(JSON.stringify({ type: "start", character_ref: selectedCharacterRef }));
 }
 
 // ---- 继续游戏 ----
@@ -112,8 +152,83 @@ export function populateModuleList(modules: any[], active: string) {
     if (chosen === activeModule) return;
     // 通过 WS 切换模组（electron 下 fetch 不可用，且 WS 切换无需 reload）
     activeModule = chosen;
+    selectedCharacterRef = null;
+    selectedCharacterId = "";
+    renderCharacterList([]);
+    characterSelectedSummary.textContent = "正在读取调查员…";
     safeSend(JSON.stringify({ type: "switch_module", module: chosen }));
   };
+}
+
+export function populateCharacterList(groups: CharacterGroup[]) {
+  renderCharacterList(groups || []);
+}
+
+function renderCharacterList(groups: CharacterGroup[]) {
+  characterChoiceList.innerHTML = "";
+  const allCharacters = groups.flatMap((group) => group.characters || []);
+  if (allCharacters.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "character-empty";
+    empty.textContent = "暂无可用调查员。";
+    characterChoiceList.appendChild(empty);
+    characterSelectedSummary.textContent = "未选择";
+    return;
+  }
+
+  if (!selectedCharacterRef || !allCharacters.some((c) => c.id === selectedCharacterId)) {
+    selectedCharacterRef = allCharacters[0].ref;
+    selectedCharacterId = allCharacters[0].id;
+  }
+
+  for (const group of groups) {
+    if (!group.characters || group.characters.length === 0) continue;
+
+    const section = document.createElement("section");
+    section.className = "character-group";
+
+    const title = document.createElement("div");
+    title.className = "character-group-title";
+    title.textContent = group.title;
+    section.appendChild(title);
+
+    const row = document.createElement("div");
+    row.className = "character-card-row";
+
+    for (const character of group.characters) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "character-card";
+      if (character.id === selectedCharacterId) card.classList.add("selected");
+      card.title = character.description || `${character.name} — ${character.occupation}`;
+
+      const name = document.createElement("span");
+      name.className = "character-card-name";
+      name.textContent = character.name;
+      const meta = document.createElement("span");
+      meta.className = "character-card-meta";
+      meta.textContent = `${character.occupation || "调查员"} · HP ${character.hp}/${character.max_hp} · SAN ${character.san}/${character.max_san}`;
+      const career = document.createElement("span");
+      career.className = "character-card-career";
+      career.textContent = `${character.source_label}${character.completed_modules ? ` · ${character.completed_modules}案` : ""}${character.reputation ? ` · 声望 ${character.reputation}` : ""}`;
+
+      card.appendChild(name);
+      card.appendChild(meta);
+      card.appendChild(career);
+      card.onclick = () => {
+        selectedCharacterRef = character.ref;
+        selectedCharacterId = character.id;
+        renderCharacterList(groups);
+      };
+      row.appendChild(card);
+    }
+
+    section.appendChild(row);
+    characterChoiceList.appendChild(section);
+  }
+
+  const selected = allCharacters.find((c) => c.id === selectedCharacterId) || allCharacters[0];
+  characterSelectedSummary.textContent = `${selected.name} · ${selected.occupation || "调查员"}`;
 }
 
 // ==================== 按钮事件绑定 ====================

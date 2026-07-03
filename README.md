@@ -34,6 +34,7 @@ trpg-master/
 ├── src/                          # 内核（零界面依赖）
 │   ├── engine.py                 # GameEngine — 回调驱动游戏循环
 │   ├── agent_graph.py            # LangGraph 回合编排：LLM/工具/模型切换/finalize
+│   ├── characters.py             # 长期调查员、角色选择、案件结算履历
 │   ├── config.py                 # 路径/API配置/动态模块切换
 │   ├── tools.py                  # Function Calling Schema + 执行器
 │   ├── llm.py                    # GLM 快速摘要
@@ -67,6 +68,13 @@ trpg-master/
 │   ├── character.py              # COC 7e 角色创建 (9职业) + 心理特质初始化
 │   ├── module_loader.py          # Markdown→world_state.json 导入
 │   └── state_manager.py          # 世界状态读写 + NPC揭示追踪 + 心理特质管理
+│
+├── characters/                   # 全局角色库
+│   ├── default/                  # 项目内置调查员，可跨模组选择
+│   └── custom/                   # 玩家自建/导入角色（本地数据，不入库）
+│
+├── profiles/                     # 玩家长期履历
+│   └── player_profile.json       # 运行时生成：案件历史、声望、人脉、长期状态
 │
 ├── skills/                       # 约束型提示模板 (COC 7e 完整规则)
 │   ├── core/                     # d100检定/防剧透(TIER+私有工作记忆)/入口
@@ -179,8 +187,28 @@ prepare_turn → call_llm → execute_tools → finalize
 - 文件夹式多槽位: `saves/<模组>/slot_NNN/`
 - 每槽含对话历史 + 世界快照 + 元数据
 - 读档恢复快照——杜绝线索跨存档污染
+- 存档仍然按模组隔离；`snapshot.json` 保存当前案件里的 PC 快照
+- `meta.json` 记录 `character_id/name/source/path`，用于知道这个槽位是哪位调查员的案件进度
 - 新游戏不覆盖已有存档
 - 存档面板支持新建/加载/删除/重命名
+
+### 角色与长期履历
+
+角色系统分三层，避免长期成长和当前案件互相污染：
+
+| 层 | 文件 | 职责 |
+|----|------|------|
+| 全局角色库 | `characters/default/*.json` / `characters/custom/*.json` | 可被多个模组选用的调查员基础卡 |
+| 当前案件状态 | `mod/<模组>/world_state.json.pc` | 开局时复制角色卡，游戏中 HP/SAN/物品/心理状态只改这里 |
+| 长期履历 | `profiles/player_profile.json` | 案件结束后写入粗粒度经历：结局、SAN 变化、声望、人脉、已完成模组 |
+
+新游戏流程：
+
+```
+选择模组 → 选择调查员（长期角色 / 默认角色 / 模组特色 / 自定义）→ 复制到 world_state.pc → 开场
+```
+
+案件结算时，前端确认结局后调用后端结算逻辑，将当前 PC 快照和结局摘要写回长期履历。这样一个调查员可以带着理智变化、心理创伤、声望和案件历史继续进入下一个模组。
 
 ### 线索系统（四分类）
 
