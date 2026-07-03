@@ -348,25 +348,13 @@ npcs_present:
 ## 初始线索
 ```yaml
 - category: investigation
-  text: 法伦主任告知：莱特教授在紧锁的办公室内死亡，官方死因为"严重突发心力衰竭"
+  text: 法伦主任告知：查尔斯·莱特教授死于一场被校方定性为"严重突发心力衰竭"的意外，死亡地点在他的校内办公室。
 - category: investigation
-  text: 法伦主任告知：莱特生前负责评估霍布豪斯家族文档，如今阿卡姆女巫审判文档下落不明
-- category: investigation
-  text: 法伦主任告知：莱特可能过着双重生活，他对莱特的了解仅限于工作层面
-- category: investigation
-  text: 法伦主任透露：哈兰德·洛奇和艾米莉亚·考特也卷入了此事
-- category: investigation
-  text: 法伦主任可以借出莱特办公室和家门的钥匙
-- category: investigation
-  text: 惠特克罗夫特医生的死亡证明存疑——尸体眼部组织遭受严重热损伤，所有器官同时衰竭
-- category: investigation
-  text: 莱特的尸体面部凝固着恐惧尖叫的神情
-- category: investigation
-  text: 莱特死前行为日益反常，表现出妄想狂倾向，想要逃离镇子
-- category: investigation
-  text: 莱特欠大西洋城黑帮巨额赌债——约11000美元
-- category: investigation
-  text: 塞西尔·亨特——被密斯卡托尼克大学开除的学生，莱特的造假同伙，目前已精神崩溃入住阿卡姆疗养院
+  text: 莱特生前正在评估霍布豪斯家族捐赠的阿卡姆女巫审判文档；他死后，这份文档下落不明。
+- category: task
+  text: 法伦主任愿意借出莱特办公室和住处的钥匙；初步调查可以从办公室、莱特的小屋，或参与文档评估工作的人员开始。
+- category: npc
+  text: 哈兰德·洛奇和艾米莉亚·考特曾接触过莱特的文档评估工作，可作为后续询问对象。
 ```
 
 # 标志 Flags

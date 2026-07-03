@@ -1,4 +1,4 @@
-"""LLM 客户端：流式/非流式调用 + GLM-4 Flash 快速摘要 + 沉浸式等待文本"""
+"""LLM 辅助功能：GLM-4 Flash 快速摘要 + 沉浸式等待文本"""
 
 import json
 import random
@@ -44,77 +44,6 @@ def tension(category: str = "dice") -> str:
     """返回一条随机沉浸式等待文本"""
     lines = TENSION_LINES.get(category, TENSION_LINES["dice"])
     return random.choice(lines)
-
-
-# ---------------------------------------------------------------------------
-# 流式调用
-# ---------------------------------------------------------------------------
-
-def stream_llm(client: OpenAI, messages: list, model: str,
-               tools: list | None = None) -> tuple[str, list]:
-    """流式调用 LLM——文本实时输出，tool_calls 静默积累。"""
-    kwargs = dict(model=model, messages=messages, temperature=0.8,
-                  max_tokens=2048, stream=True)
-    if tools:
-        kwargs["tools"] = tools
-        kwargs["tool_choice"] = "auto"
-
-    try:
-        stream = client.chat.completions.create(**kwargs)
-    except Exception as e:
-        print(f"\n[API 错误] {e}")
-        return "", []
-
-    full_text = ""
-    tool_calls_acc: dict[int, dict] = {}
-
-    for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta is None:
-            continue
-
-        if delta.content:
-            full_text += delta.content
-            print(delta.content, end="", flush=True)
-
-        if delta.tool_calls:
-            for tc_delta in delta.tool_calls:
-                idx = tc_delta.index
-                if idx not in tool_calls_acc:
-                    tool_calls_acc[idx] = {
-                        "id": "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""}
-                    }
-                acc = tool_calls_acc[idx]
-                if tc_delta.id:
-                    acc["id"] += tc_delta.id
-                if tc_delta.function:
-                    if tc_delta.function.name:
-                        acc["function"]["name"] += tc_delta.function.name
-                    if tc_delta.function.arguments:
-                        acc["function"]["arguments"] += tc_delta.function.arguments
-
-    tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
-    return full_text, tool_calls_list
-
-
-# ---------------------------------------------------------------------------
-# 非流式调用
-# ---------------------------------------------------------------------------
-
-def call_llm(client: OpenAI, messages: list, model: str,
-             tools: list | None = None) -> dict:
-    """非流式调用 LLM（保留以备用）。"""
-    kwargs = dict(model=model, messages=messages, temperature=0.8, max_tokens=2048)
-    if tools:
-        kwargs["tools"] = tools
-        kwargs["tool_choice"] = "auto"
-    try:
-        return client.chat.completions.create(**kwargs)
-    except Exception as e:
-        print(f"\n[API 错误] {e}")
-        return None
 
 
 # ---------------------------------------------------------------------------

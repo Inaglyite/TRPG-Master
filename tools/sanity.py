@@ -121,7 +121,6 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
     state = _load_state()
     pc = state["pc"]
     current_san = pc.get("san", 65)
-    pow_val = pc.get("attributes", {}).get("POW", 65)
 
     # 解析 severity
     loss_formats = {

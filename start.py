@@ -58,11 +58,11 @@ def save_config(cfg):
 def setup_venv():
     if VENV_DIR.exists():
         print(f"venv 已存在: {VENV_DIR}")
-        return
-    print("创建虚拟环境...")
-    subprocess.run([PYTHON_EXE, "-m", "venv", str(VENV_DIR)], check=True)
-    print("安装 openai...")
-    subprocess.run([str(VENV_PIP), "install", "openai"], check=True)
+    else:
+        print("创建虚拟环境...")
+        subprocess.run([PYTHON_EXE, "-m", "venv", str(VENV_DIR)], check=True)
+    print("安装 Python 依赖...")
+    subprocess.run([str(VENV_PIP), "install", "openai", "langgraph"], check=True)
     print("完成！")
 
 

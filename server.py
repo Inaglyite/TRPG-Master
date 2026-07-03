@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """TRPG Agent WebSocket 服务器 —— GameEngine + FastAPI"""
 
 import json
 import sys
 import asyncio
-import subprocess
+import base64
+import copy
+import mimetypes
+from urllib.parse import quote
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -40,7 +44,6 @@ from src.persistence import delete_save
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-import mimetypes
 
 app = FastAPI(title="TRPG Agent API")
 
@@ -67,6 +70,40 @@ def _list_mods() -> list:
             mods.append({"id": d.name, "title": theme.get("title", d.name),
                          "description": theme.get("description", "")})
     return mods
+
+
+def _asset_payload(filename: str) -> dict:
+    """生成前端可直接渲染的资产信息。"""
+    if not filename:
+        return {}
+    asset_path = (cfg.MODULE_DIR / "assets" / filename).resolve()
+    allowed = (cfg.MODULE_DIR / "assets").resolve()
+    if not str(asset_path).startswith(str(allowed)) or not asset_path.exists():
+        return {}
+
+    mime, _ = mimetypes.guess_type(str(asset_path))
+    data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
+    return {
+        "asset_data_uri": f"data:{mime or 'image/png'};base64,{data}",
+        "asset_url": f"/api/assets/{quote(cfg.MODULE_NAME)}/{quote(filename)}",
+    }
+
+
+def _enrich_clues_for_frontend(clues: dict) -> dict:
+    """为线索面板补齐图片 data URI，避免 Electron file:// 下无法直接取 HTTP 图。"""
+    enriched = copy.deepcopy(clues) if isinstance(clues, dict) else clues
+    if not isinstance(enriched, dict):
+        return enriched
+    for items in enriched.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            asset = item.get("asset")
+            if isinstance(asset, dict) and asset.get("file"):
+                asset.update(_asset_payload(asset["file"]))
+    return enriched
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +366,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 try:
                     _ws = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
                     pc_data = _ws.get("pc", {})
-                    clues_data = _ws.get("clues_found", {})
+                    clues_data = _enrich_clues_for_frontend(_ws.get("clues_found", {}))
                 except Exception:
                     pc_data, clues_data = {}, {}
                 await ws.send_json({
@@ -425,5 +462,5 @@ else:
 if __name__ == "__main__":
     import uvicorn
     print("🎲 TRPG Agent WebSocket 服务器")
-    print(f"   ws://localhost:8765/ws    前端: http://localhost:8765/")
+    print("   ws://localhost:8765/ws    前端: http://localhost:8765/")
     uvicorn.run(app, host="0.0.0.0", port=8765)

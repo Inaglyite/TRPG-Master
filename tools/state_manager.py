@@ -128,8 +128,10 @@ def cmd_list_clues():
                 ctype = c.get("type", "")
                 asset = c.get("asset")
                 prefix = ""
-                if ctype == "hidden": prefix = "[隐秘] "
-                elif ctype == "inferred": prefix = "[推理] "
+                if ctype == "hidden":
+                    prefix = "[隐秘] "
+                elif ctype == "inferred":
+                    prefix = "[推理] "
                 extra = f" ({cid})" if cid else ""
                 print(f"  {i+1}. {prefix}{c['text']}{extra}")
                 if asset and asset.get("file"):
@@ -187,8 +189,22 @@ def _migrate_old_clue_format(data: dict):
     data.setdefault("clue_links", [])
 
 
+def _find_clue_by_asset(data: dict, *, asset_id: str | None = None,
+                        asset_file: str | None = None):
+    """返回已使用同一线索资产的 clue，避免一张图挂到多条线索上。"""
+    for cat in CLUE_CATEGORIES:
+        for item in data.get("clues_found", {}).get(cat, []):
+            asset = item.get("asset") or {}
+            if asset_id and asset.get("id") == asset_id:
+                return item
+            if asset_file and asset.get("file") == asset_file:
+                return item
+    return None
+
+
 def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
-                  source=None, related_npcs="", related_scenes="", asset_file=None):
+                  source=None, related_npcs="", related_scenes="", asset_file=None,
+                  asset_id=None):
     """添加线索。向后兼容旧版纯 text 调用。"""
     if category not in CLUE_CATEGORIES:
         category = "investigation"
@@ -196,6 +212,34 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
     _migrate_old_clue_format(data)
 
     next_id = _clue_counter(data)
+    asset = None
+    skipped_asset = None
+    if asset_id:
+        mapped = data.get("asset_map", {}).get("clues", {}).get(asset_id)
+        existing = _find_clue_by_asset(data, asset_id=asset_id)
+        if existing:
+            skipped_asset = {
+                "id": asset_id,
+                "reason": "asset_already_attached",
+                "existing_clue_id": existing.get("id"),
+            }
+        elif mapped:
+            asset = {
+                "id": asset_id,
+                "file": mapped.get("file"),
+                "label": mapped.get("label", text[:80])
+            }
+    elif asset_file:
+        existing = _find_clue_by_asset(data, asset_file=asset_file)
+        if existing:
+            skipped_asset = {
+                "file": asset_file,
+                "reason": "asset_already_attached",
+                "existing_clue_id": existing.get("id"),
+            }
+        else:
+            asset = {"file": asset_file, "label": text[:80]}
+
     clue = {
         "id": f"clue_{next_id:03d}",
         "text": text,
@@ -205,11 +249,14 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
         "related_npcs": [n.strip() for n in related_npcs.split(",") if n.strip()] if related_npcs else [],
         "related_scenes": [s.strip() for s in related_scenes.split(",") if s.strip()] if related_scenes else [],
         "discovered_at": __import__("datetime").datetime.now().isoformat(),
-        "asset": {"file": asset_file, "label": text[:80]} if asset_file else None
+        "asset": asset
     }
     data["clues_found"][category].append(clue)
     _save(data)
-    print(json.dumps({"ok": True, "clue": clue}, ensure_ascii=False))
+    result = {"ok": True, "clue": clue}
+    if skipped_asset:
+        result["skipped_asset"] = skipped_asset
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def cmd_link_clues(from_id, to_id, reasoning):
@@ -405,7 +452,7 @@ def cmd_usage():
     print("  python state_manager.py set <json_path> <val>  修改字段（值用 JSON 格式）")
     print("  python state_manager.py npcs                   列出所有 NPC（含揭示程度）")
     print("  python state_manager.py clues                  列出已发现线索")
-    print("  python state_manager.py add-clue <text> [category]  添加线索")
+    print("  python state_manager.py add-clue <text> [category] [asset_id]  添加线索")
     print("        category: investigation/event/task/npc，默认 investigation")
     print("  python state_manager.py add-item <name>        添加物品到背包")
     print("  python state_manager.py remove-item <name>     从背包移除物品")
@@ -453,10 +500,11 @@ def main():
         cmd_set(sys.argv[2], sys.argv[3])
     elif cmd == "add-clue":
         if len(sys.argv) < 3:
-            print("ERROR: add-clue 需要 <text> [category] 参数", file=sys.stderr)
+            print("ERROR: add-clue 需要 <text> [category] [asset_id] 参数", file=sys.stderr)
             sys.exit(1)
         cat = sys.argv[3] if len(sys.argv) > 3 else "investigation"
-        cmd_add_clue(sys.argv[2], cat)
+        asset_id = sys.argv[4] if len(sys.argv) > 4 else None
+        cmd_add_clue(sys.argv[2], cat, asset_id=asset_id)
     elif cmd == "npcs":
         cmd_list_npcs()
     elif cmd == "clues":

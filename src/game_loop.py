@@ -1,6 +1,5 @@
 """终端版游戏循环 —— 使用 GameEngine + print/input 回调"""
 
-import json
 import sys
 import subprocess
 

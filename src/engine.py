@@ -3,24 +3,22 @@
 """
 
 import json
-import sys
-from dataclasses import dataclass, field
-from typing import Callable, Any
+from dataclasses import dataclass
+from typing import Callable
 
 from openai import OpenAI
 
 from .config import (
-    PROJECT_ROOT, API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, FORCE_PRO,
-    MAX_TOOL_ROUNDS, AUTO_SAVE_SLOT, OPTIONAL_SKILL_HINTS,
+    API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, FORCE_PRO,
+    OPTIONAL_SKILL_HINTS,
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .tools import (
-    TOOLS, COMPLEX_FUNCTIONS, tool_category,
-    needs_pro_model, execute_function, dice_summary,
+    TOOLS, execute_function,
 )
-from .llm import stream_llm as raw_stream_llm, tension, glm_quick_summary
-from .logger import tool as log_tool, error as log_error, summary_event as log_summary, \
-    tier_inject as log_tier, game_event as log_game, san as log_san
+from .agent_graph import build_turn_graph
+from .logger import error as log_error, summary_event as log_summary, \
+    tier_inject as log_tier, game_event as log_game
 
 
 @dataclass
@@ -55,6 +53,7 @@ class GameEngine:
         # 摘要阈值：消息超过此数或 token 估算超过窗口 60% 时触发压缩
         self.SUMMARY_MSG_THRESHOLD = 30
         self.SUMMARY_TOKEN_THRESHOLD = 8000
+        self._turn_graph = build_turn_graph()
 
     def reset(self):
         """开始新游戏——重置对话 + 世界状态"""
@@ -191,12 +190,15 @@ class GameEngine:
                             tool_calls_acc[idx] = {
                                 "id": "", "type": "function",
                                 "function": {"name": "", "arguments": ""}
-                            }
+                        }
                         acc = tool_calls_acc[idx]
-                        if tc.id: acc["id"] += tc.id
+                        if tc.id:
+                            acc["id"] += tc.id
                         if tc.function:
-                            if tc.function.name: acc["function"]["name"] += tc.function.name
-                            if tc.function.arguments: acc["function"]["arguments"] += tc.function.arguments
+                            if tc.function.name:
+                                acc["function"]["name"] += tc.function.name
+                            if tc.function.arguments:
+                                acc["function"]["arguments"] += tc.function.arguments
 
         # 因 token 上限被截断时提示（叙述/选项可能不完整）
         if finish_reason == "length" and not tool_calls_acc:
@@ -419,7 +421,6 @@ class GameEngine:
             f"{old_text}"
         )
 
-        last_err = None
         for attempt in range(2):
             try:
                 resp = client.chat.completions.create(
@@ -432,8 +433,7 @@ class GameEngine:
                     max_tokens=3000,
                 )
                 raw = resp.choices[0].message.content.strip()
-            except Exception as e:
-                last_err = e
+            except Exception:
                 if attempt == 0:
                     continue  # 重试一次
                 return None
@@ -491,8 +491,10 @@ class GameEngine:
                 # 补全缺失的右括号
                 depth = 0
                 for ch in candidate:
-                    if ch == '{': depth += 1
-                    elif ch == '}': depth -= 1
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
                 if depth > 0:
                     candidate += '}' * depth
                 json.loads(candidate)
@@ -510,14 +512,24 @@ class GameEngine:
             esc = False
             for ch in candidate:
                 if esc:
-                    esc = False; continue
-                if ch == '\\': esc = True; continue
-                if ch == '"': in_string = not in_string; continue
-                if in_string: continue
-                if ch == '{': depth_brace += 1
-                elif ch == '}': depth_brace -= 1
-                elif ch == '[': depth_bracket += 1
-                elif ch == ']': depth_bracket -= 1
+                    esc = False
+                    continue
+                if ch == '\\':
+                    esc = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == '{':
+                    depth_brace += 1
+                elif ch == '}':
+                    depth_brace -= 1
+                elif ch == '[':
+                    depth_bracket += 1
+                elif ch == ']':
+                    depth_bracket -= 1
             candidate += ']' * max(depth_bracket, 0)
             candidate += '}' * max(depth_brace, 0)
             try:
@@ -536,6 +548,16 @@ class GameEngine:
         "3. 不确定某信息是否可透露 → 保守处理，用模糊描述代替。\n"
         "4. 涉及战斗/疯狂叙事/魔法时，务必先 read_file 加载对应 skill（参考 trpg_master.skill 路由表）。"
     )
+
+    def _auto_handout(self, entity_type: str, entity_id: str):
+        """自动推送展示材料（独立于 LLM 调用，确保首次遇到必触发）。"""
+        result = execute_function("show_handout", {"entity_type": entity_type, "entity_id": entity_id})
+        try:
+            info = json.loads(result)
+            if info.get("found") and info.get("asset_data_uri"):
+                self.cb.on_handout(info)
+        except Exception:
+            pass
 
     def _inject_tier_reminder(self):
         """在最新 user 消息前注入 TIER 规则提醒（防止上下文稀释导致泄密）"""
@@ -566,127 +588,7 @@ class GameEngine:
 
     def handle_action(self, user_content: str | None = None):
         """执行一个完整回合"""
-        if user_content:
-            # TIER 滑动窗口注入（在追加用户消息前检查）
-            self._maybe_inject_tier()
-            self.messages.append({"role": "user", "content": user_content})
-            # 检测玩家消息是否涉及战斗/魔法/疯狂→主动注入按需 skill 提示
-            self._detect_content_skill_hint(user_content)
-
-        # 上下文压缩检查（在 LLM 调用前）
-        if self._should_summarize():
-            self._summarize_history()
-
-        tool_round = 0
-        narrative = ""
-        self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
-        turn_had_check = FORCE_PRO  # Pro 模式每回合都提醒 TIER 规则（可选）
-        if FORCE_PRO:
-            turn_had_check = True  # 全程 Pro 时每回合都视为 "高危"，确保 TIER 提醒不遗漏
-
-        while tool_round <= MAX_TOOL_ROUNDS:
-            text, tool_calls = self._stream_llm(self.current_model)
-
-            if not text and not tool_calls:
-                break
-
-            if not tool_calls:
-                narrative = text
-                break
-
-            # Pro 切换
-            if self.current_model == MODEL_FLASH and needs_pro_model(tool_calls):
-                self.current_model = MODEL_PRO
-                cat = "dice"
-                for tc in tool_calls:
-                    n = tc["function"]["name"]
-                    if n.startswith("sanity"): cat = "sanity"; break
-                    elif n in ("apply_damage", "apply_heal"): cat = "combat"; break
-                self.cb.on_tension(tension(cat), cat)
-                if self.messages and self.messages[-1]["role"] == "assistant":
-                    self.messages.pop()
-                continue
-
-            # 沉浸式提示
-            complex_hit = any(tc["function"]["name"] in COMPLEX_FUNCTIONS for tc in tool_calls)
-            if complex_hit:
-                turn_had_check = True  # 标记高危回合
-            if complex_hit and tool_round == 0:
-                cat = "dice"
-                for tc in tool_calls:
-                    n = tc["function"]["name"]
-                    if n.startswith("sanity"): cat = "sanity"; break
-                    elif n in ("apply_damage", "apply_heal"): cat = "combat"; break
-                self.cb.on_tension(tension(cat), cat)
-
-            if text:
-                narrative += text + "\n\n"
-
-            assistant_msg: dict = {"role": "assistant", "content": text}
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
-            self.messages.append(assistant_msg)
-
-            # 执行工具
-            tool_outputs = []
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                try:
-                    args = json.loads(tc["function"]["arguments"])
-                except json.JSONDecodeError:
-                    args = {}
-                output = self._execute_tool(name, args)
-                self.messages.append({
-                    "role": "tool", "tool_call_id": tc["id"], "content": output
-                })
-
-                # 日志记录
-                log_tool(name, args)
-
-                # 按需 skill 提示：特定工具调用后引导模型加载对应 skill
-                self._maybe_hint_optional_skill(name)
-
-                if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
-                    summary = dice_summary(output)
-                    if summary:
-                        self.cb.on_dice(summary)
-
-                if name in COMPLEX_FUNCTIONS:
-                    tool_outputs.append((name, output))
-
-                # 检测游戏结束：模型提议，不直接结束——让玩家决定
-                if name == "end_game":
-                    try:
-                        end_data = json.loads(output)
-                        self.cb.on_game_over(
-                            end_data.get("ending_type", "neutral"),
-                            end_data.get("title", "故事结束"),
-                            end_data.get("summary", "")
-                        )
-                        # 不 return，继续正常叙事循环。模型应该描述结局场景并提供
-                        # 「确认离开」和「继续探索」两个选项给玩家选择。
-                    except json.JSONDecodeError:
-                        pass
-
-            # GLM 快速摘要
-            if tool_outputs:
-                quick = glm_quick_summary(tool_outputs, text or narrative)
-                if quick:
-                    self.cb.on_glm_summary(quick)
-
-            tool_round += 1
-
-        if narrative.strip():
-            self.messages.append({"role": "assistant", "content": narrative.strip()})
-        else:
-            log_error("空回合：模型未生成任何叙述或工具调用")
-            self.cb.on_error("守秘人陷入了沉思……")
-
-        # 每回合结束后自动存档到 slot_000
-        self.save("slot_000")
-
-        # 更新记忆管理状态
-        self._last_turn_high_risk = turn_had_check
-        self._round_count += 1
-
-        self.cb.on_done()
+        self._turn_graph.invoke(
+            {"engine": self, "user_content": user_content},
+            config={"recursion_limit": 50},
+        )

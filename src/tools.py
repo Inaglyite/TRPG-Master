@@ -6,7 +6,6 @@ import os
 import base64
 import mimetypes
 import subprocess
-from pathlib import Path
 from .config import PROJECT_ROOT, STATE_FILE
 from . import config as _cfg
 
@@ -109,7 +108,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "state_add_clue",
-            "description": "记录新发现的线索。只在检定成功或确凿发现了信息时调用。根据线索性质选择分类：investigation(探案/现场证据)、event(事件/剧情)、task(任务/目标)、npc(人物相关发现)。",
+            "description": "记录新发现的线索。只在检定成功或确凿发现了信息时调用。根据线索性质选择分类：investigation(探案/现场证据)、event(事件/剧情)、task(任务/目标)、npc(人物相关发现)。如果该线索对应 asset_map.clues 中的展示材料，请提供 asset_id；引擎会在记录线索后自动分发图片。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -118,6 +117,10 @@ TOOLS = [
                         "type": "string",
                         "enum": ["investigation", "event", "task", "npc"],
                         "description": "线索分类"
+                    },
+                    "asset_id": {
+                        "type": "string",
+                        "description": "可选。对应 world_state.asset_map.clues 的键，如 wright_body、monster_manifest、wick_dinner。仅在线索确实对应该图片时填写。"
                     }
                 },
                 "required": ["text", "category"]
@@ -529,18 +532,6 @@ COMPLEX_FUNCTIONS = {
 }
 
 
-def tool_category(name: str) -> str:
-    if name == "skill_check":
-        return "dice"
-    if name.startswith("dice"):
-        return "dice"
-    if name.startswith("sanity"):
-        return "sanity"
-    if name in ("apply_damage", "apply_heal"):
-        return "combat"
-    return "dice"
-
-
 def _tc_name(tc) -> str:
     """兼容 SDK 对象和 plain dict 两种 tool_call 格式"""
     if isinstance(tc, dict):
@@ -580,7 +571,8 @@ def _run_cli(cmd: str) -> str:
 
 
 def execute_function(name: str, args: dict) -> str:
-    safe = lambda s: json.dumps(str(s), ensure_ascii=False)
+    def safe(value) -> str:
+        return json.dumps(str(value), ensure_ascii=False)
 
     if name == "skill_check":
         skill = args.get("skill", "spot_hidden")
@@ -604,7 +596,9 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "state_add_clue":
         text = safe(args.get("text", ""))
         cat = args.get("category", "investigation")
-        return _run_cli(f"{sys.executable} tools/state_manager.py add-clue {text} {cat}")
+        asset_id = args.get("asset_id", "") or ""
+        asset_arg = f" {safe(asset_id)}" if asset_id else ""
+        return _run_cli(f"{sys.executable} tools/state_manager.py add-clue {text} {cat}{asset_arg}")
     elif name == "state_add_item":
         return _run_cli(f"{sys.executable} tools/state_manager.py add-item {safe(args.get('item', ''))}")
     elif name == "state_remove_item":
@@ -618,7 +612,6 @@ def execute_function(name: str, args: dict) -> str:
         return _run_cli(f"{sys.executable} tools/damage.py heal {args.get('target', 'pc')} {args.get('amount', 0)}")
     elif name == "sanity_loss":
         sev = args.get("severity", "moderate")
-        src = safe(args.get("source", "未知恐怖"))
         return _run_cli(f"{sys.executable} tools/sanity.py loss {sev}")
     elif name == "sanity_restore":
         return _run_cli(f"{sys.executable} tools/sanity.py restore {args.get('amount', 0)}")
@@ -671,7 +664,6 @@ def execute_function(name: str, args: dict) -> str:
         ending = args.get("ending_type", "neutral")
         title = args.get("title", "故事结束")
         summary = args.get("summary", "")
-        from . import config as _cfg
         with open(_cfg.STATE_FILE, "r+", encoding="utf-8") as f:
             data = json.load(f)
             data["game_over"] = {
@@ -707,7 +699,6 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "sanity_trigger":
         desc = args.get("description", "")
         # 基于关键词的 severity 建议
-        desc_lower = desc.lower()
         if any(w in desc for w in ["直视", "伟大", "克苏鲁", "神话生物完全显形"]):
             suggestion = "catastrophic"
         elif any(w in desc for w in ["朋友被杀", "目击死亡", "尸雨", "严刑拷打", "割喉"]):

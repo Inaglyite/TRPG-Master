@@ -133,18 +133,26 @@ def calc_derived(attrs: dict) -> dict:
 
 
 def _damage_bonus(total: int) -> str:
-    if total < 65: return "-2"
-    if total < 85: return "-1"
-    if total < 125: return "0"
-    if total < 165: return "+1D4"
+    if total < 65:
+        return "-2"
+    if total < 85:
+        return "-1"
+    if total < 125:
+        return "0"
+    if total < 165:
+        return "+1D4"
     return "+1D6"
 
 
 def _build(total: int) -> int:
-    if total < 65: return -2
-    if total < 85: return -1
-    if total < 125: return 0
-    if total < 165: return 1
+    if total < 65:
+        return -2
+    if total < 85:
+        return -1
+    if total < 125:
+        return 0
+    if total < 165:
+        return 1
     return 2
 
 
@@ -189,7 +197,6 @@ def create_character(name: str, occupation: str, quick: bool = False) -> dict:
 
     # 职业技能点
     occ_skill_points = parse_skill_points(occ["skill_points"], attrs)
-    interest_points = attrs["INT"] * 2  # 兴趣技能点
 
     # 信用评级范围
     cr_min, cr_max = occ["credit_range"]

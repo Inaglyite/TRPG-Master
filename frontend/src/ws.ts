@@ -98,6 +98,7 @@ function handleMessage(e: MessageEvent) {
       break;
     case "done":
       onDone();
+      safeSend(JSON.stringify({ type: "state" }));
       break;
     case "error":
       addMsg("error", data.message);

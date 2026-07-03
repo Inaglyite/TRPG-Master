@@ -23,10 +23,66 @@ import { addMsg, removeLoading, scrollDown } from "./renderer";
 import { getGameStarted } from "./start";
 import { enableInput, sendAction } from "./options";
 
+type ClueAsset = {
+  id?: string;
+  file?: string;
+  label?: string;
+  asset_data_uri?: string;
+  asset_url?: string;
+};
+
+type ClueItem = {
+  id?: string;
+  text?: string;
+  type?: string;
+  tier?: number;
+  asset?: ClueAsset | null;
+};
+
+const CLUE_CATEGORIES = ["investigation", "event", "task", "npc"] as const;
+
+const CLUE_NAMES: Record<string, string> = {
+  investigation: "探案线索",
+  event: "事件线索",
+  task: "任务线索",
+  npc: "人物线索",
+};
+
+function parseJson<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function clearElement(el: Element) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function makeBadge(text: string, cls = "") {
+  const badge = document.createElement("span");
+  badge.className = `clue-tier${cls ? ` ${cls}` : ""}`;
+  badge.textContent = text;
+  return badge;
+}
+
+function openImageOverlay(src: string, alt = "") {
+  const overlay = document.createElement("div");
+  overlay.className = "handout-overlay";
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = alt;
+  overlay.appendChild(img);
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+}
+
 // ---- 角色面板 ----
 export function updateCharPanel(raw: string) {
+  const data = parseJson<any>(raw, null);
+  if (!data) return;
   try {
-    const data = JSON.parse(raw);
     // 名字和职业随模组动态更新
     const nameEl = document.getElementById("char-name");
     if (nameEl && data.name) nameEl.textContent = data.name;
@@ -82,40 +138,72 @@ export function updateCharPanel(raw: string) {
 
 // ---- 线索面板 ----
 export function updateCluePanel(cluesRaw: string) {
-  try {
-    const clues = JSON.parse(cluesRaw);
-    const names: Record<string, string> = {
-      investigation: "🔍 探案线索",
-      event: "📜 事件线索",
-      task: "🎯 任务线索",
-      npc: "👤 人物线索",
-    };
-    const cluesList = document.getElementById("clues-list")!;
-    let html = "";
-    if (typeof clues === "object" && !Array.isArray(clues)) {
-      for (const cat of ["investigation", "event", "task", "npc"]) {
-        const items = clues[cat] || [];
-        if (items.length > 0) {
-          html += `<div class="clue-cat">${names[cat] || cat}</div>`;
-for (const item of items) {
-          // 缩略图：electron file:// 下 HTTP URL 不可用，线索面板不直接嵌图（通过 show_handout 弹窗展示）
-          let tierBadge = "";
-          if (item.tier === 2) tierBadge = ' <span class="clue-tier">TIER2</span>';
-          if (item.type === "inferred") tierBadge = ' <span class="clue-tier inferred">推理</span>';
-          let assetBadge = "";
-          if (item.asset && item.asset.file) assetBadge = ' <span class="clue-tier asset">🖼</span>';
-          html += `<div class="clue-item">• ${item.text}${tierBadge}${assetBadge}</div>`;
-          }
-        }
+  const clues = parseJson<Record<string, ClueItem[]>>(cluesRaw, {});
+  const cluesList = document.getElementById("clues-list")!;
+  clearElement(cluesList);
+
+  let rendered = 0;
+  if (typeof clues === "object" && !Array.isArray(clues)) {
+    for (const cat of CLUE_CATEGORIES) {
+      const items = clues[cat] || [];
+      if (items.length === 0) continue;
+
+      const heading = document.createElement("div");
+      heading.className = "clue-cat";
+      heading.textContent = CLUE_NAMES[cat] || cat;
+      cluesList.appendChild(heading);
+
+      for (const item of items) {
+        cluesList.appendChild(renderClueItem(item));
+        rendered++;
       }
     }
-    if (!html) {
-      html = '<div class="clue-item" style="color:var(--text-faint)">暂无记录</div>';
-    }
-    cluesList.innerHTML = html;
-  } catch {
-    // ignore parse errors
   }
+
+  if (rendered === 0) {
+    const empty = document.createElement("div");
+    empty.className = "clue-empty";
+    empty.textContent = "暂无记录";
+    cluesList.appendChild(empty);
+  }
+}
+
+function renderClueItem(item: ClueItem) {
+  const row = document.createElement("div");
+  row.className = "clue-item";
+
+  const main = document.createElement("div");
+  main.className = "clue-main";
+
+  const text = document.createElement("div");
+  text.className = "clue-text";
+  text.textContent = item.text || "未命名线索";
+  main.appendChild(text);
+
+  const meta = document.createElement("div");
+  meta.className = "clue-meta";
+  if (item.tier === 2) meta.appendChild(makeBadge("TIER2"));
+  if (item.type === "inferred") meta.appendChild(makeBadge("推理", "inferred"));
+  if (item.asset?.file) meta.appendChild(makeBadge("图像", "asset"));
+  if (meta.childElementCount > 0) main.appendChild(meta);
+
+  row.appendChild(main);
+
+  const assetSrc = item.asset?.asset_data_uri || item.asset?.asset_url || "";
+  if (assetSrc) {
+    const btn = document.createElement("button");
+    btn.className = "clue-thumb-btn";
+    btn.title = item.asset?.label || item.asset?.file || "查看线索图片";
+    const img = document.createElement("img");
+    img.className = "clue-thumb";
+    img.src = assetSrc;
+    img.alt = item.asset?.label || item.asset?.file || "线索图片";
+    btn.appendChild(img);
+    btn.onclick = () => openImageOverlay(assetSrc, img.alt);
+    row.appendChild(btn);
+  }
+
+  return row;
 }
 
 // ---- 请求角色状态 ----
@@ -134,21 +222,27 @@ export function showHandout(data: { file: string; label: string; asset_data_uri:
 
   const card = document.createElement("div");
   card.className = "handout-card";
-  card.innerHTML = `
-    <div class="handout-header">
-      <span class="handout-label">${data.label || data.file}</span>
-      <button class="handout-close" onclick="this.parentElement!.parentElement!.remove()">✕</button>
-    </div>
-    <img src="${imgSrc}" alt="${data.label}" loading="lazy" />
-  `;
-  // 点击图片放大
-  card.querySelector("img")!.onclick = () => {
-    const overlay = document.createElement("div");
-    overlay.className = "handout-overlay";
-    overlay.innerHTML = `<img src="${imgSrc}" alt="${data.label}" />`;
-    overlay.onclick = () => overlay.remove();
-    document.body.appendChild(overlay);
-  };
+
+  const header = document.createElement("div");
+  header.className = "handout-header";
+  const label = document.createElement("span");
+  label.className = "handout-label";
+  label.textContent = data.label || data.file;
+  const close = document.createElement("button");
+  close.className = "handout-close";
+  close.textContent = "✕";
+  close.onclick = () => card.remove();
+  header.appendChild(label);
+  header.appendChild(close);
+
+  const img = document.createElement("img");
+  img.src = imgSrc;
+  img.alt = data.label || data.file;
+  img.loading = "lazy";
+  img.onclick = () => openImageOverlay(imgSrc, img.alt);
+
+  card.appendChild(header);
+  card.appendChild(img);
   container.appendChild(card);
 
   // 10 秒后自动消失

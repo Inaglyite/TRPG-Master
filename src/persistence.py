@@ -159,8 +159,6 @@ def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
 
 def _migrate_snapshot(snapshot: dict) -> dict:
     """将旧版快照迁移到最新数据结构（向下兼容）。"""
-    migrated = False
-
     # v2: private_memory
     if "private_memory" not in snapshot:
         snapshot["private_memory"] = {
@@ -168,13 +166,11 @@ def _migrate_snapshot(snapshot: dict) -> dict:
             "hidden_facts": {},
             "inference_notes": "（从旧存档迁移，请守秘人根据对话历史手动补充）"
         }
-        migrated = True
 
     # v2: NPC revealed 字段
     for npc in snapshot.get("npcs", []):
         if "revealed" not in npc:
             npc["revealed"] = {"level": 0, "entries": []}
-            migrated = True
 
     # v2: PC psychological_profile
     pc = snapshot.get("pc", {})
@@ -183,7 +179,6 @@ def _migrate_snapshot(snapshot: dict) -> dict:
             "traits": [], "key_relationships": [],
             "phobias": [], "manias": []
         }
-        migrated = True
 
     return snapshot
 
