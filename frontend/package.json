@@ -8,9 +8,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "electron:dev": "NODE_ENV=dev npx electron .",
-    "electron:start": "vite build && npx electron .",
-    "dist": "vite build && npx electron-builder --linux AppImage --x64"
+    "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev npx electron .",
+    "electron:start": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron .",
+    "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64"
   },
   "devDependencies": {
     "electron": "^42.4.1",

@@ -25,6 +25,16 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
+  win.webContents.on("did-finish-load", () => {
+    log("页面加载完成:", win.webContents.getURL());
+  });
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    log("页面加载失败事件:", errorCode, errorDescription, validatedURL);
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    log("渲染进程退出:", details.reason, details.exitCode);
+  });
+
   // 加载页面，并在失败时弹窗提示（避免白屏无声失败）
   const loadPromise = isDev
     ? win.loadURL("http://localhost:3000")
