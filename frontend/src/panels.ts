@@ -22,6 +22,7 @@ import { safeSend } from "./ws";
 import { addMsg, removeLoading, scrollDown } from "./renderer";
 import { getGameStarted } from "./start";
 import { enableInput, sendAction } from "./options";
+import { escapeHtml } from "./text";
 
 type ClueAsset = {
   id?: string;
@@ -60,6 +61,33 @@ function clearElement(el: Element) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+function clampPct(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function upsertStatBar(valueId: string, fillId: string, fillClass: string, pct: number) {
+  const valueEl = document.getElementById(valueId);
+  if (!valueEl) return;
+
+  let fill = document.getElementById(fillId) as HTMLElement | null;
+  if (!fill) {
+    const bar = document.createElement("div");
+    bar.className = "stat-bar";
+    fill = document.createElement("div");
+    fill.className = `stat-bar-fill ${fillClass}`;
+    fill.id = fillId;
+    bar.appendChild(fill);
+    const row = valueEl.closest(".stat-row");
+    (row || valueEl).insertAdjacentElement("afterend", bar);
+  } else {
+    const row = valueEl.closest(".stat-row");
+    const bar = fill.parentElement;
+    if (row && bar?.parentElement === row) row.insertAdjacentElement("afterend", bar);
+  }
+  fill.style.width = `${clampPct(pct)}%`;
+}
+
 function makeBadge(text: string, cls = "") {
   const badge = document.createElement("span");
   badge.className = `clue-tier${cls ? ` ${cls}` : ""}`;
@@ -91,46 +119,33 @@ export function updateCharPanel(raw: string) {
 
     document.getElementById("hp-bar")!.textContent = `${data.hp} / ${data.max_hp}`;
     document.getElementById("san-bar")!.textContent = `${data.san} / ${data.max_san}`;
-    const hpPct = (data.hp / data.max_hp) * 100;
-    const sanPct = (data.san / data.max_san) * 100;
-
-    // HP bar
-    let hpBar = document.getElementById("hp-fill");
-    if (!hpBar) {
-      const bar = document.createElement("div");
-      bar.className = "stat-bar";
-      const fill = document.createElement("div");
-      fill.className = "stat-bar-fill hp";
-      fill.id = "hp-fill";
-      fill.style.width = `${hpPct}%`;
-      bar.appendChild(fill);
-      document.getElementById("hp-bar")!.after(bar);
-    } else {
-      hpBar.style.width = `${hpPct}%`;
-    }
-
-    let sanBar = document.getElementById("san-fill");
-    if (!sanBar) {
-      const bar = document.createElement("div");
-      bar.className = "stat-bar";
-      const fill = document.createElement("div");
-      fill.className = "stat-bar-fill san";
-      fill.id = "san-fill";
-      fill.style.width = `${sanPct}%`;
-      bar.appendChild(fill);
-      document.getElementById("san-bar")!.after(bar);
-    } else {
-      sanBar.style.width = `${sanPct}%`;
-    }
+    const hpPct = (Number(data.hp) / Number(data.max_hp)) * 100;
+    const sanPct = (Number(data.san) / Number(data.max_san)) * 100;
+    upsertStatBar("hp-bar", "hp-fill", "hp", hpPct);
+    upsertStatBar("san-bar", "san-fill", "san", sanPct);
 
     const attrs = data.attributes || {};
     const attrList = document.getElementById("attr-list")!;
-    attrList.innerHTML = Object.entries(attrs)
-      .map(([k, v]) => `<div class="stat-row"><span>${k}</span><span>${v}</span></div>`)
-      .join("");
+    clearElement(attrList);
+    Object.entries(attrs).forEach(([k, v]) => {
+      const row = document.createElement("div");
+      row.className = "stat-row";
+      const label = document.createElement("span");
+      label.textContent = k;
+      const value = document.createElement("span");
+      value.textContent = String(v);
+      row.appendChild(label);
+      row.appendChild(value);
+      attrList.appendChild(row);
+    });
 
     const inv = document.getElementById("inv-list")!;
-    inv.innerHTML = (data.inventory || []).map((s: string) => `<div>• ${s}</div>`).join("");
+    clearElement(inv);
+    (data.inventory || []).forEach((s: string) => {
+      const item = document.createElement("div");
+      item.textContent = s;
+      inv.appendChild(item);
+    });
   } catch {
     // ignore parse errors
   }
@@ -255,13 +270,12 @@ export function showEnding(data: any) {
   const emoji = data.ending_type === "good" ? "🏆" : data.ending_type === "bad" ? "💀" : "🌫";
   // 显示结局提议按钮
   const btnConfirm = document.createElement("button");
-  btnConfirm.className = "opt-btn";
-  btnConfirm.style.cssText = "flex:2;background:var(--gold);color:var(--bg);font-weight:bold";
+  btnConfirm.className = "opt-btn end-confirm";
   btnConfirm.textContent = emoji + " 确认结束 —— " + data.title;
   btnConfirm.id = "btn-end-confirm";
 
   const btnContinueBtn = document.createElement("button");
-  btnContinueBtn.className = "opt-btn";
+  btnContinueBtn.className = "opt-btn free end-continue";
   btnContinueBtn.textContent = "🔄 继续探索";
   btnContinueBtn.id = "btn-end-continue";
 
@@ -279,8 +293,8 @@ export function showEnding(data: any) {
     const html = [
       '<div class="ending-box">',
       '<div class="ending-emoji">' + emoji + "</div>",
-      '<div class="ending-title">' + data.title + "</div>",
-      '<div class="ending-summary">' + data.summary + "</div>",
+      '<div class="ending-title">' + escapeHtml(data.title) + "</div>",
+      '<div class="ending-summary">' + escapeHtml(data.summary) + "</div>",
       "</div>",
     ].join("");
     const el = addMsg("gm", html);
@@ -338,19 +352,20 @@ export function renderSavePanel(saves: any[]) {
         // ignore date parse errors
       }
     }
-    const sceneName = s.scene_name || "未知场景";
-    const displayName = s.label || sceneName;
-    const characterName = s.character_name || "未知调查员";
-    const hpStr = s.hp || "?";
-    const sanStr = s.san || "?";
+    const sceneName = escapeHtml(s.scene_name || "未知场景");
+    const displayName = escapeHtml(s.label || s.scene_name || "未知场景");
+    const characterName = escapeHtml(s.character_name || "未知调查员");
+    const hpStr = escapeHtml(s.hp || "?");
+    const sanStr = escapeHtml(s.san || "?");
+    const slotId = escapeHtml(s.id);
     const clueCount = s.clue_count ?? 0;
     const msgCount = s.message_count ?? 0;
 
-    html += `<div class="save-slot-entry${isLatest ? " save-latest" : ""}" data-slot="${s.id}">
+    html += `<div class="save-slot-entry${isLatest ? " save-latest" : ""}" data-slot="${slotId}">
       <div class="save-slot-info">
         <div class="save-slot-title">
           <span class="save-slot-name">${isLatest ? '<span class="save-badge">最新</span> ' : ""}${isAuto ? "💾" : "📁"} ${displayName}</span>
-          <span class="save-slot-time">${relative} · ${timeStr}</span>
+          <span class="save-slot-time">${escapeHtml(relative)} · ${escapeHtml(timeStr)}</span>
         </div>
         <div class="save-slot-meta">
           <span>${sceneName}</span>
@@ -361,9 +376,9 @@ export function renderSavePanel(saves: any[]) {
         </div>
       </div>
       <div class="save-slot-actions">
-        <button class="save-action-load" data-slot="${s.id}">📂</button>
-        <button class="save-action-rename" data-slot="${s.id}">✏️</button>
-        ${isAuto ? "" : `<button class="save-action-del" data-slot="${s.id}">🗑</button>`}
+        <button class="save-action-load" data-slot="${slotId}">📂</button>
+        <button class="save-action-rename" data-slot="${slotId}">✏️</button>
+        ${isAuto ? "" : `<button class="save-action-del" data-slot="${slotId}">🗑</button>`}
       </div>
     </div>`;
   }

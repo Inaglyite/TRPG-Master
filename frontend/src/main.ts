@@ -7,7 +7,7 @@
  */
 
 import { connect } from "./ws";
-import { btnStart } from "./dom";
+import { btnStart, getConnState, setConn } from "./dom";
 
 export { populateModuleList } from "./start";
 
@@ -36,7 +36,13 @@ export function applyTheme(theme: any) {
   if (theme.title) {
     document.title = theme.title;
     const h1 = document.querySelector("#header h1");
-    if (h1) h1.innerHTML = `🏛 ${theme.title}<span id="conn-status" class="connecting"></span>`;
+    if (h1) {
+      h1.textContent = `🏛 ${theme.title}`;
+      const status = document.createElement("span");
+      status.id = "conn-status";
+      h1.appendChild(status);
+      setConn(getConnState());
+    }
     const el = document.getElementById("start-title");
     if (el) el.textContent = `🏛 ${theme.title}`;
   }

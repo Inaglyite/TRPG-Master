@@ -15,9 +15,18 @@ export const btnPanel = document.getElementById("btn-panel")!;
 export const charPanel = document.getElementById("char-panel")!;
 export const connStatus = document.getElementById("conn-status")!;
 
+let connState: "connecting" | "connected" | "disconnected" = "connecting";
+
+export function getConnState() {
+  return connState;
+}
+
 export function setConn(state: "connecting" | "connected" | "disconnected") {
-  connStatus.className = state;
-  connStatus.title =
+  connState = state;
+  const el = document.getElementById("conn-status") || connStatus;
+  if (!el) return;
+  el.className = state;
+  el.title =
     state === "connected"
       ? "已连接到守秘人"
       : state === "connecting"

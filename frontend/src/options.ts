@@ -18,15 +18,16 @@ import {
 } from "./dom";
 import { addMsg, removeLoading, showGmThinking, getStreamTarget, setStreamTarget } from "./renderer";
 import { safeSend } from "./ws";
+import { escapeHtml } from "./text";
 
 // ---- 建议检定弹窗 ----
 export function onSuggest(data: any) {
   removeLoading();
   modalText.innerHTML = `
-    <div style="font-size:13px;color:var(--text-dim)">${data.description}</div>
-    <div style="margin-top:8px;">
-      <b>${data.skill}</b>（${data.attribute}）
-      — 难度：${data.dc_label}（DC ${data.dc}）
+    <div class="suggest-desc">${escapeHtml(data.description)}</div>
+    <div class="suggest-roll">
+      <b>${escapeHtml(data.skill)}</b>（${escapeHtml(data.attribute)}）
+      — 难度：${escapeHtml(data.dc_label)}（DC ${escapeHtml(data.dc)}）
     </div>
   `;
   modalOverlay.classList.remove("hidden");
