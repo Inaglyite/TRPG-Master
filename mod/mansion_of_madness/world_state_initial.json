@@ -138,7 +138,15 @@
     "east_wing_explored": false,
     "west_wing_explored": false,
     "basement_accessible": false,
-    "ritual_circle_active": true
+    "ritual_circle_active": true,
+    "portrait_safe_opened": false,
+    "silver_badge_found": false,
+    "basement_seal_seen": false
+  },
+  "case_clocks": {
+    "house_instability": 0,
+    "shadow_hunger": 0,
+    "truth_clarity": 0
   },
   "scene_cache": {},
   "private_memory": {
