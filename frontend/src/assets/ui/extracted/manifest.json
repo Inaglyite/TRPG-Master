@@ -1,0 +1,326 @@
+[
+  {
+    "file": "01_panel_message_large.png",
+    "source_bbox": {
+      "minX": 11,
+      "minY": 14,
+      "maxX": 701,
+      "maxY": 181,
+      "count": 114502
+    },
+    "width": 711,
+    "height": 188
+  },
+  {
+    "file": "02_panel_small_light.png",
+    "source_bbox": {
+      "minX": 716,
+      "minY": 15,
+      "maxX": 1011,
+      "maxY": 115,
+      "count": 29149
+    },
+    "width": 316,
+    "height": 121
+  },
+  {
+    "file": "03_strip_small_ornate_dark.png",
+    "source_bbox": {
+      "minX": 716,
+      "minY": 132,
+      "maxX": 1011,
+      "maxY": 194,
+      "count": 18118
+    },
+    "width": 316,
+    "height": 83
+  },
+  {
+    "file": "04_panel_message_medium.png",
+    "source_bbox": {
+      "minX": 10,
+      "minY": 192,
+      "maxX": 702,
+      "maxY": 294,
+      "count": 70008
+    },
+    "width": 713,
+    "height": 123
+  },
+  {
+    "file": "05_strip_small_dark.png",
+    "source_bbox": {
+      "minX": 714,
+      "minY": 214,
+      "maxX": 1010,
+      "maxY": 283,
+      "count": 20069
+    },
+    "width": 317,
+    "height": 90
+  },
+  {
+    "file": "06_button_option_light.png",
+    "source_bbox": {
+      "minX": 11,
+      "minY": 315,
+      "maxX": 508,
+      "maxY": 387,
+      "count": 35334
+    },
+    "width": 518,
+    "height": 93
+  },
+  {
+    "file": "07_button_option_ornate_dark.png",
+    "source_bbox": {
+      "minX": 518,
+      "minY": 316,
+      "maxX": 1013,
+      "maxY": 386,
+      "count": 34314
+    },
+    "width": 516,
+    "height": 91
+  },
+  {
+    "file": "08_panel_input_wide.png",
+    "source_bbox": {
+      "minX": 418,
+      "minY": 406,
+      "maxX": 1013,
+      "maxY": 506,
+      "count": 57738
+    },
+    "width": 616,
+    "height": 121
+  },
+  {
+    "file": "09_panel_sidebar_tall.png",
+    "source_bbox": {
+      "minX": 10,
+      "minY": 408,
+      "maxX": 402,
+      "maxY": 1111,
+      "count": 272531
+    },
+    "width": 413,
+    "height": 724
+  },
+  {
+    "file": "10_panel_modal_wide.png",
+    "source_bbox": {
+      "minX": 418,
+      "minY": 523,
+      "maxX": 1012,
+      "maxY": 637,
+      "count": 66195
+    },
+    "width": 615,
+    "height": 135
+  },
+  {
+    "file": "11_bar_status_round_ends.png",
+    "source_bbox": {
+      "minX": 415,
+      "minY": 655,
+      "maxX": 1009,
+      "maxY": 727,
+      "count": 41795
+    },
+    "width": 615,
+    "height": 93
+  },
+  {
+    "file": "12_strip_action_long.png",
+    "source_bbox": {
+      "minX": 418,
+      "minY": 750,
+      "maxX": 1009,
+      "maxY": 832,
+      "count": 46158
+    },
+    "width": 612,
+    "height": 103
+  },
+  {
+    "file": "13_panel_book_double.png",
+    "source_bbox": {
+      "minX": 428,
+      "minY": 847,
+      "maxX": 943,
+      "maxY": 1121,
+      "count": 136693
+    },
+    "width": 536,
+    "height": 295
+  },
+  {
+    "file": "14_icon_round_small.png",
+    "source_bbox": {
+      "minX": 950,
+      "minY": 952,
+      "maxX": 1011,
+      "maxY": 1016,
+      "count": 3222
+    },
+    "width": 82,
+    "height": 85
+  },
+  {
+    "file": "15_panel_card_medium.png",
+    "source_bbox": {
+      "minX": 20,
+      "minY": 1129,
+      "maxX": 370,
+      "maxY": 1260,
+      "count": 44180
+    },
+    "width": 371,
+    "height": 152
+  },
+  {
+    "file": "16_strip_ornate_wide.png",
+    "source_bbox": {
+      "minX": 395,
+      "minY": 1134,
+      "maxX": 905,
+      "maxY": 1205,
+      "count": 34329
+    },
+    "width": 531,
+    "height": 92
+  },
+  {
+    "file": "17_icon_portrait_square.png",
+    "source_bbox": {
+      "minX": 914,
+      "minY": 1160,
+      "maxX": 1009,
+      "maxY": 1254,
+      "count": 8819
+    },
+    "width": 116,
+    "height": 115
+  },
+  {
+    "file": "18_button_strip_plain.png",
+    "source_bbox": {
+      "minX": 393,
+      "minY": 1221,
+      "maxX": 898,
+      "maxY": 1289,
+      "count": 31277
+    },
+    "width": 526,
+    "height": 89
+  },
+  {
+    "file": "19_fx_candle_left.png",
+    "source_bbox": {
+      "minX": 23,
+      "minY": 1269,
+      "maxX": 129,
+      "maxY": 1401,
+      "count": 13460
+    },
+    "width": 127,
+    "height": 153
+  },
+  {
+    "file": "20_icon_round_coin.png",
+    "source_bbox": {
+      "minX": 919,
+      "minY": 1270,
+      "maxX": 1002,
+      "maxY": 1355,
+      "count": 5682
+    },
+    "width": 104,
+    "height": 106
+  },
+  {
+    "file": "21_fx_candle_middle.png",
+    "source_bbox": {
+      "minX": 136,
+      "minY": 1272,
+      "maxX": 247,
+      "maxY": 1400,
+      "count": 13878
+    },
+    "width": 132,
+    "height": 149
+  },
+  {
+    "file": "22_fx_candle_right.png",
+    "source_bbox": {
+      "minX": 256,
+      "minY": 1274,
+      "maxX": 371,
+      "maxY": 1400,
+      "count": 14083
+    },
+    "width": 136,
+    "height": 147
+  },
+  {
+    "file": "23_strip_header_plain.png",
+    "source_bbox": {
+      "minX": 393,
+      "minY": 1312,
+      "maxX": 900,
+      "maxY": 1376,
+      "count": 31721
+    },
+    "width": 528,
+    "height": 85
+  },
+  {
+    "file": "24_icon_round_gem.png",
+    "source_bbox": {
+      "minX": 912,
+      "minY": 1373,
+      "maxX": 1011,
+      "maxY": 1475,
+      "count": 7074
+    },
+    "width": 120,
+    "height": 123
+  },
+  {
+    "file": "25_strip_footer_ornate.png",
+    "source_bbox": {
+      "minX": 389,
+      "minY": 1408,
+      "maxX": 899,
+      "maxY": 1507,
+      "count": 48176
+    },
+    "width": 531,
+    "height": 120
+  },
+  {
+    "file": "26_fx_eye_left.png",
+    "source_bbox": {
+      "minX": 23,
+      "minY": 1411,
+      "maxX": 191,
+      "maxY": 1497,
+      "count": 13877
+    },
+    "width": 189,
+    "height": 107
+  },
+  {
+    "file": "27_fx_eye_right.png",
+    "source_bbox": {
+      "minX": 193,
+      "minY": 1411,
+      "maxX": 377,
+      "maxY": 1499,
+      "count": 15601
+    },
+    "width": 205,
+    "height": 109
+  }
+]
