@@ -2,6 +2,7 @@
 
 **引用 Skill：** [[../core/no_spoiler.skill]]、[[../core/dice_system.skill]]、[[../keeper/keeper_core.skill]]
 **引用其他模块：** [[../keeper/keeper_clues.skill]]、[[../keeper/keeper_npc.skill]]、[[../keeper/keeper_sanity.skill]]、[[../keeper/keeper_combat.skill]]
+**扩展节奏模块：** [[keeper_pressure.skill]] 负责调查压力、嫌疑人矩阵、线索网与危机升级。
 
 ---
 
