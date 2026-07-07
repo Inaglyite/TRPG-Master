@@ -45,12 +45,10 @@ def _prepare_turn(state: TurnState) -> dict:
     user_content = state.get("user_content")
 
     if user_content:
+        engine._player_turn_count += 1
         engine._maybe_inject_tier()
         engine.messages.append({"role": "user", "content": f"[玩家行动] {user_content}"})
         engine._detect_content_skill_hint(user_content)
-
-    if engine._should_summarize():
-        engine._summarize_history()
 
     engine.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
     return {
@@ -131,7 +129,11 @@ def _execute_tools(state: TurnState) -> dict:
         if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
             summary = dice_summary(output)
             if summary:
-                engine.cb.on_dice(summary)
+                try:
+                    roll_data = json.loads(output)
+                except json.JSONDecodeError:
+                    roll_data = None
+                engine.cb.on_dice(summary, roll_data)
 
         if name in COMPLEX_FUNCTIONS:
             tool_outputs.append((name, output))
@@ -218,6 +220,7 @@ def _finalize_turn(state: TurnState) -> dict:
     engine._last_turn_high_risk = state.get("turn_had_check", False)
     engine._round_count += 1
     engine.cb.on_done()
+    engine._maybe_summarize_after_turn()
     return {"narrative": narrative}
 
 

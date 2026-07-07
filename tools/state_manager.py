@@ -318,6 +318,13 @@ def cmd_show_handout(entity_type, entity_id):
     section = asset_map.get(entity_type + "s", {})  # npcs / scenes / clues
     entry = section.get(entity_id)
     if entry:
+        seen = data.setdefault("seen_handouts", {})
+        seen_key = entity_type + "s"
+        if not isinstance(seen.get(seen_key), list):
+            seen[seen_key] = []
+        if entity_id and entity_id not in seen[seen_key]:
+            seen[seen_key].append(entity_id)
+            _save(data)
         result = {"found": True, "entity_type": entity_type, "entity_id": entity_id,
                   "file": entry["file"], "label": entry.get("label", "")}
     else:

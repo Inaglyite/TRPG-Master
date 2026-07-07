@@ -28,22 +28,49 @@ export function setStreamTarget(el: HTMLElement | null) {
 // ---- 消息 ID 计数器 ----
 let msgIdCounter = 0;
 
+type DiceRollData = {
+  d100_roll?: number;
+  tens_dice?: number[];
+  ones_dice?: number;
+  bonus_dice?: number;
+  penalty_dice?: number;
+  spec?: string;
+  sides?: number;
+  rolls?: number[];
+  total?: number;
+};
+
+type VisualDie = {
+  min: number;
+  max: number;
+  final: number;
+  label: string;
+  formatter?: (value: number) => string;
+};
+
 // ---- 添加消息（完整 Markdown 解析） ----
-export function addMsg(kind: string, text: string): HTMLElement {
+export function addMsg(kind: string, text: string, forceScroll = false): HTMLElement {
   const el = document.createElement("div");
   el.className = `msg ${kind}`;
   el.id = `msg-${++msgIdCounter}`;
   el.innerHTML = marked.parse(text) as string;
+  const stickToBottom = forceScroll || shouldAutoScroll();
   messagesEl.appendChild(el);
-  scrollDown();
+  if (stickToBottom) scrollDown(true);
   return el;
 }
 
 // ---- 滚动到底部 ----
-export function scrollDown() {
+export function scrollDown(force = false) {
   setTimeout(() => {
+    if (!force && !shouldAutoScroll()) return;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }, 50);
+}
+
+function shouldAutoScroll(): boolean {
+  const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  return distance < 96;
 }
 
 // ---- 移除"守秘人思考中"指示 ----
@@ -60,8 +87,35 @@ export function showGmThinking() {
   dots.id = "loading-dots";
   dots.innerHTML =
     '<div class="typing-dots"><span></span><span></span><span></span></div><span style="margin-left:8px;font-size:13px">守秘人正在叙述……</span>';
+  const stickToBottom = shouldAutoScroll();
   messagesEl.appendChild(dots);
-  scrollDown();
+  if (stickToBottom) scrollDown(true);
+}
+
+export function showRollPending() {
+  removeLoading();
+  if (document.getElementById("roll-pending")) return;
+  const el = document.createElement("div");
+  el.className = "msg dice roll-pending rolling";
+  el.id = "roll-pending";
+  el.innerHTML = `
+    <div class="dice-title">判定中</div>
+    <div class="dice-stage">
+      <div class="dice-wrap">
+        <div class="dice-face"><span>?</span></div>
+        <div class="dice-face-label">等待结果</div>
+      </div>
+    </div>
+    <div class="dice-result">守秘人正在结算检定……</div>
+  `;
+  const stickToBottom = shouldAutoScroll();
+  messagesEl.appendChild(el);
+  if (stickToBottom) scrollDown(true);
+}
+
+export function removeRollPending() {
+  const el = document.getElementById("roll-pending");
+  if (el) el.remove();
 }
 
 // ---- 流式文本缓冲 ----
@@ -70,6 +124,7 @@ let streamBuffer = "";
 // ---- 流式文本到达 ----
 export function onNarrativeChunk(text: string) {
   removeLoading();
+  const stickToBottom = shouldAutoScroll();
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
     streamTarget = addMsg("gm", "");
     streamTarget.classList.add("streaming-cursor");
@@ -77,7 +132,7 @@ export function onNarrativeChunk(text: string) {
   }
   streamBuffer += text;
   streamTarget.innerHTML = marked.parse(streamBuffer) as string;
-  scrollDown();
+  if (stickToBottom) scrollDown(true);
 }
 
 // ---- 紧张感提示 ----
@@ -87,14 +142,180 @@ export function onTension(text: string) {
 }
 
 // ---- 骰子结果 ----
-export function onDice(text: string) {
+export function onDice(text: string, rollData?: DiceRollData) {
   removeLoading();
+  removeRollPending();
   if (streamTarget) {
     streamTarget.classList.remove("streaming-cursor");
     streamTarget = null;
     streamBuffer = "";
   }
-  addMsg("dice", text);
+
+  const dice = normalizeDiceVisual(rollData, text);
+  if (dice.length === 0) {
+    addMsg("dice", text);
+    return;
+  }
+
+  const el = document.createElement("div");
+  el.className = "msg dice rolling";
+  el.id = `msg-${++msgIdCounter}`;
+
+  const title = document.createElement("div");
+  title.className = "dice-title";
+  title.textContent = "命运之骰翻滚";
+  el.appendChild(title);
+
+  const stage = document.createElement("div");
+  stage.className = "dice-stage";
+  const valueEls: HTMLSpanElement[] = [];
+  dice.forEach((die) => {
+    const wrap = document.createElement("div");
+    wrap.className = "dice-wrap";
+
+    const face = document.createElement("div");
+    face.className = "dice-face";
+    face.dataset.sides = String(die.max);
+
+    const value = document.createElement("span");
+    value.textContent = formatDieValue(die, randomInt(die.min, die.max));
+    face.appendChild(value);
+    valueEls.push(value);
+
+    const label = document.createElement("div");
+    label.className = "dice-face-label";
+    label.textContent = die.label;
+
+    wrap.appendChild(face);
+    wrap.appendChild(label);
+    stage.appendChild(wrap);
+  });
+  el.appendChild(stage);
+
+  const result = document.createElement("div");
+  result.className = "dice-result hidden";
+  result.setAttribute("aria-live", "polite");
+  result.textContent = text;
+  el.appendChild(result);
+
+  const stickToBottom = shouldAutoScroll();
+  messagesEl.appendChild(el);
+  if (stickToBottom) scrollDown(true);
+  animateDice(el, dice, valueEls, result);
+}
+
+function normalizeDiceVisual(data: DiceRollData | undefined, summary: string): VisualDie[] {
+  if (data?.d100_roll !== undefined) {
+    const roll = Number(data.d100_roll);
+    const fallbackTens = roll === 100 ? 0 : Math.floor(roll / 10);
+    const fallbackOnes = roll === 100 ? 0 : roll % 10;
+    const tensDice = Array.isArray(data.tens_dice) && data.tens_dice.length > 0
+      ? data.tens_dice
+      : [fallbackTens];
+    const tenFormatter = (value: number) => (value === 0 ? "00" : String(value * 10));
+    const dice: VisualDie[] = tensDice.map((value, index) => ({
+      min: 0,
+      max: 9,
+      final: clampInt(value, 0, 9),
+      label: index === 0 ? "十位" : extraTensLabel(data),
+      formatter: tenFormatter,
+    }));
+    dice.push({
+      min: 0,
+      max: 9,
+      final: clampInt(data.ones_dice ?? fallbackOnes, 0, 9),
+      label: "个位",
+    });
+    return dice;
+  }
+
+  if (Array.isArray(data?.rolls) && data.rolls.length > 0) {
+    const sides = Math.max(2, Number(data.sides) || parseSides(data.spec) || 20);
+    return data.rolls.map((roll) => ({
+      min: 1,
+      max: sides,
+      final: clampInt(roll, 1, sides),
+      label: `d${sides}`,
+    }));
+  }
+
+  const d100Match = summary.match(/d100\s*=\s*(\d+)/i);
+  if (d100Match) {
+    return [{ min: 1, max: 100, final: clampInt(Number(d100Match[1]), 1, 100), label: "d100" }];
+  }
+
+  const specMatch = summary.match(/\bD?(\d+)\s*=\s*(\d+)/i);
+  if (specMatch) {
+    const sides = Math.max(2, Number(specMatch[1]));
+    return [{ min: 1, max: sides, final: clampInt(Number(specMatch[2]), 1, sides), label: `d${sides}` }];
+  }
+
+  return [];
+}
+
+function extraTensLabel(data: DiceRollData | undefined): string {
+  if ((data?.bonus_dice || 0) > 0) return "奖励";
+  if ((data?.penalty_dice || 0) > 0) return "惩罚";
+  return "加骰";
+}
+
+function parseSides(spec?: string): number | null {
+  const match = spec?.match(/d(\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function randomInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function formatDieValue(die: VisualDie, value: number): string {
+  return die.formatter ? die.formatter(value) : String(value);
+}
+
+function animateDice(el: HTMLElement, dice: VisualDie[], valueEls: HTMLSpanElement[], resultEl: HTMLElement) {
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const timers: number[] = [];
+
+  if (reduceMotion) {
+    dice.forEach((die, index) => {
+      valueEls[index].textContent = formatDieValue(die, die.final);
+    });
+    el.classList.remove("rolling");
+    el.classList.add("settled");
+    resultEl.classList.remove("hidden");
+    scrollDown();
+    return;
+  }
+
+  dice.forEach((die, index) => {
+    const timer = window.setInterval(() => {
+      valueEls[index].textContent = formatDieValue(die, randomInt(die.min, die.max));
+    }, 48);
+    timers.push(timer);
+
+    window.setTimeout(() => {
+      window.clearInterval(timer);
+      valueEls[index].textContent = formatDieValue(die, die.final);
+      valueEls[index].parentElement?.classList.add("locked");
+    }, 440 + index * 80);
+  });
+
+  window.setTimeout(() => {
+    timers.forEach((timer) => window.clearInterval(timer));
+    dice.forEach((die, index) => {
+      valueEls[index].textContent = formatDieValue(die, die.final);
+      valueEls[index].parentElement?.classList.add("locked");
+    });
+    el.classList.remove("rolling");
+    el.classList.add("settled");
+    resultEl.classList.remove("hidden");
+    scrollDown();
+  }, 560 + dice.length * 80);
 }
 
 // ---- GM 摘要 ----

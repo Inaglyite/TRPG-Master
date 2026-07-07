@@ -14,51 +14,75 @@
     ]
   },
   "pc": {
-    "name": "爱德华·温斯洛",
-    "occupation": "私家侦探",
-    "hp": 11,
-    "max_hp": 11,
-    "san": 65,
-    "max_san": 65,
+    "name": "黄千陆",
+    "occupation": "侦探/警方顾问",
+    "hp": 10,
+    "max_hp": 10,
+    "san": 63,
+    "max_san": 70,
     "attributes": {
-      "STR": 50,
+      "STR": 45,
       "DEX": 55,
       "CON": 50,
       "INT": 65,
-      "POW": 65,
-      "SIZ": 60,
+      "POW": 70,
+      "SIZ": 50,
       "APP": 50,
       "EDU": 70
     },
     "skills": {
-      "spot_hidden": 60,
+      "spot_hidden": 70,
+      "fast_talk": 50,
+      "listen": 60,
       "library_use": 50,
-      "listen": 40,
-      "psychology": 35,
-      "persuade": 40,
-      "charm": 25,
-      "fast_talk": 30,
-      "intimidate": 20,
-      "stealth": 40,
-      "dodge": 35,
-      "climb": 30,
+      "psychology": 60,
       "fighting_brawl": 40,
-      "firearms_handgun": 45,
-      "first_aid": 35,
-      "occult": 30,
-      "history": 40,
-      "credit_rating": 30,
-      "drive_auto": 30,
+      "track": 50,
       "law": 30,
-      "navigate": 25,
-      "locksmith": 20,
-      "language_own": 70
+      "navigate": 40,
+      "stealth": 50,
+      "history": 40,
+      "language_own": 70,
+      "dodge": 27,
+      "credit_rating": 25,
+      "first_aid": 30,
+      "occult": 5,
+      "charm": 20,
+      "intimidate": 15,
+      "climb": 20,
+      "jump": 20,
+      "swim": 20,
+      "throw": 20,
+      "firearms_handgun": 20,
+      "drive_auto": 20,
+      "ride": 5,
+      "natural_world": 10,
+      "survival": 10,
+      "sleight_of_hand": 10,
+      "locksmith": 1,
+      "mech_repair": 10,
+      "elec_repair": 10,
+      "appraise": 5,
+      "archaeology": 1,
+      "anthropology": 1,
+      "disguise": 5,
+      "science": 1,
+      "medicine": 1,
+      "psychoanalysis": 1,
+      "accounting": 5,
+      "pilot": 1,
+      "arts_craft": 5,
+      "op_hv_machine": 1,
+      "language_latin": 1,
+      "cthulhu_mythos": 0
     },
     "inventory": [
-      "手电筒",
-      "怀表",
       "笔记本与钢笔",
-      "38口径左轮手枪（6发）"
+      "怀表",
+      "手电筒",
+      "旧金山唐人街带来的算盘",
+      "故乡的信物（一枚磨损的铜钱）",
+      ".38口径左轮手枪（6发）"
     ],
     "conditions": [],
     "age": 34,
@@ -67,7 +91,37 @@
       "key_relationships": [],
       "phobias": [],
       "manias": []
-    }
+    },
+    "credit_rating": 25,
+    "backstory": {
+      "description": "衣着整洁朴素，永远一丝不苟。说话时习惯略低下头，眼神却锐利直接。",
+      "beliefs": "行动是最好的回击。破解被草草了结的案子，本身就是对偏见的响亮耳光。",
+      "important_person": "父亲——广东沿海渔村的教书先生，观察与逻辑思维的启蒙者",
+      "meaningful_place": "旧金山唐人街",
+      "treasured_possession": "一枚磨损的铜钱——来自故乡的信物",
+      "traits": "敏锐的观察者、沉默的骄傲、于偏见中坚守正义。",
+      "key_connection": "父亲——教会他用头脑而非拳头面对世界"
+    },
+    "career": {
+      "reputation": 0,
+      "titles": [],
+      "known_contacts": [],
+      "completed_modules": [],
+      "case_history": []
+    },
+    "character_id": "default:黄千陆",
+    "character_source": "default",
+    "character_source_path": "characters/default/黄千陆.json",
+    "character_session": {
+      "character_id": "default:黄千陆",
+      "source": "default",
+      "source_path": "characters/default/黄千陆.json",
+      "module": "mansion_of_madness",
+      "started_at": "2026-07-07T13:53:43.433760",
+      "starting_hp": 10,
+      "starting_san": 70
+    },
+    "_san_loss_today": 7
   },
   "npcs": [
     {
@@ -85,8 +139,13 @@
       "disposition": "nervous",
       "current_location": "entrance_hall",
       "revealed": {
-        "level": 0,
-        "entries": []
+        "level": 1,
+        "entries": [
+          {
+            "tier": 1,
+            "text": "近距离观察发现管家多项非人特征——皮肤无纹理无毛孔、胸部无呼吸起伏、手指有银灰色焦痕、瞳孔对光线无收缩反应、镜中无倒影。"
+          }
+        ]
       }
     },
     {
@@ -128,7 +187,41 @@
     }
   ],
   "clues_found": {
-    "investigation": [],
+    "investigation": [
+      {
+        "id": "clue_001",
+        "text": "管家的皮肤没有纹理和毛孔，触感不像活人皮肤，更像是凝固的灰烬",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": "2026-07-07T13:56:53.695574",
+        "asset": null
+      },
+      {
+        "id": "clue_002",
+        "text": "管家胸部没有呼吸起伏，手指和手腕有银灰色焦痕——疑似陈旧烧伤",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": "2026-07-07T13:56:53.719742",
+        "asset": null
+      },
+      {
+        "id": "clue_003",
+        "text": "管家在椭圆镜子中没有倒影——镜中只有调查员自己和空荡荡的位置",
+        "type": "obvious",
+        "tier": 1,
+        "source": null,
+        "related_npcs": [],
+        "related_scenes": [],
+        "discovered_at": "2026-07-07T13:56:53.744544",
+        "asset": null
+      }
+    ],
     "event": [],
     "task": [],
     "npc": []
@@ -144,9 +237,9 @@
     "basement_seal_seen": false
   },
   "case_clocks": {
-    "house_instability": 0,
-    "shadow_hunger": 0,
-    "truth_clarity": 0
+    "house_instability": 2,
+    "shadow_hunger": 1,
+    "truth_clarity": 2
   },
   "scene_cache": {},
   "private_memory": {

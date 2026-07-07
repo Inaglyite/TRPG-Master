@@ -90,11 +90,83 @@ def _asset_payload(filename: str) -> dict:
     }
 
 
-def _enrich_clues_for_frontend(clues: dict) -> dict:
+def _collect_known_npc_ids(world_state: dict) -> list[str]:
+    """收集已发放过人物展示材料的 NPC ID，不把仅被提及的人物提前入册。"""
+    known: list[str] = []
+
+    def add(npc_id: str):
+        if npc_id and npc_id not in known:
+            known.append(npc_id)
+
+    seen = world_state.get("seen_handouts", {}) if isinstance(world_state, dict) else {}
+    seen_npcs = seen.get("npcs", []) if isinstance(seen, dict) else []
+    if isinstance(seen_npcs, list):
+        for npc_id in seen_npcs:
+            if isinstance(npc_id, str):
+                add(npc_id)
+
+    return known
+
+
+def _append_npc_profiles(enriched: dict, world_state: dict):
+    """把已知 NPC 的公开档案追加到人物线索，不发送 secret/技能等守秘信息。"""
+    if not isinstance(enriched, dict) or not isinstance(world_state, dict):
+        return
+
+    npc_assets = world_state.get("asset_map", {}).get("npcs", {})
+    if not isinstance(npc_assets, dict):
+        return
+
+    npc_by_id = {
+        npc.get("id"): npc
+        for npc in world_state.get("npcs", [])
+        if isinstance(npc, dict) and npc.get("id")
+    }
+    profiles = []
+    for npc_id in _collect_known_npc_ids(world_state):
+        npc = npc_by_id.get(npc_id)
+        asset = npc_assets.get(npc_id)
+        if not npc or not isinstance(asset, dict) or not asset.get("file"):
+            continue
+
+        tags = npc.get("visible_tags", [])
+        public_tags = "、".join(str(tag) for tag in tags[:4]) if isinstance(tags, list) else ""
+        name = npc.get("name") or asset.get("label") or npc_id
+        text = f"{name}：{public_tags}" if public_tags else str(name)
+        profiles.append({
+            "id": f"profile_{npc_id}",
+            "text": text,
+            "type": "profile",
+            "tier": 0,
+            "source": "npc_profile",
+            "related_npcs": [npc_id],
+            "related_scenes": [],
+            "discovered_at": None,
+            "asset": {
+                "id": npc_id,
+                "file": asset.get("file"),
+                "label": asset.get("label", name),
+            },
+        })
+
+    if not profiles:
+        return
+
+    existing = enriched.get("npc", [])
+    if not isinstance(existing, list):
+        existing = []
+    existing_ids = {item.get("id") for item in existing if isinstance(item, dict)}
+    new_profiles = [item for item in profiles if item["id"] not in existing_ids]
+    enriched["npc"] = new_profiles + existing
+
+
+def _enrich_clues_for_frontend(clues: dict, world_state: dict | None = None) -> dict:
     """为线索面板补齐图片 data URI，避免 Electron file:// 下无法直接取 HTTP 图。"""
     enriched = copy.deepcopy(clues) if isinstance(clues, dict) else clues
     if not isinstance(enriched, dict):
         return enriched
+    if isinstance(world_state, dict):
+        _append_npc_profiles(enriched, world_state)
     for items in enriched.values():
         if not isinstance(items, list):
             continue
@@ -157,8 +229,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_tension(text: str, cat: str):
         emit({"type": "tension", "text": text, "category": cat})
 
-    def on_dice(summary: str):
-        emit({"type": "dice_result", "summary": summary})
+    def on_dice(summary: str, roll_data: dict | None = None):
+        emit({"type": "dice_result", "summary": summary, "roll_data": roll_data or {}})
 
     def on_glm_summary(text: str):
         emit({"type": "glm_summary", "text": text})
@@ -373,7 +445,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 try:
                     _ws = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
                     pc_data = _ws.get("pc", {})
-                    clues_data = _enrich_clues_for_frontend(_ws.get("clues_found", {}))
+                    clues_data = _enrich_clues_for_frontend(_ws.get("clues_found", {}), _ws)
                 except Exception:
                     pc_data, clues_data = {}, {}
                 await ws.send_json({

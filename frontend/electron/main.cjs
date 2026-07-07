@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog } = require("electron");
 const path = require("node:path");
 
 const isDev = process.env.NODE_ENV === "dev";
+const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
 
 function log(...args) {
   // electron 主进程日志，启动脚本或终端可见
@@ -37,7 +38,7 @@ function createWindow() {
 
   // 加载页面，并在失败时弹窗提示（避免白屏无声失败）
   const loadPromise = isDev
-    ? win.loadURL("http://localhost:3000")
+    ? win.loadURL(devServerUrl)
     : win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 
   loadPromise.catch((err) => {
@@ -46,7 +47,7 @@ function createWindow() {
       "启动失败",
       `无法加载游戏界面：\n${err.message}\n\n` +
         (isDev
-          ? "请确认 vite dev server 已在 localhost:3000 运行。"
+          ? `请确认 vite dev server 已在 ${devServerUrl} 运行。`
           : "请确认前端已构建（cd frontend && npm run build）。")
     );
   });

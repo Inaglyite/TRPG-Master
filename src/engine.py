@@ -27,7 +27,7 @@ class EngineCallbacks:
     """引擎输出事件回调。每个回调在特定时机触发。"""
     on_narrative: Callable[[str], None] = lambda text: None       # 流式文本块
     on_tension: Callable[[str, str], None] = lambda text, cat: None  # 沉浸式提示
-    on_dice: Callable[[str], None] = lambda summary: None        # 骰子结果
+    on_dice: Callable[[str, dict | None], None] = lambda summary, roll_data=None: None  # 骰子结果
     on_glm_summary: Callable[[str], None] = lambda text: None    # 快速摘要
     on_suggest: Callable[[dict], bool] = lambda info: False      # 检定确认，返回 True/False
     on_done: Callable[[], None] = lambda: None                   # 回合结束
@@ -46,14 +46,16 @@ class GameEngine:
         self.cb = EngineCallbacks()
         # 记忆管理
         self._round_count = 0
+        self._player_turn_count = 0
+        self._last_summary_player_turn = 0
         self._tier_last_injected = -99  # 首次必定注入
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
         # 按需 skill 加载追踪：本会话已提示/加载过的 skill 路径，避免重复提示
         self._loaded_optional_skills: set[str] = set()
-        # 摘要阈值：消息超过此数或 token 估算超过窗口 60% 时触发压缩
-        self.SUMMARY_MSG_THRESHOLD = 30
-        self.SUMMARY_TOKEN_THRESHOLD = 8000
+        # 摘要策略：按玩家回合静默压缩，避免内部工具消息过多导致频繁打断沉浸。
+        self.SUMMARY_PLAYER_TURN_INTERVAL = 50
+        self.SUMMARY_KEEP_RECENT_MESSAGES = 24
         self._turn_graph = build_turn_graph()
 
     def prepare_session(self):
@@ -61,6 +63,8 @@ class GameEngine:
         self.messages = [{"role": "system", "content": load_system_prompt()}]
         self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
         self._round_count = 0
+        self._player_turn_count = 0
+        self._last_summary_player_turn = 0
         self._tier_last_injected = -99
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
@@ -89,6 +93,8 @@ class GameEngine:
                 f"{mod_path}。"
                 "然后调用 get_private_memory 了解当前信息边界。"
                 "再调用 state_clues 和 state_npcs 确认已知线索和 NPC 揭示状态。"
+                "玩家调查员姓名、职业、背景必须以该 world_state.json 的 pc 字段为唯一来源；"
+                "不要使用 module.md、示例文本或旧存档里的默认调查员姓名来称呼玩家。"
                 "最后描述开场场景并提供选项。）"
             )
         })
@@ -131,6 +137,8 @@ class GameEngine:
         self.messages = [system_msg] + messages[1:]
         # 重置记忆管理状态
         self._round_count = 0
+        self._player_turn_count = 0
+        self._last_summary_player_turn = 0
         self._tier_last_injected = -99
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
@@ -237,6 +245,18 @@ class GameEngine:
                 pass
             return result
 
+        if name == "state_add_clue":
+            result = execute_function(name, args)
+            try:
+                info = json.loads(result)
+                clue = info.get("clue") or {}
+                asset = clue.get("asset") or {}
+                if info.get("ok") and asset.get("id") and asset.get("file"):
+                    self._auto_handout("clue", asset["id"])
+            except Exception:
+                pass
+            return result
+
         return execute_function(name, args)
 
     # ---- 按需 Skill 加载提示 ----
@@ -302,15 +322,23 @@ class GameEngine:
         return total
 
     def _should_summarize(self) -> bool:
-        """检查是否需要压缩上下文"""
-        msg_count = len(self.messages)
-        if msg_count >= self.SUMMARY_MSG_THRESHOLD:
-            return True
-        if self._estimate_tokens() >= self.SUMMARY_TOKEN_THRESHOLD:
-            return True
-        return False
+        """是否到达玩家回合压缩周期。"""
+        return (
+            self._player_turn_count > 0
+            and self._player_turn_count - self._last_summary_player_turn >= self.SUMMARY_PLAYER_TURN_INTERVAL
+        )
 
-    def _summarize_history(self):
+    def _maybe_summarize_after_turn(self):
+        """在本轮叙事和 done 事件之后静默压缩，尽量让玩家无感。"""
+        if not self._should_summarize():
+            return
+        current_turn = self._player_turn_count
+        changed = self._summarize_history(silent=True)
+        self._last_summary_player_turn = current_turn
+        if changed:
+            self.save("slot_000")
+
+    def _summarize_history(self, silent: bool = False) -> bool:
         """压缩旧消息。优先 GLM-4 Flash（免费快速），失败则 DeepSeek Pro（可靠），
         都失败才降级为简单截断。
 
@@ -322,19 +350,19 @@ class GameEngine:
         """
         from .llm import _get_glm
 
-        KEEP_RECENT = 12
+        KEEP_RECENT = self.SUMMARY_KEEP_RECENT_MESSAGES
         # 只在"旧消息太少不值得压缩"时跳过：系统消息+开场prompt之后几乎没有对话
         cutoff = len(self.messages) - KEEP_RECENT
         while cutoff > 1 and self.messages[cutoff].get("role") != "user":
             cutoff -= 1
         if cutoff <= 1:
-            return  # 没有足够的旧消息可压缩
+            return False  # 没有足够的旧消息可压缩
 
         old_messages = self.messages[1:cutoff]
         recent_messages = self.messages[cutoff:]
         system_msg = self.messages[0]
         if len(old_messages) < 3:
-            return  # 旧消息太少，压缩意义不大
+            return False  # 旧消息太少，压缩意义不大
 
         # 构建旧消息文本（复用于各级摘要）
         old_text = self._build_summary_input(old_messages)
@@ -344,15 +372,16 @@ class GameEngine:
         if glm is not None:
             summary = self._try_model_summary(glm, "glm-4-flash-250414", old_text)
             if summary is not None:
-                self._apply_summary(system_msg, summary, recent_messages, "GLM-4 Flash")
-                return
+                self._apply_summary(system_msg, summary, recent_messages, "GLM-4 Flash", silent=silent)
+                return True
 
         # 第二级：DeepSeek Pro（付费但可靠）
-        self.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
+        if not silent:
+            self.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
         summary = self._try_model_summary(self.client, MODEL_PRO, old_text)
         if summary is not None:
-            self._apply_summary(system_msg, summary, recent_messages, "DeepSeek Pro")
-            return
+            self._apply_summary(system_msg, summary, recent_messages, "DeepSeek Pro", silent=silent)
+            return True
 
         # 第三级：简单截断（最后手段）
         dropped = len(old_messages)
@@ -366,9 +395,11 @@ class GameEngine:
         }
         self.messages = [system_msg, note] + recent_messages
         self._summary_token_estimate = self._estimate_tokens()
-        self.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
+        if not silent:
+            self.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
+        return True
 
-    def _apply_summary(self, system_msg, summary, recent_messages, model_name):
+    def _apply_summary(self, system_msg, summary, recent_messages, model_name, silent: bool = False):
         """将摘要应用到消息列表。"""
         summary_msg = {
             "role": "user",
@@ -382,7 +413,8 @@ class GameEngine:
         self.messages = [system_msg, summary_msg] + recent_messages
         self._summary_token_estimate = self._estimate_tokens()
         log_summary(model_name, "成功")
-        self.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
+        if not silent:
+            self.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
 
     def _build_summary_input(self, old_messages: list) -> str:
         """从旧消息构建摘要输入文本。截断 tool 输出，保留 user/assistant 核心内容。"""

@@ -6,9 +6,9 @@
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc && vite build",
-    "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev npx electron .",
+    "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npx electron .",
     "electron:start": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron .",
     "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64"
   },

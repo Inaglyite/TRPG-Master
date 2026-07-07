@@ -96,7 +96,7 @@ function handleMessage(e: MessageEvent) {
       onTension(data.text);
       break;
     case "dice_result":
-      onDice(data.summary);
+      onDice(data.summary, data.roll_data);
       break;
     case "glm_summary":
       onSummary(data.text);
@@ -163,6 +163,7 @@ function handleMessage(e: MessageEvent) {
       break;
     case "handout":
       showHandout(data);
+      safeSend(JSON.stringify({ type: "state" }));
       break;
   }
 }

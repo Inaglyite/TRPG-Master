@@ -49,6 +49,8 @@ const CLUE_NAMES: Record<string, string> = {
   npc: "人物线索",
 };
 
+let knownClueKeys: Set<string> | null = null;
+
 function parseJson<T>(raw: string, fallback: T): T {
   try {
     return JSON.parse(raw) as T;
@@ -106,6 +108,12 @@ function openImageOverlay(src: string, alt = "") {
   document.body.appendChild(overlay);
 }
 
+function dismissHandout(card: HTMLElement) {
+  if (!card.parentElement || card.classList.contains("leaving")) return;
+  card.classList.add("leaving");
+  setTimeout(() => card.remove(), 280);
+}
+
 // ---- 角色面板 ----
 export function updateCharPanel(raw: string) {
   const data = parseJson<any>(raw, null);
@@ -156,6 +164,7 @@ export function updateCluePanel(cluesRaw: string) {
   const clues = parseJson<Record<string, ClueItem[]>>(cluesRaw, {});
   const cluesList = document.getElementById("clues-list")!;
   clearElement(cluesList);
+  notifyNewClues(clues);
 
   let rendered = 0;
   if (typeof clues === "object" && !Array.isArray(clues)) {
@@ -183,9 +192,55 @@ export function updateCluePanel(cluesRaw: string) {
   }
 }
 
+function collectClueKeys(clues: Record<string, ClueItem[]>): Set<string> {
+  const keys = new Set<string>();
+  if (typeof clues !== "object" || Array.isArray(clues)) return keys;
+  for (const cat of CLUE_CATEGORIES) {
+    const items = clues[cat] || [];
+    items.forEach((item, index) => {
+      if (item.type === "profile") return;
+      const key = item.id || item.text || `${cat}-${index}`;
+      keys.add(`${cat}:${key}`);
+    });
+  }
+  return keys;
+}
+
+function notifyNewClues(clues: Record<string, ClueItem[]>) {
+  const current = collectClueKeys(clues);
+  if (knownClueKeys) {
+    let added = 0;
+    current.forEach((key) => {
+      if (!knownClueKeys!.has(key)) added++;
+    });
+    if (added > 0) {
+      showClueToast(added);
+    }
+  }
+  knownClueKeys = current;
+}
+
+function showClueToast(count: number) {
+  let stack = document.getElementById("toast-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "toast-stack";
+    document.body.appendChild(stack);
+  }
+
+  const toast = document.createElement("div");
+  toast.className = "clue-toast";
+  toast.textContent = count > 1 ? `${count} 条线索已加入` : "线索已加入";
+  stack.appendChild(toast);
+
+  setTimeout(() => toast.classList.add("leaving"), 2200);
+  setTimeout(() => toast.remove(), 2700);
+}
+
 function renderClueItem(item: ClueItem) {
   const row = document.createElement("div");
   row.className = "clue-item";
+  if (item.type === "profile") row.classList.add("profile");
 
   const main = document.createElement("div");
   main.className = "clue-main";
@@ -197,6 +252,7 @@ function renderClueItem(item: ClueItem) {
 
   const meta = document.createElement("div");
   meta.className = "clue-meta";
+  if (item.type === "profile") meta.appendChild(makeBadge("人物", "profile"));
   if (item.tier === 2) meta.appendChild(makeBadge("TIER2"));
   if (item.type === "inferred") meta.appendChild(makeBadge("推理", "inferred"));
   if (item.asset?.file) meta.appendChild(makeBadge("图像", "asset"));
@@ -206,6 +262,7 @@ function renderClueItem(item: ClueItem) {
 
   const assetSrc = item.asset?.asset_data_uri || item.asset?.asset_url || "";
   if (assetSrc) {
+    row.classList.add("has-asset");
     const btn = document.createElement("button");
     btn.className = "clue-thumb-btn";
     btn.title = item.asset?.label || item.asset?.file || "查看线索图片";
@@ -213,9 +270,17 @@ function renderClueItem(item: ClueItem) {
     img.className = "clue-thumb";
     img.src = assetSrc;
     img.alt = item.asset?.label || item.asset?.file || "线索图片";
+    img.loading = "lazy";
     btn.appendChild(img);
     btn.onclick = () => openImageOverlay(assetSrc, img.alt);
     row.appendChild(btn);
+  } else if (item.asset?.file) {
+    row.classList.add("has-asset");
+    const missing = document.createElement("div");
+    missing.className = "clue-thumb-missing";
+    missing.textContent = "图像不可用";
+    missing.title = item.asset.file;
+    row.appendChild(missing);
   }
 
   return row;
@@ -246,7 +311,7 @@ export function showHandout(data: { file: string; label: string; asset_data_uri:
   const close = document.createElement("button");
   close.className = "handout-close";
   close.textContent = "✕";
-  close.onclick = () => card.remove();
+  close.onclick = () => dismissHandout(card);
   header.appendChild(label);
   header.appendChild(close);
 
@@ -261,7 +326,7 @@ export function showHandout(data: { file: string; label: string; asset_data_uri:
   container.appendChild(card);
 
   // 10 秒后自动消失
-  setTimeout(() => { if (card.parentElement) card.remove(); }, 10000);
+  setTimeout(() => dismissHandout(card), 10000);
 }
 
 // ---- 结局展示 ----

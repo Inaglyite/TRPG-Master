@@ -10,6 +10,7 @@
 """
 
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,33 @@ from . import config as cfg
 
 
 # ---- Skill 加载 ----
+
+def _module_prompt_content(content: str) -> str:
+    """Drop module default PC templates from the runtime prompt.
+
+    The active investigator is copied into world_state.json at game start. Keeping a
+    module.md default PC block in the system prompt can make the model call the
+    player by the template name after a different character is selected.
+    """
+    default_pc = ""
+    pc_block = re.search(r"\n# PC[^\n]*\n(.*?)(?=\n# )", content, flags=re.DOTALL)
+    if pc_block:
+        name_match = re.search(r"(?m)^\s*name:\s*(.+?)\s*$", pc_block.group(1))
+        if name_match:
+            default_pc = name_match.group(1).strip().strip("\"'")
+
+    content = re.sub(
+        r"\n# PC[^\n]*\n.*?(?=\n# )",
+        "\n# PC - 调查员\n\n（运行时调查员以 world_state.json 的 pc 字段为准；模组模板 PC 不作为玩家身份。）\n",
+        content,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if default_pc:
+        content = content.replace(default_pc, "所选调查员")
+        content = content.replace("私家侦探所选调查员", "所选调查员")
+    return content
+
 
 def load_system_prompt() -> str:
     parts = []
@@ -32,7 +60,7 @@ def load_system_prompt() -> str:
     # 当前模组的剧情设定（module.md）——让 GM 知道本模组的故事背景
     module_md = cfg.MODULE_DIR / "module.md"
     if module_md.exists():
-        content = module_md.read_text(encoding="utf-8").strip()
+        content = _module_prompt_content(module_md.read_text(encoding="utf-8")).strip()
         if content:
             parts.append(content)
     # 仅加载【当前模组】的专属 skill，避免多模组内容串扰

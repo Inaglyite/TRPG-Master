@@ -91,6 +91,35 @@
       "key_relationships": [],
       "phobias": [],
       "manias": []
+    },
+    "credit_rating": 25,
+    "backstory": {
+      "description": "衣着整洁朴素，永远一丝不苟。说话时习惯略低下头，眼神却锐利直接。",
+      "beliefs": "行动是最好的回击。破解被草草了结的案子，本身就是对偏见的响亮耳光。",
+      "important_person": "父亲——广东沿海渔村的教书先生，观察与逻辑思维的启蒙者",
+      "meaningful_place": "旧金山唐人街",
+      "treasured_possession": "一枚磨损的铜钱——来自故乡的信物",
+      "traits": "敏锐的观察者、沉默的骄傲、于偏见中坚守正义。",
+      "key_connection": "父亲——教会他用头脑而非拳头面对世界"
+    },
+    "career": {
+      "reputation": 0,
+      "titles": [],
+      "known_contacts": [],
+      "completed_modules": [],
+      "case_history": []
+    },
+    "character_id": "default:黄千陆",
+    "character_source": "default",
+    "character_source_path": "characters/default/黄千陆.json",
+    "character_session": {
+      "character_id": "default:黄千陆",
+      "source": "default",
+      "source_path": "characters/default/黄千陆.json",
+      "module": "猩红文档",
+      "started_at": "2026-07-05T12:01:53.216611",
+      "starting_hp": 10,
+      "starting_san": 70
     }
   },
   "npcs": [
@@ -580,5 +609,10 @@
       }
     }
   },
-  "clue_links": []
+  "clue_links": [],
+  "seen_handouts": {
+    "npcs": [
+      "bryce_fallon"
+    ]
+  }
 }

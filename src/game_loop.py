@@ -17,7 +17,7 @@ def game_loop():
     def on_tension(text: str, cat: str):
         print(f"  {text}")
 
-    def on_dice(summary: str):
+    def on_dice(summary: str, roll_data: dict | None = None):
         print(f"  {summary}")
 
     def on_glm_summary(text: str):

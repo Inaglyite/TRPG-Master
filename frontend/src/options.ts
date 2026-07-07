@@ -16,7 +16,15 @@ import {
   modalYes,
   modalNo,
 } from "./dom";
-import { addMsg, removeLoading, showGmThinking, getStreamTarget, setStreamTarget } from "./renderer";
+import {
+  addMsg,
+  removeLoading,
+  removeRollPending,
+  showGmThinking,
+  showRollPending,
+  getStreamTarget,
+  setStreamTarget,
+} from "./renderer";
 import { safeSend } from "./ws";
 import { escapeHtml } from "./text";
 
@@ -37,6 +45,7 @@ export function onSuggest(data: any) {
 // ---- GM 叙述结束，解析选项 ----
 export function onDone() {
   removeLoading();
+  removeRollPending();
   // 结束流式光标
   if (getStreamTarget()) {
     getStreamTarget()!.classList.remove("streaming-cursor");
@@ -137,7 +146,7 @@ export function enableInput(on: boolean) {
 
 // ---- 发送行动 ----
 export function sendAction(text: string) {
-  addMsg("player", text);
+  addMsg("player", text, true);
   optionsBar.innerHTML = "";
   enableInput(false);
   showGmThinking();
@@ -148,9 +157,10 @@ export function sendAction(text: string) {
 export function sendSuggestReply(confirmed: boolean) {
   modalOverlay.classList.add("hidden");
   if (confirmed) {
-    addMsg("player", "🎲 确定尝试！");
+    addMsg("player", "🎲 确定尝试！", true);
+    showRollPending();
   } else {
-    addMsg("player", "↩ 放弃行动。");
+    addMsg("player", "↩ 放弃行动。", true);
   }
   safeSend(JSON.stringify({ type: "suggest_reply", confirmed }));
 }
