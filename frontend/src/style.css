@@ -181,7 +181,8 @@ body:has(#start-overlay:not(.hidden)) #bottom {
 #messages {
   flex: 1; overflow-y: auto; padding: 28px 32px;
   display: flex; flex-direction: column; gap: 14px;
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth 已移除：流式输出时程序化平滑滚动会和用户滚轮抢，
+     改为瞬时滚动，由 pinnedToBottom 决定是否跟随。 */
 }
 #messages::-webkit-scrollbar { width: 8px; }
 #messages::-webkit-scrollbar-track { background: var(--bg); }

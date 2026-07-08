@@ -54,9 +54,8 @@ export function addMsg(kind: string, text: string, forceScroll = false): HTMLEle
   el.className = `msg ${kind}`;
   el.id = `msg-${++msgIdCounter}`;
   el.innerHTML = marked.parse(text) as string;
-  const stickToBottom = forceScroll || pinnedToBottom;
   messagesEl.appendChild(el);
-  if (stickToBottom) scrollDown(true);
+  scrollDown(forceScroll);  // forceScroll=true 强制滚；否则按 pinnedToBottom（fire 时复检）
   return el;
 }
 
@@ -97,9 +96,8 @@ export function showGmThinking() {
   dots.id = "loading-dots";
   dots.innerHTML =
     '<div class="typing-dots"><span></span><span></span><span></span></div><span style="margin-left:8px;font-size:13px">守秘人正在叙述……</span>';
-  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(dots);
-  if (stickToBottom) scrollDown(true);
+  scrollDown();
 }
 
 export function showRollPending() {
@@ -118,9 +116,8 @@ export function showRollPending() {
     </div>
     <div class="dice-result">守秘人正在结算检定……</div>
   `;
-  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(el);
-  if (stickToBottom) scrollDown(true);
+  scrollDown();
 }
 
 export function removeRollPending() {
@@ -134,7 +131,6 @@ let streamBuffer = "";
 // ---- 流式文本到达 ----
 export function onNarrativeChunk(text: string) {
   removeLoading();
-  const stickToBottom = pinnedToBottom;
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
     streamTarget = addMsg("gm", "");
     streamTarget.classList.add("streaming-cursor");
@@ -142,7 +138,7 @@ export function onNarrativeChunk(text: string) {
   }
   streamBuffer += text;
   streamTarget.innerHTML = marked.parse(streamBuffer) as string;
-  if (stickToBottom) scrollDown(true);
+  scrollDown();  // force=false：fire 时复检 pinnedToBottom，用户已上滚就不抢
 }
 
 // ---- 紧张感提示 ----
@@ -208,9 +204,8 @@ export function onDice(text: string, rollData?: DiceRollData) {
   result.textContent = text;
   el.appendChild(result);
 
-  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(el);
-  if (stickToBottom) scrollDown(true);
+  scrollDown();
   animateDice(el, dice, valueEls, result);
 }
 
