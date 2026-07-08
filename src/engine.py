@@ -10,7 +10,7 @@ from openai import OpenAI
 
 from .config import (
     API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, FORCE_PRO,
-    OPTIONAL_SKILL_HINTS,
+    OPTIONAL_SKILL_HINTS, PROJECT_ROOT,
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
@@ -276,36 +276,35 @@ class GameEngine:
         ],
     }
 
-    def _maybe_hint_optional_skill(self, tool_name: str):
-        """工具调用后,若该工具对应一个按需 skill 且本会话尚未提示过,
-        追加一条轻量 user 消息引导模型 read_file 加载该 skill。"""
-        skill_path = OPTIONAL_SKILL_HINTS.get(tool_name)
-        if not skill_path or skill_path in self._loaded_optional_skills:
+    def _load_optional_skill(self, skill_path: str):
+        """按需把 skill 文件内容直接注入上下文——不再提示模型 read_file 多跑一整轮。
+        读不到就静默跳过，不阻塞回合。"""
+        if skill_path in self._loaded_optional_skills:
             return
         self._loaded_optional_skills.add(skill_path)
+        try:
+            content = (PROJECT_ROOT / skill_path).read_text(encoding="utf-8")
+        except Exception:
+            return  # 文件读不到就算了，别打断回合
         self.messages.append({
             "role": "user",
-            "content": (
-                f"（系统提示：你刚调用了 {tool_name}，"
-                f"如需完整规则/叙事模板，请调用 read_file(path=\"{skill_path}\") 加载对应 Skill。）"
-            )
+            "content": f"（系统已为你加载 Skill 规则：{skill_path}\n\n{content}）",
         })
 
+    def _maybe_hint_optional_skill(self, tool_name: str):
+        """工具调用后,若该工具对应一个按需 skill 且本会话尚未加载,直接注入其内容。"""
+        skill_path = OPTIONAL_SKILL_HINTS.get(tool_name)
+        if skill_path:
+            self._load_optional_skill(skill_path)
+
     def _detect_content_skill_hint(self, content: str):
-        """检测玩家消息内容,若包含战斗/魔法/疯狂等关键词且对应 skill 未加载,
-        主动注入按需加载提示。这是"第三重保险"——不依赖模型判断,引擎直接检测。"""
+        """检测玩家消息内容,若包含战斗/魔法/疯狂等关键词且对应 skill 未加载,直接注入。
+        这是"第三重保险"——不依赖模型判断,引擎直接检测。"""
         for skill_path, keywords in self._KEYWORD_SKILL_MAP.items():
             if skill_path in self._loaded_optional_skills:
                 continue
             if any(kw in content for kw in keywords):
-                self._loaded_optional_skills.add(skill_path)
-                self.messages.append({
-                    "role": "user",
-                    "content": (
-                        f"（系统检测：玩家行动涉及{'战斗' if 'combat' in skill_path else '魔法' if 'magic' in skill_path else '疯狂'}场景。"
-                        f"请先调用 read_file(path=\"{skill_path}\") 加载完整规则,再执行对应检定和叙事。）"
-                    )
-                })
+                self._load_optional_skill(skill_path)
 
     # ---- 记忆管理 ----
 
