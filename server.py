@@ -33,8 +33,25 @@ _prefer_utf8_stdio()
 if len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
     script = Path(sys.argv[1])
     if not script.is_absolute():
-        root = Path(__import__("os").environ.get("TRPG_PROJECT_ROOT", Path(sys.executable).resolve().parent))
-        script = root / script
+        # 工具脚本以相对路径传入（如 tools/dice.py）。打包后数据在 _internal/
+        # 下，而 TRPG_PROJECT_ROOT 指向 exe 目录，二者常不一致——依次在候选
+        # 根下找实际存在的脚本，避免 runpy FileNotFoundError（即"骰子服务不可用"）。
+        candidates: list[Path] = []
+        env_root = os.environ.get("TRPG_PROJECT_ROOT")
+        if env_root:
+            candidates.append(Path(env_root))
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).resolve().parent
+            candidates.append(base / "_internal")
+            candidates.append(base)
+        candidates.append(Path.cwd())
+        resolved = None
+        for root in candidates:
+            cand = root / script
+            if cand.exists():
+                resolved = cand
+                break
+        script = resolved or (candidates[0] / script)
     sys.argv = sys.argv[1:]
     runpy.run_path(str(script), run_name="__main__")
     sys.exit(0)
