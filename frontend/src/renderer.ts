@@ -54,23 +54,33 @@ export function addMsg(kind: string, text: string, forceScroll = false): HTMLEle
   el.className = `msg ${kind}`;
   el.id = `msg-${++msgIdCounter}`;
   el.innerHTML = marked.parse(text) as string;
-  const stickToBottom = forceScroll || shouldAutoScroll();
+  const stickToBottom = forceScroll || pinnedToBottom;
   messagesEl.appendChild(el);
   if (stickToBottom) scrollDown(true);
   return el;
 }
 
+// ---- 自动滚动：用户是否"钉"在底部 ----
+// 用滚动事件驱动的 sticky 状态，而非每次 chunk 到达时才查位置。后者会被
+// 平滑滚动动画干扰：用户往上滚时 scrollTop 可能仍接近底部，被判为"在底部"
+// 又被拉回去。sticky 状态在用户滚动当下就更新，流式输出期间不再抢滚动。
+let pinnedToBottom = true;
+
+messagesEl.addEventListener("scroll", () => {
+  pinnedToBottom = isNearBottom();
+}, { passive: true });
+
+function isNearBottom(): boolean {
+  const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  return distance < 96;
+}
+
 // ---- 滚动到底部 ----
 export function scrollDown(force = false) {
   setTimeout(() => {
-    if (!force && !shouldAutoScroll()) return;
+    if (!force && !pinnedToBottom) return;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }, 50);
-}
-
-function shouldAutoScroll(): boolean {
-  const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
-  return distance < 96;
 }
 
 // ---- 移除"守秘人思考中"指示 ----
@@ -87,7 +97,7 @@ export function showGmThinking() {
   dots.id = "loading-dots";
   dots.innerHTML =
     '<div class="typing-dots"><span></span><span></span><span></span></div><span style="margin-left:8px;font-size:13px">守秘人正在叙述……</span>';
-  const stickToBottom = shouldAutoScroll();
+  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(dots);
   if (stickToBottom) scrollDown(true);
 }
@@ -108,7 +118,7 @@ export function showRollPending() {
     </div>
     <div class="dice-result">守秘人正在结算检定……</div>
   `;
-  const stickToBottom = shouldAutoScroll();
+  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(el);
   if (stickToBottom) scrollDown(true);
 }
@@ -124,7 +134,7 @@ let streamBuffer = "";
 // ---- 流式文本到达 ----
 export function onNarrativeChunk(text: string) {
   removeLoading();
-  const stickToBottom = shouldAutoScroll();
+  const stickToBottom = pinnedToBottom;
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
     streamTarget = addMsg("gm", "");
     streamTarget.classList.add("streaming-cursor");
@@ -198,7 +208,7 @@ export function onDice(text: string, rollData?: DiceRollData) {
   result.textContent = text;
   el.appendChild(result);
 
-  const stickToBottom = shouldAutoScroll();
+  const stickToBottom = pinnedToBottom;
   messagesEl.appendChild(el);
   if (stickToBottom) scrollDown(true);
   animateDice(el, dice, valueEls, result);
