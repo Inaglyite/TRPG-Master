@@ -4,22 +4,49 @@
 
 import json
 import sys
+import os
 import asyncio
 import base64
 import copy
 import mimetypes
+import runpy
 from urllib.parse import quote
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+
+def _prefer_utf8_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_prefer_utf8_stdio()
+
+# PyInstaller 打包后，工具层仍会通过 `sys.executable tools/*.py ...`
+# 启动确定性脚本。此处把自身当作轻量 Python launcher 使用。
+if len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
+    script = Path(sys.argv[1])
+    if not script.is_absolute():
+        root = Path(__import__("os").environ.get("TRPG_PROJECT_ROOT", Path(sys.executable).resolve().parent))
+        script = root / script
+    sys.argv = sys.argv[1:]
+    runpy.run_path(str(script), run_name="__main__")
+    sys.exit(0)
+
 # ---- 从 .env.json 加载配置到环境变量（与 start.py 行为一致）----
 # 必须在 import src.* 之前完成，因为 src/config.py 在导入时就读取 os.environ。
-_ENV_FILE = Path(__file__).resolve().parent / ".env.json"
+_ROOT_FOR_ENV = Path(os.environ.get("TRPG_PROJECT_ROOT", Path(__file__).resolve().parent))
+_ENV_FILE = _ROOT_FOR_ENV / ".env.json"
 if _ENV_FILE.exists():
     try:
         _cfg = json.loads(_ENV_FILE.read_text(encoding="utf-8"))
-        os_environ = __import__("os").environ
+        os_environ = os.environ
         _mapping = {
             "api_key": "OPENAI_API_KEY",
             "base_url": "OPENAI_BASE_URL",
@@ -467,6 +494,12 @@ async def get_theme():
     if cfg.THEME_FILE.exists():
         return json.loads(cfg.THEME_FILE.read_text(encoding="utf-8"))
     return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
+
+
+@app.get("/api/health")
+async def health():
+    """桌面壳用于等待内置后端启动完成。"""
+    return {"ok": True, "module": cfg.MODULE_NAME}
 
 
 @app.get("/api/modules")

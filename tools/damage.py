@@ -13,7 +13,11 @@ SM = os.path.join(PROJECT_ROOT, "tools", "state_manager.py")
 def _run_state_manager(*args):
     """调用 state_manager 并返回解析后的结果"""
     cmd = [sys.executable, SM] + list(args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    result = subprocess.run(
+        cmd, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", env=env
+    )
     if result.returncode != 0:
         print(f"ERROR: state_manager 调用失败: {result.stderr}", file=sys.stderr)
         sys.exit(1)

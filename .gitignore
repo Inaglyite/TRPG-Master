@@ -13,3 +13,7 @@ mod/*/characters/*.json
 characters/custom/*.json
 profiles/player_profile.json
 logs/
+build/
+release-backend/
+release/
+.vscode/

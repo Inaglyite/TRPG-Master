@@ -554,9 +554,14 @@ def _run_cli(cmd: str) -> str:
     try:
         # 传入 TRPG_MODULE 环境变量,确保子进程读写的 world_state.json
         # 与运行时切换后的活跃模组一致(set_active_module 不写 os.environ)
-        env = {**os.environ, "TRPG_MODULE": _cfg.MODULE_NAME}
+        env = {
+            **os.environ,
+            "TRPG_MODULE": _cfg.MODULE_NAME,
+            "PYTHONIOENCODING": "utf-8",
+        }
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=30, cwd=PROJECT_ROOT, env=env
         )
         output = result.stdout.strip()

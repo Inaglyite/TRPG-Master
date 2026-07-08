@@ -10,7 +10,8 @@
     "build": "tsc && vite build",
     "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npx electron .",
     "electron:start": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron .",
-    "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64"
+    "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64",
+    "dist:win": "vite build && electron-builder --win nsis portable --x64"
   },
   "devDependencies": {
     "electron": "^42.4.1",
@@ -28,9 +29,29 @@
       "dist/**/*",
       "electron/main.cjs"
     ],
+    "extraResources": [
+      {
+        "from": "../release-backend/win/trpg-server",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "linux": {
       "target": "AppImage",
       "category": "Game"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     }
   },
   "dependencies": {

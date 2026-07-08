@@ -1,10 +1,34 @@
 """路径、API 配置、常量"""
 
 import os
+import sys
 from pathlib import Path
 
 # ---- 路径 ----
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def _resolve_project_root() -> Path:
+    """定位项目根目录（含 mod/ 的目录）。
+
+    PyInstaller 6.x 打包后把数据放进 _internal/ 子目录，而 Electron 壳把
+    TRPG_PROJECT_ROOT 指向 exe 所在目录（便于 .env.json/存档可写）。两者
+    常不一致，因此不能盲信 TRPG_PROJECT_ROOT——要找到真正含 mod/ 的目录。
+    """
+    candidates: list[Path] = []
+    env_root = os.environ.get("TRPG_PROJECT_ROOT")
+    if env_root:
+        candidates.append(Path(env_root).resolve())
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).resolve().parent
+        candidates.append(base / "_internal")
+        candidates.append(base)
+    else:
+        candidates.append(Path(__file__).resolve().parent.parent)
+    for c in candidates:
+        if (c / "mod").is_dir():
+            return c
+    return candidates[-1]
+
+
+PROJECT_ROOT = _resolve_project_root()
 SKILLS_DIR = PROJECT_ROOT / "skills"
 MODULE_NAME = os.environ.get("TRPG_MODULE", "mansion_of_madness")
 MODULE_DIR = PROJECT_ROOT / "mod" / MODULE_NAME

@@ -1,0 +1,4 @@
+fastapi
+langgraph
+openai
+uvicorn[standard]

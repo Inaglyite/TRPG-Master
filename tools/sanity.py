@@ -16,7 +16,11 @@ STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
 def _cli(*args):
     import subprocess
     cmd = [sys.executable, SM] + list(args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    result = subprocess.run(
+        cmd, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", env=env
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
     try:
