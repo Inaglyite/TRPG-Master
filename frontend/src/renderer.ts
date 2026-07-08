@@ -71,7 +71,9 @@ messagesEl.addEventListener("scroll", () => {
 
 function isNearBottom(): boolean {
   const distance = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
-  return distance < 96;
+  // 阈值要小：用户上滚一档(>50px)就应判"离底"停跟。原来 96px 太大——
+  // 每个 chunk 把你 reset 到 0，你永远攒不到 96px，于是被反复拉回(抽搐几下)。
+  return distance < 8;
 }
 
 // ---- 滚动到底部 ----
@@ -130,6 +132,11 @@ let streamBuffer = "";
 
 // ---- 流式文本到达 ----
 export function onNarrativeChunk(text: string) {
+  // 动 DOM 前先用【实时位置】判断是否在底部。不用 pinnedToBottom 状态——
+  // 状态靠 scroll 事件更新，有竞态：chunk 到达时状态还没更新，就会把已上滚
+  // 的用户拉回底部。实时 wasAtBottom 反映浏览器已处理的滚轮输入，零抽搐
+  // （ZCode/Codex 同款做法）。
+  const wasAtBottom = isNearBottom();
   removeLoading();
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
     streamTarget = addMsg("gm", "");
@@ -138,10 +145,7 @@ export function onNarrativeChunk(text: string) {
   }
   streamBuffer += text;
   streamTarget.innerHTML = marked.parse(streamBuffer) as string;
-  // 瞬时跟随（同步滚到底），不走 scrollDown 的 50ms 延迟——否则每个 chunk
-  // 内容先长、视图 50ms 后才跳，头几帧就是"抽搐两下"。用户上滚后 pinnedToBottom
-  // 为 false，这里不滚，不抢滚轮。
-  if (pinnedToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (wasAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 // ---- 紧张感提示 ----
