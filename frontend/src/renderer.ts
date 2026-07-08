@@ -138,7 +138,10 @@ export function onNarrativeChunk(text: string) {
   }
   streamBuffer += text;
   streamTarget.innerHTML = marked.parse(streamBuffer) as string;
-  scrollDown();  // force=false：fire 时复检 pinnedToBottom，用户已上滚就不抢
+  // 瞬时跟随（同步滚到底），不走 scrollDown 的 50ms 延迟——否则每个 chunk
+  // 内容先长、视图 50ms 后才跳，头几帧就是"抽搐两下"。用户上滚后 pinnedToBottom
+  // 为 false，这里不滚，不抢滚轮。
+  if (pinnedToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 // ---- 紧张感提示 ----
