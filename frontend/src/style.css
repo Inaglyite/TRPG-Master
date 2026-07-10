@@ -162,9 +162,24 @@ body:has(#start-overlay:not(.hidden)) #bottom {
 #toolbar button:active { transform: translateY(0); }
 #toolbar button:disabled { opacity: 0.45; cursor: wait; transform: none; }
 #btn-save { background-image: var(--ui-save); }
+#btn-save.saving {
+  opacity: 0.86;
+  animation: quick-save-pulse 0.8s ease-in-out infinite alternate;
+}
+#btn-save.save-success {
+  filter: drop-shadow(0 0 13px rgba(107, 154, 82, 0.82)) brightness(1.16);
+}
+#btn-save.save-failed {
+  filter: drop-shadow(0 0 13px rgba(201, 80, 80, 0.78)) brightness(0.92);
+}
 #btn-load { background-image: var(--ui-load); }
 #btn-new { background-image: var(--ui-restart); }
 #btn-panel { background-image: var(--ui-character); }
+
+@keyframes quick-save-pulse {
+  from { filter: drop-shadow(0 0 5px rgba(236, 208, 122, 0.3)) brightness(0.96); }
+  to { filter: drop-shadow(0 0 15px rgba(236, 208, 122, 0.76)) brightness(1.15); }
+}
 
 /* ---- 主体 ---- */
 #main {
@@ -786,6 +801,12 @@ body:has(.clue-toast) #handout-container {
   margin-top: 8px;
   overflow-wrap: anywhere;
 }
+.decision-title {
+  color: #2d1b0e;
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
 #modal-actions { display: flex; gap: 14px; justify-content: center; }
 #modal-actions button {
   font-family: var(--font);
@@ -796,6 +817,25 @@ body:has(.clue-toast) #handout-container {
   cursor: pointer;
   border: none;
   transition: transform 0.18s ease, filter 0.18s ease;
+}
+.decision-option {
+  align-items: center;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 74px;
+  min-width: 132px;
+  max-width: 190px;
+}
+.decision-option span {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 4px;
+  opacity: 0.82;
+  overflow-wrap: anywhere;
 }
 .btn-danger {
   background: var(--ui-option-dark) center / 100% 100% no-repeat;
@@ -1245,17 +1285,111 @@ body:has(.clue-toast) #handout-container {
   border: 1px solid rgba(67, 42, 18, 0.34);
   background: rgba(56, 36, 16, 0.12); color: #3c2917;
   cursor: pointer; transition: all 0.15s ease;
+  position: relative;
+  overflow: visible;
+}
+.save-slot-actions button::after,
+.save-rename-form button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  transform: translate(-50%, 3px);
+  padding: 4px 8px;
+  border: 1px solid rgba(236, 208, 122, 0.56);
+  border-radius: 4px;
+  background: rgba(20, 13, 8, 0.96);
+  color: #fff4cf;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s ease;
+}
+.save-slot-actions button:hover::after,
+.save-slot-actions button:focus-visible::after,
+.save-rename-form button:hover::after,
+.save-rename-form button:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+#save-panel-list:has(button[data-tooltip]:hover) button[data-tooltip]:focus-visible:not(:hover)::after {
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 3px);
 }
 .save-action-load:hover {
   background: var(--gold); color: var(--bg);
   border-color: var(--gold-bright);
   box-shadow: 0 0 8px var(--gold-glow);
 }
+.save-action-rename:hover {
+  background: #416b7d; color: white;
+  border-color: #78aec2;
+  box-shadow: 0 0 8px rgba(106, 166, 200, 0.4);
+}
 .save-action-del:hover {
   background: var(--red); color: white;
   border-color: var(--red-bright);
   box-shadow: 0 0 8px rgba(201, 80, 80, 0.4);
 }
+
+.save-rename-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px 30px;
+  gap: 5px;
+  width: min(100%, 360px);
+  align-items: center;
+}
+.save-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 4px 9px;
+  border: 1px solid #76552b;
+  border-radius: 4px;
+  outline: none;
+  background: rgba(255, 247, 219, 0.94);
+  color: #211407;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 750;
+  user-select: text;
+  box-shadow: inset 0 1px 3px rgba(49, 30, 10, 0.18);
+}
+.save-rename-input:focus {
+  border-color: #9a6f2e;
+  box-shadow: 0 0 0 2px rgba(200, 162, 78, 0.28), inset 0 1px 3px rgba(49, 30, 10, 0.18);
+}
+.save-rename-form button {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(67, 42, 18, 0.42);
+  border-radius: 4px;
+  color: #fff8df;
+  font-family: var(--font);
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  overflow: visible;
+}
+.save-rename-confirm { background: #4e713d; }
+.save-rename-cancel { background: #79413a; }
+.save-rename-confirm:hover { background: #638c4e; }
+.save-rename-cancel:hover { background: #985148; }
+.save-rename-form.saving { opacity: 0.68; }
+.save-rename-form button:disabled { cursor: wait; }
 
 .save-empty {
   text-align: center; padding: 30px 0;
@@ -1398,13 +1532,17 @@ body:has(.clue-toast) #handout-container {
 
   #modal-box {
     width: calc(100vw - 28px);
-    padding: 62px 32px 34px;
+    padding: 62px 32px 64px;
   }
   #modal-actions {
+    gap: 9px;
     flex-wrap: wrap;
   }
   #modal-actions button {
     flex: 1 1 180px;
+  }
+  .decision-option {
+    min-height: 64px;
   }
 
   #start-box {

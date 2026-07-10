@@ -76,6 +76,8 @@ SKILL_LOAD_ORDER = [
 OPTIONAL_SKILL_HINTS = {
     "apply_damage": "skills/keeper/keeper_combat.skill",
     "apply_heal": "skills/keeper/keeper_combat.skill",
+    "combat_start": "skills/keeper/keeper_combat.skill",
+    "combat_action": "skills/keeper/keeper_combat.skill",
     "sanity_loss": "skills/keeper/keeper_psychology.skill",
     "create_character": "skills/investigator/investigator_creation.skill",
 }

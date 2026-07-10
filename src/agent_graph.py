@@ -15,7 +15,7 @@ from langgraph.graph import END, START, StateGraph
 from .config import FORCE_PRO, MAX_TOOL_ROUNDS, MODEL_FLASH, MODEL_PRO
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error, tool as log_tool
-from .tools import COMPLEX_FUNCTIONS, dice_summary, needs_pro_model
+from .tools import COMPLEX_FUNCTIONS, dice_summary
 
 
 class TurnState(TypedDict, total=False):
@@ -61,10 +61,23 @@ def _prepare_turn(state: TurnState) -> dict:
     }
 
 
-def _call_llm(state: TurnState) -> dict:
+def _call_story_agent(state: TurnState) -> dict:
     engine = state["engine"]
     text, tool_calls = engine._stream_llm(engine.current_model)
     return {"text": text, "tool_calls": tool_calls}
+
+
+def _call_combat_agent(state: TurnState) -> dict:
+    engine = state["engine"]
+    text, tool_calls = engine._stream_llm(
+        engine.current_model,
+        system_overlay=engine._combat_system_overlay(),
+    )
+    return {"text": text, "tool_calls": tool_calls}
+
+
+def _route_to_agent(state: TurnState) -> str:
+    return "call_combat_agent" if state["engine"]._combat_active() else "call_story_agent"
 
 
 def _route_after_llm(state: TurnState) -> str:
@@ -75,19 +88,7 @@ def _route_after_llm(state: TurnState) -> str:
         return "finalize"
     if not tool_calls:
         return "finalize"
-    if state["engine"].current_model == MODEL_FLASH and needs_pro_model(tool_calls):
-        return "switch_to_pro"
     return "execute_tools"
-
-
-def _switch_to_pro(state: TurnState) -> dict:
-    engine = state["engine"]
-    tool_calls = state.get("tool_calls", [])
-    engine.current_model = MODEL_PRO
-    engine.cb.on_tension(tension(_tool_category(tool_calls)), _tool_category(tool_calls))
-    if engine.messages and engine.messages[-1]["role"] == "assistant":
-        engine.messages.pop()
-    return {}
 
 
 def _execute_tools(state: TurnState) -> dict:
@@ -134,6 +135,9 @@ def _execute_tools(state: TurnState) -> dict:
                 except json.JSONDecodeError:
                     roll_data = None
                 engine.cb.on_dice(summary, roll_data)
+
+        if name == "combat_action":
+            _emit_combat_dice(engine, output)
 
         if name in COMPLEX_FUNCTIONS:
             tool_outputs.append((name, output))
@@ -197,8 +201,40 @@ def _handle_end_game(engine: Any, output: str) -> None:
 
 def _route_after_tools(state: TurnState) -> str:
     if state.get("tool_round", 0) <= MAX_TOOL_ROUNDS:
-        return "call_llm"
+        return _route_to_agent(state)
     return "finalize"
+
+
+def _emit_combat_dice(engine: Any, output: str) -> None:
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return
+    if not data.get("ok") or data.get("event") != "action_resolved":
+        return
+
+    rolls = []
+    for key in ("attack_roll", "defense_roll"):
+        roll = data.get(key)
+        if isinstance(roll, dict) and isinstance(roll.get("roll"), int):
+            rolls.append(roll["roll"])
+    damage = data.get("damage")
+    wound_check = damage.get("major_wound_check") if isinstance(damage, dict) else None
+    if isinstance(wound_check, dict) and isinstance(wound_check.get("roll"), int):
+        rolls.append(wound_check["roll"])
+    if not rolls:
+        return
+    engine.cb.on_dice(
+        data.get("summary", "战斗对抗已结算"),
+        {
+            "spec": f"{len(rolls)}d100",
+            "sides": 100,
+            "count": len(rolls),
+            "rolls": rolls,
+            "total": sum(rolls),
+            "combat": True,
+        },
+    )
 
 
 def _finalize_turn(state: TurnState) -> dict:
@@ -227,28 +263,28 @@ def _finalize_turn(state: TurnState) -> dict:
 def build_turn_graph():
     graph = StateGraph(TurnState)
     graph.add_node("prepare_turn", _prepare_turn)
-    graph.add_node("call_llm", _call_llm)
-    graph.add_node("switch_to_pro", _switch_to_pro)
+    graph.add_node("call_story_agent", _call_story_agent)
+    graph.add_node("call_combat_agent", _call_combat_agent)
     graph.add_node("execute_tools", _execute_tools)
     graph.add_node("finalize", _finalize_turn)
 
     graph.add_edge(START, "prepare_turn")
-    graph.add_edge("prepare_turn", "call_llm")
-    graph.add_conditional_edges(
-        "call_llm",
-        _route_after_llm,
-        {
-            "switch_to_pro": "switch_to_pro",
-            "execute_tools": "execute_tools",
-            "finalize": "finalize",
-        },
-    )
-    graph.add_edge("switch_to_pro", "call_llm")
+    graph.add_conditional_edges("prepare_turn", _route_to_agent, {
+        "call_story_agent": "call_story_agent",
+        "call_combat_agent": "call_combat_agent",
+    })
+    for agent_node in ("call_story_agent", "call_combat_agent"):
+        graph.add_conditional_edges(
+            agent_node,
+            _route_after_llm,
+            {"execute_tools": "execute_tools", "finalize": "finalize"},
+        )
     graph.add_conditional_edges(
         "execute_tools",
         _route_after_tools,
         {
-            "call_llm": "call_llm",
+            "call_story_agent": "call_story_agent",
+            "call_combat_agent": "call_combat_agent",
             "finalize": "finalize",
         },
     )

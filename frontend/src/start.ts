@@ -128,7 +128,7 @@ export function onSaveList(data: any) {
     hint.textContent = "还未有存档。开始游戏后进度将自动保存。";
   }
 
-  // 游戏内的存档管理面板（💾按钮）始终同步
+  // 游戏内的存档管理面板始终同步
   renderSavePanel(saves);
 }
 

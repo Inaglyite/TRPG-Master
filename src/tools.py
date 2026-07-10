@@ -276,6 +276,83 @@ TOOLS = [
             }
         }
     },
+    # ---- 服务端战斗状态机 ----
+    {
+        "type": "function",
+        "function": {
+            "name": "combat_start",
+            "description": "进入战斗并建立唯一的服务端回合状态。自动加入 PC，按 DEX 排序；NPC 缺少战斗数值时可在 participants 中提供保守覆盖值。战斗开始后必须使用 combat_action 推进，不要再用普通 skill_check/apply_damage 结算攻击。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "发生敌对行动的简述"},
+                    "participants": {
+                        "type": "array",
+                        "description": "参战者配置。PC 可省略并会自动加入；NPC 必须使用 world_state 中的 id。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "pc 或 NPC id"},
+                                "dex": {"type": "integer", "description": "可选 DEX 覆盖值"},
+                                "con": {"type": "integer", "description": "可选 CON 覆盖值，用于重伤检定"},
+                                "fighting_brawl": {"type": "integer", "description": "可选斗殴覆盖值"},
+                                "dodge": {"type": "integer", "description": "可选闪避覆盖值"},
+                                "firearms_handgun": {"type": "integer", "description": "可选手枪覆盖值"},
+                                "damage_spec": {"type": "string", "description": "默认伤害骰，如 1d6"},
+                                "ready_firearm": {"type": "boolean", "description": "是否已持枪待发；先攻按 DEX+50"}
+                            },
+                            "required": ["id"]
+                        }
+                    }
+                },
+                "required": ["participants", "reason"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "combat_status",
+            "description": "读取服务端战斗状态、当前轮次、行动者、参战者生命值和待处理决定。战斗专员不确定当前行动者时调用。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "combat_action",
+            "description": "提交当前行动者的一个战斗动作。工具验证行动顺序、掷骰、比较成功等级、结算伤害并推进回合。NPC 攻击 PC 时会暂停并弹出玩家防御选择，绝不能替玩家选择。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "actor_id": {"type": "string", "description": "必须等于 combat_status.current_actor"},
+                    "target_id": {"type": "string", "description": "攻击目标 id；移动或其他动作可省略"},
+                    "action_type": {"type": "string", "enum": ["melee", "firearm", "move", "other"]},
+                    "description": {"type": "string", "description": "具体动作意图，供确认弹窗和后续叙事使用"},
+                    "skill": {"type": "string", "description": "可选技能 id，近战默认 fighting_brawl，射击默认 firearms_handgun"},
+                    "weapon": {"type": "string", "description": "射击所用武器名称或物品栏中的关键字；用于从“武器（N发）”中扣减弹药"},
+                    "damage_spec": {"type": "string", "description": "命中后的伤害骰，如 1d3、1d6、1d8+1"},
+                    "damage_mode": {"type": "string", "enum": ["normal", "impaling", "blunt"], "description": "极难成功伤害模式；枪弹/刺击用 impaling，钝击用 blunt"},
+                    "defender_choice": {"type": "string", "enum": ["dodge", "fight_back", "take_cover", "no_defense"], "description": "仅用于 NPC 防御选择；PC 防御必须留空，由工具向玩家确认"},
+                    "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 2},
+                    "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 2}
+                },
+                "required": ["actor_id", "action_type", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "combat_end",
+            "description": "敌意解除、撤退成功、投降或剧情明确中止战斗时结束战斗状态。击倒全部敌人或 PC 后状态机会自动结束。",
+            "parameters": {
+                "type": "object",
+                "properties": {"reason": {"type": "string", "description": "战斗结束原因"}},
+                "required": ["reason"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -525,25 +602,12 @@ COMPLEX_FUNCTIONS = {
     "skill_check",
     "dice_roll",
     "apply_damage", "apply_heal",
+    "combat_start", "combat_action", "combat_end",
     "sanity_loss", "sanity_restore", "sanity_check",
     "create_character",
     "attribute_check", "luck_check",
     "psychoanalysis", "reality_check",
 }
-
-
-def _tc_name(tc) -> str:
-    """兼容 SDK 对象和 plain dict 两种 tool_call 格式"""
-    if isinstance(tc, dict):
-        return tc.get("function", {}).get("name", "")
-    return tc.function.name
-
-
-def needs_pro_model(tool_calls: list) -> bool:
-    for tc in tool_calls:
-        if _tc_name(tc) in COMPLEX_FUNCTIONS:
-            return True
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +687,16 @@ def execute_function(name: str, args: dict) -> str:
         return _run_cli([exe, "tools/character.py", "create", args.get('name', '调查员'), args.get('occupation', '私家侦探')])
     elif name == "load_character":
         return _run_cli([exe, "tools/character.py", "load", args.get('path', '')])
+    elif name == "combat_start":
+        return _run_cli([exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)])
+    elif name == "combat_status":
+        return _run_cli([exe, "tools/combat.py", "status", "{}"])
+    elif name == "combat_action":
+        return _run_cli([exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)])
+    elif name == "combat_decide":
+        return _run_cli([exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)])
+    elif name == "combat_end":
+        return _run_cli([exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)])
     elif name == "suggest_check":
         skill = args.get("skill", "?")
         attr = args.get("attribute", "?")

@@ -13,6 +13,7 @@ import {
   btnSend,
   modalOverlay,
   modalText,
+  modalActions,
   modalYes,
   modalNo,
 } from "./dom";
@@ -28,9 +29,12 @@ import {
 import { safeSend } from "./ws";
 import { escapeHtml } from "./text";
 
+let activeDecisionId: string | null = null;
+
 // ---- 建议检定弹窗 ----
 export function onSuggest(data: any) {
   removeLoading();
+  modalActions.replaceChildren(modalYes, modalNo);
   modalText.innerHTML = `
     <div class="suggest-desc">${escapeHtml(data.description)}</div>
     <div class="suggest-roll">
@@ -40,6 +44,36 @@ export function onSuggest(data: any) {
   `;
   modalOverlay.classList.remove("hidden");
   modalYes.focus();
+}
+
+// ---- 通用多选决定（战斗防御等） ----
+export function onDecision(data: any) {
+  removeLoading();
+  activeDecisionId = data.id || null;
+  const options = Array.isArray(data.options) ? data.options : [];
+  modalText.innerHTML = `
+    <div class="decision-title">${escapeHtml(data.title || "需要你做出决定")}</div>
+    <div class="suggest-desc">${escapeHtml(data.description || "")}</div>
+  `;
+  modalActions.replaceChildren();
+
+  options.forEach((option: any, index: number) => {
+    const button = document.createElement("button");
+    button.className = index === 0 ? "btn-danger decision-option" : "btn-safe decision-option";
+    const label = document.createElement("strong");
+    label.textContent = option.label || option.id;
+    button.appendChild(label);
+    if (option.description) {
+      const description = document.createElement("span");
+      description.textContent = option.description;
+      button.appendChild(description);
+    }
+    button.onclick = () => sendDecisionReply(data.id, option.id, option.label || option.id);
+    modalActions.appendChild(button);
+  });
+
+  modalOverlay.classList.remove("hidden");
+  (modalActions.querySelector("button") as HTMLButtonElement | null)?.focus();
 }
 
 // ---- GM 叙述结束，解析选项 ----
@@ -163,6 +197,26 @@ export function sendSuggestReply(confirmed: boolean) {
     addMsg("player", "↩ 放弃行动。", true);
   }
   safeSend(JSON.stringify({ type: "suggest_reply", confirmed }));
+}
+
+export function sendDecisionReply(decisionId: string, optionId: string, label: string) {
+  modalOverlay.classList.add("hidden");
+  activeDecisionId = null;
+  addMsg("player", label, true);
+  showRollPending();
+  safeSend(JSON.stringify({
+    type: "decision_reply",
+    decision_id: decisionId,
+    option_id: optionId,
+  }));
+}
+
+export function onDecisionResolved(data: any) {
+  if (!data.automatic || data.decision_id !== activeDecisionId) return;
+  modalOverlay.classList.add("hidden");
+  activeDecisionId = null;
+  addMsg("system", "等待选择超时，已采用默认防御。", true);
+  showRollPending();
 }
 
 // ==================== 按钮事件绑定 ====================

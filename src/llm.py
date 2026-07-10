@@ -84,7 +84,11 @@ def glm_quick_summary(tool_outputs: list[tuple[str, str]], model_context: str) -
         if "loss_amount" in data:
             sanity_info = f"理智 -{data['loss_amount']}"
         if "damage" in data:
-            damage_info = f"造成 {data['damage']} 点{data.get('damage_type', '')}伤害"
+            damage = data["damage"]
+            if isinstance(damage, dict) and damage.get("amount") is not None:
+                damage_info = f"造成 {damage['amount']} 点伤害"
+            elif isinstance(damage, (int, float)):
+                damage_info = f"造成 {damage} 点{data.get('damage_type', '')}伤害"
         if "heal_amount" in data:
             damage_info = f"恢复 {data['heal_amount']} 点生命"
 

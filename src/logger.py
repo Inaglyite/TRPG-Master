@@ -78,6 +78,13 @@ def game_event(event: str):
     get().info(f"GAME  {event}")
 
 
+def model_call(model: str, role: str, elapsed: float, first_token: float | None, finish: str | None, tools: int):
+    ttft = f"{first_token:.2f}s" if first_token is not None else "-"
+    get().info(
+        f"MODEL {role} | {model} | total={elapsed:.2f}s | first={ttft} | finish={finish or '-'} | tools={tools}"
+    )
+
+
 def _brief(d: dict) -> str:
     """压缩 dict 为一行的简短描述。"""
     parts = []

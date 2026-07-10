@@ -21,8 +21,15 @@ import {
   populateCharacterList,
 } from "./start";
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
-import { onSuggest, onDone } from "./options";
-import { showEnding, renderSavePanel, updateCharPanel, updateCluePanel, showHandout } from "./panels";
+import { onSuggest, onDecision, onDecisionResolved, onDone } from "./options";
+import {
+  finishQuickSave,
+  showEnding,
+  renderSavePanel,
+  updateCharPanel,
+  updateCluePanel,
+  showHandout,
+} from "./panels";
 import { applyTheme } from "./main";
 
 // ---- 后端地址 ----
@@ -104,6 +111,12 @@ function handleMessage(e: MessageEvent) {
     case "suggest_check":
       onSuggest(data);
       break;
+    case "decision_request":
+      onDecision(data);
+      break;
+    case "decision_resolved":
+      onDecisionResolved(data);
+      break;
     case "done":
       onDone();
       safeSend(JSON.stringify({ type: "state" }));
@@ -113,7 +126,13 @@ function handleMessage(e: MessageEvent) {
       if (getGameStarting()) resetStartButton();
       break;
     case "saved":
-      addMsg("system", data.ok ? `存档成功 (${data.slot_id})。` : "存档失败。");
+      if (data.slot_id === "slot_000") finishQuickSave(Boolean(data.ok));
+      addMsg(
+        data.ok ? "system" : "error",
+        data.ok
+          ? (data.slot_id === "slot_000" ? "进度已快速保存。" : "新存档已创建。")
+          : "存档失败，请稍后再试。",
+      );
       if (!savePanelOverlay.classList.contains("hidden")) {
         safeSend(JSON.stringify({ type: "save_list" }));
       }
@@ -123,7 +142,12 @@ function handleMessage(e: MessageEvent) {
       safeSend(JSON.stringify({ type: "save_list" }));
       break;
     case "save_renamed":
-      addMsg("system", `存档已重命名为「${data.label || "(默认)"}」。`);
+      addMsg(
+        data.ok ? "system" : "error",
+        data.ok
+          ? `存档已重命名为「${data.label || "场景默认名称"}」。`
+          : "存档重命名失败，请稍后再试。",
+      );
       safeSend(JSON.stringify({ type: "save_list" }));
       break;
     case "quit_ok":

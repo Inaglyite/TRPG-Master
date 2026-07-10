@@ -50,6 +50,11 @@ const CLUE_NAMES: Record<string, string> = {
 };
 
 let knownClueKeys: Set<string> | null = null;
+let quickSavePending = false;
+let quickSaveTimeout: number | undefined;
+let quickSaveFeedbackTimeout: number | undefined;
+
+const QUICK_SAVE_LABEL = "快速存档";
 
 function parseJson<T>(raw: string, fallback: T): T {
   try {
@@ -441,9 +446,9 @@ export function renderSavePanel(saves: any[]) {
         </div>
       </div>
       <div class="save-slot-actions">
-        <button class="save-action-load" data-slot="${slotId}">📂</button>
-        <button class="save-action-rename" data-slot="${slotId}">✏️</button>
-        ${isAuto ? "" : `<button class="save-action-del" data-slot="${slotId}">🗑</button>`}
+        <button type="button" class="save-action-load" data-slot="${slotId}" data-tooltip="读取存档" aria-label="读取存档">📂</button>
+        <button type="button" class="save-action-rename" data-slot="${slotId}" data-label="${escapeHtml(s.label || "")}" data-scene-name="${sceneName}" data-tooltip="重命名" aria-label="重命名存档">✏️</button>
+        ${isAuto ? "" : `<button type="button" class="save-action-del" data-slot="${slotId}" data-tooltip="删除存档" aria-label="删除存档">🗑</button>`}
       </div>
     </div>`;
   }
@@ -462,11 +467,7 @@ export function renderSavePanel(saves: any[]) {
   // Bind rename buttons
   savePanelList.querySelectorAll(".save-action-rename").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const slot = (btn as HTMLElement).getAttribute("data-slot") || "";
-      const label = prompt("存档名称（留空用场景名）：");
-      if (label !== null) {
-        safeSend(JSON.stringify({ type: "save_rename", slot_id: slot, label: label.trim() }));
-      }
+      openSaveRenameEditor(btn as HTMLButtonElement);
     });
   });
 
@@ -479,9 +480,116 @@ export function renderSavePanel(saves: any[]) {
   });
 }
 
+function openSaveRenameEditor(renameButton: HTMLButtonElement) {
+  const entry = renameButton.closest(".save-slot-entry");
+  const title = entry?.querySelector(".save-slot-title");
+  const name = title?.querySelector(".save-slot-name") as HTMLElement | null;
+  if (!entry || !title || !name || title.querySelector(".save-rename-form")) return;
+
+  // Only keep one rename editor open so keyboard actions stay unambiguous.
+  savePanelList.querySelectorAll(".save-rename-cancel").forEach((button) => {
+    (button as HTMLButtonElement).click();
+  });
+
+  const slot = renameButton.dataset.slot || "";
+  const sceneName = renameButton.dataset.sceneName || "未知场景";
+  const form = document.createElement("div");
+  form.className = "save-rename-form";
+
+  const input = document.createElement("input");
+  input.className = "save-rename-input";
+  input.type = "text";
+  input.maxLength = 50;
+  input.value = renameButton.dataset.label || sceneName;
+  input.placeholder = sceneName;
+  input.setAttribute("aria-label", "存档名称");
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "save-rename-confirm";
+  confirm.textContent = "✓";
+  confirm.dataset.tooltip = "保存名称";
+  confirm.setAttribute("aria-label", "保存存档名称");
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "save-rename-cancel";
+  cancel.textContent = "×";
+  cancel.dataset.tooltip = "取消";
+  cancel.setAttribute("aria-label", "取消重命名");
+
+  const restoreName = () => {
+    form.remove();
+    name.hidden = false;
+    renameButton.focus();
+  };
+  const submitName = () => {
+    if (form.classList.contains("saving")) return;
+    form.classList.add("saving");
+    input.disabled = true;
+    confirm.disabled = true;
+    cancel.disabled = true;
+    safeSend(JSON.stringify({ type: "save_rename", slot_id: slot, label: input.value.trim() }));
+  };
+
+  confirm.addEventListener("click", submitName);
+  cancel.addEventListener("click", restoreName);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitName();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      restoreName();
+    }
+  });
+
+  form.append(input, confirm, cancel);
+  name.hidden = true;
+  title.prepend(form);
+  input.focus();
+  input.select();
+}
+
+function quickSave() {
+  if (quickSavePending || !getGameStarted()) return;
+
+  window.clearTimeout(quickSaveFeedbackTimeout);
+  quickSavePending = true;
+  btnSave.disabled = true;
+  btnSave.classList.remove("save-success", "save-failed");
+  btnSave.classList.add("saving");
+  btnSave.title = "保存中…";
+  btnSave.setAttribute("aria-label", "正在快速存档");
+  safeSend(JSON.stringify({ type: "save", manual: false }));
+
+  quickSaveTimeout = window.setTimeout(() => {
+    finishQuickSave(false);
+  }, 8000);
+}
+
+export function finishQuickSave(ok: boolean) {
+  if (!quickSavePending) return;
+
+  quickSavePending = false;
+  window.clearTimeout(quickSaveTimeout);
+  btnSave.disabled = false;
+  btnSave.classList.remove("saving");
+  btnSave.classList.toggle("save-success", ok);
+  btnSave.classList.toggle("save-failed", !ok);
+  btnSave.title = ok ? "已保存" : "保存失败";
+  btnSave.setAttribute("aria-label", ok ? "快速存档已完成" : "快速存档失败");
+
+  quickSaveFeedbackTimeout = window.setTimeout(() => {
+    btnSave.classList.remove("save-success", "save-failed");
+    btnSave.title = QUICK_SAVE_LABEL;
+    btnSave.setAttribute("aria-label", QUICK_SAVE_LABEL);
+  }, 1600);
+}
+
 // ==================== 按钮事件绑定 ====================
 
-btnSave.onclick = openSavePanel;
+btnSave.onclick = quickSave;
 btnLoad.onclick = openSavePanel;
 btnPanel.onclick = () => {
   charPanel.classList.toggle("collapsed");

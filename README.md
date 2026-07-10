@@ -1,306 +1,265 @@
-# 🎲 TRPG Agent 内核
+# TRPG Master
 
-可插拔模组的克苏鲁的呼唤第七版跑团引擎。规则执行、状态管理、d100 检定、约束生成——纯内核，可接入任意前端。
+一个面向本地单人跑团的 AI 守秘人桌面应用。项目把叙事模型、CoC 7e 风格规则、确定性工具、模组状态和 Electron 界面拆成独立层，通过 FastAPI WebSocket 传递流式叙事与结构化游戏事件。
 
-## 架构
+当前仓库内置两个可游玩模组：`mansion_of_madness`（疯狂宅邸）与 `猩红文档`。目前的运行模型是单机、单玩家；多人共享世界仍处于规划阶段。
 
-```
-玩家 → Electron / 浏览器 (TS + Vite)
-          ↕  WebSocket (流式文本 + 结构化事件)
-       FastAPI 服务器 (server.py)
-          ↕  同步回调
-       GameEngine 内核 (src/engine.py)
-          ↕  LangGraph 回合编排 (src/agent_graph.py)
-       Function Calling + CLI Tools
-          ↕
-       DeepSeek V4 Flash/Pro + GLM-4 Flash + Python Tools
-```
+## 主要能力
 
-| 层 | 技术栈 | 职责 |
-|---|---|---|
-| **前端** | Vite + TypeScript + Electron | 聊天 UI、流式文本、检定弹窗、角色/任务/线索面板、模组选择器、图片线索展示 |
-| **接口层** | FastAPI + WebSocket | 引擎回调 → WS 消息，WS 消息 → 引擎动作；为前端补全素材 data URI/URL |
-| **内核** | `src/engine.py`（回调驱动） | TRPG 游戏内核、存档、回调、自动素材分发——零界面依赖 |
-| **Agent 编排** | `src/agent_graph.py` + LangGraph | 每回合 prepare → LLM → 工具执行 → Pro 模型切换 → finalize |
-| **规则** | `rules/*.json` + `skills/` (15文件4000+行) | COC 7e 完整规则——守秘人/调查员/核心三层架构 + 结构化心理学知识库 |
-| **工具** | `tools/*.py` | 确定性 Python 脚本——d100 检定、SAN 三阶段疯狂、角色创建、模组导入、心理特质管理 |
+- Electron 桌面端与浏览器前端，共用 Vite + TypeScript 渲染层。
+- OpenAI 兼容接口，默认配置面向 DeepSeek，可自定义请求地址和模型名。
+- LangGraph 双角色编排：探索由叙事 Agent 处理，战斗由无私有记忆的战斗 Agent 接管。
+- 服务端权威战斗状态机，负责先攻、回合、d100 对抗、伤害、枪械弹药与玩家防御确认。
+- d100 技能检定、属性检定、伤害、SAN 与心理状态等确定性工具。
+- 模组切换、调查员选择、长期角色履历和按模组隔离的多槽位存档。
+- 图片线索、人物档案、场景展示材料与线索加入提示。
+- 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
+- TIER 信息边界、NPC 揭示记录和私有工作记忆，降低模型提前剧透的概率。
+- Windows 安装包/便携版构建，以及 Linux 源码桌面启动脚本。
 
-> 设计边界：本项目不是“纯 Agent”。Agent 只负责叙事、判断和回合流程编排；存档、线索、世界状态、骰子、SAN、角色卡、素材发放等硬规则仍然由游戏内核和 Python 工具确定性执行。
+## 文档
 
-## 项目结构
-
-```
-trpg-master/
-├── src/                          # 内核（零界面依赖）
-│   ├── engine.py                 # GameEngine — 回调驱动游戏循环
-│   ├── agent_graph.py            # LangGraph 回合编排：LLM/工具/模型切换/finalize
-│   ├── characters.py             # 长期调查员、角色选择、案件结算履历
-│   ├── config.py                 # 路径/API配置/动态模块切换
-│   ├── tools.py                  # Function Calling Schema + 执行器
-│   ├── llm.py                    # GLM 快速摘要
-│   ├── persistence.py            # Skill加载 + 多槽位存档/读档
-│   └── game_loop.py              # 终端壳
-├── server.py                     # WebSocket 服务器
-├── game_loop.py                  # 终端版入口
-├── start_desktop.sh              # 桌面版一键启动
-├── start.py / start.sh           # 跨平台启动器
-│
-├── frontend/                     # Electron 桌面应用
-│   ├── electron/main.cjs         # Electron 主进程
-│   ├── src/
-│   │   ├── main.ts               # 入口（主题加载 + 启动）
-│   │   ├── ws.ts                 # WebSocket 通信
-│   │   ├── renderer.ts           # 消息渲染/流式文本
-│   │   ├── options.ts            # 选项解析/检定弹窗
-│   │   ├── panels.ts             # 角色面板/存档面板/结局
-│   │   ├── start.ts              # 开局流程/模组选择
-│   │   ├── dom.ts                # DOM 引用集中管理
-│   │   └── style.css             # 克苏鲁暗色主题
-│   ├── index.html
-│   ├── vite.config.ts
-│   └── package.json
-│
-├── tools/                        # 确定性 Python 工具
-│   ├── skill_check.py            # d100 roll-under + 三难度 + 奖惩骰 + 属性裸检定
-│   ├── dice.py                   # 通用骰子
-│   ├── damage.py                 # 伤害/治疗
-│   ├── sanity.py                 # X/Y SAN损失 + 三阶段疯狂 + 28恐惧症/24躁狂症 + 精神分析/现实认知
-│   ├── character.py              # COC 7e 角色创建 (9职业) + 心理特质初始化
-│   ├── module_loader.py          # Markdown→world_state.json 导入
-│   └── state_manager.py          # 世界状态读写 + NPC揭示追踪 + 心理特质管理
-│
-├── characters/                   # 全局角色库
-│   ├── default/                  # 项目内置调查员，可跨模组选择
-│   └── custom/                   # 玩家自建/导入角色（本地数据，不入库）
-│
-├── profiles/                     # 玩家长期履历
-│   └── player_profile.json       # 运行时生成：案件历史、声望、人脉、长期状态
-│
-├── skills/                       # 约束型提示模板 (COC 7e 完整规则)
-│   ├── core/                     # d100检定/防剧透(TIER+私有工作记忆)/入口
-│   ├── keeper/                   # 守秘人方法论/氛围/NPC/线索/战斗/理智/魔法/心理学知识库
-│   ├── investigator/             # 技能详解(含心理学→NPC揭示联动)/角色创建/调查方法
-│   └── (旧顶层文件保留桥接)
-│
-├── rules/                        # 规则数据 (结构化 JSON)
-│   ├── rule_schema.json          # COC 8属性 + 41技能 + 衍生值 + 检定/战斗/理智
-│   └── rule_config.json          # 规则开关
-│
-├── saves/                        # 存档 (按模组隔离)
-│   └── <module_name>/
-│       ├── slot_000/             # 自动存档
-│       │   ├── messages.json     # LLM 对话历史
-│       │   ├── snapshot.json     # 世界状态快照 (读档恢复)
-│       │   └── meta.json         # 元数据
-│       └── slot_NNN/             # 手动存档
-│
-├── mod/                          # 模组目录 (可自由加载)
-│   ├── mansion_of_madness/       # 疯狂宅邸 (示范)
-│   │   ├── module.md             # Markdown 模组定义
-│   │   ├── world_state.json      # 当前游戏状态
-│   │   ├── world_state_initial.json  # 初始状态 (新游戏恢复)
-│   │   ├── theme.json            # 配色/字体/标题
-│   │   ├── characters/           # 角色卡
-│   │   ├── skills/               # 模组专属守秘人指南
-│   │   └── assets/               # 素材
-│   └── 猩红文档/                   # 猩红文档模组
-│       ├── module.md             # 413行完整定义
-│       ├── theme.json            # 血色暗黑主题
-│       ├── scenes/               # 详细场景构造文档
-│       ├── skills/               # 守秘人指南 (403行)
-│       └── assets/               # NPC/场景/线索素材
-│
-└── rules/ skillsucai/            # COC 7e 规则书原文 (3本)
-    ├── 克苏鲁的呼唤守秘人规则书.md
-    ├── 克苏鲁的呼唤第七版调查员手册.md
-    └── 快速入门手册-基础规则.md
-```
-
-## 设计原则
-
-1. **规则是数据，不是提示词** — COC 7e 规则用 JSON + Skill 存放，模型读取执行
-2. **Tool 是确定性 Python 脚本** — 数值计算全部由脚本完成，属性绑定在代码层
-3. **Skill 是约束型提示模板** — 只告诉模型「何时调哪个 Tool、如何描述、不能透露什么」
-4. **状态是唯一真理之源** — 所有变更通过 `state_manager.py`，模型不能直接改文件
-5. **强制防剧透 + 私有工作记忆** — NPC 秘密不在 system prompt 常驻，按需通过工具访问；TIER 四级 + NPC revealed 分层追踪
-6. **上下文自适应压缩** — ENGRAM 风格会话摘要 + TIER 滑动窗口注入，防止长期游戏中规则稀释和信息遗忘
+- [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
+- [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
+- [模组示例](mod/mansion_of_madness/module.md)：`module.md` 的实际组织方式。
 
 ## 快速开始
 
-### 前置条件
+### 环境要求
 
-- Python 3.10+, Node.js 18+
-- DeepSeek API Key
-- (可选) 智谱 GLM API Key (免费)
+- Python 3.10+
+- Node.js 20 LTS 或更新版本
+- 一个 OpenAI 兼容 API Key
+- 可选：智谱 GLM API Key，用于快速摘要与上下文压缩
 
-### 配置与启动
+### 安装依赖
 
 ```bash
-python3 start.py --setup    # 创建 venv + 安装依赖
-python3 start.py --config   # 配置 API Key
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-bash start_desktop.sh       # 桌面版 (Electron优先/浏览器兜底)
-python3 game_loop.py        # 终端版
-
-# 切换模组
-TRPG_MODULE="猩红文档" python3 server.py
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-## 游戏机制
+### 配置模型
 
-### COC 第七版 d100 检定
+交互式写入项目根目录的 `.env.json`：
 
-```
-skill_check(skill="spot_hidden")  → 自动读 PC 技能值 → 掷 d100
-d100 ≤ 技能值 = 常规成功  |  ≤ 半值 = 困难成功  |  ≤ 1/5 = 极难成功
-01 = 大成功  |  100 = 大失败  |  支持奖励骰/惩罚骰/孤注一掷
+```bash
+python3 start.py --config
 ```
 
-### 模型路由
+也可以手动创建：
 
-| 场景 | 模型 |
-|------|------|
-| 叙事、对话、场景 | DeepSeek V4 Flash (1M 上下文) |
-| 技能检定、战斗、理智 | DeepSeek V4 Pro (自动切换) |
-| 检定后即时摘要 / 会话压缩 | GLM-4 Flash (免费, <1s) |
-
-### LangGraph 回合编排
-
-`GameEngine` 仍然是 TRPG 内核，`agent_graph.py` 只接管每个玩家动作后的 Agent 流程：
-
-```
-prepare_turn → call_llm → execute_tools → finalize
-                    │
-                    └─ 复杂工具自动切换 switch_to_pro
+```json
+{
+  "api_key": "your-api-key",
+  "base_url": "https://api.deepseek.com",
+  "flash_model": "deepseek-v4-flash",
+  "pro_model": "deepseek-v4-pro",
+  "glm_api_key": "optional-glm-key",
+  "glm_base_url": "https://open.bigmodel.cn/api/paas/v4/",
+  "glm_model": "glm-4-flash-250414"
+}
 ```
 
-- `prepare_turn`：整理玩家输入、系统提示、可用工具和当前上下文
-- `call_llm`：调用当前模型生成叙事或工具调用
-- `switch_to_pro`：技能检定、战斗、理智、角色创建等复杂工具自动切到 Pro
-- `execute_tools`：执行确定性 Python 工具，并处理 NPC/场景/线索素材自动发放
-- `finalize`：保存回合结果、触发自动存档和前端刷新
+`.env.json` 已被 Git 忽略，不会进入版本库。系统环境变量优先于文件配置：
 
-命令行入口仍然保留，终端版和前端版共用同一个内核。
+| 环境变量 | 用途 | 默认值 |
+|---|---|---|
+| `OPENAI_API_KEY` | 主模型 API Key | 空 |
+| `OPENAI_BASE_URL` | OpenAI 兼容请求地址 | `https://api.deepseek.com` |
+| `TRPG_FLASH_MODEL` | 常规叙事模型 | `deepseek-v4-flash` |
+| `TRPG_PRO_MODEL` | 强制 Pro 与上下文摘要兜底模型 | `deepseek-v4-pro` |
+| `TRPG_FORCE_PRO` | 全程强制使用 Pro，支持 `1/true/yes` | 关闭 |
+| `GLM_API_KEY` | 可选摘要模型 API Key | 空 |
+| `GLM_BASE_URL` | GLM 请求地址 | `https://open.bigmodel.cn/api/paas/v4/` |
+| `GLM_MODEL` | GLM 模型名 | `glm-4-flash-250414` |
+| `TRPG_MODULE` | 启动时使用的模组目录名 | `mansion_of_madness` |
+| `TRPG_PROJECT_ROOT` | 打包环境的数据根目录 | 自动识别 |
 
-### 存档系统
+### 启动桌面版
 
-- 文件夹式多槽位: `saves/<模组>/slot_NNN/`
-- 每槽含对话历史 + 世界快照 + 元数据
-- 读档恢复快照——杜绝线索跨存档污染
-- 存档仍然按模组隔离；`snapshot.json` 保存当前案件里的 PC 快照
-- `meta.json` 记录 `character_id/name/source/path`，用于知道这个槽位是哪位调查员的案件进度
-- 新游戏不覆盖已有存档
-- 存档面板支持新建/加载/删除/重命名
+从终端启动并查看实时日志：
 
-### 角色与长期履历
-
-角色系统分三层，避免长期成长和当前案件互相污染：
-
-| 层 | 文件 | 职责 |
-|----|------|------|
-| 全局角色库 | `characters/default/*.json` / `characters/custom/*.json` | 可被多个模组选用的调查员基础卡 |
-| 当前案件状态 | `mod/<模组>/world_state.json.pc` | 开局时复制角色卡，游戏中 HP/SAN/物品/心理状态只改这里 |
-| 长期履历 | `profiles/player_profile.json` | 案件结束后写入粗粒度经历：结局、SAN 变化、声望、人脉、已完成模组 |
-
-新游戏流程：
-
-```
-选择模组 → 选择调查员（长期角色 / 默认角色 / 模组特色 / 自定义）→ 复制到 world_state.pc → 开场
+```bash
+./start_desktop.sh
 ```
 
-案件结算时，前端确认结局后调用后端结算逻辑，将当前 PC 快照和结局摘要写回长期履历。这样一个调查员可以带着理智变化、心理创伤、声望和案件历史继续进入下一个模组。
+无终端桌面入口应使用 `Terminal=false` 的 `.desktop` 文件调用：
 
-### 线索系统（四分类）
+```text
+Exec=/absolute/path/to/trpg-master/start_desktop.sh --desktop
+Terminal=false
+```
 
-| 🔍 探案 | 📜 事件 | 🎯 任务 | 👤 人物 |
-|---|---|---|---|
-| 现场证据 | 剧情推进 | 目标方向 | NPC发现 |
+桌面模式日志写入 `/tmp/trpg-desktop.log`，后端日志写入 `/tmp/trpg-server.log`。Electron 最后一个窗口关闭后，启动脚本会自动停止后端并释放 `8765` 端口。
 
-线索图片通过 `world_state.asset_map.clues` 管理。模型在确认玩家确实发现线索后调用 `state_add_clue(..., asset_id="...")`，引擎会在添加线索后自动 `show_handout` 并推送给前端。状态层会阻止同一张线索图重复挂到多条线索上，避免同一尸体图或证物图被重复发放。
+### 启动终端版
 
-`猩红文档` 当前开局只保留 4 条低剧透线索，不会在调查员主动追问或检查前展示莱特教授尸体图片。
+```bash
+python3 start.py
+```
 
-### 防剧透（TIER 四级 + 私有工作记忆）
+### 前端开发模式
 
-| 层级 | 示例 | 可用时机 |
-|------|------|----------|
-| TIER_0 | "面色苍白的管家站在壁炉旁" | 进入场景 |
-| TIER_1 | "地毯污渍是陈旧血迹" | 检定成功 |
-| TIER_2 | "喷溅方向指向楼梯口" | 多线索关联 |
-| TIER_3 | NPC secret 字段 | **绝不透露** |
+分别启动后端、Vite 和 Electron：
 
-**私有工作记忆系统**：NPC secret 不再常驻 system prompt，改为 `get_npc_secret(id)` 按需访问 + `npc_reveal(id,tier)` 追踪揭示程度（0-3级）。每次叙事前必须调用 `get_private_memory()` 确认信息边界。
+```bash
+# 终端 1
+source venv/bin/activate
+python3 server.py
 
-### 三层记忆防线
+# 终端 2
+cd frontend
+npm run dev
 
-| 防线 | 机制 | 解决 |
-|------|------|------|
-| ENGRAM 会话摘要 | GLM-4 Flash 自动压缩旧消息为 Episodic/Semantic 结构化 JSON（超30条或8000 token触发） | 近期事件遗忘 |
-| NPC 知识追踪 | 每个 NPC 的 `revealed_level` + `revealed_entries`，检定成功联动 `npc_reveal()` | 秘密泄露 |
-| TIER 滑动窗口 | 高危回合（检定/战斗/理智）后≥5轮自动注入规则提醒到 user 消息前缀 | 规则稀释 |
+# 终端 3
+cd frontend
+npm run electron:dev
+```
 
-### 心理特质系统
+后端默认地址为 `http://127.0.0.1:8765`，WebSocket 为 `ws://127.0.0.1:8765/ws`。Vite 开发服务器默认使用 `http://127.0.0.1:5173`。
 
-PC 拥有 `psychological_profile`（traits/key_relationships/phobias/manias）。恐惧症/躁狂症三阶段效果：
+## 游戏内操作
 
-| SAN 正常 | 潜在疯狂期 | 疯狂发作 |
-|----------|-----------|----------|
-| 角色扮演点缀 | 触发源存在时惩罚骰×1 | 守秘人接管角色 |
+- `快速存档`：直接覆盖当前模组的自动槽 `slot_000`。
+- `存档管理`：读取、新建手动存档、重命名和删除手动槽。
+- `角色/线索`：查看当前调查员状态、物品、线索和已发放图片。
+- `新游戏`：返回开始流程，重新选择模组与调查员。
 
-来源：角色创建预设 + 疯狂发作 #9/#10 自动写入 + 守秘人 `set_psychological_trait()` 自定义（必须锚定游戏事件）。
+每个 GM 回合完成时也会更新自动槽。退出确认窗口仍建议玩家先快速存档，以免在正在生成的回合中途关闭。
 
-### 新增工具（v2）
+## 项目结构
 
-| 工具 | 用途 |
-|------|------|
-| `attribute_check(attr)` | STR撞门/DEX接物/CON抗毒/INT灵感/POW意志/EDU常识等裸属性检定 |
-| `luck_check()` | 幸运检定（d100≤POW），外部环境因素 |
-| `sanity_trigger(desc)` | 16种日常 SAN 触发场景速查——不仅限于"看到怪物" |
-| `psychoanalysis(target)` | 精神分析治疗，恢复1D3 SAN，压制恐惧症1h |
-| `reality_check()` | 潜在疯狂期鉴别幻觉 |
-| `npc_reveal(id,tier,text)` | NPC 秘密揭示追踪，心理学检定成功后联动 |
-| `get_npc_secret(id)` | NPC 完整秘密（守秘人按需访问） |
-| `get_private_memory()` | 私有工作记忆——信息边界总览 |
-| `set_psychological_trait(cat,name,ctx)` | 心理特质自定义（恐惧症必须锚定事件） |
+```text
+trpg-master/
+├── server.py                 # FastAPI HTTP + WebSocket 适配层
+├── game_loop.py              # 终端版入口
+├── start.py                  # 配置与终端启动器
+├── start_desktop.sh          # Linux 桌面进程托管脚本
+├── requirements.txt
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── API.md
+├── src/
+│   ├── engine.py             # GameEngine、模型调用、记忆与回调
+│   ├── agent_graph.py        # LangGraph 回合状态机
+│   ├── combat_agent.py       # 战斗 Agent 的临时职责提示词
+│   ├── combat.py             # 权威战斗状态与确定性结算
+│   ├── tools.py              # Function Calling schema 与工具分发
+│   ├── persistence.py        # Skill 组装、存档与快照恢复
+│   ├── characters.py         # 调查员选择与长期履历
+│   ├── config.py             # 路径、模型和活动模组配置
+│   └── llm.py                # GLM 辅助摘要
+├── tools/                    # 骰子、状态、战斗、伤害、SAN 等确定性 CLI 工具
+├── skills/                   # 常驻与按需加载的守秘人约束
+├── rules/                    # 结构化规则数据
+├── mod/<module>/             # 模组定义、状态、主题、素材和专属 skill
+├── characters/               # 默认与自定义调查员
+├── profiles/                 # 长期角色履历（运行时生成）
+├── saves/<module>/           # 按模组隔离的存档（运行时生成）
+├── frontend/
+│   ├── electron/main.cjs     # Electron 主进程与打包后端托管
+│   ├── src/                  # TypeScript UI
+│   └── package.json
+└── packaging/                # PyInstaller 与 Windows 构建脚本
+```
+
+## 运行链路
+
+```text
+玩家
+  -> Electron / Browser
+  -> WebSocket server.py
+  -> GameEngine
+  -> LangGraph 回合图
+  -> OpenAI 兼容模型 / Python 工具
+  -> world_state.json + saves/
+```
+
+模型负责叙事和决定行动意图：非战斗回合走叙事 Agent，战斗激活后按同一世界状态切换为战斗 Agent。两者不维护互相独立的长期记忆；骰子、先攻、回合推进、技能值、伤害、SAN、世界状态、存档和素材发放均由 Python 代码执行。详细线程模型与数据流见 [架构文档](docs/ARCHITECTURE.md)。
+
+## 存档与角色数据
+
+存档按模组隔离：
+
+```text
+saves/<module>/slot_000/      # 自动槽
+saves/<module>/slot_001/      # 手动槽
+├── messages.json             # 模型对话与工具历史
+├── snapshot.json             # world_state 快照
+└── meta.json                 # 场景、调查员、HP/SAN、线索数等摘要
+```
+
+调查员数据分为三层：
+
+| 层 | 路径 | 作用 |
+|---|---|---|
+| 角色模板 | `characters/default`、`characters/custom`、`mod/*/characters` | 新游戏的候选调查员 |
+| 当前案件 | `mod/<module>/world_state.json.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
+| 长期履历 | `profiles/player_profile.json` | 已完成模组、结局、声望、人脉与最后状态 |
+
+运行时数据和 API Key 均已加入 `.gitignore`；提交代码前仍应检查 `git status`，避免把正在游玩的 `world_state.json` 变化混入功能提交。
 
 ## 模组开发
 
-### Markdown 模组格式
+一个可识别的模组至少需要：
 
-模组通过 `module.md` 定义，支持以下段：
+```text
+mod/<name>/
+├── module.md
+├── world_state_initial.json
+├── world_state.json
+├── theme.json                # 可选但推荐
+├── skills/                   # 可选，模组专属约束
+├── characters/               # 可选，特色调查员
+└── assets/                   # 可选，NPC/场景/线索图片
+```
 
-| 段 | 说明 |
-|----|------|
-| `# PC` | 调查员建议、属性范围 |
-| `# NPC` | 所有 NPC (id/name/visible_tags/secret/skills/hp/disposition) |
-| `# 场景` | 场景描述/出口/NPC位置 (支持 detail_file 引用详细构造文档) |
-| `# 线索` | 初始线索列表 (investigation/event/task/npc) |
-| `# 标志` | 游戏标志 (flags) |
-| `# 规则` | 模组专属规则——怪物面板/SAN触发/物品/法术 |
-| `# 开场` | 开幕叙事 Hook |
-| `# 结局` | 多种结局条件与描述 |
+`world_state_initial.json` 是新游戏重置源，`world_state.json` 是当前运行状态。`module.md` 与模组 `skills/*.skill` 会加入守秘人上下文。Markdown 模组可通过以下命令导入/生成状态：
 
-导入: `python3 tools/module_loader.py mod/<name>/module.md`
+```bash
+python3 tools/module_loader.py mod/<name>/module.md
+```
 
-### 主题配置
+前端从 `theme.json` 读取标题、描述、字体和颜色；图片通过 `world_state.asset_map` 关联到 NPC、场景或线索。
 
-`theme.json` 定义配色/字体/标题，前端启动自动加载。切换模组时主题跟随。
+## Windows 打包
 
-## 技术栈
+在 Windows PowerShell 中执行：
 
-| 组件 | 技术 |
-|------|------|
-| 后端 | Python 3.10+, FastAPI, Uvicorn |
-| Agent 编排 | LangGraph |
-| 内核 LLM | DeepSeek V4 Flash/Pro (OpenAI 兼容) |
-| 快速摘要 | 智谱 GLM-4 Flash (免费) |
-| 前端 | Vite + TypeScript vanilla + Electron |
-| 通信 | WebSocket (流式文本 + 结构化事件) |
-| 规则体系 | COC 第七版 d100 (14 skill 文件 3500 行) |
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
+```
 
-## 可用模组
+脚本会：
 
-| 模组 | 说明 | NPC | 场景 |
-|------|------|-----|------|
-| 🏛 疯狂宅邸 | 维多利亚式宅邸中的克苏鲁恐怖 | 3 | 2 |
-| 📜 猩红文档 | 密斯卡托尼克大学学者离奇死亡，女巫审判文档下落不明 | 11 | 8 |
+1. 安装/检查 Python 与 Node.js 依赖。
+2. 用 PyInstaller 构建 `trpg-server.exe`。
+3. 用 electron-builder 构建 NSIS 安装版和便携版。
+
+输出位于 `frontend/release/`。`.env.json` 不会被打进安装包；首次运行时由 Electron 配置窗口收集 API 地址和 Key。
+
+## 开发校验
+
+仓库目前没有完整自动化测试套件。提交前至少运行：
+
+```bash
+python3 -m py_compile server.py src/*.py tools/*.py
+cd frontend && npm run build
+bash -n ../start_desktop.sh
+```
+
+接口变化还应同步更新 [接口文档](docs/API.md)。修改存档、角色或模组状态结构时，应同时更新 [架构文档](docs/ARCHITECTURE.md) 的数据所有权章节。
+
+## 当前边界
+
+- API 没有鉴权，后端用于本机桌面应用，不应直接暴露到公网。
+- `cfg.MODULE_NAME` 与模组状态文件是进程级共享状态，同时连接多个玩家会相互影响。
+- 每条 WebSocket 连接只在自身内部用回合锁串行化；它不是跨连接事务锁。
+- 多人模式需要先引入房间/世界实例 ID、服务端权威状态和独立存档命名空间，不能只在现有 WebSocket 上增加玩家列表。

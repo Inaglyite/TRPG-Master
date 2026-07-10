@@ -3,6 +3,7 @@
 """
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -14,12 +15,13 @@ from .config import (
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
+from .combat_agent import build_combat_overlay
 from .tools import (
     TOOLS, execute_function,
 )
 from .agent_graph import build_turn_graph
 from .logger import error as log_error, summary_event as log_summary, \
-    tier_inject as log_tier, game_event as log_game
+    tier_inject as log_tier, game_event as log_game, model_call as log_model_call
 
 
 @dataclass
@@ -30,6 +32,7 @@ class EngineCallbacks:
     on_dice: Callable[[str, dict | None], None] = lambda summary, roll_data=None: None  # 骰子结果
     on_glm_summary: Callable[[str], None] = lambda text: None    # 快速摘要
     on_suggest: Callable[[dict], bool] = lambda info: False      # 检定确认，返回 True/False
+    on_decision: Callable[[dict], str | None] = lambda info: info.get("default_option")  # 多选决定
     on_done: Callable[[], None] = lambda: None                   # 回合结束
     on_game_over: Callable[[str, str, str], None] = lambda t, ti, s: None  # 游戏结束
     on_handout: Callable[[dict], None] = lambda info: None       # 展示材料
@@ -166,9 +169,18 @@ class GameEngine:
 
     # ---- 流式 LLM ----
 
-    def _stream_llm(self, model: str) -> tuple[str, list]:
+    def _stream_llm(self, model: str, system_overlay: str | None = None) -> tuple[str, list]:
         """流式调用，文本通过 on_narrative 回调输出"""
-        kwargs = dict(model=model, messages=self.messages, temperature=0.8,
+        started_at = time.monotonic()
+        first_token_at: float | None = None
+        messages = self.messages
+        if system_overlay and messages:
+            messages = [dict(message) for message in messages]
+            if messages[0].get("role") == "system":
+                messages[0]["content"] = f"{messages[0].get('content', '')}\n\n---\n\n{system_overlay}"
+            else:
+                messages.insert(0, {"role": "system", "content": system_overlay})
+        kwargs = dict(model=model, messages=messages, temperature=0.8,
                       max_tokens=4096, stream=True, tools=TOOLS, tool_choice="auto")
         try:
             stream = self.client.chat.completions.create(**kwargs)
@@ -189,6 +201,8 @@ class GameEngine:
                 delta = choice.delta
                 if delta is None:
                     continue
+                if first_token_at is None and (delta.content or delta.tool_calls):
+                    first_token_at = time.monotonic()
                 if delta.content:
                     full_text += delta.content
                     self.cb.on_narrative(delta.content)
@@ -214,12 +228,59 @@ class GameEngine:
             self.cb.on_error("（叙述过长被截断，请重试或继续）")
 
         tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
+        log_model_call(
+            model,
+            "combat" if system_overlay else "story",
+            time.monotonic() - started_at,
+            first_token_at - started_at if first_token_at is not None else None,
+            finish_reason,
+            len(tool_calls_list),
+        )
         return full_text, tool_calls_list
+
+    def _combat_state(self) -> dict:
+        """Read the authoritative combat state for graph routing and prompt overlay."""
+        from . import config as cfg
+        try:
+            world = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        combat = world.get("combat_state")
+        return combat if isinstance(combat, dict) else {}
+
+    def _combat_active(self) -> bool:
+        return bool(self._combat_state().get("active"))
+
+    def _combat_system_overlay(self) -> str:
+        return build_combat_overlay(self._combat_state())
+
+    def _resume_pending_combat_decision(self) -> None:
+        """Re-open a persisted combat decision before asking either agent to continue."""
+        pending = self._combat_state().get("pending_decision")
+        if not isinstance(pending, dict) or not pending.get("id"):
+            return
+        decision = {key: value for key, value in pending.items() if key != "action"}
+        selected = self.cb.on_decision(decision)
+        valid_options = {
+            option.get("id")
+            for option in decision.get("options", [])
+            if isinstance(option, dict)
+        }
+        if selected not in valid_options:
+            selected = decision.get("default_option")
+        result = execute_function("combat_decide", {
+            "decision_id": decision.get("id", ""),
+            "option_id": selected or "",
+        })
+        self.messages.append({
+            "role": "user",
+            "content": f"[恢复的战斗决定已结算] {result}",
+        })
 
     # ---- 工具执行 ----
 
     def _execute_tool(self, name: str, args: dict) -> str:
-        """执行工具。suggest_check 通过回调交互。"""
+        """执行工具。确认类工具通过回调与玩家交互。"""
         if name == "suggest_check":
             info = {
                 "skill": args.get("skill", "?"),
@@ -256,6 +317,29 @@ class GameEngine:
             except Exception:
                 pass
             return result
+
+        if name == "combat_action":
+            result = execute_function(name, args)
+            try:
+                info = json.loads(result)
+            except json.JSONDecodeError:
+                return result
+            if not info.get("requires_decision"):
+                return result
+
+            decision = info.get("decision") or {}
+            selected = self.cb.on_decision(decision)
+            valid_options = {
+                option.get("id")
+                for option in decision.get("options", [])
+                if isinstance(option, dict)
+            }
+            if selected not in valid_options:
+                selected = decision.get("default_option")
+            return execute_function("combat_decide", {
+                "decision_id": decision.get("id", ""),
+                "option_id": selected or "",
+            })
 
         return execute_function(name, args)
 
@@ -620,6 +704,7 @@ class GameEngine:
 
     def handle_action(self, user_content: str | None = None):
         """执行一个完整回合"""
+        self._resume_pending_combat_decision()
         self._turn_graph.invoke(
             {"engine": self, "user_content": user_content},
             config={"recursion_limit": 50},

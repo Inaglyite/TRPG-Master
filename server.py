@@ -242,6 +242,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     suggest_box: dict = {"event": threading.Event(), "result": False}
     suggest_lock = threading.Lock()
     suggest_active = [False]  # 当前是否有待回复的 suggest
+    # 通用多选决定握手。战斗状态机用它确认闪避、反击、寻找掩体等选择。
+    decision_box: dict = {"event": threading.Event(), "result": None, "id": None}
+    decision_lock = threading.Lock()
+    decision_active = [False]
     # 回合锁：保证同一时间只有一个 handle_action 在跑，避免并发修改 messages
     turn_lock = threading.Lock()
 
@@ -297,6 +301,29 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             suggest_active[0] = False
             return suggest_box["result"]
 
+    def on_decision(info: dict) -> str | None:
+        ev = threading.Event()
+        decision_id = info.get("id")
+        with decision_lock:
+            decision_box["event"] = ev
+            decision_box["result"] = None
+            decision_box["id"] = decision_id
+            decision_active[0] = True
+        emit({"type": "decision_request", **info})
+        ev.wait(timeout=120)
+        with decision_lock:
+            decision_active[0] = False
+            result = decision_box["result"]
+            decision_box["id"] = None
+        selected = result or info.get("default_option")
+        emit({
+            "type": "decision_resolved",
+            "decision_id": decision_id,
+            "option_id": selected,
+            "automatic": result is None,
+        })
+        return selected
+
     def on_done():
         emit({"type": "done"})
 
@@ -330,6 +357,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         on_dice=on_dice,
         on_glm_summary=on_glm_summary,
         on_suggest=on_suggest,
+        on_decision=on_decision,
         on_done=on_done,
         on_game_over=on_game_over,
         on_handout=on_handout,
@@ -400,6 +428,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     if suggest_active[0]:
                         suggest_box["result"] = data.get("confirmed", False)
                         suggest_box["event"].set()
+
+            elif msg_type == "decision_reply":
+                with decision_lock:
+                    if decision_active[0] and data.get("decision_id") == decision_box["id"]:
+                        decision_box["result"] = data.get("option_id")
+                        decision_box["event"].set()
 
             elif msg_type == "save":
                 is_manual = data.get("manual", False)

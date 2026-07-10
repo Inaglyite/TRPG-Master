@@ -34,6 +34,23 @@ def game_loop():
             answer = "n"
         return answer in ("y", "yes", "是")
 
+    def on_decision(info: dict) -> str | None:
+        print()
+        print(f"  {info.get('title', '需要你做出决定')}")
+        description = info.get("description", "")
+        if description:
+            print(f"  {description}")
+        options = info.get("options", [])
+        for index, option in enumerate(options, 1):
+            print(f"    {index}. {option.get('label', option.get('id', ''))}")
+        try:
+            selected = int(input("  → 请选择: ").strip()) - 1
+        except (ValueError, EOFError, KeyboardInterrupt):
+            return info.get("default_option")
+        if 0 <= selected < len(options):
+            return options[selected].get("id")
+        return info.get("default_option")
+
     def on_done():
         pass
 
@@ -59,6 +76,7 @@ def game_loop():
         on_dice=on_dice,
         on_glm_summary=on_glm_summary,
         on_suggest=on_suggest,
+        on_decision=on_decision,
         on_done=on_done,
         on_error=on_error,
     )
