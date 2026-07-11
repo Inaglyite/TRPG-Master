@@ -1,7 +1,13 @@
 import random
 import unittest
 
-from src.combat import CombatError, combat_action, combat_decide, start_combat
+from src.combat import (
+    CombatError,
+    combat_action,
+    combat_decide,
+    preview_player_escalation,
+    start_combat,
+)
 
 
 class FixedRandom:
@@ -39,6 +45,42 @@ def make_world() -> dict:
 
 
 class CombatStateMachineTests(unittest.TestCase):
+    def test_preflight_detects_explicit_attack_before_combat_exists(self):
+        world = make_world()
+        world["pc"]["backstory"] = {"violence_stance": "avoidant"}
+        world["npcs"][0]["id"] = "bryce_fallon"
+        world["npcs"][0]["name"] = "布莱斯·法伦"
+        world["npcs"][0]["disposition"] = "cooperative"
+
+        preview = preview_player_escalation(world, "朝着法伦开枪")
+
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview["decision"]["kind"], "irreversible_violence")
+        self.assertEqual(preview["decision"]["target_id"], "bryce_fallon")
+        self.assertEqual(preview["decision"]["default_option"], "cancel_violence")
+        self.assertEqual(preview["authorization"]["confirm_option"], "confirm_violence")
+        self.assertNotIn("combat_state", world)
+
+    def test_preflight_distinguishes_weapon_threat_and_ignores_hypotheticals(self):
+        world = make_world()
+        world["npcs"][0]["id"] = "bryce_fallon"
+        world["npcs"][0]["name"] = "布莱斯·法伦"
+        world["npcs"][0]["disposition"] = "cooperative"
+
+        threat = preview_player_escalation(world, "用枪指着法伦逼问真相")
+
+        self.assertEqual(threat["decision"]["kind"], "coercive_threat")
+        self.assertEqual(threat["authorization"]["confirm_option"], "confirm_threat")
+        self.assertIsNone(preview_player_escalation(world, "如果朝法伦开枪会怎么样？"))
+        self.assertIsNone(preview_player_escalation(world, "我收起枪，不朝法伦开枪"))
+
+    def test_preflight_does_not_interrupt_attack_on_hostile_target(self):
+        world = make_world()
+
+        self.assertIsNone(preview_player_escalation(world, "朝教徒开枪"))
+        start_combat(world, [{"id": "cultist"}], "遭到袭击")
+        self.assertIsNone(preview_player_escalation(world, "扣动扳机"))
+
     def test_start_uses_dex_and_persists_authoritative_state(self):
         world = make_world()
 
@@ -181,7 +223,7 @@ class CombatStateMachineTests(unittest.TestCase):
         world["pc"]["inventory"][0] = ".38口径左轮手枪（0发）"
         start_combat(world, [{"id": "cultist"}], "枪战")
 
-        with self.assertRaisesRegex(CombatError, "没有子弹"):
+        with self.assertRaisesRegex(CombatError, "弹药不足"):
             combat_action(
                 world,
                 actor_id="pc",
@@ -195,6 +237,213 @@ class CombatStateMachineTests(unittest.TestCase):
 
         self.assertEqual(world["combat_state"]["current_actor"], "pc")
         self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（0发）")
+
+    def test_non_hostile_attack_requires_confirmation_and_cancel_preserves_turn(self):
+        world = make_world()
+        world["pc"]["attributes"]["DEX"] = 80
+        world["pc"]["backstory"] = {
+            "beliefs": "以头脑而非暴力追查真相",
+            "traits": "克制而审慎",
+            "violence_stance": "avoidant",
+        }
+        world["npcs"][0]["disposition"] = "cooperative"
+        start_combat(world, [{"id": "cultist"}], "突然拔枪")
+
+        pending = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="firearm",
+            description="近距离朝对方开枪",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+        )
+
+        self.assertTrue(pending["requires_decision"])
+        self.assertEqual(pending["decision"]["kind"], "irreversible_violence")
+        self.assertEqual(pending["decision"]["default_option"], "cancel_violence")
+        self.assertEqual(pending["decision"]["options"][0]["label"], "克制冲动")
+        self.assertEqual(pending["decision"]["roleplay_context"]["violence_stance"], "avoidant")
+        self.assertIn("明显违背", pending["decision"]["description"])
+        self.assertIn("以头脑而非暴力", pending["decision"]["description"])
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（6发）")
+
+        cancelled = combat_decide(world, pending["decision"]["id"], "cancel_violence")
+        self.assertEqual(cancelled["event"], "action_cancelled")
+        self.assertFalse(cancelled["action_consumed"])
+        self.assertFalse(cancelled["violence_confirmation"]["confirmed"])
+        self.assertEqual(world["combat_state"]["current_actor"], "pc")
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（6发）")
+        self.assertNotIn("violence_log", world)
+
+    def test_declared_opening_attack_immediately_requires_confirmation(self):
+        world = make_world()
+        world["pc"]["backstory"] = {"violence_stance": "avoidant"}
+        world["npcs"][0]["disposition"] = "cooperative"
+
+        pending = start_combat(
+            world,
+            [{"id": "pc", "ready_firearm": True}, {"id": "cultist"}],
+            "调查员突然拔枪射击",
+            {
+                "actor_id": "pc",
+                "target_id": "cultist",
+                "action_type": "firearm",
+                "description": "近距离朝对方开枪",
+                "weapon": "左轮手枪",
+                "damage_spec": "1d8",
+            },
+        )
+
+        self.assertTrue(pending["requires_decision"])
+        self.assertEqual(pending["decision"]["kind"], "irreversible_violence")
+        self.assertEqual(world["combat_state"]["phase"], "awaiting_decision")
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（6发）")
+
+    def test_initial_weapon_threat_can_be_cancelled_without_escalation(self):
+        world = make_world()
+        world["pc"]["backstory"] = {
+            "beliefs": "以头脑而非武力解决问题",
+            "violence_stance": "avoidant",
+        }
+        world["npcs"][0]["disposition"] = "cooperative"
+        world["case_clocks"] = {"human_pressure": 0}
+
+        pending = start_combat(
+            world,
+            [{"id": "pc", "ready_firearm": True}, {"id": "cultist"}],
+            "调查员拔枪指向对方",
+            {
+                "actor_id": "pc",
+                "target_id": "cultist",
+                "action_type": "threat",
+                "description": "用左轮手枪指着对方逼问真相",
+                "weapon": "左轮手枪",
+            },
+        )
+
+        decision = pending["decision"]
+        self.assertEqual(decision["kind"], "coercive_threat")
+        self.assertEqual(decision["default_option"], "cancel_threat")
+        self.assertEqual(decision["options"][0]["label"], "收起武器")
+        self.assertIn("明显违背", decision["description"])
+
+        cancelled = combat_decide(world, decision["id"], "cancel_threat")
+
+        self.assertEqual(cancelled["event"], "action_cancelled")
+        self.assertFalse(cancelled["action_consumed"])
+        self.assertFalse(cancelled["combat"]["active"])
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（6发）")
+        self.assertEqual(world["case_clocks"]["human_pressure"], 0)
+        self.assertNotIn("threat_log", world)
+        self.assertNotIn("threatened_by_pc", world["npcs"][0])
+
+    def test_confirmed_weapon_threat_records_consequences_but_not_ammo(self):
+        world = make_world()
+        world["pc"]["backstory"] = {"violence_stance": "conditional"}
+        world["npcs"][0]["disposition"] = "cooperative"
+        world["case_clocks"] = {"human_pressure": 0}
+        pending = start_combat(
+            world,
+            [{"id": "pc", "ready_firearm": True}, {"id": "cultist"}],
+            "调查员拔枪指向对方",
+            {
+                "actor_id": "pc",
+                "target_id": "cultist",
+                "action_type": "threat",
+                "description": "用左轮手枪指着对方逼问真相",
+                "weapon": "左轮手枪",
+            },
+        )
+
+        resolved = combat_decide(world, pending["decision"]["id"], "confirm_threat")
+
+        self.assertEqual(resolved["outcome"], "threat_established")
+        self.assertFalse(resolved["resource_consumed"])
+        self.assertTrue(resolved["threat_confirmation"]["confirmed"])
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（6发）")
+        self.assertTrue(world["npcs"][0]["threatened_by_pc"])
+        self.assertEqual(world["npcs"][0]["disposition"], "guarded")
+        self.assertEqual(world["threat_log"][-1]["target"], "cultist")
+        self.assertEqual(world["case_clocks"]["human_pressure"], 1)
+        self.assertEqual(world["combat_state"]["current_actor"], "cultist")
+
+        combat_action(world, actor_id="cultist", action_type="move", description="退到桌后")
+        attack = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="firearm",
+            description="扣动扳机",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+        )
+        self.assertEqual(attack["decision"]["kind"], "irreversible_violence")
+
+    def test_unrestrained_character_still_confirms_without_moralizing(self):
+        world = make_world()
+        world["pc"]["attributes"]["DEX"] = 80
+        world["pc"]["backstory"] = {
+            "traits": "冷静、善于操纵他人",
+            "violence_stance": "unrestrained",
+        }
+        world["pc"]["psychological_profile"] = {"traits": ["享受掌控局面"]}
+        world["npcs"][0]["disposition"] = "cooperative"
+        start_combat(world, [{"id": "cultist"}], "突然拔枪")
+
+        pending = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="melee",
+            description="毫无征兆地袭击对方",
+            damage_spec="1d3",
+        )
+
+        decision = pending["decision"]
+        self.assertTrue(pending["requires_decision"])
+        self.assertEqual(decision["default_option"], "cancel_violence")
+        self.assertEqual(decision["options"][0]["label"], "改换做法")
+        self.assertIn("并不冲突", decision["description"])
+        self.assertNotIn("明显违背", decision["description"])
+        self.assertEqual(
+            decision["roleplay_context"]["traits"],
+            ["冷静、善于操纵他人", "享受掌控局面"],
+        )
+
+    def test_confirmed_non_hostile_attack_records_consequences_and_resolves(self):
+        world = make_world()
+        world["pc"]["attributes"]["DEX"] = 80
+        world["npcs"][0]["disposition"] = "cooperative"
+        world["current_scene"] = {"id": "office", "name": "大学办公室"}
+        world["case_clocks"] = {"human_pressure": 0}
+        start_combat(world, [{"id": "cultist"}], "突然拔枪")
+        pending = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="firearm",
+            description="近距离朝对方开枪",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+        )
+
+        resolved = combat_decide(
+            world,
+            pending["decision"]["id"],
+            "confirm_violence",
+            rng=FixedRandom([9, 9]),
+        )
+
+        self.assertEqual(resolved["event"], "action_resolved")
+        self.assertTrue(resolved["violence_confirmation"]["confirmed"])
+        self.assertTrue(resolved["violence_confirmation"]["consequences_required"])
+        self.assertEqual(resolved["ammo"]["after"], 5)
+        self.assertTrue(world["npcs"][0]["hostile_to_pc"])
+        self.assertTrue(world["combat_state"]["participants"][1]["hostile_to_pc"])
+        self.assertEqual(world["case_clocks"]["human_pressure"], 1)
+        self.assertEqual(world["violence_log"][-1]["target"], "cultist")
+        self.assertEqual(world["combat_state"]["current_actor"], "cultist")
 
 
 if __name__ == "__main__":

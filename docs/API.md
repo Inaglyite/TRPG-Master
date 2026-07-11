@@ -574,7 +574,8 @@ done
 
 #### `decision_request`
 
-战斗状态机需要玩家选择防御方式时发送：
+战斗状态机需要玩家选择防御方式，或确认对非敌对 NPC 的不可逆暴力/武力威胁时发送。对于从玩家最新输入中明确识别出的攻击和武力威胁，`decision_request` 会在首个 `narrative_chunk` 与 `tension` 事件之前发送；取消后本轮直接发送 `done`，世界状态不变。
+防御示例：
 
 ```json
 {
@@ -592,6 +593,56 @@ done
 }
 ```
 
+不可逆暴力示例：
+
+```json
+{
+  "type": "decision_request",
+  "id": "c28e71af34d0",
+  "kind": "irreversible_violence",
+  "target_id": "bryce_fallon",
+  "title": "你真的要攻击布莱斯·法伦吗？",
+  "description": "法伦目前并未主动敌对。调查员通常只在认为必要时使用暴力，这一次是否必要仍由你决定。攻击可能引来报警、法律、声望、案件或理智后果。",
+  "options": [
+    {"id":"cancel_violence","label":"暂不攻击","description":"保留行动与当前资源。"},
+    {"id":"confirm_violence","label":"仍然攻击","description":"接受后果并进行结算。"}
+  ],
+  "default_option": "cancel_violence",
+  "roleplay_context": {
+    "violence_stance": "conditional",
+    "violence_stance_label": "仅在必要时使用暴力",
+    "beliefs": "以头脑而非暴力追查真相",
+    "traits": ["克制而审慎"]
+  }
+}
+```
+
+`backstory.violence_stance` 支持 `avoidant`、`conditional`、`unrestrained`。它只影响确认文案和 Agent 的人物冲突叙事；三个值都会保留确认步骤，且超时一律默认取消。取消标签可能随立场显示为“克制冲动”“暂不攻击”或“改换做法”，客户端应使用服务端返回的 `label`。
+
+武力威胁示例：
+
+```json
+{
+  "type": "decision_request",
+  "id": "f17c3b22aa10",
+  "kind": "coercive_threat",
+  "target_id": "bryce_fallon",
+  "title": "你真的要用武力威胁布莱斯·法伦吗？",
+  "description": "法伦目前并未主动敌对。用武器胁迫他人明显违背了调查员避免主动暴力的行为倾向。即使不开枪，这也可能破坏关系、引来报警或改变案件走向。",
+  "options": [
+    {"id":"cancel_threat","label":"收起武器","description":"收起武器，不消耗行动或弹药。"},
+    {"id":"confirm_threat","label":"继续威胁","description":"接受关系、法律与案件后果。"}
+  ],
+  "default_option": "cancel_threat",
+  "roleplay_context": {
+    "violence_stance": "avoidant",
+    "violence_stance_label": "避免主动暴力",
+    "beliefs": "以头脑而非暴力追查真相",
+    "traits": ["克制而审慎"]
+  }
+}
+```
+
 客户端用 `decision_reply` 回复。`id` 用于拒绝迟到或不属于当前请求的回复。
 
 #### `decision_resolved`
@@ -605,7 +656,7 @@ done
 }
 ```
 
-每次决定完成后发送。`automatic:true` 表示等待超时后使用了 `default_option`；客户端应关闭仍显示的决定弹窗。
+每次决定完成后发送。`automatic:true` 表示等待超时后使用了 `default_option`；客户端应关闭仍显示的决定弹窗。不可逆暴力和武力威胁超时分别默认返回 `cancel_violence`、`cancel_threat`，不会产生掷骰、弹药或回合消耗。
 
 #### `dice_result`
 

@@ -51,7 +51,12 @@ def main() -> int:
 
     try:
         if command == "start":
-            result = start_combat(world, params.get("participants", []), params.get("reason", ""))
+            result = start_combat(
+                world,
+                params.get("participants", []),
+                params.get("reason", ""),
+                params.get("initial_action"),
+            )
         elif command == "status":
             result = combat_status(world)
         elif command == "action":

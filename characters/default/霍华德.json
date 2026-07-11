@@ -83,6 +83,7 @@
   "backstory": {
     "description": "受过良好教育的神秘学研究者，对禁忌文本有危险的好奇心。",
     "beliefs": "真正的历史总藏在被删去的脚注里。",
+    "violence_stance": "avoidant",
     "important_person": "",
     "meaningful_place": "",
     "treasured_possession": "泛黄的仪式书",

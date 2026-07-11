@@ -1,0 +1,27 @@
+# 道具使用与资源消耗
+
+道具效果必须以 `world_state.pc.inventory` 和确定性工具结果为准。叙事不能自行假定
+玩家拥有某件物品，也不能只在文字里说“少了一发”“喝掉一瓶”而不更新状态。
+
+## `use_item` 路由
+
+| 场景 | 调用 |
+|---|---|
+| 使用钥匙、手电筒、笔记本等可重复物品 | `use_item(operation="use")` |
+| 喝药、烧掉符纸、交出并失去某件一次性物品 | `use_item(operation="consume")` |
+| 战斗外鸣枪、试射、打锁、打灯、朝空处开枪 | `use_item(operation="firearm_discharge")` |
+| 用枪、刀等武器威胁 PC/NPC，但尚未攻击 | `combat_action(action_type="threat")`；开战时放进 `combat_start.initial_action` |
+| 对 PC/NPC 进行枪械攻击 | 只用 `combat_action(action_type="firearm")` |
+
+### 强制规则
+
+1. 先调用工具，成功后才能叙述物品生效。
+2. 一次实际开枪只允许走一条路径：战斗攻击由 `combat_action` 内部扣弹；其余开枪用
+   `use_item(firearm_discharge)`。两者不能为同一发子弹重复调用。
+3. 鸣枪是否震慑成功可以在扣弹后另做 `intimidate` 等检定；无论检定成败，子弹已经消耗。
+4. `use` 只验证持有，不消耗物品；不要把钥匙、手电筒、枪械等耐用品误用 `consume` 删除。
+5. `consume` 只用于叙事上明确失去的一次性物品。带 `（N个）`、`（N瓶）`、`（N次）`
+   等数量后缀时自动减量；减到 0 后从物品栏移除。
+6. 枪械使用带 `（N发）` 的物品字符串跟踪余弹。0 发时动作失败，必须装填或更换武器。
+
+工具结果中的 `item_after`、`after`、`warning` 是资源事实的唯一来源。

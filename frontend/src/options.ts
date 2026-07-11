@@ -57,9 +57,10 @@ export function onDecision(data: any) {
   `;
   modalActions.replaceChildren();
 
-  options.forEach((option: any, index: number) => {
+  options.forEach((option: any) => {
     const button = document.createElement("button");
-    button.className = index === 0 ? "btn-danger decision-option" : "btn-safe decision-option";
+    const isDangerous = ["confirm_violence", "confirm_threat", "fight_back", "no_defense"].includes(option.id);
+    button.className = `${isDangerous ? "btn-danger" : "btn-safe"} decision-option`;
     const label = document.createElement("strong");
     label.textContent = option.label || option.id;
     button.appendChild(label);
@@ -203,7 +204,11 @@ export function sendDecisionReply(decisionId: string, optionId: string, label: s
   modalOverlay.classList.add("hidden");
   activeDecisionId = null;
   addMsg("player", label, true);
-  showRollPending();
+  if (optionId === "confirm_threat") {
+    showGmThinking();
+  } else if (!["cancel_violence", "cancel_threat"].includes(optionId)) {
+    showRollPending();
+  }
   safeSend(JSON.stringify({
     type: "decision_reply",
     decision_id: decisionId,
@@ -215,8 +220,13 @@ export function onDecisionResolved(data: any) {
   if (!data.automatic || data.decision_id !== activeDecisionId) return;
   modalOverlay.classList.add("hidden");
   activeDecisionId = null;
-  addMsg("system", "等待选择超时，已采用默认防御。", true);
-  showRollPending();
+  if (["cancel_violence", "cancel_threat"].includes(data.option_id)) {
+    const action = data.option_id === "cancel_threat" ? "威胁" : "攻击";
+    addMsg("system", `等待确认超时，已取消这次${action}。`, true);
+  } else {
+    addMsg("system", "等待选择超时，已采用默认防御。", true);
+    showRollPending();
+  }
 }
 
 // ==================== 按钮事件绑定 ====================

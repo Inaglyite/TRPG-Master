@@ -35,7 +35,7 @@ def _tool_category(tool_calls: list[dict]) -> str:
         name = tc["function"]["name"]
         if name.startswith("sanity"):
             return "sanity"
-        if name in ("apply_damage", "apply_heal"):
+        if name in ("apply_damage", "apply_heal", "combat_start", "combat_action", "combat_end"):
             return "combat"
     return cat
 
@@ -136,7 +136,7 @@ def _execute_tools(state: TurnState) -> dict:
                     roll_data = None
                 engine.cb.on_dice(summary, roll_data)
 
-        if name == "combat_action":
+        if name in {"combat_start", "combat_action"}:
             _emit_combat_dice(engine, output)
 
         if name in COMPLEX_FUNCTIONS:

@@ -69,6 +69,8 @@ flowchart LR
 | 游戏内核 | `src/engine.py` | 会话消息、模型调用、存档、角色应用、记忆压缩、回调接口 |
 | 回合编排 | `src/agent_graph.py` | 叙事/战斗 Agent 路由、工具循环、finalize |
 | 战斗域 | `src/combat_agent.py`、`src/combat.py` | 战斗角色提示、权威回合状态、对抗与伤害结算 |
+| 性格归一化 | `src/personality.py` | 角色信念、背景/心理特质与暴力立场的兼容读取 |
+| 道具域 | `src/inventory.py`、`tools/item.py` | 持有验证、一次性消耗、弹药/堆叠数量与使用日志 |
 | 工具路由 | `src/tools.py` | Function Calling schema、工具分类、CLI 子进程执行 |
 | 确定性规则 | `tools/*.py` | 检定、骰子、战斗、状态、伤害、SAN、角色、模组导入 |
 | 持久化 | `src/persistence.py` | system prompt 组装、存档列表、快照迁移与恢复 |
@@ -151,7 +153,17 @@ flowchart TD
 
 ### 6.4 战斗状态机
 
-`combat_start` 在 `world_state.combat_state` 创建权威状态，包含 encounter ID、轮次、参战者、先攻、当前行动者、防御次数、待确认决定和有界日志。`combat_action` 校验行动者并执行 d100 对抗、伤害、重伤与回合推进；PC 使用枪械时还会把物品栏中形如 `左轮手枪（6发）` 的旧字符串原位更新为 `（5发）`，即使射击落空也会消耗一发，0 发时拒绝动作且不推进回合。NPC 攻击 PC 时先返回 `decision_required`，由 `GameEngine` 完成前端确认后内部调用 `combat_decide`。`combat_end` 负责非击倒类结束条件。
+`combat_start` 在 `world_state.combat_state` 创建权威状态，包含 encounter ID、轮次、参战者、先攻、当前行动者、防御次数、待确认决定和有界日志。玩家消息已经声明开场攻击或武力威胁时，调用方通过 `initial_action` 一次提交，状态机直接进入确认/结算，不再依赖 Agent 开战后补交第二次工具调用。`combat_action` 校验行动者并执行 d100 对抗、伤害、重伤与回合推进；PC 枪械攻击通过 `src.inventory` 的共享资源服务扣弹，即使射击落空也会消耗一发，0 发时拒绝动作且不推进回合。NPC 攻击 PC 时先返回 `decision_required`，由 `GameEngine` 完成前端确认后内部调用 `combat_decide`。`combat_end` 负责非击倒类结束条件。
+
+战斗外道具动作调用 `use_item`：`use` 仅验证持有，`consume` 更新堆叠数量或移除一次性物品，`firearm_discharge` 处理鸣枪、试射、打锁等非攻击开枪。后者与战斗枪击共用形如 `左轮手枪（6发）` 的解析和扣减逻辑，但同一发子弹只能走一条调用路径。成功动作追加到有界 `item_use_log`，并随世界状态快照保存。
+
+PC 首次攻击未主动敌对的 NPC 时，状态机在任何掷骰、伤害或弹药消耗前返回 `irreversible_violence` 决定。默认项为取消，取消不消耗动作或资源；确认后目标写入 `hostile_to_pc`，事件追加到 `violence_log`，并在模组存在 `case_clocks.human_pressure` 时推进压力。
+
+PC 用武器胁迫未主动敌对的 NPC 时返回 `coercive_threat` 决定。取消开场威胁会结束刚创建的战斗且不消耗行动、弹药或物品；确认后目标写入 `threatened_by_pc` 并转为 `guarded`，事件追加到 `threat_log`，但不会把威胁误算成开枪。后续真正攻击仍需独立经过 `irreversible_violence`。
+
+为避免流式文本抢在确认之前叙述“已经拔枪”，`GameEngine.handle_action()` 会先调用无副作用的 `preview_player_escalation()`。它以保守关键词识别明确攻击/武力威胁，并从当前世界的 NPC 名称解析目标；假设句、否定句和已敌对目标不会拦截。取消时不进入 LangGraph、不发送 tension 或 narrative 事件，只记录“行动未发生”；确认后生成仅本回合有效的一次性授权。后续 `combat_start` / `combat_action` 返回同类型、同目标的状态机决定时，授权静默选择确认项，避免第二次弹窗。授权不匹配或未被消费会在回合结束时清除。
+
+`src.personality` 统一读取 `backstory.beliefs`、背景特质和游戏中获得的心理特质。角色可通过 `backstory.violence_stance` 声明 `avoidant`、`conditional` 或 `unrestrained`；旧角色缺少字段时使用 `conditional`。立场只改变确认措辞和返回给 Agent 的 `roleplay_context`，不能替玩家否决行动，也不能免除战斗、资源、法律、声望、案件与 SAN 后果。
 
 模组缺少 NPC 的 DEX 或战斗技能时，状态机使用保守默认值并写入 `assumed_fields`，便于后续补全模组数据。战斗状态属于世界快照，因此可随普通存档恢复。
 

@@ -15,6 +15,7 @@ from .config import (
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
+from .combat import preview_player_escalation
 from .combat_agent import build_combat_overlay
 from .tools import (
     TOOLS, execute_function,
@@ -56,6 +57,7 @@ class GameEngine:
         self._summary_token_estimate = 0
         # 按需 skill 加载追踪：本会话已提示/加载过的 skill 路径，避免重复提示
         self._loaded_optional_skills: set[str] = set()
+        self._preconfirmed_escalation: dict | None = None
         # 摘要策略：按玩家回合静默压缩，避免内部工具消息过多导致频繁打断沉浸。
         self.SUMMARY_PLAYER_TURN_INTERVAL = 50
         self.SUMMARY_KEEP_RECENT_MESSAGES = 24
@@ -72,6 +74,7 @@ class GameEngine:
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
         self._loaded_optional_skills = set()
+        self._preconfirmed_escalation = None
 
     def reset(self, character_ref: dict | None = None):
         """开始新游戏——重置对话 + 世界状态"""
@@ -146,6 +149,7 @@ class GameEngine:
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
         self._loaded_optional_skills = set()
+        self._preconfirmed_escalation = None
         return len(messages) - 1
 
     def settle_case(self, ending_type: str, title: str, summary: str) -> dict:
@@ -251,6 +255,51 @@ class GameEngine:
     def _combat_active(self) -> bool:
         return bool(self._combat_state().get("active"))
 
+    def _preflight_player_escalation(self, content: str) -> str | None:
+        """Confirm explicit violence before the first model token can narrate it."""
+        from . import config as cfg
+        try:
+            world = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return content
+        preview = preview_player_escalation(world, content)
+        if preview is None:
+            return content
+
+        decision = preview["decision"]
+        selected = self.cb.on_decision(decision)
+        valid_options = {
+            option.get("id")
+            for option in decision.get("options", [])
+            if isinstance(option, dict)
+        }
+        if selected not in valid_options:
+            selected = decision.get("default_option")
+        authorization = preview["authorization"]
+        if selected != authorization["confirm_option"]:
+            self.messages.append({
+                "role": "user",
+                "content": f"[玩家在行动发生前取消，场景状态不变] 原提议：{content}",
+            })
+            self.save("slot_000")
+            self.cb.on_done()
+            return None
+
+        self._preconfirmed_escalation = authorization
+        return f"{content}\n{preview['prompt_suffix']}"
+
+    def _preconfirmed_option(self, decision: dict) -> str | None:
+        authorization = self._preconfirmed_escalation
+        if not isinstance(authorization, dict):
+            return None
+        if decision.get("kind") != authorization.get("kind"):
+            return None
+        expected_target = authorization.get("target_id")
+        if expected_target and decision.get("target_id") != expected_target:
+            return None
+        self._preconfirmed_escalation = None
+        return authorization.get("confirm_option")
+
     def _combat_system_overlay(self) -> str:
         return build_combat_overlay(self._combat_state())
 
@@ -318,7 +367,7 @@ class GameEngine:
                 pass
             return result
 
-        if name == "combat_action":
+        if name in {"combat_start", "combat_action"}:
             result = execute_function(name, args)
             try:
                 info = json.loads(result)
@@ -328,7 +377,9 @@ class GameEngine:
                 return result
 
             decision = info.get("decision") or {}
-            selected = self.cb.on_decision(decision)
+            selected = self._preconfirmed_option(decision)
+            if selected is None:
+                selected = self.cb.on_decision(decision)
             valid_options = {
                 option.get("id")
                 for option in decision.get("options", [])
@@ -347,8 +398,14 @@ class GameEngine:
 
     # 玩家消息关键词 → 对应按需 skill（引擎侧主动检测，不依赖模型判断）
     _KEYWORD_SKILL_MAP = {
+        "skills/keeper/keeper_items.skill": [
+            "鸣枪", "开枪", "射击", "扣动扳机", "子弹", "装弹", "换弹",
+            "喝下", "服用", "点燃", "烧掉", "使用钥匙", "打开手电筒",
+            "急救包", "消耗道具", "使用物品",
+        ],
         "skills/keeper/keeper_combat.skill": [
-            "开枪", "射击", "攻击", "挥拳", "拔枪", "拔刀", "砍", "刺", "砸",
+            "开枪", "射击", "攻击", "挥拳", "拔枪", "持枪", "用枪", "枪指", "瞄准",
+            "威胁", "拔刀", "砍", "刺", "砸",
             "战斗", "搏斗", "斗殴", "反击", "闪避", "伤害", "受伤", "倒地",
             "武器", "手枪", "左轮", "刀", "棍", "枪", "弹药",
         ],
@@ -705,7 +762,14 @@ class GameEngine:
     def handle_action(self, user_content: str | None = None):
         """执行一个完整回合"""
         self._resume_pending_combat_decision()
-        self._turn_graph.invoke(
-            {"engine": self, "user_content": user_content},
-            config={"recursion_limit": 50},
-        )
+        if user_content:
+            user_content = self._preflight_player_escalation(user_content)
+            if user_content is None:
+                return
+        try:
+            self._turn_graph.invoke(
+                {"engine": self, "user_content": user_content},
+                config={"recursion_limit": 50},
+            )
+        finally:
+            self._preconfirmed_escalation = None

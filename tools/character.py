@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """COC 第七版角色卡创建工具 —— 掷属性、分配技能、导出 JSON 角色卡"""
 
 import json
@@ -12,6 +13,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
 STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
 CHARS_DIR = PROJECT_ROOT / "mod" / MODULE / "characters"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.personality import normalize_violence_stance
 
 # ── COC 7e 职业库 ──────────────────────────────────────────
 
@@ -171,7 +175,12 @@ def parse_skill_points(formula: str, attrs: dict) -> int:
     return total
 
 
-def create_character(name: str, occupation: str, quick: bool = False) -> dict:
+def create_character(
+    name: str,
+    occupation: str,
+    quick: bool = False,
+    violence_stance: str = "conditional",
+) -> dict:
     """创建 COC 7e 角色卡"""
     occ = OCCUPATIONS.get(occupation)
     if not occ:
@@ -306,6 +315,7 @@ def create_character(name: str, occupation: str, quick: bool = False) -> dict:
         "backstory": {
             "description": "",
             "beliefs": "",
+            "violence_stance": normalize_violence_stance(violence_stance),
             "important_person": "",
             "meaningful_place": "",
             "treasured_possession": "",
@@ -387,8 +397,8 @@ def apply_character(char: dict) -> dict:
 def console():
     if len(sys.argv) < 2:
         print("用法:")
-        print("  python character.py create <名字> <职业>   创建新角色")
-        print("  python character.py quick <名字> <职业>   快速创建（预设属性池）")
+        print("  python character.py create <名字> <职业> [暴力立场]   创建新角色")
+        print("  python character.py quick <名字> <职业> [暴力立场]   快速创建（预设属性池）")
         print("  python character.py save <文件路径>       保存当前角色")
         print("  python character.py load <文件路径>       加载角色卡")
         print("  python character.py apply <文件路径>      加载角色卡并应用到游戏")
@@ -405,7 +415,13 @@ def console():
             sys.exit(1)
         name = sys.argv[2]
         occupation = sys.argv[3]
-        char = create_character(name, occupation, quick=(cmd == "quick"))
+        violence_stance = sys.argv[4] if len(sys.argv) > 4 else "conditional"
+        char = create_character(
+            name,
+            occupation,
+            quick=(cmd == "quick"),
+            violence_stance=violence_stance,
+        )
         if "error" in char:
             print(json.dumps(char, ensure_ascii=False))
             sys.exit(1)

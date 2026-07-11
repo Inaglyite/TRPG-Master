@@ -206,6 +206,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "use_item",
+            "description": "确定性使用调查员物品。战斗外任何真实开枪（鸣枪、试射、打锁/灯等）必须用 firearm_discharge 扣弹；普通可重复道具用 use 验证持有但不消耗；明确的一次性道具用 consume。对角色/NPC 发起的枪械攻击改用 combat_action，不能与本工具重复扣弹。必须先调用工具成功，再叙述物品已生效。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "物品名称或足以唯一匹配物品栏的关键字"},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["use", "consume", "firearm_discharge"],
+                        "description": "use=验证持有且不消耗；consume=消耗一次性物品；firearm_discharge=战斗外开枪并扣减发数"
+                    },
+                    "amount": {"type": "integer", "minimum": 1, "maximum": 20, "description": "消耗数量或开枪发数，默认 1"},
+                    "reason": {"type": "string", "description": "具体用途，如鸣枪示警、用钥匙开门、喝下药剂"}
+                },
+                "required": ["item", "operation", "reason"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "state_add_item",
             "description": "添加物品到 PC 背包。当玩家捡起、获得或购买物品时调用。",
             "parameters": {
@@ -221,7 +242,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "state_remove_item",
-            "description": "从 PC 背包移除物品。当玩家使用、丢弃或失去物品时调用。",
+            "description": "从 PC 背包移除物品。只在玩家明确丢弃、交出或永久失去物品时调用；正常使用与消耗必须调用 use_item。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -256,7 +277,12 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "角色姓名"},
-                    "occupation": {"type": "string", "description": "职业名称"}
+                    "occupation": {"type": "string", "description": "职业名称"},
+                    "violence_stance": {
+                        "type": "string",
+                        "enum": ["avoidant", "conditional", "unrestrained"],
+                        "description": "角色对主动暴力的倾向；只影响角色扮演与确认文案",
+                    },
                 },
                 "required": ["name", "occupation"]
             }
@@ -281,11 +307,32 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "combat_start",
-            "description": "进入战斗并建立唯一的服务端回合状态。自动加入 PC，按 DEX 排序；NPC 缺少战斗数值时可在 participants 中提供保守覆盖值。战斗开始后必须使用 combat_action 推进，不要再用普通 skill_check/apply_damage 结算攻击。",
+            "description": "进入战斗并建立唯一的服务端回合状态。玩家最新输入已明确包含首个攻击或武力威胁时，必须同时填写 initial_action，状态机会立即确认/结算，绝不能只开战后再次询问玩家。自动加入 PC 并按 DEX 排序；NPC 缺少战斗数值时可提供保守覆盖值。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "reason": {"type": "string", "description": "发生敌对行动的简述"},
+                    "initial_action": {
+                        "type": "object",
+                        "description": "玩家在最新输入中已经明确声明的开场攻击或武力威胁；没有明确行动时省略",
+                        "properties": {
+                            "actor_id": {"type": "string", "description": "通常为 pc"},
+                            "target_id": {"type": "string", "description": "目标 NPC id"},
+                            "action_type": {
+                                "type": "string",
+                                "enum": ["melee", "firearm", "threat"],
+                                "description": "threat 表示持枪、持刀等武力胁迫但尚未攻击",
+                            },
+                            "description": {"type": "string", "description": "玩家已经声明的具体行动意图"},
+                            "skill": {"type": "string", "description": "攻击技能 id"},
+                            "weapon": {"type": "string", "description": "武器名称或物品栏关键字"},
+                            "damage_spec": {"type": "string", "description": "攻击伤害骰，如 1d8"},
+                            "damage_mode": {"type": "string", "enum": ["normal", "impaling", "blunt"]},
+                            "bonus_dice": {"type": "integer", "minimum": 0, "maximum": 2},
+                            "penalty_dice": {"type": "integer", "minimum": 0, "maximum": 2},
+                        },
+                        "required": ["actor_id", "target_id", "action_type", "description"],
+                    },
                     "participants": {
                         "type": "array",
                         "description": "参战者配置。PC 可省略并会自动加入；NPC 必须使用 world_state 中的 id。",
@@ -327,7 +374,7 @@ TOOLS = [
                 "properties": {
                     "actor_id": {"type": "string", "description": "必须等于 combat_status.current_actor"},
                     "target_id": {"type": "string", "description": "攻击目标 id；移动或其他动作可省略"},
-                    "action_type": {"type": "string", "enum": ["melee", "firearm", "move", "other"]},
+                    "action_type": {"type": "string", "enum": ["melee", "firearm", "threat", "move", "other"]},
                     "description": {"type": "string", "description": "具体动作意图，供确认弹窗和后续叙事使用"},
                     "skill": {"type": "string", "description": "可选技能 id，近战默认 fighting_brawl，射击默认 firearms_handgun"},
                     "weapon": {"type": "string", "description": "射击所用武器名称或物品栏中的关键字；用于从“武器（N发）”中扣减弹药"},
@@ -684,9 +731,18 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "import_module":
         return _run_cli([exe, "tools/module_loader.py", args.get('path', '')])
     elif name == "create_character":
-        return _run_cli([exe, "tools/character.py", "create", args.get('name', '调查员'), args.get('occupation', '私家侦探')])
+        return _run_cli([
+            exe,
+            "tools/character.py",
+            "create",
+            args.get("name", "调查员"),
+            args.get("occupation", "私家侦探"),
+            args.get("violence_stance", "conditional"),
+        ])
     elif name == "load_character":
         return _run_cli([exe, "tools/character.py", "load", args.get('path', '')])
+    elif name == "use_item":
+        return _run_cli([exe, "tools/item.py", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_start":
         return _run_cli([exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_status":

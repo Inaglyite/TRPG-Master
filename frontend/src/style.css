@@ -771,8 +771,11 @@ body:has(.clue-toast) #handout-container {
   background: var(--ui-panel-modal) center / 100% 100% no-repeat;
   border: 0;
   border-radius: 0;
+  box-sizing: border-box;
   padding: 64px 56px 44px;
   max-width: 560px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   text-align: center;
   color: var(--paper-ink-soft);
   box-shadow: none;
