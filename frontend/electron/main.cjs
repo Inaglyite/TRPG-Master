@@ -143,6 +143,8 @@ function startPackagedBackend() {
 
   const exePath = backendExecutablePath();
   const backendRoot = path.dirname(exePath);
+  const runtimeRoot = path.join(app.getPath("userData"), "runtime");
+  fs.mkdirSync(runtimeRoot, { recursive: true });
   log("启动内置后端:", exePath);
   backendProcess = spawn(exePath, [], {
     cwd: backendRoot,
@@ -150,6 +152,7 @@ function startPackagedBackend() {
     env: {
       ...process.env,
       TRPG_PROJECT_ROOT: backendRoot,
+      TRPG_RUNTIME_ROOT: runtimeRoot,
     },
   });
 

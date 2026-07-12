@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from .module_registry import ModuleRegistry
 from .runtime import RuntimeContext, default_world_id
 from .world_store import atomic_write_json
 
@@ -77,7 +78,10 @@ def _module_characters_dir(
 ) -> Path:
     context = _runtime_context(context, module_name)
     module = module_name or context.module_name
-    return context.project_root / "mod" / module / "characters"
+    if module == context.module_name:
+        return context.module_dir / "characters"
+    record = ModuleRegistry(context.project_root, context.runtime_root).resolve(module)
+    return record.path / "characters"
 
 
 def _safe_file_name(name: str) -> str:

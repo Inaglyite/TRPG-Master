@@ -60,7 +60,12 @@
         <div id="start-subtitle">A TRPG of Madness &amp; Mystery</div>
         <div id="module-selector">
           <label for="module-select">📚 模组选择</label>
-          <select id="module-select"></select>
+          <div class="module-select-row">
+            <select id="module-select"></select>
+            <button id="btn-import-module" type="button" title="导入 .trpgmod 模组包">⇧ <span>导入</span></button>
+          </div>
+          <input id="module-file-input" type="file" accept=".trpgmod,application/zip" hidden />
+          <div id="module-import-status" aria-live="polite"></div>
         </div>
         <div id="character-selector">
           <div class="selector-header">
@@ -97,6 +102,33 @@
       <div id="save-panel-body">
         <button id="save-panel-new" class="save-new-btn">➕ 新建存档</button>
         <div id="save-panel-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模组导入预览 -->
+  <div id="module-import-overlay" class="hidden">
+    <div id="module-import-panel" role="dialog" aria-modal="true" aria-labelledby="module-import-title">
+      <div class="module-import-header">
+        <div>
+          <div class="module-import-eyebrow">TRPGMOD / PACKAGE REVIEW</div>
+          <h2 id="module-import-title">导入模组</h2>
+        </div>
+        <button id="module-import-close" type="button" title="关闭" aria-label="关闭模组导入">✕</button>
+      </div>
+      <div class="module-import-body">
+        <h3 id="module-import-name">正在检查模组包…</h3>
+        <div id="module-import-meta"></div>
+        <p id="module-import-description"></p>
+        <div id="module-import-warnings" class="hidden">
+          <div class="module-import-warning-title">导入前请确认</div>
+          <ul id="module-import-warning-list"></ul>
+        </div>
+        <div id="module-import-error" class="hidden" aria-live="assertive"></div>
+      </div>
+      <div class="module-import-actions">
+        <button id="module-import-cancel" type="button">取消</button>
+        <button id="module-import-confirm" type="button" disabled>导入并切换</button>
       </div>
     </div>
   </div>

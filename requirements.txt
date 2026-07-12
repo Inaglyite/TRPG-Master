@@ -1,4 +1,5 @@
 fastapi
 langgraph
 openai
+pydantic>=2.12,<3
 uvicorn[standard]

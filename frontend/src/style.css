@@ -923,7 +923,7 @@ body:has(.clue-toast) #handout-container {
 
 #module-selector {
   margin-bottom: 16px;
-  width: min(300px, calc(100vw - 72px));
+  width: min(430px, calc(100vw - 72px));
 }
 #module-selector label {
   display: block; font-size: 12px; color: var(--text-dim);
@@ -950,6 +950,7 @@ body:has(.clue-toast) #handout-container {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.36);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   text-shadow: 0 1px 2px #000, 0 0 8px rgba(236, 208, 122, 0.48);
+  min-width: 0;
 }
 #module-select:hover,
 #module-select:focus {
@@ -959,6 +960,205 @@ body:has(.clue-toast) #handout-container {
 #module-select option {
   background: var(--bg2);
   color: #fff4cf;
+}
+.module-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 8px;
+  align-items: stretch;
+}
+#btn-import-module {
+  min-height: 42px;
+  border: 1px solid rgba(106, 166, 200, 0.65);
+  border-radius: 8px;
+  background: rgba(15, 29, 36, 0.94);
+  color: #cce9f4;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+#btn-import-module:hover,
+#btn-import-module:focus-visible {
+  border-color: var(--blue-bright);
+  background: rgba(24, 53, 66, 0.98);
+  transform: translateY(-1px);
+  outline: none;
+}
+#btn-import-module:disabled {
+  opacity: 0.58;
+  cursor: wait;
+  transform: none;
+}
+#module-import-status {
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+#module-import-status[data-state="working"] { color: var(--blue-bright); }
+#module-import-status[data-state="success"] { color: #9acb7d; }
+#module-import-status[data-state="error"] { color: #ef9a94; }
+
+/* ---- 模组导入预览 ---- */
+#module-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 5, 6, 0.78);
+  backdrop-filter: blur(5px);
+}
+#module-import-overlay.hidden { display: none; }
+#module-import-panel {
+  width: min(580px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(200, 162, 78, 0.54);
+  border-radius: 8px;
+  background: #171613;
+  color: var(--text);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
+  animation: pop-in 0.2s ease-out;
+}
+.module-import-header {
+  min-height: 78px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(200, 162, 78, 0.22);
+  background: #222019;
+}
+.module-import-eyebrow {
+  color: var(--blue-bright);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+#module-import-title {
+  margin: 4px 0 0;
+  color: var(--gold-bright);
+  font-size: 20px;
+  letter-spacing: 0;
+}
+#module-import-close {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid var(--border-bright);
+  border-radius: 6px;
+  background: #12110e;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+#module-import-close:hover { color: #fff; border-color: var(--gold); }
+.module-import-body {
+  overflow-y: auto;
+  padding: 24px 22px;
+}
+#module-import-name {
+  margin: 0;
+  color: #f0dfb7;
+  font-size: 23px;
+  line-height: 1.25;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+#module-import-meta {
+  margin-top: 8px;
+  color: var(--blue-bright);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+#module-import-description {
+  margin: 18px 0 0;
+  color: #d7cdb9;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+#module-import-warnings {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-left: 3px solid #d6a64f;
+  background: #292317;
+}
+#module-import-warnings.hidden,
+#module-import-error.hidden {
+  display: none;
+}
+.module-import-warning-title {
+  color: #f0c977;
+  font-size: 13px;
+  font-weight: 800;
+}
+#module-import-warning-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: #d7c7a7;
+  font-size: 12px;
+  line-height: 1.55;
+}
+#module-import-error {
+  margin-top: 18px;
+  padding: 13px 15px;
+  border: 1px solid rgba(201, 80, 80, 0.55);
+  border-radius: 6px;
+  background: #2b1515;
+  color: #ffb2ac;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.module-import-actions {
+  min-height: 70px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(200, 162, 78, 0.22);
+  background: #11110f;
+}
+.module-import-actions button {
+  min-width: 108px;
+  min-height: 40px;
+  border-radius: 7px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+#module-import-cancel {
+  border: 1px solid var(--border-bright);
+  background: #1b1a17;
+  color: var(--text-dim);
+}
+#module-import-confirm {
+  border: 1px solid rgba(107, 154, 82, 0.8);
+  background: #294022;
+  color: #e5f2dc;
+}
+#module-import-confirm:hover:not(:disabled) { background: #36572d; }
+.module-import-actions button:disabled {
+  opacity: 0.48;
+  cursor: wait;
 }
 
 #character-selector {
@@ -1569,6 +1769,33 @@ body:has(.clue-toast) #handout-container {
   }
   .character-card-row {
     grid-template-columns: 1fr;
+  }
+  #module-selector {
+    width: min(100%, calc(100vw - 52px));
+  }
+  .module-select-row {
+    grid-template-columns: minmax(0, 1fr) 82px;
+  }
+  #btn-import-module span {
+    display: none;
+  }
+  #module-import-overlay {
+    padding: 12px;
+  }
+  #module-import-panel {
+    max-height: calc(100vh - 24px);
+  }
+  .module-import-header,
+  .module-import-actions {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .module-import-body {
+    padding: 20px 16px;
+  }
+  .module-import-actions button {
+    min-width: 0;
+    flex: 1 1 50%;
   }
 
   #save-panel {

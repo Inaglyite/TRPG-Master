@@ -1,0 +1,94 @@
+{
+  "$schema": "https://trpg-master.local/schemas/module-v1.json",
+  "format_version": "1.0",
+  "entry_scene_id": "archive_study",
+  "opening_prompt": "调查员应邀来到一座即将闭馆的私人档案馆。馆长刚刚说明委托，但尚未展示失踪手稿的保管记录。",
+  "npcs": {
+    "archivist_lin": {
+      "name": "林馆长",
+      "visible_tags": ["年迈", "谨慎", "戴金丝眼镜"],
+      "secret": "林馆长隐瞒了自己昨夜听见手稿在书架间低语的事实。",
+      "hp": 9,
+      "disposition": "cooperative",
+      "current_location": "archive_study",
+      "skills": {
+        "图书馆使用": 75,
+        "心理学": 40
+      }
+    }
+  },
+  "scenes": {
+    "archive_study": {
+      "name": "档案馆书房",
+      "description": "窄窗外的雨水拍打玻璃，成排索引柜一直延伸到没有点灯的后室。",
+      "exits": ["archive_courtyard"],
+      "npcs_present": ["archivist_lin"]
+    },
+    "archive_courtyard": {
+      "name": "档案馆内院",
+      "description": "湿透的石板围住一口封死的旧井，排水沟里卡着几片发黑的纸。",
+      "exits": ["archive_study"],
+      "npcs_present": []
+    }
+  },
+  "clues": {
+    "commission_missing_manuscript": {
+      "text": "林馆长委托调查员寻找昨夜从密柜中消失的手稿。",
+      "category": "task",
+      "type": "obvious",
+      "tier": 0,
+      "source": "opening_briefing",
+      "related_npcs": ["archivist_lin"],
+      "related_scenes": ["archive_study"],
+      "initially_known": true
+    },
+    "well_paper_fragment": {
+      "text": "旧井旁的黑色纸片与失踪手稿使用同一种纤维。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 1,
+      "source": "archive_courtyard",
+      "related_npcs": [],
+      "related_scenes": ["archive_courtyard"],
+      "initially_known": false,
+      "discovery_notes": "调查排水沟或旧井周边时，侦查成功后揭示。"
+    }
+  },
+  "endings": {
+    "manuscript_recovered": {
+      "title": "手稿归档",
+      "trigger": "调查员找回手稿并封住旧井",
+      "description": "低语随着井盖最后一枚铆钉落下而停止。",
+      "ending_type": "good"
+    }
+  },
+  "rules": {},
+  "assets": {
+    "npcs": {},
+    "scenes": {},
+    "clues": {}
+  },
+  "initial_state": {
+    "pc": {
+      "name": "",
+      "occupation": "",
+      "hp": 11,
+      "max_hp": 11,
+      "san": 65,
+      "max_san": 65,
+      "attributes": {},
+      "skills": {},
+      "inventory": [],
+      "conditions": []
+    },
+    "known_clue_ids": [],
+    "flags": {
+      "well_opened": false,
+      "manuscript_recovered": false
+    },
+    "case_clocks": {
+      "whispers": 0
+    }
+  },
+  "clue_links": []
+}

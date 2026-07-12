@@ -13,6 +13,7 @@ TRPG Master 当前是一个本地单机应用，但运行时已经按 `world_id`
 - `snapshot.json` 是读档时恢复世界状态的事实来源。
 - 前端不直接修改世界文件，只通过 WebSocket 请求服务端动作。
 - `mod/<module>/` 只保存模组定义与初始模板，新游戏不会写回版本控制目录。
+- 用户 `.trpgmod` 版本化安装到 `modules/<id>/<version>/`；运行世界固定绑定模组 key。
 - 当前仍不是多人房间服务器：世界可隔离并发运行，但同一房间尚无共享 GM 历史、行动队列、玩家身份与事件广播。
 
 ## 2. 系统上下文
@@ -29,7 +30,10 @@ flowchart LR
     Store <--> State[worlds/world_id/world_state.json]
     Engine <--> Saves[worlds/world_id/saves/slot]
     Engine <--> Profile[profiles/player_profile.json]
-    Server --> Assets[mod/module/assets]
+    Server --> Registry[ModuleRegistry]
+    Registry --> Builtin[mod/module]
+    Registry --> UserModules[modules/id/version]
+    Server --> Assets[module/assets]
 ```
 
 ## 3. 进程模型
@@ -51,7 +55,7 @@ flowchart LR
 打包后的 Electron 由 `frontend/electron/main.cjs` 托管内置后端：
 
 1. 定位 `resources/backend/trpg-server(.exe)`。
-2. 设置 `TRPG_PROJECT_ROOT` 后启动后端，Windows 使用 `windowsHide: true`。
+2. 设置只读 `TRPG_PROJECT_ROOT` 与用户数据下的 `TRPG_RUNTIME_ROOT` 后启动后端，Windows 使用 `windowsHide: true`。
 3. 轮询 `/api/health`，成功后加载前端页面。
 4. `window-all-closed` 或 `before-quit` 时终止内置后端。
 
@@ -77,6 +81,8 @@ flowchart LR
 | 确定性规则 | `tools/*.py` | 检定、骰子、战斗、状态、伤害、SAN、角色、模组导入 |
 | 持久化 | `src/persistence.py` | system prompt 组装、存档列表、快照迁移与恢复 |
 | 角色服务 | `src/characters.py` | 候选角色、角色复制、案件结算与长期履历 |
+| 模组格式 | `src/module_format.py` | v1 作者态模型、引用校验、JSON Schema、世界模板与提示编译 |
+| 模组注册表 | `src/module_registry.py` | 内置/用户模组发现、包安全检查、版本化原子安装 |
 | 运行时上下文 | `src/runtime.py` | `world_id`、模组定义路径、可写世界路径与旧单人数据迁移 |
 | 世界存储 | `src/world_store.py`、`src/world_migrations.py` | 房间锁、revision、原子替换、备份恢复与 schema 迁移 |
 | 配置 | `src/config.py` | 默认数据根目录、模型与 Skill 加载顺序；不保存运行中活动世界 |
@@ -221,6 +227,8 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 |---|---|---|---|
 | 模组定义 | `mod/<name>/module.md` | 模组作者 | 版本控制 |
 | 初始世界 | `mod/<name>/world_state_initial.json` | 模组作者/导入器 | 新游戏模板 |
+| 用户模组源文件 | `modules/<id>/<version>/manifest.json`、`module.json`、`keeper.md` | `.trpgmod` 导入器 | 指定模组版本 |
+| 用户模组编译产物 | `modules/<id>/<version>/module.md`、`world_state_initial.json` | `module_format` | 指定模组版本 |
 | 世界元数据 | `worlds/<world_id>/world.json` | `RuntimeContext` | 本地运行数据 |
 | 当前世界 | `worlds/<world_id>/world_state.json` | `WorldStore` | 当前案件 |
 | 世界备份 | `worlds/<world_id>/world_state.backup.json` | `WorldStore` | 最后一次提交前的有效状态 |
@@ -266,13 +274,48 @@ worlds/<world_id>/saves/slot_NNN/
 
 新游戏从 `profile/default/module/custom` 四类来源解析角色引用，把角色复制到当前 `world_state.pc`。游戏内变化只作用于案件状态；案件结算后，`settle_case()` 才把结局、HP/SAN 变化、声望、人脉与最后角色状态写入 `profiles/player_profile.json`。
 
+### 8.4 模组包与注册表
+
+`ModuleRegistry` 合并两类来源：
+
+```text
+内置 legacy key       mod/<directory>/
+用户版本 key          modules/<package-id>/<version>/  -> id@version
+```
+
+`RuntimeContext` 在构造时解析并固定 `ModuleRecord`，之后主题、角色、素材、Skill、初始模板和
+守秘人提示都从同一 `module_dir` 读取，不允许各服务再次自行拼接 `PROJECT_ROOT/mod`。
+
+`.trpgmod` 导入分为预检与安装：
+
+```mermaid
+sequenceDiagram
+    participant UI as Start UI
+    participant API as FastAPI
+    participant PKG as Package Inspector
+    participant REG as ModuleRegistry
+    UI->>API: POST /api/modules/inspect (raw package)
+    API->>PKG: ZIP/security/schema/engine/reference checks
+    PKG-->>UI: manifest summary + warnings
+    UI->>API: POST /api/modules/import
+    API->>REG: install(package)
+    REG->>REG: compile + staging + atomic rename
+    REG-->>UI: module record (id@version)
+    UI->>API: WS switch_module
+```
+
+作者态 `module.json` 保存全部内容定义，运行时编译器只把初始已知线索写入 `clues_found`，并将
+完整定义保存到私有 `clue_catalog`/`scene_catalog`。模组版本和世界状态 schema 分别迁移，不能
+共用一个版本号。完整契约见 `docs/MODULE_FORMAT.md`。
+
 ## 9. 前端结构
 
 | 模块 | 职责 |
 |---|---|
-| `main.ts` | 启动 WebSocket、应用主题 |
+| `main.ts` | 启动 WebSocket、校验并应用主题变量 |
 | `ws.ts` | 连接、重连、发送队列、服务端事件分发 |
 | `start.ts` | 模组/调查员选择、新游戏与继续游戏入口 |
+| `module-import.ts` | `.trpgmod` 文件选择、HTTP 预检、确认安装与自动切换 |
 | `renderer.ts` | Markdown 消息、流式追加、滚动策略、骰子与 handout 容器 |
 | `options.ts` | 行动选项、自由输入、检定确认 |
 | `panels.ts` | 角色、线索、结局、存档与快速存档 |
@@ -327,14 +370,17 @@ worlds/<world_id>/saves/slot_NNN/
 
 ### 新增模组
 
-1. 创建 `mod/<name>/module.md` 和 `world_state_initial.json`。
-2. 可选添加 `theme.json`、`skills/`、`characters/` 与 `assets/`。
-3. 保持 ID 稳定：NPC、场景、线索和 `asset_map` 通过 ID 关联。
-4. 使用开始界面切换模组，验证新游戏重置、读档隔离和图片发放。
+1. 从 `examples/module-template/` 复制作者工程。
+2. 编辑 `manifest.json`、`module.json`、`keeper.md` 与可选素材目录。
+3. 运行 `tools/module_packager.py pack`；不能手写编译产物。
+4. 从开始界面导入，验证玩家预览、开场、读档隔离和图片发放。
+5. 已发布实体 ID 保持稳定；不兼容内容变更提升模组主版本。
 
 ## 13. 安全边界
 
 - 服务端默认监听 `0.0.0.0:8765`，但没有鉴权；只应在可信本地网络或本机使用。
 - `.env.json` 含 API Key，禁止打包和提交。
 - 资产路由与 `read_file` 有路径边界检查；新增文件接口时必须保持相同约束。
+- `.trpgmod` 必须经过跨平台路径、符号链接、文件类型、体积、Schema、引擎版本、引用和 checksum 检查后才能安装。
+- 第三方 `custom_skills` 会改变模型行为，导入预览必须显示信任警告。
 - 不要把模组 secret 直接发送到前端。人物线索只使用公开 name、visible tags 与已发放素材。

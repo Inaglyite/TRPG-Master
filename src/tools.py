@@ -261,21 +261,6 @@ TOOLS = [
             }
         }
     },
-    # ---- 模组导入 ----
-    {
-        "type": "function",
-        "function": {
-            "name": "import_module",
-            "description": "从 Markdown 文件导入模组。解析 MD 中 PC/NPC/场景/线索/标志，覆盖当前 world_state.json。路径如 mod/mansion_of_madness/module.md。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "模组 MD 文件路径"}
-                },
-                "required": ["path"]
-            }
-        }
-    },
     # ---- 角色管理 ----
     {
         "type": "function",
@@ -744,8 +729,6 @@ def execute_function(
         return run_cli([exe, "tools/sanity.py", "restore", args.get('amount', 0)])
     elif name == "sanity_check":
         return run_cli([exe, "tools/sanity.py", "check"])
-    elif name == "import_module":
-        return run_cli([exe, "tools/module_loader.py", args.get('path', '')])
     elif name == "create_character":
         return run_cli([
             exe,

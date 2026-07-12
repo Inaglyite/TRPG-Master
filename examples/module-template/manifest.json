@@ -1,0 +1,20 @@
+{
+  "$schema": "https://trpg-master.local/schemas/module-manifest-v1.json",
+  "format_version": "1.0",
+  "id": "example.whispering-archive",
+  "version": "1.0.0",
+  "title": "低语档案馆",
+  "author": "模组作者",
+  "description": "用于演示 TRPG Master v1 模组格式的短篇调查。",
+  "system": "COC 第七版",
+  "era": "1920s",
+  "language": "zh-CN",
+  "license": "CC BY 4.0",
+  "min_engine_version": "0.1.0",
+  "entry": "module.json",
+  "keeper_document": "keeper.md",
+  "theme": "theme.json",
+  "capabilities": [],
+  "tags": ["示例", "调查"],
+  "created_with": "TRPG Master template"
+}

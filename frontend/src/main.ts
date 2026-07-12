@@ -8,8 +8,20 @@
 
 import { connect } from "./ws";
 import { btnStart, getConnState, setConn } from "./dom";
+import "./module-import";
 
 export { populateModuleList } from "./start";
+
+function isSafeThemeColor(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 80 && CSS.supports("color", value);
+}
+
+function isSafeFontFamily(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length <= 240
+    && !/[;{}<>]/.test(value)
+    && !/url\s*\(/i.test(value);
+}
 
 // ---- 应用主题（由 WS theme 消息触发）----
 export function applyTheme(theme: any) {
@@ -26,12 +38,18 @@ export function applyTheme(theme: any) {
       border: "--border", borderBright: "--border-bright",
     };
     Object.entries(theme.colors).forEach(([k, v]) => {
-      if (map[k]) document.documentElement.style.setProperty(map[k], v as string);
+      if (map[k] && isSafeThemeColor(v)) {
+        document.documentElement.style.setProperty(map[k], v);
+      }
     });
   }
   if (theme.fonts) {
-    if (theme.fonts.body) document.documentElement.style.setProperty("--font", theme.fonts.body);
-    if (theme.fonts.mono) document.documentElement.style.setProperty("--font-mono", theme.fonts.mono);
+    if (isSafeFontFamily(theme.fonts.body)) {
+      document.documentElement.style.setProperty("--font", theme.fonts.body);
+    }
+    if (isSafeFontFamily(theme.fonts.mono)) {
+      document.documentElement.style.setProperty("--font-mono", theme.fonts.mono);
+    }
   }
   if (theme.title) {
     document.title = theme.title;

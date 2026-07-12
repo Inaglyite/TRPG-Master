@@ -10,6 +10,7 @@ import base64
 import copy
 import mimetypes
 import runpy
+import tempfile
 from urllib.parse import quote
 from pathlib import Path
 
@@ -84,14 +85,30 @@ from src.engine import GameEngine, EngineCallbacks
 from src.config import AUTO_SAVE_SLOT, DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
 from src.persistence import delete_save
 from src.characters import list_character_options
+from src.module_format import manifest_json_schema, module_json_schema
+from src.module_registry import (
+    MAX_PACKAGE_BYTES,
+    ModulePackageError,
+    ModuleRegistry,
+    inspect_package,
+)
 from src.runtime import RuntimeContext
 from src.world_store import StaleRevisionError
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="TRPG Agent API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["null"],
+    allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Module-Filename"],
+)
+MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 
 
@@ -110,19 +127,7 @@ def _load_theme(context: RuntimeContext | None = None) -> dict:
 
 def _list_mods() -> list:
     """列出所有可用模组"""
-    mods = []
-    mods_dir = PROJECT_ROOT / "mod"
-    if not mods_dir.exists():
-        return mods
-    for d in sorted(mods_dir.iterdir()):
-        if d.is_dir() and (d / "module.md").exists():
-            theme = {}
-            tf = d / "theme.json"
-            if tf.exists():
-                theme = json.loads(tf.read_text(encoding="utf-8"))
-            mods.append({"id": d.name, "title": theme.get("title", d.name),
-                         "description": theme.get("description", "")})
-    return mods
+    return [record.to_dict() for record in MODULE_REGISTRY.list_modules()]
 
 
 def _asset_payload(filename: str, context: RuntimeContext | None = None) -> dict:
@@ -132,7 +137,7 @@ def _asset_payload(filename: str, context: RuntimeContext | None = None) -> dict
         return {}
     asset_path = (context.assets_dir / filename).resolve()
     allowed = context.assets_dir.resolve()
-    if not str(asset_path).startswith(str(allowed)) or not asset_path.exists():
+    if not asset_path.is_relative_to(allowed) or not asset_path.is_file():
         return {}
 
     mime, _ = mimetypes.guess_type(str(asset_path))
@@ -398,13 +403,22 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             if msg_type == "ping":
                 await ws.send_json({"type": "pong"})
 
+            elif msg_type == "module_list":
+                await ws.send_json({
+                    "type": "module_list",
+                    "modules": _list_mods(),
+                    "active": engine.context.module_name,
+                })
+
             elif msg_type == "switch_module":
                 # 切换活跃模组（开场前在下拉框选择）
                 name = data.get("module", engine.context.module_name)
-                target = PROJECT_ROOT / "mod" / name
-                if not target.exists() or not (target / "module.md").exists():
+                try:
+                    MODULE_REGISTRY.resolve(name)
+                except FileNotFoundError:
                     await ws.send_json({"type": "error", "message": f"模组'{name}'不存在"})
-                elif not turn_lock.acquire(blocking=False):
+                    continue
+                if not turn_lock.acquire(blocking=False):
                     await ws.send_json({
                         "type": "error",
                         "message": "当前回合尚未结束，暂时不能切换模组。",
@@ -614,20 +628,104 @@ async def health():
 @app.get("/api/modules")
 async def list_modules():
     """列出所有可用模组"""
-    mods = []
-    mods_dir = PROJECT_ROOT / "mod"
-    for d in sorted(mods_dir.iterdir()):
-        if d.is_dir() and (d / "module.md").exists():
-            theme = {}
-            theme_file = d / "theme.json"
-            if theme_file.exists():
-                theme = json.loads(theme_file.read_text(encoding="utf-8"))
-            mods.append({
-                "id": d.name,
-                "title": theme.get("title", d.name),
-                "description": theme.get("description", "")
-            })
-    return {"modules": mods, "active": _active_context.module_name}
+    return {"modules": _list_mods(), "active": _active_context.module_name}
+
+
+def _module_error_response(exc: ModulePackageError) -> JSONResponse:
+    status = {
+        "version_conflict": 409,
+        "package_too_large": 413,
+        "expanded_too_large": 413,
+        "file_too_large": 413,
+        "too_many_files": 413,
+    }.get(exc.code, 400)
+    return JSONResponse({
+        "ok": False,
+        "error_code": exc.code,
+        "error": exc.message,
+        "details": exc.details,
+    }, status_code=status)
+
+
+async def _receive_module_upload(request: Request) -> Path:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_PACKAGE_BYTES:
+                raise ModulePackageError("package_too_large", "模组包超过 64 MiB 上限")
+        except ValueError:
+            raise ModulePackageError("invalid_length", "Content-Length 无效")
+
+    import_dir = RUNTIME_ROOT / ".module-imports"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb",
+        prefix="upload-",
+        suffix=".trpgmod",
+        dir=import_dir,
+        delete=False,
+    )
+    path = Path(handle.name)
+    total = 0
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > MAX_PACKAGE_BYTES:
+                raise ModulePackageError("package_too_large", "模组包超过 64 MiB 上限")
+            handle.write(chunk)
+        handle.close()
+        if total == 0:
+            raise ModulePackageError("empty_upload", "没有收到模组包内容")
+        return path
+    except Exception:
+        handle.close()
+        path.unlink(missing_ok=True)
+        raise
+
+
+@app.get("/api/modules/schema/manifest-v1")
+async def get_module_manifest_schema():
+    return manifest_json_schema()
+
+
+@app.get("/api/modules/schema/module-v1")
+async def get_module_definition_schema():
+    return module_json_schema()
+
+
+@app.post("/api/modules/inspect")
+async def inspect_module_upload(request: Request):
+    """只校验上传包，供导入预览和未来编辑器使用。"""
+    try:
+        path = await _receive_module_upload(request)
+        inspection = await asyncio.to_thread(inspect_package, path)
+        return {"ok": True, "module": inspection.summary()}
+    except ModulePackageError as exc:
+        return _module_error_response(exc)
+    finally:
+        if "path" in locals():
+            path.unlink(missing_ok=True)
+
+
+@app.post("/api/modules/import")
+async def import_module_upload(request: Request):
+    """安全校验并版本化安装 .trpgmod。"""
+    try:
+        path = await _receive_module_upload(request)
+        record, inspection, already_installed = await asyncio.to_thread(
+            MODULE_REGISTRY.install, path
+        )
+        return JSONResponse({
+            "ok": True,
+            "already_installed": already_installed,
+            "module": record.to_dict(),
+            "inspection": inspection.summary(),
+        }, status_code=200 if already_installed else 201)
+    except ModulePackageError as exc:
+        return _module_error_response(exc)
+    finally:
+        if "path" in locals():
+            path.unlink(missing_ok=True)
 
 
 @app.get("/api/characters")
@@ -642,8 +740,9 @@ async def list_characters():
 async def switch_module(data: dict):
     """切换活跃模组"""
     name = data.get("module", _active_context.module_name)
-    target = PROJECT_ROOT / "mod" / name
-    if not target.exists() or not (target / "module.md").exists():
+    try:
+        MODULE_REGISTRY.resolve(name)
+    except FileNotFoundError:
         return {"ok": False, "error": f"模组'{name}'不存在"}
     context = RuntimeContext.local(
         name,
@@ -684,16 +783,18 @@ async def game_ws(ws: WebSocket):
 
 
 # ---- 资产文件 ----
-@app.get("/api/assets/{module_name}/{filename}")
+@app.get("/api/assets/{module_name}/{filename:path}")
 async def serve_asset(module_name: str, filename: str):
     """服务模组资产图片，带路径遍历保护。"""
-    asset_path = (PROJECT_ROOT / "mod" / module_name / "assets" / filename).resolve()
-    allowed = (PROJECT_ROOT / "mod" / module_name / "assets").resolve()
-    if not str(asset_path).startswith(str(allowed)):
-        from fastapi.responses import JSONResponse
+    try:
+        record = MODULE_REGISTRY.resolve(module_name)
+    except FileNotFoundError:
+        return JSONResponse({"error": "module not found"}, status_code=404)
+    asset_path = (record.path / "assets" / filename).resolve()
+    allowed = (record.path / "assets").resolve()
+    if not asset_path.is_relative_to(allowed):
         return JSONResponse({"error": "forbidden"}, status_code=403)
-    if not asset_path.exists():
-        from fastapi.responses import JSONResponse
+    if not asset_path.is_file():
         return JSONResponse({"error": "not found"}, status_code=404)
     mime, _ = mimetypes.guess_type(str(asset_path))
     return FileResponse(asset_path, media_type=mime or "image/png")

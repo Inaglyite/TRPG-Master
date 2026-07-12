@@ -34,9 +34,13 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/health` | 后端就绪检查 |
 | `GET` | `/api/theme` | 当前活动模组主题 |
 | `GET` | `/api/modules` | 模组列表与活动模组 |
+| `GET` | `/api/modules/schema/manifest-v1` | manifest JSON Schema |
+| `GET` | `/api/modules/schema/module-v1` | 模组定义 JSON Schema |
+| `POST` | `/api/modules/inspect` | 预检 `.trpgmod`，不安装 |
+| `POST` | `/api/modules/import` | 校验并版本化安装 `.trpgmod` |
 | `GET` | `/api/characters` | 当前模组可选调查员 |
 | `POST` | `/api/modules/switch` | 切换 REST/新连接使用的默认本地世界 |
-| `GET` | `/api/assets/{module_name}/{filename}` | 读取模组图片素材 |
+| `GET` | `/api/assets/{module_name}/{filename:path}` | 读取模组素材 |
 | `GET` | `/` | 已构建前端或构建提示 |
 
 ### 2.2 `GET /api/health`
@@ -81,7 +85,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 ### 2.4 `GET /api/modules`
 
-扫描 `mod/*/module.md`。`title` 与 `description` 来自各模组的 `theme.json`。
+通过 `ModuleRegistry` 合并内置 `mod/*` 和用户安装的 `modules/<id>/<version>`。
 
 响应：
 
@@ -90,20 +94,117 @@ WebSocket 消息都有一个字符串字段 `type`：
   "modules": [
     {
       "id": "mansion_of_madness",
+      "package_id": "mansion_of_madness",
+      "version": "legacy",
       "title": "疯狂宅邸",
-      "description": "..."
+      "description": "...",
+      "author": "",
+      "system": "",
+      "source": "builtin",
+      "format_version": "legacy",
+      "capabilities": []
     },
     {
-      "id": "猩红文档",
-      "title": "猩红文档",
-      "description": "..."
+      "id": "example.whispering-archive@1.0.0",
+      "package_id": "example.whispering-archive",
+      "version": "1.0.0",
+      "title": "低语档案馆",
+      "description": "...",
+      "author": "模组作者",
+      "system": "COC 第七版",
+      "source": "user",
+      "format_version": "1.0",
+      "capabilities": []
     }
   ],
   "active": "mansion_of_madness"
 }
 ```
 
-### 2.5 `GET /api/characters`
+用户模组的 `id` 是运行时 key `<package_id>@<version>`，切换模组和 WebSocket 查询参数均使用它。
+
+### 2.5 模组 JSON Schema
+
+```text
+GET /api/modules/schema/manifest-v1
+GET /api/modules/schema/module-v1
+```
+
+返回 Draft 2020-12 JSON Schema。未来编辑器和第三方工具应消费这些 Schema，但后端
+Pydantic/语义校验仍是导入权威。
+
+### 2.6 `POST /api/modules/inspect`
+
+请求体是 `.trpgmod` 原始字节，不使用 multipart：
+
+```http
+Content-Type: application/vnd.trpg-master.module+zip
+X-Module-Filename: example.trpgmod
+```
+
+成功响应：
+
+```json
+{
+  "ok": true,
+  "module": {
+    "module_key": "example.whispering-archive@1.0.0",
+    "package_id": "example.whispering-archive",
+    "version": "1.0.0",
+    "title": "低语档案馆",
+    "author": "模组作者",
+    "description": "...",
+    "system": "COC 第七版",
+    "capabilities": [],
+    "file_count": 4,
+    "package_sha256": "...",
+    "warnings": []
+  }
+}
+```
+
+该接口执行 ZIP 安全、Schema、最低引擎版本、交叉引用、capability、UTF-8 和 checksum 校验，
+不写入用户模组目录。
+
+### 2.7 `POST /api/modules/import`
+
+请求格式与 inspect 相同。服务端重复执行全部校验，在 staging 目录编译运行时文件，然后原子安装到
+`modules/<package-id>/<version>/`。
+
+首次安装返回 HTTP 201：
+
+```json
+{
+  "ok": true,
+  "already_installed": false,
+  "module": {
+    "id": "example.whispering-archive@1.0.0",
+    "package_id": "example.whispering-archive",
+    "version": "1.0.0",
+    "title": "低语档案馆",
+    "source": "user",
+    "format_version": "1.0",
+    "capabilities": []
+  },
+  "inspection": {}
+}
+```
+
+相同 SHA-256 重复导入返回 HTTP 200 且 `already_installed:true`。相同版本、不同内容返回 HTTP 409。
+失败结构：
+
+```json
+{
+  "ok": false,
+  "error_code": "missing_reference",
+  "error": "模组定义引用了包内不存在的文件",
+  "details": ["assets/missing.png"]
+}
+```
+
+包上限为 64 MiB；其余大小和安全限制见 `docs/MODULE_FORMAT.md`。
+
+### 2.8 `GET /api/characters`
 
 列出当前活动模组的新游戏候选调查员。
 
@@ -152,10 +253,10 @@ WebSocket 消息都有一个字符串字段 `type`：
 |---|---|
 | `profile` | `profiles/player_profile.json` 中的长期角色 |
 | `default` | `characters/default/*.json` |
-| `module` | `mod/<active>/characters/*.json` |
+| `module` | 当前 `ModuleRecord.path/characters/*.json` |
 | `custom` | `characters/custom/*.json` |
 
-### 2.6 `POST /api/modules/switch`
+### 2.9 `POST /api/modules/switch`
 
 请求：
 
@@ -186,15 +287,15 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 此接口打开该模组稳定的 `local-<module>` 世界，并把它设为 REST 与后续无参数 WebSocket 连接的默认 context；不会修改已经连接的 `GameEngine`。桌面前端使用 WebSocket `switch_module`，因为它会切换当前连接并同时刷新主题、角色与存档列表。
 
-### 2.7 `GET /api/assets/{module_name}/{filename}`
+### 2.10 `GET /api/assets/{module_name}/{filename:path}`
 
-返回 `mod/<module_name>/assets/<filename>`，支持中文与 URL 编码文件名。
+从内置或用户模组返回 `assets/<filename>`，支持子目录、中文与 URL 编码文件名。
 
 - 成功：文件内容，`Content-Type` 由扩展名推断。
 - 文件不存在：HTTP 404，`{"error":"not found"}`。
 - 路径越界：HTTP 403，`{"error":"forbidden"}`。
 
-### 2.8 静态前端
+### 2.11 静态前端
 
 当 `frontend/dist` 存在时，它被挂载到 `/`。否则根路由返回构建提示：
 
@@ -228,6 +329,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `type` | 关键字段 | 作用 |
 |---|---|---|
 | `ping` | 无 | 心跳 |
+| `module_list` | 无 | 导入后重新请求内置/用户模组列表 |
 | `switch_module` | `module` | 切换活动模组并刷新开局数据 |
 | `start` | `character_ref` | 新游戏 |
 | `action` | `content` | 提交玩家动作 |
@@ -260,7 +362,17 @@ WebSocket 消息都有一个字符串字段 `type`：
 {"type":"pong"}
 ```
 
-### 4.3 切换模组
+### 4.3 刷新与切换模组
+
+导入成功后可重新请求列表：
+
+```json
+{"type":"module_list"}
+```
+
+服务端返回 `module_list`，但不改变当前模组。
+
+切换请求：
 
 ```json
 {
@@ -308,7 +420,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 开始新游戏会：
 
-1. 用 `mod/<module>/world_state_initial.json` 重建 `worlds/<world_id>/world_state.json`，并递增 revision。
+1. 用当前 `ModuleRecord.path/world_state_initial.json` 重建 `worlds/<world_id>/world_state.json`，并递增 revision。
 2. 把选中的调查员复制到当前 world 的 `pc`。
 3. 重建 system prompt 与会话消息。
 4. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
@@ -994,7 +1106,7 @@ sequenceDiagram
 
 ## 7. 兼容性与已知限制
 
-- 协议没有 `version`、request ID 或结构化 error code。
+- WebSocket 协议没有 `version`、request ID 或结构化 error code；模组导入 HTTP API 已使用稳定 `error_code`。
 - `state_data.data` 与 `state_data.clues` 是 JSON 字符串，这是历史格式。
 - `continue`、`load` 与 `save.manual` 属于兼容接口；桌面前端使用 `save_load`、`save_create` 和 `save(manual:false)`。
 - 前端仍包含对 `save_available` 的兼容处理，但当前服务端不会发送该事件。

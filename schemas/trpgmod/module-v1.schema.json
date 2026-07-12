@@ -1,0 +1,649 @@
+{
+  "$defs": {
+    "AssetDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Label",
+          "type": "string"
+        },
+        "alt": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Alt",
+          "type": "string"
+        },
+        "media_type": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Media Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "AssetDefinition",
+      "type": "object"
+    },
+    "AssetMapDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "npcs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AssetDefinition"
+          },
+          "title": "Npcs",
+          "type": "object"
+        },
+        "scenes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AssetDefinition"
+          },
+          "title": "Scenes",
+          "type": "object"
+        },
+        "clues": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AssetDefinition"
+          },
+          "title": "Clues",
+          "type": "object"
+        }
+      },
+      "title": "AssetMapDefinition",
+      "type": "object"
+    },
+    "ClueDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "category": {
+          "default": "investigation",
+          "enum": [
+            "investigation",
+            "event",
+            "task",
+            "npc"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "type": {
+          "default": "obvious",
+          "enum": [
+            "obvious",
+            "hidden",
+            "inferred"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "tier": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Tier",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "related_npcs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Npcs",
+          "type": "array"
+        },
+        "related_scenes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Scenes",
+          "type": "array"
+        },
+        "asset_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asset Id"
+        },
+        "initially_known": {
+          "default": false,
+          "title": "Initially Known",
+          "type": "boolean"
+        },
+        "discovery_notes": {
+          "default": "",
+          "title": "Discovery Notes",
+          "type": "string"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ClueDefinition",
+      "type": "object"
+    },
+    "ClueLinkDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "reasoning": {
+          "default": "",
+          "title": "Reasoning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "ClueLinkDefinition",
+      "type": "object"
+    },
+    "EndingDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "trigger": {
+          "minLength": 1,
+          "title": "Trigger",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "ending_type": {
+          "default": "neutral",
+          "enum": [
+            "good",
+            "neutral",
+            "bad",
+            "secret"
+          ],
+          "title": "Ending Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "trigger",
+        "description"
+      ],
+      "title": "EndingDefinition",
+      "type": "object"
+    },
+    "InitialStateDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "pc": {
+          "$ref": "#/$defs/PcTemplate"
+        },
+        "known_clue_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Known Clue Ids",
+          "type": "array"
+        },
+        "flags": {
+          "additionalProperties": true,
+          "title": "Flags",
+          "type": "object"
+        },
+        "case_clocks": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Case Clocks",
+          "type": "object"
+        },
+        "private_memory": {
+          "$ref": "#/$defs/PrivateMemoryDefinition"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "title": "InitialStateDefinition",
+      "type": "object"
+    },
+    "NpcDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "visible_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Visible Tags",
+          "type": "array"
+        },
+        "secret": {
+          "default": "",
+          "title": "Secret",
+          "type": "string"
+        },
+        "hp": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Hp",
+          "type": "integer"
+        },
+        "max_hp": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Hp"
+        },
+        "disposition": {
+          "default": "neutral",
+          "maxLength": 80,
+          "title": "Disposition",
+          "type": "string"
+        },
+        "current_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Location"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Attributes",
+          "type": "object"
+        },
+        "skills": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Skills",
+          "type": "object"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "spells": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Spells",
+          "type": "array"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        },
+        "asset_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asset Id"
+        },
+        "initial_reveal": {
+          "default": 0,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Initial Reveal",
+          "type": "integer"
+        },
+        "initial_reveal_entries": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Initial Reveal Entries",
+          "type": "array"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "NpcDefinition",
+      "type": "object"
+    },
+    "PcTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "occupation": {
+          "default": "",
+          "title": "Occupation",
+          "type": "string"
+        },
+        "hp": {
+          "default": 11,
+          "minimum": 0,
+          "title": "Hp",
+          "type": "integer"
+        },
+        "max_hp": {
+          "default": 11,
+          "minimum": 1,
+          "title": "Max Hp",
+          "type": "integer"
+        },
+        "san": {
+          "default": 65,
+          "minimum": 0,
+          "title": "San",
+          "type": "integer"
+        },
+        "max_san": {
+          "default": 65,
+          "minimum": 0,
+          "title": "Max San",
+          "type": "integer"
+        },
+        "attributes": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Attributes",
+          "type": "object"
+        },
+        "skills": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Skills",
+          "type": "object"
+        },
+        "inventory": {
+          "items": {},
+          "title": "Inventory",
+          "type": "array"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "psychological_profile": {
+          "additionalProperties": {
+            "items": {},
+            "type": "array"
+          },
+          "title": "Psychological Profile",
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "title": "PcTemplate",
+      "type": "object"
+    },
+    "PrivateMemoryDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "goals_and_plans": {
+          "default": "",
+          "title": "Goals And Plans",
+          "type": "string"
+        },
+        "hidden_facts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hidden Facts",
+          "type": "object"
+        },
+        "inference_notes": {
+          "default": "游戏刚开始。所有 NPC 秘密均未揭示。",
+          "title": "Inference Notes",
+          "type": "string"
+        }
+      },
+      "title": "PrivateMemoryDefinition",
+      "type": "object"
+    },
+    "SceneDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "exits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exits",
+          "type": "array"
+        },
+        "npcs_present": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Npcs Present",
+          "type": "array"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "document": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document"
+        },
+        "asset_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asset Id"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "SceneDefinition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://trpg-master.local/schemas/module-v1.json",
+      "default": "https://trpg-master.local/schemas/module-v1.json",
+      "title": "$Schema",
+      "type": "string"
+    },
+    "format_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Format Version",
+      "type": "string"
+    },
+    "entry_scene_id": {
+      "title": "Entry Scene Id",
+      "type": "string"
+    },
+    "opening_prompt": {
+      "default": "",
+      "title": "Opening Prompt",
+      "type": "string"
+    },
+    "npcs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/NpcDefinition"
+      },
+      "title": "Npcs",
+      "type": "object"
+    },
+    "scenes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SceneDefinition"
+      },
+      "title": "Scenes",
+      "type": "object"
+    },
+    "clues": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ClueDefinition"
+      },
+      "title": "Clues",
+      "type": "object"
+    },
+    "endings": {
+      "additionalProperties": {
+        "$ref": "#/$defs/EndingDefinition"
+      },
+      "title": "Endings",
+      "type": "object"
+    },
+    "rules": {
+      "additionalProperties": true,
+      "title": "Rules",
+      "type": "object"
+    },
+    "assets": {
+      "$ref": "#/$defs/AssetMapDefinition"
+    },
+    "initial_state": {
+      "$ref": "#/$defs/InitialStateDefinition"
+    },
+    "clue_links": {
+      "items": {
+        "$ref": "#/$defs/ClueLinkDefinition"
+      },
+      "title": "Clue Links",
+      "type": "array"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    }
+  },
+  "required": [
+    "entry_scene_id",
+    "scenes"
+  ],
+  "title": "ModuleDefinition",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/module-v1.json"
+}

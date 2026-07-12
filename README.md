@@ -14,6 +14,7 @@
 - 统一道具使用层：验证耐用品、消耗一次性物品，并让战斗内外的真实开枪共用余弹结算。
 - d100 技能检定、属性检定、伤害、SAN 与心理状态等确定性工具。
 - 模组切换、调查员选择、长期角色履历和按世界实例隔离的多槽位存档。
+- `.trpgmod` 模组包预检、一键导入、版本并存、JSON Schema 与安全安装。
 - `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
 - 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
@@ -25,7 +26,9 @@
 - [开发路线图](docs/ROADMAP.md)：单机收口、多人房间、双人可玩版本、数据库与多 Agent 规划。
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
-- [模组示例](mod/mansion_of_madness/module.md)：`module.md` 的实际组织方式。
+- [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
+- [模组编辑器规划](docs/MODULE_EDITOR.md)：编辑器需求、技术架构、阶段与验收标准。
+- [模组工程模板](examples/module-template/manifest.json)：可直接打包的 v1 示例。
 
 ## 快速开始
 
@@ -151,7 +154,9 @@ trpg-master/
 ├── requirements.txt
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── API.md
+│   ├── API.md
+│   ├── MODULE_FORMAT.md
+│   └── MODULE_EDITOR.md
 ├── src/
 │   ├── engine.py             # GameEngine、模型调用、记忆与回调
 │   ├── agent_graph.py        # LangGraph 回合状态机
@@ -162,6 +167,8 @@ trpg-master/
 │   ├── persistence.py        # Skill 组装、存档与快照恢复
 │   ├── characters.py         # 调查员选择与长期履历
 │   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
+│   ├── module_format.py      # v1 模组领域模型、Schema 与运行时编译
+│   ├── module_registry.py    # 内置/用户模组发现及安全包安装
 │   ├── world_store.py        # revision、房间锁、原子写与备份恢复
 │   ├── world_migrations.py   # 世界 schema 迁移注册表
 │   ├── config.py             # 默认路径、模型和 Skill 配置
@@ -170,6 +177,9 @@ trpg-master/
 ├── skills/                   # 常驻与按需加载的守秘人约束
 ├── rules/                    # 结构化规则数据
 ├── mod/<module>/             # 模组定义、初始模板、主题、素材和专属 skill
+├── modules/<id>/<version>/   # 用户导入模组（运行时生成）
+├── schemas/trpgmod/          # 编辑器与第三方工具共享的 JSON Schema
+├── examples/module-template/ # v1 模组工程模板
 ├── characters/               # 默认与自定义调查员
 ├── profiles/                 # 长期角色履历（运行时生成）
 ├── worlds/<world_id>/        # 当前世界、备份、元数据和存档（运行时生成）
@@ -217,27 +227,36 @@ worlds/<world_id>/saves/slot_001/      # 手动槽
 
 运行时数据和 API Key 均已加入 `.gitignore`。旧版 `mod/<module>/world_state.json` 只作为首次迁移来源保留；新游戏与工具调用不会再写入模组目录。
 
-## 模组开发
+## 模组开发与导入
 
-一个可识别的模组至少需要：
+新模组使用 `.trpgmod` v1。它是经过安全限制的 ZIP 包，至少包含：
 
 ```text
-mod/<name>/
-├── module.md
-├── world_state_initial.json
-├── theme.json                # 可选但推荐
-├── skills/                   # 可选，模组专属约束
-├── characters/               # 可选，特色调查员
-└── assets/                   # 可选，NPC/场景/线索图片
+module-project/
+├── manifest.json
+├── module.json
+├── keeper.md                 # 可选
+├── theme.json                # 可选
+├── skills/                   # 可选，需声明 custom_skills
+├── characters/               # 可选，需声明 bundled_characters
+├── scenes/                   # 可选，需声明 scene_documents
+└── assets/                   # 可选，图片与音频
 ```
 
-`world_state_initial.json` 是只读的新游戏模板，运行状态由 `RuntimeContext` 创建到 `worlds/`。`module.md` 与模组 `skills/*.skill` 会加入守秘人上下文。Markdown 模组可通过以下命令导入/生成模板：
+生成、检查和导入：
 
 ```bash
-python3 tools/module_loader.py mod/<name>/module.md
+venv/bin/python tools/module_packager.py pack \
+  examples/module-template /tmp/example.trpgmod
+venv/bin/python tools/module_packager.py validate /tmp/example.trpgmod
 ```
 
-前端从 `theme.json` 读取标题、描述、字体和颜色；图片通过 `world_state.asset_map` 关联到 NPC、场景或线索。
+游戏开始页的“导入”按钮会先做格式、安全和引用预检，确认后安装到
+`<runtime>/modules/<id>/<version>/` 并自动切换。安装过程生成兼容当前引擎的 `module.md` 和
+`world_state_initial.json`；作者工程与玩家运行状态始终分离。
+
+完整字段、大小限制、版本兼容和错误规则见 [模组格式](docs/MODULE_FORMAT.md)。旧式
+`mod/<name>/module.md` 仍可运行，`tools/module_loader.py` 只作为有损兼容入口保留。
 
 ## Windows 打包
 

@@ -11,12 +11,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from .module_registry import ModuleRecord, ModuleRegistry
 from .world_store import WorldStore, atomic_write_json
 
 
 def default_world_id(module_name: str) -> str:
     slug = re.sub(r"\s+", "_", module_name.strip())
-    slug = "".join(ch for ch in slug if ch.isalnum() or ch in "_-")
+    slug = re.sub(r"[^\w-]+", "-", slug, flags=re.UNICODE).strip("-_")
     return f"local-{slug or 'world'}"
 
 
@@ -34,17 +35,20 @@ class RuntimeContext:
     world_id: str
     module_name: str
     world_store: WorldStore = field(init=False, repr=False, compare=False)
+    module_record: ModuleRecord = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_root", Path(self.project_root).resolve())
         object.__setattr__(self, "runtime_root", Path(self.runtime_root).resolve())
         object.__setattr__(self, "world_id", _validate_component(self.world_id, "world_id"))
         object.__setattr__(self, "module_name", _validate_component(self.module_name, "module_name"))
+        registry = ModuleRegistry(self.project_root, self.runtime_root)
+        object.__setattr__(self, "module_record", registry.resolve(self.module_name))
         object.__setattr__(self, "world_store", WorldStore(self.world_dir))
 
     @property
     def module_dir(self) -> Path:
-        return self.project_root / "mod" / self.module_name
+        return self.module_record.path
 
     @property
     def initial_state_file(self) -> Path:
@@ -108,10 +112,20 @@ class RuntimeContext:
                 raise ValueError(
                     f"world_id={self.world_id} 已绑定模组 {metadata.get('module_name')}"
                 )
+            expected_metadata = {
+                "module_id": self.module_record.package_id,
+                "module_version": self.module_record.version,
+            }
+            if any(key not in metadata for key in expected_metadata):
+                for key, value in expected_metadata.items():
+                    metadata.setdefault(key, value)
+                atomic_write_json(self.metadata_file, metadata)
         else:
             metadata = {
                 "world_id": self.world_id,
                 "module_name": self.module_name,
+                "module_id": self.module_record.package_id,
+                "module_version": self.module_record.version,
                 "created_at": datetime.now().isoformat(),
                 "layout_version": 1,
             }

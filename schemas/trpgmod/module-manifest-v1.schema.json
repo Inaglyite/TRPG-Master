@@ -1,0 +1,147 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://trpg-master.local/schemas/module-manifest-v1.json",
+      "default": "https://trpg-master.local/schemas/module-manifest-v1.json",
+      "title": "$Schema",
+      "type": "string"
+    },
+    "format_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Format Version",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "author": {
+      "default": "",
+      "maxLength": 200,
+      "title": "Author",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 1000,
+      "title": "Description",
+      "type": "string"
+    },
+    "system": {
+      "default": "COC 第七版",
+      "maxLength": 100,
+      "title": "System",
+      "type": "string"
+    },
+    "era": {
+      "default": "",
+      "maxLength": 100,
+      "title": "Era",
+      "type": "string"
+    },
+    "language": {
+      "default": "zh-CN",
+      "maxLength": 35,
+      "title": "Language",
+      "type": "string"
+    },
+    "license": {
+      "default": "",
+      "maxLength": 120,
+      "title": "License",
+      "type": "string"
+    },
+    "homepage": {
+      "default": "",
+      "maxLength": 500,
+      "title": "Homepage",
+      "type": "string"
+    },
+    "min_engine_version": {
+      "default": "0.1.0",
+      "title": "Min Engine Version",
+      "type": "string"
+    },
+    "entry": {
+      "const": "module.json",
+      "default": "module.json",
+      "title": "Entry",
+      "type": "string"
+    },
+    "keeper_document": {
+      "anyOf": [
+        {
+          "const": "keeper.md",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "keeper.md",
+      "title": "Keeper Document"
+    },
+    "theme": {
+      "anyOf": [
+        {
+          "const": "theme.json",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "theme.json",
+      "title": "Theme"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Tags",
+      "type": "array"
+    },
+    "created_with": {
+      "default": "",
+      "maxLength": 120,
+      "title": "Created With",
+      "type": "string"
+    },
+    "checksums": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Checksums",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "title"
+  ],
+  "title": "ModuleManifest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/module-manifest-v1.json"
+}
