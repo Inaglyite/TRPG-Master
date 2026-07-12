@@ -12,7 +12,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src import config as cfg
 from src.combat import (
     CombatError,
     combat_action,
@@ -21,14 +20,9 @@ from src.combat import (
     end_combat,
     start_combat,
 )
+from src.runtime import RuntimeContext
 
-
-def _load_world() -> dict:
-    return json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
-
-
-def _save_world(world: dict) -> None:
-    cfg.STATE_FILE.write_text(json.dumps(world, ensure_ascii=False, indent=2), encoding="utf-8")
+CONTEXT = RuntimeContext.from_env()
 
 
 def _args() -> dict:
@@ -46,37 +40,40 @@ def main() -> int:
         return 2
 
     command = sys.argv[1]
-    world = _load_world()
     params = _args()
+    result = None
 
     try:
-        if command == "start":
-            result = start_combat(
-                world,
-                params.get("participants", []),
-                params.get("reason", ""),
-                params.get("initial_action"),
-            )
-        elif command == "status":
-            result = combat_status(world)
-        elif command == "action":
-            result = combat_action(world, **params)
-        elif command == "decide":
-            result = combat_decide(
-                world,
-                str(params.get("decision_id", "")),
-                str(params.get("option_id", "")),
-            )
-        elif command == "end":
-            result = end_combat(world, params.get("reason", ""))
+        if command == "status":
+            result = combat_status(CONTEXT.world_store.load())
         else:
-            raise CombatError(f"未知战斗命令: {command}")
+            def mutate(world: dict) -> None:
+                nonlocal result
+                if command == "start":
+                    result = start_combat(
+                        world,
+                        params.get("participants", []),
+                        params.get("reason", ""),
+                        params.get("initial_action"),
+                    )
+                elif command == "action":
+                    result = combat_action(world, **params)
+                elif command == "decide":
+                    result = combat_decide(
+                        world,
+                        str(params.get("decision_id", "")),
+                        str(params.get("option_id", "")),
+                    )
+                elif command == "end":
+                    result = end_combat(world, params.get("reason", ""))
+                else:
+                    raise CombatError(f"未知战斗命令: {command}")
+
+            CONTEXT.world_store.update(mutate)
     except (CombatError, TypeError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 0
 
-    if command != "status":
-        _save_world(world)
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

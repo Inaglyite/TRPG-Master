@@ -15,8 +15,27 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from .config import SKILLS_DIR, SKILL_LOAD_ORDER, AUTO_SAVE_SLOT
-from . import config as cfg
+from .config import (
+    AUTO_SAVE_SLOT,
+    DEFAULT_MODULE_NAME,
+    PROJECT_ROOT,
+    RUNTIME_ROOT,
+    SKILL_LOAD_ORDER,
+)
+from .runtime import RuntimeContext, default_world_id
+from .world_migrations import migrate_world_state
+from .world_store import atomic_write_json
+
+
+def _runtime_context(context: RuntimeContext | None = None) -> RuntimeContext:
+    if context is not None:
+        return context
+    return RuntimeContext(
+        PROJECT_ROOT,
+        RUNTIME_ROOT,
+        default_world_id(DEFAULT_MODULE_NAME),
+        DEFAULT_MODULE_NAME,
+    )
 
 
 # ---- Skill 加载 ----
@@ -48,23 +67,24 @@ def _module_prompt_content(content: str) -> str:
     return content
 
 
-def load_system_prompt() -> str:
+def load_system_prompt(context: RuntimeContext | None = None) -> str:
+    context = _runtime_context(context)
     parts = []
     # 核心 skill
     for name in SKILL_LOAD_ORDER:
-        path = SKILLS_DIR / name
+        path = context.project_root / "skills" / name
         if path.exists():
             content = path.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
     # 当前模组的剧情设定（module.md）——让 GM 知道本模组的故事背景
-    module_md = cfg.MODULE_DIR / "module.md"
+    module_md = context.module_dir / "module.md"
     if module_md.exists():
         content = _module_prompt_content(module_md.read_text(encoding="utf-8")).strip()
         if content:
             parts.append(content)
     # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
-    mod_skills_dir = cfg.MODULE_DIR / "skills"
+    mod_skills_dir = context.module_dir / "skills"
     if mod_skills_dir.exists():
         for mod_skill in sorted(mod_skills_dir.glob("*.skill")):
             content = mod_skill.read_text(encoding="utf-8").strip()
@@ -75,15 +95,19 @@ def load_system_prompt() -> str:
 
 # ---- 存档 ----
 
-def _slot_dir(slot_id: str) -> Path:
-    return cfg.SAVES_DIR / slot_id
+def _slot_dir(slot_id: str, context: RuntimeContext | None = None) -> Path:
+    if not re.fullmatch(r"slot_\d{3,}", str(slot_id)):
+        raise ValueError(f"非法存档槽位: {slot_id!r}")
+    return _runtime_context(context).saves_dir / slot_id
 
 
-def _next_slot() -> str:
+def _next_slot(context: RuntimeContext | None = None) -> str:
     """返回下一个可用的手动存档槽位 ID"""
+    context = _runtime_context(context)
+    context.saves_dir.mkdir(parents=True, exist_ok=True)
     existing = sorted(
         int(d.name.split("_")[1])
-        for d in cfg.SAVES_DIR.iterdir()
+        for d in context.saves_dir.iterdir()
         if d.is_dir() and d.name.startswith("slot_") and d.name != AUTO_SAVE_SLOT
     )
     n = 1
@@ -92,7 +116,7 @@ def _next_slot() -> str:
     return f"slot_{n:03d}"
 
 
-def _slot_meta(messages: list, world_state: dict) -> dict:
+def _slot_meta(messages: list, world_state: dict, context: RuntimeContext) -> dict:
     """从消息和世界状态生成存档元数据"""
     pc = world_state.get("pc", {})
     scene = world_state.get("current_scene", {})
@@ -114,15 +138,25 @@ def _slot_meta(messages: list, world_state: dict) -> dict:
         "san": f"{pc.get('san', 0)}/{pc.get('max_san', 0)}",
         "clue_count": clue_count,
         "message_count": len(messages),
+        "world_id": context.world_id,
+        "module_name": context.module_name,
+        "world_revision": world_state.get("revision", 0),
+        "schema_version": world_state.get("schema_version", 0),
     }
 
 
-def save_game(messages: list, slot_id: str | None = None) -> str:
+def save_game(
+    messages: list,
+    slot_id: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> str:
     """保存游戏到指定槽位（默认自动存档）。返回槽位 ID。"""
+    context = _runtime_context(context)
     if slot_id is None:
         slot_id = AUTO_SAVE_SLOT
 
-    slot_dir = _slot_dir(slot_id)
+    slot_dir = _slot_dir(slot_id, context)
     slot_dir.mkdir(parents=True, exist_ok=True)
 
     # 序列化消息（去掉不可序列化的字段）
@@ -136,43 +170,39 @@ def save_game(messages: list, slot_id: str | None = None) -> str:
         serializable.append(entry)
 
     # 读取当前世界状态作为快照
-    try:
-        world_state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        world_state = {}
+    world_state = context.world_store.load()
 
     # 写入文件
-    (slot_dir / "messages.json").write_text(
-        json.dumps(serializable, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    (slot_dir / "snapshot.json").write_text(
-        json.dumps(world_state, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    (slot_dir / "meta.json").write_text(
-        json.dumps(_slot_meta(serializable, world_state), ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    atomic_write_json(slot_dir / "messages.json", serializable)
+    atomic_write_json(slot_dir / "snapshot.json", world_state)
+    # meta 最后写；它相当于该槽位提交完成的标记。
+    atomic_write_json(slot_dir / "meta.json", _slot_meta(serializable, world_state, context))
 
     return slot_id
 
 
-def load_game(slot_id: str | None = None) -> tuple[list, dict] | tuple[None, None]:
+def load_game(
+    slot_id: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> tuple[list, dict] | tuple[None, None]:
     """读取存档。返回 (messages, world_snapshot) 或 (None, None)。
     如果 slot_id 为 None，加载最新存档（按修改时间）。
     """
+    context = _runtime_context(context)
     if slot_id:
-        slot_dir = _slot_dir(slot_id)
+        slot_dir = _slot_dir(slot_id, context)
         if not slot_dir.exists():
             return None, None
         return _load_slot(slot_dir)
 
     # 找最新存档
-    slots = list_saves()
+    slots = list_saves(context=context)
     if not slots:
         return None, None
 
     latest = slots[0]  # 已按时间倒序
-    return _load_slot(_slot_dir(latest["id"]))
+    return _load_slot(_slot_dir(latest["id"], context))
 
 
 def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
@@ -191,51 +221,33 @@ def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
 
 def _migrate_snapshot(snapshot: dict) -> dict:
     """将旧版快照迁移到最新数据结构（向下兼容）。"""
-    # v2: private_memory
-    if "private_memory" not in snapshot:
-        snapshot["private_memory"] = {
-            "goals_and_plans": "",
-            "hidden_facts": {},
-            "inference_notes": "（从旧存档迁移，请守秘人根据对话历史手动补充）"
-        }
-
-    # v2: NPC revealed 字段
-    for npc in snapshot.get("npcs", []):
-        if "revealed" not in npc:
-            npc["revealed"] = {"level": 0, "entries": []}
-
-    # v2: PC psychological_profile
-    pc = snapshot.get("pc", {})
-    if "psychological_profile" not in pc:
-        pc["psychological_profile"] = {
-            "traits": [], "key_relationships": [],
-            "phobias": [], "manias": []
-        }
-
-    return snapshot
+    migrated, _ = migrate_world_state(snapshot)
+    return migrated
 
 
-def restore_snapshot(snapshot: dict) -> bool:
+def restore_snapshot(
+    snapshot: dict,
+    *,
+    context: RuntimeContext | None = None,
+    expected_revision: int | None = None,
+) -> bool:
     """将世界状态快照恢复到 world_state.json（自动迁移旧版数据结构）。返回是否成功。"""
+    context = _runtime_context(context)
     if not snapshot:
         return False
-    try:
-        snapshot = _migrate_snapshot(snapshot)
-        cfg.STATE_FILE.write_text(
-            json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        return True
-    except Exception:
-        return False
+    snapshot = _migrate_snapshot(snapshot)
+    context.world_store.restore(snapshot, expected_revision=expected_revision)
+    return True
 
 
-def list_saves() -> list[dict]:
+def list_saves(*, context: RuntimeContext | None = None) -> list[dict]:
     """列出所有存档的元数据，按时间倒序"""
+    context = _runtime_context(context)
     result = []
-    if not cfg.SAVES_DIR.exists():
+    if not context.saves_dir.exists():
         return result
 
-    for d in sorted(cfg.SAVES_DIR.iterdir(), reverse=True):
+    for d in sorted(context.saves_dir.iterdir(), reverse=True):
         if not d.is_dir() or not d.name.startswith("slot_"):
             continue
         meta_file = d / "meta.json"
@@ -253,28 +265,33 @@ def list_saves() -> list[dict]:
     return result
 
 
-def has_save() -> bool:
+def has_save(*, context: RuntimeContext | None = None) -> bool:
     """检查是否有任何存档"""
-    return len(list_saves()) > 0
+    return len(list_saves(context=context)) > 0
 
 
-def delete_save(slot_id: str):
+def delete_save(slot_id: str, *, context: RuntimeContext | None = None):
     """删除指定存档"""
-    slot_dir = _slot_dir(slot_id)
+    slot_dir = _slot_dir(slot_id, context)
     if slot_dir.exists():
         shutil.rmtree(slot_dir)
 
 
-def rename_save(slot_id: str, label: str) -> bool:
+def rename_save(
+    slot_id: str,
+    label: str,
+    *,
+    context: RuntimeContext | None = None,
+) -> bool:
     """重命名存档——更新 meta.json 中的 label 字段"""
-    slot_dir = _slot_dir(slot_id)
+    slot_dir = _slot_dir(slot_id, context)
     meta_file = slot_dir / "meta.json"
     if not meta_file.exists():
         return False
     try:
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         meta["label"] = label
-        meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(meta_file, meta)
         return True
     except Exception:
         return False

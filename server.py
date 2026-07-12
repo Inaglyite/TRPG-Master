@@ -81,22 +81,30 @@ if _ENV_FILE.exists():
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
 from src.engine import GameEngine, EngineCallbacks
-from src.config import PROJECT_ROOT, AUTO_SAVE_SLOT
-import src.config as cfg
+from src.config import AUTO_SAVE_SLOT, DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
 from src.persistence import delete_save
 from src.characters import list_character_options
+from src.runtime import RuntimeContext
+from src.world_store import StaleRevisionError
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="TRPG Agent API")
+_active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 
 
-def _load_theme() -> dict:
+def _set_active_context(context: RuntimeContext) -> None:
+    global _active_context
+    _active_context = context
+
+
+def _load_theme(context: RuntimeContext | None = None) -> dict:
     """读取当前模组的 theme.json"""
-    if cfg.THEME_FILE.exists():
-        return json.loads(cfg.THEME_FILE.read_text(encoding="utf-8"))
+    context = context or _active_context
+    if context.theme_file.exists():
+        return json.loads(context.theme_file.read_text(encoding="utf-8"))
     return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
 
 
@@ -117,12 +125,13 @@ def _list_mods() -> list:
     return mods
 
 
-def _asset_payload(filename: str) -> dict:
+def _asset_payload(filename: str, context: RuntimeContext | None = None) -> dict:
     """生成前端可直接渲染的资产信息。"""
+    context = context or _active_context
     if not filename:
         return {}
-    asset_path = (cfg.MODULE_DIR / "assets" / filename).resolve()
-    allowed = (cfg.MODULE_DIR / "assets").resolve()
+    asset_path = (context.assets_dir / filename).resolve()
+    allowed = context.assets_dir.resolve()
     if not str(asset_path).startswith(str(allowed)) or not asset_path.exists():
         return {}
 
@@ -130,7 +139,7 @@ def _asset_payload(filename: str) -> dict:
     data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
     return {
         "asset_data_uri": f"data:{mime or 'image/png'};base64,{data}",
-        "asset_url": f"/api/assets/{quote(cfg.MODULE_NAME)}/{quote(filename)}",
+        "asset_url": f"/api/assets/{quote(context.module_name)}/{quote(filename)}",
     }
 
 
@@ -204,7 +213,11 @@ def _append_npc_profiles(enriched: dict, world_state: dict):
     enriched["npc"] = new_profiles + existing
 
 
-def _enrich_clues_for_frontend(clues: dict, world_state: dict | None = None) -> dict:
+def _enrich_clues_for_frontend(
+    clues: dict,
+    world_state: dict | None = None,
+    context: RuntimeContext | None = None,
+) -> dict:
     """为线索面板补齐图片 data URI，避免 Electron file:// 下无法直接取 HTTP 图。"""
     enriched = copy.deepcopy(clues) if isinstance(clues, dict) else clues
     if not isinstance(enriched, dict):
@@ -219,7 +232,7 @@ def _enrich_clues_for_frontend(clues: dict, world_state: dict | None = None) -> 
                 continue
             asset = item.get("asset")
             if isinstance(asset, dict) and asset.get("file"):
-                asset.update(_asset_payload(asset["file"]))
+                asset.update(_asset_payload(asset["file"], context))
     return enriched
 
 
@@ -341,12 +354,19 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         emit({"type": "error", "message": msg})
 
     # 通知前端模组列表 + 角色列表 + 存档列表 + 当前主题
-    await ws.send_json({"type": "module_list", "modules": _list_mods(), "active": cfg.MODULE_NAME})
-    await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
+    await ws.send_json({
+        "type": "module_list",
+        "modules": _list_mods(),
+        "active": engine.context.module_name,
+    })
+    await ws.send_json({
+        "type": "character_list",
+        **list_character_options(engine.context.module_name, context=engine.context),
+    })
 
     # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
     # 故主题也走 WS 下发）
-    await ws.send_json({"type": "theme", "theme": _load_theme()})
+    await ws.send_json({"type": "theme", "theme": _load_theme(engine.context)})
 
     saves = engine.list_saves()
     await ws.send_json({"type": "save_list", "saves": saves})
@@ -380,19 +400,38 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
             elif msg_type == "switch_module":
                 # 切换活跃模组（开场前在下拉框选择）
-                name = data.get("module", cfg.MODULE_NAME)
+                name = data.get("module", engine.context.module_name)
                 target = PROJECT_ROOT / "mod" / name
                 if not target.exists() or not (target / "module.md").exists():
                     await ws.send_json({"type": "error", "message": f"模组'{name}'不存在"})
+                elif not turn_lock.acquire(blocking=False):
+                    await ws.send_json({
+                        "type": "error",
+                        "message": "当前回合尚未结束，暂时不能切换模组。",
+                    })
                 else:
-                    cfg.set_active_module(name)
-                    # 切换 system prompt，但不重置 world_state；真正的新游戏重置在 start 时发生。
-                    engine.prepare_session()
-                    # 下发新主题 + 新存档列表
-                    await ws.send_json({"type": "theme", "theme": _load_theme()})
-                    await ws.send_json({"type": "module_list", "modules": _list_mods(), "active": name})
-                    await ws.send_json({"type": "character_list", **list_character_options(name)})
-                    await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
+                    try:
+                        context = RuntimeContext.local(
+                            name,
+                            project_root=PROJECT_ROOT,
+                            runtime_root=RUNTIME_ROOT,
+                        )
+                        engine.switch_context(context)
+                        _set_active_context(context)
+                        # 下发新主题 + 新存档列表
+                        await ws.send_json({"type": "theme", "theme": _load_theme(context)})
+                        await ws.send_json({
+                            "type": "module_list",
+                            "modules": _list_mods(),
+                            "active": name,
+                        })
+                        await ws.send_json({
+                            "type": "character_list",
+                            **list_character_options(name, context=context),
+                        })
+                        await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
+                    finally:
+                        turn_lock.release()
 
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
@@ -403,24 +442,26 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             elif msg_type == "continue":
                 # 继续游戏：读档 + 恢复快照 + 续写 prompt
                 slot = data.get("slot_id")  # 可选：指定槽位
-                count = engine.load(slot)
+                try:
+                    count = engine.load(slot)
+                except StaleRevisionError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    continue
                 if count is None:
                     await ws.send_json({"type": "error", "message": "未找到存档，请开始新游戏。"})
                 else:
-                    engine.messages.append({
-                        "role": "user",
-                        "content": (
-                            "（游戏继续。你刚刚读取了之前的存档，世界状态已恢复。"
-                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-                            "不要从头开场，不要重新介绍世界观。）"
-                        )
-                    })
+                    engine.append_control_instruction(
+                        "继续游戏。之前的存档和世界状态已经恢复。"
+                        "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+                        "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+                        "不要从头开场，不要重新介绍世界观。"
+                    )
                     await ws.send_json({"type": "gm_turn_start"})
                     run_turn(engine.handle_action, None)
 
             elif msg_type == "action":
                 # 同上：不 await，避免 on_suggest 阻塞时主循环死锁
+                await ws.send_json({"type": "gm_turn_start"})
                 run_turn(engine.handle_action, data.get("content", ""))
 
             elif msg_type == "suggest_reply":
@@ -446,21 +487,27 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 await ws.send_json({"type": "save_list", "saves": saves})
 
             elif msg_type == "character_list":
-                await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
+                await ws.send_json({
+                    "type": "character_list",
+                    **list_character_options(
+                        engine.context.module_name, context=engine.context
+                    ),
+                })
 
             elif msg_type == "save_load":
                 slot_id = data.get("slot_id", "")
-                cnt = engine.load(slot_id)
+                try:
+                    cnt = engine.load(slot_id)
+                except StaleRevisionError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    continue
                 if cnt is not None:
-                    engine.messages.append({
-                        "role": "user",
-                        "content": (
-                            "（游戏继续。你刚刚读取了之前的存档，世界状态已恢复。"
-                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-                            "不要从头开场，不要重新介绍世界观。）"
-                        )
-                    })
+                    engine.append_control_instruction(
+                        "继续游戏。之前的存档和世界状态已经恢复。"
+                        "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+                        "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+                        "不要从头开场，不要重新介绍世界观。"
+                    )
                     await ws.send_json({"type": "loaded", "ok": True, "slot_id": slot_id, "count": cnt})
                     await ws.send_json({"type": "gm_turn_start"})
                     run_turn(engine.handle_action, None)
@@ -472,7 +519,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 if slot_id == AUTO_SAVE_SLOT:
                     await ws.send_json({"type": "error", "message": "自动存档不可手动删除。"})
                 else:
-                    delete_save(slot_id)
+                    delete_save(slot_id, context=engine.context)
                     await ws.send_json({"type": "save_deleted", "slot_id": slot_id})
 
             elif msg_type == "save_create":
@@ -495,7 +542,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 slot_id = data.get("slot_id", "")
                 label = data.get("label", "")
                 from src.persistence import rename_save
-                ok = rename_save(slot_id, label)
+                ok = rename_save(slot_id, label, context=engine.context)
                 await ws.send_json({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
 
             elif msg_type == "settle_case":
@@ -505,7 +552,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     data.get("summary", ""),
                 )
                 await ws.send_json({"type": "case_settled", **result})
-                await ws.send_json({"type": "character_list", **list_character_options(cfg.MODULE_NAME)})
+                await ws.send_json({
+                    "type": "character_list",
+                    **list_character_options(
+                        engine.context.module_name, context=engine.context
+                    ),
+                })
                 await ws.send_json({"type": "state"})
 
             elif msg_type == "quit":
@@ -514,16 +566,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 break  # 退出消息循环
 
             elif msg_type == "load":
-                count = engine.load()
+                try:
+                    count = engine.load()
+                except StaleRevisionError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    continue
                 await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
 
             elif msg_type == "state":
-                # 直接读取当前模组的 world_state.json（不走 state_manager.py 子进程，
-                # 否则子进程的 TRPG_MODULE 环境变量不会随运行时模组切换更新）
                 try:
-                    _ws = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+                    _ws = engine.context.world_store.load()
                     pc_data = _ws.get("pc", {})
-                    clues_data = _enrich_clues_for_frontend(_ws.get("clues_found", {}), _ws)
+                    clues_data = _enrich_clues_for_frontend(
+                        _ws.get("clues_found", {}), _ws, engine.context
+                    )
                 except Exception:
                     pc_data, clues_data = {}, {}
                 await ws.send_json({
@@ -542,15 +598,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 @app.get("/api/theme")
 async def get_theme():
     """返回当前模组的主题配置"""
-    if cfg.THEME_FILE.exists():
-        return json.loads(cfg.THEME_FILE.read_text(encoding="utf-8"))
-    return {"title": "TRPG Agent", "colors": {}, "fonts": {}}
+    return _load_theme(_active_context)
 
 
 @app.get("/api/health")
 async def health():
     """桌面壳用于等待内置后端启动完成。"""
-    return {"ok": True, "module": cfg.MODULE_NAME}
+    return {
+        "ok": True,
+        "module": _active_context.module_name,
+        "world_id": _active_context.world_id,
+    }
 
 
 @app.get("/api/modules")
@@ -569,31 +627,53 @@ async def list_modules():
                 "title": theme.get("title", d.name),
                 "description": theme.get("description", "")
             })
-    return {"modules": mods, "active": cfg.MODULE_NAME}
+    return {"modules": mods, "active": _active_context.module_name}
 
 
 @app.get("/api/characters")
 async def list_characters():
     """列出可用于当前模组的新游戏调查员。"""
-    return list_character_options(cfg.MODULE_NAME)
+    return list_character_options(
+        _active_context.module_name, context=_active_context
+    )
 
 
 @app.post("/api/modules/switch")
 async def switch_module(data: dict):
     """切换活跃模组"""
-    name = data.get("module", cfg.MODULE_NAME)
+    name = data.get("module", _active_context.module_name)
     target = PROJECT_ROOT / "mod" / name
     if not target.exists() or not (target / "module.md").exists():
         return {"ok": False, "error": f"模组'{name}'不存在"}
-    cfg.set_active_module(name)
-    return {"ok": True, "module": name}
+    context = RuntimeContext.local(
+        name,
+        project_root=PROJECT_ROOT,
+        runtime_root=RUNTIME_ROOT,
+    )
+    _set_active_context(context)
+    return {"ok": True, "module": name, "world_id": context.world_id}
 
 
 @app.websocket("/ws")
 async def game_ws(ws: WebSocket):
     await ws.accept()
     try:
-        engine = GameEngine()
+        requested_world = ws.query_params.get("world_id")
+        requested_module = ws.query_params.get("module") or _active_context.module_name
+        if requested_world:
+            context = RuntimeContext.create(
+                requested_world,
+                requested_module,
+                project_root=PROJECT_ROOT,
+                runtime_root=RUNTIME_ROOT,
+            )
+        else:
+            context = RuntimeContext.local(
+                requested_module,
+                project_root=PROJECT_ROOT,
+                runtime_root=RUNTIME_ROOT,
+            )
+        engine = GameEngine(context)
         engine.prepare_session()
     except Exception as e:
         # 配置/初始化失败时，把错误发回客户端而不是静默断开

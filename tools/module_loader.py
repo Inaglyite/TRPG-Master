@@ -5,7 +5,7 @@
      用 ## 二级标题定义具体条目，```yaml 代码块存放结构化数据。
 """
 
-import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -13,6 +13,11 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MOD_DIR = PROJECT_ROOT / "mod"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime import RuntimeContext  # noqa: E402
+from src.world_migrations import migrate_world_state  # noqa: E402
+from src.world_store import atomic_write_json  # noqa: E402
 
 
 def _extract_yaml_blocks(text: str) -> list[dict]:
@@ -208,10 +213,15 @@ def parse_module(md_path: str) -> dict:
 
 def export_module(md_path: str, output_path: str | None = None):
     state = parse_module(md_path)
-    if output_path is None:
-        output_path = Path(md_path).parent / "world_state.json"
-    Path(output_path).write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    if os.environ.get("TRPG_WORLD_ID"):
+        context = RuntimeContext.from_env()
+        context.world_store.restore(state)
+        output_path = context.state_file
+    else:
+        if output_path is None:
+            output_path = Path(md_path).parent / "world_state_initial.json"
+        state, _ = migrate_world_state(state)
+        atomic_write_json(Path(output_path), state)
     clues = sum(len(v) for v in state["clues_found"].values())
     print(f"✅ 模组已导出: {output_path}")
     print(f"   PC: {state['pc']['name']} ({state['pc']['occupation']})")

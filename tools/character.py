@@ -5,17 +5,19 @@
 import json
 import random
 import sys
-import os
 from pathlib import Path
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
-STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
-CHARS_DIR = PROJECT_ROOT / "mod" / MODULE / "characters"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.personality import normalize_violence_stance
+from src.runtime import RuntimeContext
+from src.world_store import atomic_write_json
+
+
+CONTEXT = RuntimeContext.from_env()
+CHARS_DIR = CONTEXT.custom_characters_dir
 
 # ── COC 7e 职业库 ──────────────────────────────────────────
 
@@ -342,8 +344,7 @@ def save_character(char: dict, filename: str | None = None) -> str:
         name_safe = "".join(c for c in char["name"] if c.isalnum() or c in "_ ")
         filename = f"{name_safe.strip()}_{char['created_at'][:10]}.json"
     filepath = CHARS_DIR / filename
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(char, f, ensure_ascii=False, indent=2)
+    atomic_write_json(filepath, char)
     return str(filepath)
 
 
@@ -360,36 +361,39 @@ def load_character(path: str) -> dict | None:
 
 def apply_character(char: dict) -> dict:
     """将角色卡应用到当前世界状态"""
-    state_path = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
-    with open(state_path, "r", encoding="utf-8") as f:
-        state = json.load(f)
+    result = None
 
-    pc = state["pc"]
-    pc["name"] = char["name"]
-    pc["occupation"] = char["occupation"]
-    pc["attributes"] = char["attributes"]
-    pc["skills"] = char["skills"]
-    derived = char.get("derived", {})
-    pc["hp"] = derived.get("HP", pc.get("hp", 11))
-    pc["max_hp"] = derived.get("max_HP", pc.get("max_hp", 11))
-    pc["san"] = derived.get("SAN", pc.get("san", 65))
-    pc["max_san"] = derived.get("max_SAN", pc.get("max_san", 65))
-    pc["inventory"] = char.get("inventory", pc.get("inventory", []))
-    pc["credit_rating"] = char.get("credit_rating", 30)
-    # 心理特质：优先用角色卡中已有的，否则初始化空结构
-    if "psychological_profile" in char:
-        pc["psychological_profile"] = char["psychological_profile"]
-    elif "psychological_profile" not in pc:
-        pc["psychological_profile"] = {
-            "traits": [], "key_relationships": [],
-            "phobias": [], "manias": []
+    def mutate(state: dict) -> None:
+        nonlocal result
+        pc = state["pc"]
+        pc["name"] = char["name"]
+        pc["occupation"] = char["occupation"]
+        pc["attributes"] = char["attributes"]
+        pc["skills"] = char["skills"]
+        derived = char.get("derived", {})
+        pc["hp"] = derived.get("HP", pc.get("hp", 11))
+        pc["max_hp"] = derived.get("max_HP", pc.get("max_hp", 11))
+        pc["san"] = derived.get("SAN", pc.get("san", 65))
+        pc["max_san"] = derived.get("max_SAN", pc.get("max_san", 65))
+        pc["inventory"] = char.get("inventory", pc.get("inventory", []))
+        pc["credit_rating"] = char.get("credit_rating", 30)
+        if "psychological_profile" in char:
+            pc["psychological_profile"] = char["psychological_profile"]
+        elif "psychological_profile" not in pc:
+            pc["psychological_profile"] = {
+                "traits": [], "key_relationships": [],
+                "phobias": [], "manias": []
+            }
+        result = {
+            "applied": True,
+            "name": char["name"],
+            "occupation": char["occupation"],
+            "hp": pc["hp"],
+            "san": pc["san"],
         }
 
-    with open(state_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
-    return {"applied": True, "name": char["name"], "occupation": char["occupation"],
-            "hp": pc["hp"], "san": pc["san"]}
+    CONTEXT.world_store.update(mutate)
+    return result
 
 
 # ── CLI ─────────────────────────────────────────────────────

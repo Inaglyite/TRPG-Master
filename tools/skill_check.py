@@ -8,16 +8,18 @@ d100 ≤ 技能值/5 = 极难成功
 """
 
 import json
-import os
 import random
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCHEMA_PATH = PROJECT_ROOT / "rules" / "rule_schema.json"
-MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
-STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
-CONFIG_PATH = PROJECT_ROOT / "rules" / "rule_config.json"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime import RuntimeContext  # noqa: E402
+
+
+CONTEXT = RuntimeContext.from_env()
+SCHEMA_PATH = CONTEXT.project_root / "rules" / "rule_schema.json"
 
 
 def load_json(path):
@@ -152,7 +154,7 @@ def console_check():
 
     # 判断是技能检定还是属性检定
     ATTRIBUTES = {"STR", "DEX", "CON", "INT", "POW", "SIZ", "APP", "EDU"}
-    state = load_json(STATE_PATH)
+    state = CONTEXT.world_store.load()
 
     if skill_name_global in ATTRIBUTES:
         # 属性裸检定：d100 ≤ 属性值

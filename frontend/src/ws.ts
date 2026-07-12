@@ -14,6 +14,7 @@ import { addMsg } from "./renderer";
 import {
   onGmTurnStart,
   resetStartButton,
+  getGameStarted,
   getGameStarting,
   onSaveList,
   onSaveAvailable,
@@ -38,6 +39,13 @@ const WS_URL = `ws://${WS_HOST}:8765/ws`;
 
 // ---- WebSocket 实例 ----
 let ws: WebSocket | null = null;
+
+type HandoutMessage = Parameters<typeof showHandout>[0];
+
+// 工具调用可能早于本轮最终叙述完成。回合进行中先缓存会剧透的 UI 更新，
+// 等 done 到达后再展示，避免图片和线索抢在守秘人叙述前出现。
+let gmTurnActive = false;
+let deferredHandouts: HandoutMessage[] = [];
 
 export function getWs(): WebSocket | null {
   return ws;
@@ -73,6 +81,8 @@ export function connect() {
   };
   ws.onmessage = handleMessage;
   ws.onclose = () => {
+    gmTurnActive = false;
+    deferredHandouts = [];
     setConn("disconnected");
     addMsg("error", "连接断开。5秒后重试……");
     setTimeout(connect, 5000);
@@ -94,6 +104,8 @@ function handleMessage(e: MessageEvent) {
     case "pong":
       break;
     case "gm_turn_start":
+      gmTurnActive = true;
+      deferredHandouts = [];
       onGmTurnStart();
       break;
     case "narrative_chunk":
@@ -119,6 +131,9 @@ function handleMessage(e: MessageEvent) {
       break;
     case "done":
       onDone();
+      gmTurnActive = false;
+      deferredHandouts.forEach((handout) => showHandout(handout));
+      deferredHandouts = [];
       safeSend(JSON.stringify({ type: "state" }));
       break;
     case "error":
@@ -182,12 +197,20 @@ function handleMessage(e: MessageEvent) {
       addMsg("system", data.ok ? "案件经历已写入调查员长期履历。" : `履历写入失败：${data.error || "未知错误"}`);
       break;
     case "state_data":
-      updateCharPanel(data.data);
-      updateCluePanel(data.clues);
+      // 开场前的预取状态可能属于旧存档；回合中的状态又可能早于叙述。
+      // done 后会重新请求最终状态，因此这两种响应都不应提前渲染。
+      if (getGameStarted() && !gmTurnActive) {
+        updateCharPanel(data.data);
+        updateCluePanel(data.clues);
+      }
       break;
     case "handout":
-      showHandout(data);
-      safeSend(JSON.stringify({ type: "state" }));
+      if (gmTurnActive) {
+        deferredHandouts.push(data);
+      } else {
+        showHandout(data);
+        safeSend(JSON.stringify({ type: "state" }));
+      }
       break;
   }
 }

@@ -8,9 +8,9 @@ from pathlib import Path
 def _resolve_project_root() -> Path:
     """定位项目根目录（含 mod/ 的目录）。
 
-    PyInstaller 6.x 打包后把数据放进 _internal/ 子目录，而 Electron 壳把
-    TRPG_PROJECT_ROOT 指向 exe 所在目录（便于 .env.json/存档可写）。两者
-    常不一致，因此不能盲信 TRPG_PROJECT_ROOT——要找到真正含 mod/ 的目录。
+    PyInstaller 6.x 打包后把只读定义放进 _internal/ 子目录，而 Electron 壳可能把
+    TRPG_PROJECT_ROOT 指向 exe 所在目录。两者常不一致，因此这里定位真正含 mod/
+    的定义目录；可写 worlds/ 根目录由 RUNTIME_ROOT 单独决定。
     """
     candidates: list[Path] = []
     env_root = os.environ.get("TRPG_PROJECT_ROOT")
@@ -29,8 +29,16 @@ def _resolve_project_root() -> Path:
 
 
 PROJECT_ROOT = _resolve_project_root()
+if os.environ.get("TRPG_RUNTIME_ROOT"):
+    RUNTIME_ROOT = Path(os.environ["TRPG_RUNTIME_ROOT"]).resolve()
+elif getattr(sys, "frozen", False):
+    RUNTIME_ROOT = Path(sys.executable).resolve().parent
+else:
+    RUNTIME_ROOT = PROJECT_ROOT
 SKILLS_DIR = PROJECT_ROOT / "skills"
-MODULE_NAME = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+DEFAULT_MODULE_NAME = os.environ.get("TRPG_MODULE", "mansion_of_madness")
+# 旧入口暂时保留为只读兼容常量。运行中模块必须来自 RuntimeContext。
+MODULE_NAME = DEFAULT_MODULE_NAME
 MODULE_DIR = PROJECT_ROOT / "mod" / MODULE_NAME
 STATE_FILE = MODULE_DIR / "world_state.json"
 INITIAL_STATE_FILE = MODULE_DIR / "world_state_initial.json"
@@ -43,6 +51,7 @@ DEFAULT_CHARACTERS_DIR = CHARACTERS_DIR / "default"
 CUSTOM_CHARACTERS_DIR = CHARACTERS_DIR / "custom"
 PROFILES_DIR = PROJECT_ROOT / "profiles"
 PLAYER_PROFILE_FILE = PROFILES_DIR / "player_profile.json"
+WORLDS_DIR = RUNTIME_ROOT / "worlds"
 
 # ---- DeepSeek API ----
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -62,9 +71,9 @@ GLM_MODEL = os.environ.get("GLM_MODEL", "glm-4-flash-250414")
 # investigator_skills / investigator_creation / investigator_methods）
 # 不在此列表——改为运行时按需 read_file 加载,见 trpg_master.skill 路由表。
 SKILL_LOAD_ORDER = [
-    "core/dice_system.skill",
-    "core/no_spoiler.skill",
     "core/trpg_master.skill",
+    "core/no_spoiler.skill",
+    "core/dice_system.skill",
     "keeper/keeper_core.skill",
     "keeper/keeper_atmosphere.skill",
     "keeper/keeper_npc.skill",
@@ -85,7 +94,7 @@ OPTIONAL_SKILL_HINTS = {
 
 MAX_TOOL_ROUNDS = 5
 
-# 运行时模块切换
+# 旧调用方兼容入口；新业务代码应切换 RuntimeContext，不应调用本函数。
 def set_active_module(name: str):
     global MODULE_NAME, MODULE_DIR, STATE_FILE, INITIAL_STATE_FILE, SAVES_DIR, THEME_FILE, ASSETS_DIR
     MODULE_NAME = name

@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "revision": 0,
   "module": "猩红文档",
   "current_scene": {
     "id": "miskatonic_university",

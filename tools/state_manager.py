@@ -3,21 +3,32 @@
 
 import json
 import sys
-import os
+from pathlib import Path
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
-STATE_PATH = os.path.join(PROJECT_ROOT, "mod", MODULE, "world_state.json")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime import RuntimeContext  # noqa: E402
+
+
+CONTEXT = RuntimeContext.from_env()
+STORE = CONTEXT.world_store
+_TRANSACTION_STATE = None
 
 
 def _load():
-    with open(STATE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    if _TRANSACTION_STATE is not None:
+        return _TRANSACTION_STATE
+    return STORE.load()
 
 
 def _save(data):
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    if _TRANSACTION_STATE is not None:
+        if data is not _TRANSACTION_STATE:
+            _TRANSACTION_STATE.clear()
+            _TRANSACTION_STATE.update(data)
+        return
+    STORE.restore(data)
 
 
 def _resolve_path(data, path):
@@ -488,11 +499,10 @@ COMMANDS = {
 }
 
 
-def main():
+def _dispatch():
     if len(sys.argv) < 2:
         cmd_usage()
         sys.exit(1)
-
     cmd = sys.argv[1]
 
     if cmd == "get":
@@ -563,6 +573,16 @@ def main():
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()
         sys.exit(1)
+
+
+def main():
+    global _TRANSACTION_STATE
+    with STORE.transaction() as state:
+        _TRANSACTION_STATE = state
+        try:
+            _dispatch()
+        finally:
+            _TRANSACTION_STATE = None
 
 
 if __name__ == "__main__":

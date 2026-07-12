@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "revision": 0,
   "module": "mansion_of_madness",
   "current_scene": {
     "id": "entrance_hall",

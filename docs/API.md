@@ -7,13 +7,13 @@
 | 项目 | 值 |
 |---|---|
 | HTTP Base URL | `http://127.0.0.1:8765` |
-| WebSocket URL | `ws://127.0.0.1:8765/ws` |
+| WebSocket URL | `ws://127.0.0.1:8765/ws`；可选 `?module=<name>&world_id=<id>` |
 | 编码 | UTF-8 |
 | WebSocket 数据 | JSON text frame |
 | 鉴权 | 无 |
 | OpenAPI | `/docs`、`/openapi.json` |
 
-服务端进程实际监听 `0.0.0.0:8765`，但接口按本地桌面应用设计。没有鉴权、限流、房间隔离或 TLS，不应直接暴露到公网。
+服务端进程实际监听 `0.0.0.0:8765`，但接口按本地桌面应用设计。不同 `world_id` 的文件状态已经隔离，但尚无房间身份、共享 GM 会话、鉴权、限流或 TLS，不应直接暴露到公网。
 
 WebSocket 消息都有一个字符串字段 `type`：
 
@@ -35,7 +35,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/theme` | 当前活动模组主题 |
 | `GET` | `/api/modules` | 模组列表与活动模组 |
 | `GET` | `/api/characters` | 当前模组可选调查员 |
-| `POST` | `/api/modules/switch` | 切换进程级活动模组 |
+| `POST` | `/api/modules/switch` | 切换 REST/新连接使用的默认本地世界 |
 | `GET` | `/api/assets/{module_name}/{filename}` | 读取模组图片素材 |
 | `GET` | `/` | 已构建前端或构建提示 |
 
@@ -48,7 +48,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 ```json
 {
   "ok": true,
-  "module": "mansion_of_madness"
+  "module": "mansion_of_madness",
+  "world_id": "local-mansion_of_madness"
 }
 ```
 
@@ -169,7 +170,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 ```json
 {
   "ok": true,
-  "module": "猩红文档"
+  "module": "猩红文档",
+  "world_id": "local-猩红文档"
 }
 ```
 
@@ -182,7 +184,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 }
 ```
 
-此接口修改进程级全局配置，不会自动重置 `world_state.json`，也不会主动通知已连接的 WebSocket 客户端。桌面前端使用 WebSocket `switch_module`，因为它会同时刷新主题、角色与存档列表。
+此接口打开该模组稳定的 `local-<module>` 世界，并把它设为 REST 与后续无参数 WebSocket 连接的默认 context；不会修改已经连接的 `GameEngine`。桌面前端使用 WebSocket `switch_module`，因为它会切换当前连接并同时刷新主题、角色与存档列表。
 
 ### 2.7 `GET /api/assets/{module_name}/{filename}`
 
@@ -202,7 +204,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 ## 3. WebSocket 生命周期
 
-连接成功后，服务端创建新的 `GameEngine`，准备 system prompt，然后按以下顺序主动发送：
+连接成功后，服务端先打开 `RuntimeContext`，再用它创建新的 `GameEngine` 并准备 system prompt。默认打开当前模组的本地世界；测试或未来房间层可连接
+`/ws?module=mansion_of_madness&world_id=room-a`。随后按以下顺序主动发送：
 
 1. `module_list`
 2. `character_list`
@@ -266,7 +269,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 }
 ```
 
-成功后依次返回新的 `theme`、`module_list`、`character_list` 和 `save_list`。切换只更新运行路径和 system prompt，不重置世界状态；新游戏的 `start` 才会从初始状态复制。
+成功后当前连接切换到该模组的默认本地世界，并依次返回新的 `theme`、`module_list`、`character_list` 和 `save_list`。切换不重置世界状态；新游戏的 `start` 才会从初始模板重建当前 world。
 
 ### 4.4 开始新游戏
 
@@ -305,8 +308,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 开始新游戏会：
 
-1. 用 `world_state_initial.json` 覆盖当前 `world_state.json`。
-2. 把选中的调查员复制到 `world_state.pc`。
+1. 用 `mod/<module>/world_state_initial.json` 重建 `worlds/<world_id>/world_state.json`，并递增 revision。
+2. 把选中的调查员复制到当前 world 的 `pc`。
 3. 重建 system prompt 与会话消息。
 4. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
 
@@ -322,14 +325,14 @@ WebSocket 消息都有一个字符串字段 `type`：
 服务端不发送单独 ACK。一个典型回合为：
 
 ```text
-gm_turn_start（仅新游戏/读档时）
+gm_turn_start
 narrative_chunk * N
 tension? / suggest_check? / decision_request? / dice_result? / handout? / glm_summary?
 narrative_chunk * N
 done
 ```
 
-普通 `action` 当前不会先发送 `gm_turn_start`；前端在发送动作时自行进入等待状态。
+新游戏、读档和普通 `action` 都先发送 `gm_turn_start`，客户端以它和 `done` 作为一轮 GM 回合的边界。工具执行期间到达的 `handout` 或 `state_data` 可能早于最终叙述；正式前端会暂存这些展示更新，在 `done` 后显示材料并重新请求最终状态。
 
 ### 4.6 回复检定确认
 
@@ -403,7 +406,7 @@ done
 3. GM 回合事件
 4. `done`
 
-读档会恢复 `snapshot.json` 到当前 `world_state.json`，并在模型消息中加入“基于存档续写、不要重新开场”的指令。
+读档会通过 `WorldStore.restore()` 把 `snapshot.json` 恢复到当前 world，执行 schema 迁移并生成新的 revision；待确认的战斗动作也随完整快照恢复。若读取槽位期间当前 world 已被其他动作更新，服务端发送 revision 过期的 `error`，不会覆盖新状态。随后模型消息加入“基于存档续写、不要重新开场”的指令。
 
 ### 4.12 删除存档
 
@@ -532,7 +535,7 @@ done
 {"type":"gm_turn_start"}
 ```
 
-表示服务端开始新游戏或读档后的 GM 回合。前端隐藏开始界面并禁用输入。
+表示服务端开始一轮 GM 回合。首次收到时前端隐藏开始界面；每轮收到时均禁用输入并进入等待叙述状态。
 
 #### `narrative_chunk`
 
@@ -960,6 +963,8 @@ sequenceDiagram
     S-->>C: state_data
 ```
 
+图中 `handout` 是服务端发送时机。客户端在 GM 回合进行中不会立即渲染它，而是在 `done` 后与最终 `state_data` 一起揭示，避免图片或线索先于对应叙述出现。
+
 ### 6.2 读档
 
 ```mermaid
@@ -994,6 +999,6 @@ sequenceDiagram
 - `continue`、`load` 与 `save.manual` 属于兼容接口；桌面前端使用 `save_load`、`save_create` 和 `save(manual:false)`。
 - 前端仍包含对 `save_available` 的兼容处理，但当前服务端不会发送该事件。
 - `settle_case` 后的服务端 `state` 只是刷新标记，不包含状态数据。
-- 同一进程中的多条连接共享活动模组与世界文件，不能用作隔离的多人房间。
+- 不同 `world_id` 的状态和存档互相隔离；但同一 `world_id` 的多条连接仍各自拥有独立 GM 消息历史，尚不能用作共享多人房间。
 - HTTP 切换模组不会广播；优先使用 WebSocket `switch_module`。
-- API 没有鉴权。开发远程客户端前必须先增加身份、房间隔离和权限边界。
+- API 没有鉴权。开发远程客户端前必须先增加身份、共享房间运行时和权限边界。

@@ -4,39 +4,32 @@
 import json
 import random
 import sys
-import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SM = os.path.join(PROJECT_ROOT, "tools", "state_manager.py")
-MODULE = os.environ.get("TRPG_MODULE", "mansion_of_madness")
-STATE_PATH = PROJECT_ROOT / "mod" / MODULE / "world_state.json"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime import RuntimeContext  # noqa: E402
 
 
-def _cli(*args):
-    import subprocess
-    cmd = [sys.executable, SM] + list(args)
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    result = subprocess.run(
-        cmd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", env=env
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip())
-    try:
-        return json.loads(result.stdout.strip())
-    except json.JSONDecodeError:
-        return result.stdout.strip()
+CONTEXT = RuntimeContext.from_env()
+STORE = CONTEXT.world_store
+_TRANSACTION_STATE = None
 
 
 def _load_state():
-    with open(STATE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    if _TRANSACTION_STATE is not None:
+        return _TRANSACTION_STATE
+    return STORE.load()
 
 
 def _save_state(data):
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    if _TRANSACTION_STATE is not None:
+        if data is not _TRANSACTION_STATE:
+            _TRANSACTION_STATE.clear()
+            _TRANSACTION_STATE.update(data)
+        return
+    STORE.restore(data)
 
 
 # 疯狂发作表
@@ -400,7 +393,7 @@ def sanity_check():
     print(json.dumps(result, ensure_ascii=False))
 
 
-def main():
+def _dispatch():
     if len(sys.argv) < 2:
         print("用法: python sanity.py loss <severity>")
         print("      python sanity.py restore <amount>")
@@ -429,6 +422,16 @@ def main():
         reality_check()
     else:
         print(f"未知动作: {action}")
+
+
+def main():
+    global _TRANSACTION_STATE
+    with STORE.transaction() as state:
+        _TRANSACTION_STATE = state
+        try:
+            _dispatch()
+        finally:
+            _TRANSACTION_STATE = None
 
 
 if __name__ == "__main__":

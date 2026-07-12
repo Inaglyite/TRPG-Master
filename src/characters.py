@@ -9,19 +9,44 @@ from __future__ import annotations
 import copy
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from . import config as cfg
+from .config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from .runtime import RuntimeContext, default_world_id
+from .world_store import atomic_write_json
 
 CHARACTER_SOURCES = {"profile", "default", "custom", "module"}
 
 
-def ensure_character_dirs() -> None:
-    cfg.DEFAULT_CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
-    cfg.CUSTOM_CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
-    cfg.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+def _runtime_context(
+    context: RuntimeContext | None = None,
+    module_name: str | None = None,
+) -> RuntimeContext:
+    if context is not None:
+        return context
+    module = module_name or DEFAULT_MODULE_NAME
+    return RuntimeContext(PROJECT_ROOT, RUNTIME_ROOT, default_world_id(module), module)
+
+
+def ensure_character_dirs(context: RuntimeContext | None = None) -> None:
+    context = _runtime_context(context)
+    context.custom_characters_dir.mkdir(parents=True, exist_ok=True)
+    context.profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    # 打包布局升级时保留旧自定义角色和长期档案。
+    legacy_custom = context.project_root / "characters" / "custom"
+    if legacy_custom != context.custom_characters_dir and legacy_custom.is_dir():
+        shutil.copytree(legacy_custom, context.custom_characters_dir, dirs_exist_ok=True)
+    legacy_profile = context.project_root / "profiles" / "player_profile.json"
+    if (
+        legacy_profile != context.player_profile_file
+        and legacy_profile.exists()
+        and not context.player_profile_file.exists()
+    ):
+        shutil.copy2(legacy_profile, context.player_profile_file)
 
 
 def _now() -> str:
@@ -43,23 +68,31 @@ def _read_json(path: Path, fallback: Any) -> Any:
 
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, data)
 
 
-def _module_characters_dir(module_name: str | None = None) -> Path:
-    module = module_name or cfg.MODULE_NAME
-    return cfg.PROJECT_ROOT / "mod" / module / "characters"
+def _module_characters_dir(
+    module_name: str | None = None,
+    context: RuntimeContext | None = None,
+) -> Path:
+    context = _runtime_context(context, module_name)
+    module = module_name or context.module_name
+    return context.project_root / "mod" / module / "characters"
 
 
 def _safe_file_name(name: str) -> str:
     return Path(name).name
 
 
-def _source_path_label(path: Path) -> str:
+def _source_path_label(path: Path, context: RuntimeContext | None = None) -> str:
+    context = _runtime_context(context)
     try:
-        return str(path.relative_to(cfg.PROJECT_ROOT))
+        return str(path.relative_to(context.project_root))
     except ValueError:
-        return str(path)
+        try:
+            return str(path.relative_to(context.runtime_root))
+        except ValueError:
+            return str(path)
 
 
 def _profile_template() -> dict:
@@ -71,20 +104,22 @@ def _profile_template() -> dict:
     }
 
 
-def load_profile() -> dict:
-    ensure_character_dirs()
-    if not cfg.PLAYER_PROFILE_FILE.exists():
+def load_profile(context: RuntimeContext | None = None) -> dict:
+    context = _runtime_context(context)
+    ensure_character_dirs(context)
+    if not context.player_profile_file.exists():
         return _profile_template()
-    profile = _read_json(cfg.PLAYER_PROFILE_FILE, _profile_template())
+    profile = _read_json(context.player_profile_file, _profile_template())
     profile.setdefault("version", 1)
     profile.setdefault("active_character_id", None)
     profile.setdefault("characters", {})
     return profile
 
 
-def save_profile(profile: dict) -> None:
+def save_profile(profile: dict, context: RuntimeContext | None = None) -> None:
+    context = _runtime_context(context)
     profile["updated_at"] = _now()
-    _write_json(cfg.PLAYER_PROFILE_FILE, profile)
+    _write_json(context.player_profile_file, profile)
 
 
 def _character_id(source: str, char: dict, *, module_name: str | None = None,
@@ -123,7 +158,8 @@ def _normalize_career(career: dict | None) -> dict:
 
 
 def character_to_pc(char: dict, ref: dict | None = None,
-                    existing_pc: dict | None = None) -> dict:
+                    existing_pc: dict | None = None,
+                    module_name: str | None = None) -> dict:
     """把角色卡复制成 world_state.pc 兼容结构。"""
     pc = copy.deepcopy(existing_pc or {})
     derived = char.get("derived", {})
@@ -159,7 +195,7 @@ def character_to_pc(char: dict, ref: dict | None = None,
         "character_id": char_id,
         "source": source,
         "source_path": pc.get("character_source_path", ""),
-        "module": cfg.MODULE_NAME,
+        "module": module_name or (ref or {}).get("module") or DEFAULT_MODULE_NAME,
         "started_at": _now(),
         "starting_hp": pc.get("hp", 0),
         "starting_san": pc.get("san", 0),
@@ -189,17 +225,23 @@ def _profile_entry_to_character(entry: dict) -> dict:
     return char
 
 
-def resolve_character(ref: dict | None, module_name: str | None = None) -> tuple[dict | None, dict | None]:
+def resolve_character(
+    ref: dict | None,
+    module_name: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> tuple[dict | None, dict | None]:
     """根据前端传来的 ref 读取角色卡，返回 (character, normalized_ref)。"""
     if not ref:
         return None, None
-    ensure_character_dirs()
+    context = _runtime_context(context, module_name)
+    ensure_character_dirs(context)
     source = ref.get("source", "")
     if source not in CHARACTER_SOURCES:
         return None, None
 
     if source == "profile":
-        profile = load_profile()
+        profile = load_profile(context)
         char_id = ref.get("id", "")
         entry = profile.get("characters", {}).get(char_id)
         if not entry:
@@ -215,14 +257,14 @@ def resolve_character(ref: dict | None, module_name: str | None = None) -> tuple
     if not file_name:
         return None, None
     if source == "default":
-        path = cfg.DEFAULT_CHARACTERS_DIR / file_name
+        path = context.default_characters_dir / file_name
         mod = None
     elif source == "custom":
-        path = cfg.CUSTOM_CHARACTERS_DIR / file_name
+        path = context.custom_characters_dir / file_name
         mod = None
     else:
-        mod = ref.get("module") or module_name or cfg.MODULE_NAME
-        path = _module_characters_dir(mod) / file_name
+        mod = ref.get("module") or module_name or context.module_name
+        path = _module_characters_dir(mod, context) / file_name
 
     if not path.exists():
         return None, None
@@ -233,7 +275,7 @@ def resolve_character(ref: dict | None, module_name: str | None = None) -> tuple
         "source": source,
         "module": mod,
         "file": file_name,
-        "path": _source_path_label(path),
+        "path": _source_path_label(path, context),
     }
     return char, normalized
 
@@ -268,7 +310,8 @@ def _character_summary(char: dict, ref: dict, *, source_label: str) -> dict:
 
 
 def _list_character_files(directory: Path, source: str, source_label: str,
-                          *, module_name: str | None = None) -> list[dict]:
+                          *, module_name: str | None = None,
+                          context: RuntimeContext | None = None) -> list[dict]:
     result = []
     if not directory.exists():
         return result
@@ -279,7 +322,7 @@ def _list_character_files(directory: Path, source: str, source_label: str,
         ref = {
             "source": source,
             "file": path.name,
-            "path": _source_path_label(path),
+            "path": _source_path_label(path, context),
         }
         if module_name:
             ref["module"] = module_name
@@ -287,10 +330,15 @@ def _list_character_files(directory: Path, source: str, source_label: str,
     return result
 
 
-def list_character_options(module_name: str | None = None) -> dict:
-    ensure_character_dirs()
-    module = module_name or cfg.MODULE_NAME
-    profile = load_profile()
+def list_character_options(
+    module_name: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> dict:
+    context = _runtime_context(context, module_name)
+    ensure_character_dirs(context)
+    module = module_name or context.module_name
+    profile = load_profile(context)
     experienced = []
     for char_id, entry in sorted(profile.get("characters", {}).items()):
         char = _profile_entry_to_character(entry)
@@ -306,30 +354,40 @@ def list_character_options(module_name: str | None = None) -> dict:
         {
             "id": "default",
             "title": "默认调查员",
-            "characters": _list_character_files(cfg.DEFAULT_CHARACTERS_DIR, "default", "默认调查员"),
+            "characters": _list_character_files(
+                context.default_characters_dir, "default", "默认调查员", context=context
+            ),
         },
         {
             "id": "module",
             "title": f"{module} 特色调查员",
             "characters": _list_character_files(
-                _module_characters_dir(module), "module", "模组特色", module_name=module
+                _module_characters_dir(module, context), "module", "模组特色",
+                module_name=module, context=context
             ),
         },
         {
             "id": "custom",
             "title": "自定义角色",
-            "characters": _list_character_files(cfg.CUSTOM_CHARACTERS_DIR, "custom", "自定义角色"),
+            "characters": _list_character_files(
+                context.custom_characters_dir, "custom", "自定义角色", context=context
+            ),
         },
     ]
     return {"module": module, "groups": groups}
 
 
 def apply_character_to_state(ref: dict | None, state: dict,
-                             module_name: str | None = None) -> dict | None:
-    char, normalized_ref = resolve_character(ref, module_name)
+                             module_name: str | None = None, *,
+                             context: RuntimeContext | None = None) -> dict | None:
+    context = _runtime_context(context, module_name)
+    module_name = module_name or context.module_name
+    char, normalized_ref = resolve_character(ref, module_name, context=context)
     if char is None or normalized_ref is None:
         return None
-    state["pc"] = character_to_pc(char, normalized_ref, state.get("pc", {}))
+    state["pc"] = character_to_pc(
+        char, normalized_ref, state.get("pc", {}), module_name=module_name
+    )
     return {
         "id": state["pc"].get("character_id", ""),
         "name": state["pc"].get("name", ""),
@@ -339,8 +397,12 @@ def apply_character_to_state(ref: dict | None, state: dict,
     }
 
 
-def default_character_ref(module_name: str | None = None) -> dict | None:
-    options = list_character_options(module_name)
+def default_character_ref(
+    module_name: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> dict | None:
+    options = list_character_options(module_name, context=context)
     for group_id in ("profile", "default", "module", "custom"):
         group = next((g for g in options["groups"] if g["id"] == group_id), None)
         if group and group["characters"]:
@@ -421,16 +483,18 @@ def _reputation_delta(ending_type: str) -> int:
 
 
 def settle_case(world_state: dict, *, ending_type: str, title: str,
-                summary: str, module_name: str | None = None) -> dict:
+                summary: str, module_name: str | None = None,
+                context: RuntimeContext | None = None) -> dict:
     """把当前案件的粗粒度结果写入长期 profile。"""
     pc = world_state.get("pc", {})
     if not pc:
         return {"ok": False, "error": "当前世界状态没有 pc"}
-    module = module_name or cfg.MODULE_NAME
+    context = _runtime_context(context, module_name)
+    module = module_name or context.module_name
     char_id = pc.get("character_id") or _character_id("profile", pc, module_name=module)
     pc["character_id"] = char_id
 
-    profile = load_profile()
+    profile = load_profile(context)
     characters = profile.setdefault("characters", {})
     existing = characters.get(char_id, {})
     career = _normalize_career(existing.get("career") or pc.get("career"))
@@ -468,5 +532,5 @@ def settle_case(world_state: dict, *, ending_type: str, title: str,
     record["last_case"] = case_entry
     characters[char_id] = record
     profile["active_character_id"] = char_id
-    save_profile(profile)
+    save_profile(profile, context)
     return {"ok": True, "character_id": char_id, "case": case_entry, "career": career}

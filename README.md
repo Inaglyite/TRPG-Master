@@ -2,7 +2,7 @@
 
 一个面向本地单人跑团的 AI 守秘人桌面应用。项目把叙事模型、CoC 7e 风格规则、确定性工具、模组状态和 Electron 界面拆成独立层，通过 FastAPI WebSocket 传递流式叙事与结构化游戏事件。
 
-当前仓库内置两个可游玩模组：`mansion_of_madness`（疯狂宅邸）与 `猩红文档`。目前的运行模型是单机、单玩家；多人共享世界仍处于规划阶段。
+当前仓库内置两个可游玩模组：`mansion_of_madness`（疯狂宅邸）与 `猩红文档`。目前的产品体验仍是单机、单玩家，但底层世界已经按 `world_id` 隔离，可并行运行多个实例；共享 GM 历史、房间身份和事件广播将在下一阶段实现。
 
 ## 主要能力
 
@@ -13,7 +13,8 @@
 - 非敌对 NPC 的首次不可逆攻击和武力威胁会在 GM 叙事前确认；取消时场景完全不变，确认后仍承担正常后果。
 - 统一道具使用层：验证耐用品、消耗一次性物品，并让战斗内外的真实开枪共用余弹结算。
 - d100 技能检定、属性检定、伤害、SAN 与心理状态等确定性工具。
-- 模组切换、调查员选择、长期角色履历和按模组隔离的多槽位存档。
+- 模组切换、调查员选择、长期角色履历和按世界实例隔离的多槽位存档。
+- `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
 - 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
 - TIER 信息边界、NPC 揭示记录和私有工作记忆，降低模型提前剧透的概率。
@@ -21,6 +22,7 @@
 
 ## 文档
 
+- [开发路线图](docs/ROADMAP.md)：单机收口、多人房间、双人可玩版本、数据库与多 Agent 规划。
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
 - [模组示例](mod/mansion_of_madness/module.md)：`module.md` 的实际组织方式。
@@ -82,7 +84,9 @@ python3 start.py --config
 | `GLM_BASE_URL` | GLM 请求地址 | `https://open.bigmodel.cn/api/paas/v4/` |
 | `GLM_MODEL` | GLM 模型名 | `glm-4-flash-250414` |
 | `TRPG_MODULE` | 启动时使用的模组目录名 | `mansion_of_madness` |
-| `TRPG_PROJECT_ROOT` | 打包环境的数据根目录 | 自动识别 |
+| `TRPG_PROJECT_ROOT` | 模组、规则与 Skill 的只读定义根目录 | 自动识别 |
+| `TRPG_RUNTIME_ROOT` | `worlds/`、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；打包模式为后端目录 |
+| `TRPG_WORLD_ID` | 工具子进程打开的世界实例；通常由引擎自动注入 | 当前模组的默认本地世界 |
 
 ### 启动桌面版
 
@@ -129,7 +133,7 @@ npm run electron:dev
 
 ## 游戏内操作
 
-- `快速存档`：直接覆盖当前模组的自动槽 `slot_000`。
+- `快速存档`：直接覆盖当前世界的自动槽 `slot_000`。
 - `存档管理`：读取、新建手动存档、重命名和删除手动槽。
 - `角色/线索`：查看当前调查员状态、物品、线索和已发放图片。
 - `新游戏`：返回开始流程，重新选择模组与调查员。
@@ -157,15 +161,18 @@ trpg-master/
 │   ├── tools.py              # Function Calling schema 与工具分发
 │   ├── persistence.py        # Skill 组装、存档与快照恢复
 │   ├── characters.py         # 调查员选择与长期履历
-│   ├── config.py             # 路径、模型和活动模组配置
+│   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
+│   ├── world_store.py        # revision、房间锁、原子写与备份恢复
+│   ├── world_migrations.py   # 世界 schema 迁移注册表
+│   ├── config.py             # 默认路径、模型和 Skill 配置
 │   └── llm.py                # GLM 辅助摘要
 ├── tools/                    # 骰子、状态、战斗、伤害、SAN 等确定性 CLI 工具
 ├── skills/                   # 常驻与按需加载的守秘人约束
 ├── rules/                    # 结构化规则数据
-├── mod/<module>/             # 模组定义、状态、主题、素材和专属 skill
+├── mod/<module>/             # 模组定义、初始模板、主题、素材和专属 skill
 ├── characters/               # 默认与自定义调查员
 ├── profiles/                 # 长期角色履历（运行时生成）
-├── saves/<module>/           # 按模组隔离的存档（运行时生成）
+├── worlds/<world_id>/        # 当前世界、备份、元数据和存档（运行时生成）
 ├── frontend/
 │   ├── electron/main.cjs     # Electron 主进程与打包后端托管
 │   ├── src/                  # TypeScript UI
@@ -182,18 +189,19 @@ trpg-master/
   -> GameEngine
   -> LangGraph 回合图
   -> OpenAI 兼容模型 / Python 工具
-  -> world_state.json + saves/
+  -> RuntimeContext
+  -> worlds/<world_id>/world_state.json + saves/
 ```
 
 模型负责叙事和决定行动意图：非战斗回合走叙事 Agent，战斗激活后按同一世界状态切换为战斗 Agent。两者不维护互相独立的长期记忆；骰子、先攻、回合推进、技能值、伤害、SAN、世界状态、存档和素材发放均由 Python 代码执行。详细线程模型与数据流见 [架构文档](docs/ARCHITECTURE.md)。
 
 ## 存档与角色数据
 
-存档按模组隔离：
+存档按世界实例隔离：
 
 ```text
-saves/<module>/slot_000/      # 自动槽
-saves/<module>/slot_001/      # 手动槽
+worlds/<world_id>/saves/slot_000/      # 自动槽
+worlds/<world_id>/saves/slot_001/      # 手动槽
 ├── messages.json             # 模型对话与工具历史
 ├── snapshot.json             # world_state 快照
 └── meta.json                 # 场景、调查员、HP/SAN、线索数等摘要
@@ -204,10 +212,10 @@ saves/<module>/slot_001/      # 手动槽
 | 层 | 路径 | 作用 |
 |---|---|---|
 | 角色模板 | `characters/default`、`characters/custom`、`mod/*/characters` | 新游戏的候选调查员 |
-| 当前案件 | `mod/<module>/world_state.json.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
+| 当前案件 | `worlds/<world_id>/world_state.json.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
 | 长期履历 | `profiles/player_profile.json` | 已完成模组、结局、声望、人脉与最后状态 |
 
-运行时数据和 API Key 均已加入 `.gitignore`；提交代码前仍应检查 `git status`，避免把正在游玩的 `world_state.json` 变化混入功能提交。
+运行时数据和 API Key 均已加入 `.gitignore`。旧版 `mod/<module>/world_state.json` 只作为首次迁移来源保留；新游戏与工具调用不会再写入模组目录。
 
 ## 模组开发
 
@@ -217,14 +225,13 @@ saves/<module>/slot_001/      # 手动槽
 mod/<name>/
 ├── module.md
 ├── world_state_initial.json
-├── world_state.json
 ├── theme.json                # 可选但推荐
 ├── skills/                   # 可选，模组专属约束
 ├── characters/               # 可选，特色调查员
 └── assets/                   # 可选，NPC/场景/线索图片
 ```
 
-`world_state_initial.json` 是新游戏重置源，`world_state.json` 是当前运行状态。`module.md` 与模组 `skills/*.skill` 会加入守秘人上下文。Markdown 模组可通过以下命令导入/生成状态：
+`world_state_initial.json` 是只读的新游戏模板，运行状态由 `RuntimeContext` 创建到 `worlds/`。`module.md` 与模组 `skills/*.skill` 会加入守秘人上下文。Markdown 模组可通过以下命令导入/生成模板：
 
 ```bash
 python3 tools/module_loader.py mod/<name>/module.md
@@ -250,10 +257,12 @@ powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 
 ## 开发校验
 
-仓库目前没有完整自动化测试套件。提交前至少运行：
+后端包含世界隔离、并发、战斗、道具、旧存档和恢复测试。提交前运行：
 
 ```bash
-python3 -m py_compile server.py src/*.py tools/*.py
+venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m ruff check src server.py tools tests
+venv/bin/python -m compileall -q src tools server.py tests
 cd frontend && npm run build
 bash -n ../start_desktop.sh
 ```
@@ -263,6 +272,6 @@ bash -n ../start_desktop.sh
 ## 当前边界
 
 - API 没有鉴权，后端用于本机桌面应用，不应直接暴露到公网。
-- `cfg.MODULE_NAME` 与模组状态文件是进程级共享状态，同时连接多个玩家会相互影响。
-- 每条 WebSocket 连接只在自身内部用回合锁串行化；它不是跨连接事务锁。
-- 多人模式需要先引入房间/世界实例 ID、服务端权威状态和独立存档命名空间，不能只在现有 WebSocket 上增加玩家列表。
+- 不同 `world_id` 已隔离；同一世界的写入由 `WorldStore` 跨线程/进程串行并带 revision。
+- 每条 WebSocket 仍拥有独立 `GameEngine.messages`；多个连接尚不能作为一个共享 GM 房间。
+- 多人模式下一步需要 `RoomManager`、共享引擎、行动队列、玩家身份和事件广播，不能只增加玩家列表。

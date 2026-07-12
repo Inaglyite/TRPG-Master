@@ -2,13 +2,16 @@
 
 import sys
 import subprocess
+import os
 
 from .config import PROJECT_ROOT
 from .engine import GameEngine, EngineCallbacks
+from .runtime import RuntimeContext
 
 
 def game_loop():
-    engine = GameEngine()
+    context = RuntimeContext.local()
+    engine = GameEngine(context)
 
     # ---- 终端回调 ----
     def on_narrative(text: str):
@@ -127,8 +130,17 @@ def game_loop():
 
         if user_input.lower() == "/state":
             print()
-            subprocess.run([sys.executable, "tools/state_manager.py", "get", "pc"], cwd=PROJECT_ROOT)
-            subprocess.run([sys.executable, "tools/state_manager.py", "clues"], cwd=PROJECT_ROOT)
+            env = {**os.environ, **context.child_process_env()}
+            subprocess.run(
+                [sys.executable, "tools/state_manager.py", "get", "pc"],
+                cwd=PROJECT_ROOT,
+                env=env,
+            )
+            subprocess.run(
+                [sys.executable, "tools/state_manager.py", "clues"],
+                cwd=PROJECT_ROOT,
+                env=env,
+            )
             print()
             continue
 

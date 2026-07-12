@@ -11,7 +11,7 @@ from openai import OpenAI
 
 from .config import (
     API_KEY, BASE_URL, MODEL_FLASH, MODEL_PRO, FORCE_PRO,
-    OPTIONAL_SKILL_HINTS, PROJECT_ROOT,
+    OPTIONAL_SKILL_HINTS,
 )
 from .persistence import load_system_prompt, save_game, load_game, restore_snapshot, has_save, list_saves
 from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
@@ -20,6 +20,7 @@ from .combat_agent import build_combat_overlay
 from .tools import (
     TOOLS, execute_function,
 )
+from .runtime import RuntimeContext
 from .agent_graph import build_turn_graph
 from .logger import error as log_error, summary_event as log_summary, \
     tier_inject as log_tier, game_event as log_game, model_call as log_model_call
@@ -43,7 +44,10 @@ class EngineCallbacks:
 class GameEngine:
     """TRPG 游戏引擎内核"""
 
-    def __init__(self):
+    CONTROL_MESSAGE_PREFIX = "[引擎控制指令｜非玩家发言]"
+
+    def __init__(self, context: RuntimeContext | None = None):
+        self.context = context or RuntimeContext.local()
         self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
         self.messages: list[dict] = []
         self.current_model = MODEL_FLASH
@@ -65,7 +69,7 @@ class GameEngine:
 
     def prepare_session(self):
         """准备一条界面连接使用的空会话，不重置 world_state。"""
-        self.messages = [{"role": "system", "content": load_system_prompt()}]
+        self.messages = [{"role": "system", "content": load_system_prompt(self.context)}]
         self.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
         self._round_count = 0
         self._player_turn_count = 0
@@ -76,68 +80,92 @@ class GameEngine:
         self._loaded_optional_skills = set()
         self._preconfirmed_escalation = None
 
+    def switch_context(self, context: RuntimeContext) -> None:
+        """切换到另一个世界实例并重建该世界对应的 system prompt。"""
+        self.context = context
+        self.prepare_session()
+
+    def append_control_instruction(self, content: str) -> None:
+        """追加程序控制消息，并与真实玩家发言明确隔离。"""
+        self.messages.append({
+            "role": "user",
+            "content": (
+                f"{self.CONTROL_MESSAGE_PREFIX}\n"
+                "静默执行下列指令。不要确认、复述或说明执行过程；"
+                "不要把这条消息的发出者称为守秘人或 GM。\n"
+                f"{content}"
+            ),
+        })
+
+    def _has_pending_control_instruction(self) -> bool:
+        if not self.messages:
+            return False
+        latest = self.messages[-1]
+        return (
+            latest.get("role") == "user"
+            and latest.get("content", "").startswith(self.CONTROL_MESSAGE_PREFIX)
+        )
+
     def reset(self, character_ref: dict | None = None):
         """开始新游戏——重置对话 + 世界状态"""
-        import shutil
-        from . import config as cfg
-
-        log_game(f"新游戏 | 模组={cfg.MODULE_NAME}")
-        # 重置世界状态到初始
-        initial = cfg.MODULE_DIR / "world_state_initial.json"
-        if initial.exists():
-            shutil.copy(str(initial), str(cfg.STATE_FILE))
+        log_game(f"新游戏 | world={self.context.world_id} | 模组={self.context.module_name}")
+        self.context.reset_world()
 
         self._apply_starting_character(character_ref)
 
         self.prepare_session()
-        mod_path = f"mod/{cfg.MODULE_NAME}/world_state.json"
-        self.messages.append({
-            "role": "user",
-            "content": (
-                f"（游戏开始。请调用 read_file 读取以下文件来初始化："
-                "rules/rule_schema.json、rules/rule_config.json、"
-                f"{mod_path}。"
-                "然后调用 get_private_memory 了解当前信息边界。"
-                "再调用 state_clues 和 state_npcs 确认已知线索和 NPC 揭示状态。"
-                "玩家调查员姓名、职业、背景必须以该 world_state.json 的 pc 字段为唯一来源；"
-                "不要使用 module.md、示例文本或旧存档里的默认调查员姓名来称呼玩家。"
-                "最后描述开场场景并提供选项。）"
-            )
-        })
+        self.append_control_instruction(
+            "开始新游戏。请调用 read_file 读取以下文件来初始化："
+            "rules/rule_schema.json、rules/rule_config.json、"
+            "world://state。"
+            "然后调用 get_private_memory 了解当前信息边界。"
+            "再调用 state_clues 和 state_npcs 确认已知线索和 NPC 揭示状态。"
+            "玩家调查员姓名、职业、背景必须以该 world_state.json 的 pc 字段为唯一来源；"
+            "不要使用 module.md、示例文本或旧存档里的默认调查员姓名来称呼玩家。"
+            "工具调用全部完成后，第一段可见文本直接描述开场场景并提供选项。"
+        )
 
     def _apply_starting_character(self, character_ref: dict | None):
         """将选择的调查员复制进当前模组 world_state.pc。"""
-        from . import config as cfg
-        try:
-            state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return
-
-        selected_ref = character_ref or default_character_ref(cfg.MODULE_NAME)
+        selected_ref = character_ref or default_character_ref(
+            self.context.module_name, context=self.context
+        )
         if not selected_ref:
             return
-        applied = apply_character_to_state(selected_ref, state, cfg.MODULE_NAME)
-        if applied:
-            cfg.STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        def apply(state: dict) -> None:
+            apply_character_to_state(
+                selected_ref,
+                state,
+                self.context.module_name,
+                context=self.context,
+            )
+
+        self.context.world_store.update(apply)
 
     def has_save(self) -> bool:
-        return has_save()
+        return has_save(context=self.context)
 
     def save(self, slot_id: str | None = None) -> str:
         """保存游戏。返回槽位 ID。"""
-        return save_game(self.messages, slot_id)
+        return save_game(self.messages, slot_id, context=self.context)
 
     def list_saves(self) -> list[dict]:
-        return list_saves()
+        return list_saves(context=self.context)
 
     def load(self, slot_id: str | None = None) -> int | None:
         """读取存档并恢复世界状态快照。返回消息数量或 None。"""
-        messages, snapshot = load_game(slot_id)
+        expected_revision = self.context.world_store.revision
+        messages, snapshot = load_game(slot_id, context=self.context)
         if messages is None:
             return None
         # 恢复世界状态快照（防止线索污染）
         if snapshot:
-            restore_snapshot(snapshot)
+            restore_snapshot(
+                snapshot,
+                context=self.context,
+                expected_revision=expected_revision,
+            )
         # 保留当前 system prompt，恢复对话历史
         system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
         self.messages = [system_msg] + messages[1:]
@@ -154,27 +182,36 @@ class GameEngine:
 
     def settle_case(self, ending_type: str, title: str, summary: str) -> dict:
         """将已确认结局写入长期角色履历。"""
-        from . import config as cfg
+        result: dict = {"ok": False, "error": "案件结算未执行"}
+
+        def settle(world_state: dict) -> None:
+            nonlocal result
+            result = settle_character_case(
+                world_state,
+                ending_type=ending_type,
+                title=title,
+                summary=summary,
+                module_name=self.context.module_name,
+                context=self.context,
+            )
+
         try:
-            world_state = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            return {"ok": False, "error": f"读取世界状态失败: {e}"}
-        result = settle_character_case(
-            world_state,
-            ending_type=ending_type,
-            title=title,
-            summary=summary,
-            module_name=cfg.MODULE_NAME,
-        )
+            self.context.world_store.update(settle)
+        except Exception as exc:
+            return {"ok": False, "error": f"写入世界状态失败: {exc}"}
         if result.get("ok"):
-            cfg.STATE_FILE.write_text(json.dumps(world_state, ensure_ascii=False, indent=2), encoding="utf-8")
             self.save("slot_000")
         return result
 
     # ---- 流式 LLM ----
 
-    def _stream_llm(self, model: str, system_overlay: str | None = None) -> tuple[str, list]:
-        """流式调用，文本通过 on_narrative 回调输出"""
+    def _stream_llm(
+        self,
+        model: str,
+        system_overlay: str | None = None,
+        buffer_if_tools: bool = False,
+    ) -> tuple[str, list]:
+        """流式调用；控制回合可缓冲并丢弃工具调用前的元确认语。"""
         started_at = time.monotonic()
         first_token_at: float | None = None
         messages = self.messages
@@ -209,7 +246,8 @@ class GameEngine:
                     first_token_at = time.monotonic()
                 if delta.content:
                     full_text += delta.content
-                    self.cb.on_narrative(delta.content)
+                    if not buffer_if_tools:
+                        self.cb.on_narrative(delta.content)
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index
@@ -232,6 +270,13 @@ class GameEngine:
             self.cb.on_error("（叙述过长被截断，请重试或继续）")
 
         tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
+        if buffer_if_tools:
+            if tool_calls_list:
+                # 控制回合的首轮文本只是工具调用前导语，不应进入 UI 或存档叙事。
+                full_text = ""
+            elif full_text:
+                # 模型没有调用工具时仍保留其正文，避免异常情况下出现空白回合。
+                self.cb.on_narrative(full_text)
         log_model_call(
             model,
             "combat" if system_overlay else "story",
@@ -244,9 +289,8 @@ class GameEngine:
 
     def _combat_state(self) -> dict:
         """Read the authoritative combat state for graph routing and prompt overlay."""
-        from . import config as cfg
         try:
-            world = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+            world = self.context.world_store.load()
         except Exception:
             return {}
         combat = world.get("combat_state")
@@ -257,9 +301,8 @@ class GameEngine:
 
     def _preflight_player_escalation(self, content: str) -> str | None:
         """Confirm explicit violence before the first model token can narrate it."""
-        from . import config as cfg
         try:
-            world = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
+            world = self.context.world_store.load()
         except Exception:
             return content
         preview = preview_player_escalation(world, content)
@@ -317,10 +360,14 @@ class GameEngine:
         }
         if selected not in valid_options:
             selected = decision.get("default_option")
-        result = execute_function("combat_decide", {
-            "decision_id": decision.get("id", ""),
-            "option_id": selected or "",
-        })
+        result = execute_function(
+            "combat_decide",
+            {
+                "decision_id": decision.get("id", ""),
+                "option_id": selected or "",
+            },
+            context=self.context,
+        )
         self.messages.append({
             "role": "user",
             "content": f"[恢复的战斗决定已结算] {result}",
@@ -346,7 +393,7 @@ class GameEngine:
                 return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
 
         if name == "show_handout":
-            result = execute_function(name, args)
+            result = execute_function(name, args, context=self.context)
             try:
                 info = json.loads(result)
                 if info.get("found") and info.get("asset_data_uri"):
@@ -356,7 +403,7 @@ class GameEngine:
             return result
 
         if name == "state_add_clue":
-            result = execute_function(name, args)
+            result = execute_function(name, args, context=self.context)
             try:
                 info = json.loads(result)
                 clue = info.get("clue") or {}
@@ -368,7 +415,7 @@ class GameEngine:
             return result
 
         if name in {"combat_start", "combat_action"}:
-            result = execute_function(name, args)
+            result = execute_function(name, args, context=self.context)
             try:
                 info = json.loads(result)
             except json.JSONDecodeError:
@@ -387,12 +434,16 @@ class GameEngine:
             }
             if selected not in valid_options:
                 selected = decision.get("default_option")
-            return execute_function("combat_decide", {
-                "decision_id": decision.get("id", ""),
-                "option_id": selected or "",
-            })
+            return execute_function(
+                "combat_decide",
+                {
+                    "decision_id": decision.get("id", ""),
+                    "option_id": selected or "",
+                },
+                context=self.context,
+            )
 
-        return execute_function(name, args)
+        return execute_function(name, args, context=self.context)
 
     # ---- 按需 Skill 加载提示 ----
 
@@ -424,13 +475,12 @@ class GameEngine:
             return
         self._loaded_optional_skills.add(skill_path)
         try:
-            content = (PROJECT_ROOT / skill_path).read_text(encoding="utf-8")
+            content = (self.context.project_root / skill_path).read_text(encoding="utf-8")
         except Exception:
             return  # 文件读不到就算了，别打断回合
-        self.messages.append({
-            "role": "user",
-            "content": f"（系统已为你加载 Skill 规则：{skill_path}\n\n{content}）",
-        })
+        self.append_control_instruction(
+            f"以下 Skill 规则已经由引擎加载，请在本回合应用：{skill_path}\n\n{content}"
+        )
 
     def _maybe_hint_optional_skill(self, tool_name: str):
         """工具调用后,若该工具对应一个按需 skill 且本会话尚未加载,直接注入其内容。"""
@@ -724,7 +774,11 @@ class GameEngine:
 
     def _auto_handout(self, entity_type: str, entity_id: str):
         """自动推送展示材料（独立于 LLM 调用，确保首次遇到必触发）。"""
-        result = execute_function("show_handout", {"entity_type": entity_type, "entity_id": entity_id})
+        result = execute_function(
+            "show_handout",
+            {"entity_type": entity_type, "entity_id": entity_id},
+            context=self.context,
+        )
         try:
             info = json.loads(result)
             if info.get("found") and info.get("asset_data_uri"):

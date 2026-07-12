@@ -51,11 +51,9 @@ NPC 设计、扮演技巧、对话范例
 
 ---
 
-## 初始化流程
+## 兼容加载
 
-在第一次回复玩家之前，必须：
-
-1. 调用 read_file(path="rules/rule_schema.json")
-2. 调用 read_file(path="rules/rule_config.json")
-3. 调用 read_file(path="mod/mansion_of_madness/world_state.json")
-4. 调用 state_clues() 确认已知线索
+本文件只用于兼容旧引用。读取到这里时，调用
+`read_file(path="skills/core/trpg_master.skill")` 获取当前身份、消息边界和初始化流程。
+当前模组的 `world_state.json` 路径只以最新的
+`[引擎控制指令｜非玩家发言]` 为准，不得使用固定模组名。

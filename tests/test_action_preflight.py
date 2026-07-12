@@ -1,12 +1,10 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from src import config as cfg
 from src.engine import GameEngine
+from src.world_store import WorldStore
 
 
 def make_world() -> dict:
@@ -42,8 +40,15 @@ class FakeGraph:
 
 
 class ActionPreflightTests(unittest.TestCase):
-    def _engine(self, selected: str, events: list[str]) -> GameEngine:
+    def _engine(
+        self,
+        selected: str,
+        events: list[str],
+        store: WorldStore | None = None,
+    ) -> GameEngine:
         engine = GameEngine.__new__(GameEngine)
+        if store is not None:
+            engine.context = SimpleNamespace(world_store=store)
 
         def on_decision(_decision):
             events.append("decision")
@@ -62,13 +67,12 @@ class ActionPreflightTests(unittest.TestCase):
 
     def test_confirmation_happens_before_graph_and_first_model_token(self):
         events: list[str] = []
-        engine = self._engine("confirm_violence", events)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            state_file = Path(temp_dir) / "world_state.json"
-            state_file.write_text(json.dumps(make_world(), ensure_ascii=False), encoding="utf-8")
-            with patch.object(cfg, "STATE_FILE", state_file):
-                engine.handle_action("朝着法伦开枪")
+            store = WorldStore(Path(temp_dir) / "world")
+            store.initialize(make_world())
+            engine = self._engine("confirm_violence", events, store)
+            engine.handle_action("朝着法伦开枪")
 
         self.assertEqual(events, ["decision", "graph"])
         submitted = engine._turn_graph.inputs[0][0]["user_content"]
@@ -76,13 +80,12 @@ class ActionPreflightTests(unittest.TestCase):
 
     def test_cancelling_preflight_never_starts_gm_graph(self):
         events: list[str] = []
-        engine = self._engine("cancel_violence", events)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            state_file = Path(temp_dir) / "world_state.json"
-            state_file.write_text(json.dumps(make_world(), ensure_ascii=False), encoding="utf-8")
-            with patch.object(cfg, "STATE_FILE", state_file):
-                engine.handle_action("朝着法伦开枪")
+            store = WorldStore(Path(temp_dir) / "world")
+            store.initialize(make_world())
+            engine = self._engine("cancel_violence", events, store)
+            engine.handle_action("朝着法伦开枪")
 
         self.assertEqual(events, ["decision", "save", "done"])
         self.assertEqual(engine._turn_graph.inputs, [])

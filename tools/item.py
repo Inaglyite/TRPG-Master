@@ -12,8 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src import config as cfg
 from src.inventory import InventoryError, use_item
+from src.runtime import RuntimeContext
+
+
+CONTEXT = RuntimeContext.from_env()
 
 
 def main() -> int:
@@ -24,15 +27,19 @@ def main() -> int:
         params = json.loads(sys.argv[1])
         if not isinstance(params, dict):
             raise InventoryError("工具参数必须是 JSON 对象")
-        world = json.loads(cfg.STATE_FILE.read_text(encoding="utf-8"))
-        result = use_item(
-            world,
-            item=str(params.get("item", "")),
-            operation=str(params.get("operation", "use")),
-            amount=params.get("amount", 1),
-            reason=str(params.get("reason", "")),
-        )
-        cfg.STATE_FILE.write_text(json.dumps(world, ensure_ascii=False, indent=2), encoding="utf-8")
+        result = None
+
+        def mutate(world: dict) -> None:
+            nonlocal result
+            result = use_item(
+                world,
+                item=str(params.get("item", "")),
+                operation=str(params.get("operation", "use")),
+                amount=params.get("amount", 1),
+                reason=str(params.get("reason", "")),
+            )
+
+        CONTEXT.world_store.update(mutate)
     except (InventoryError, json.JSONDecodeError, OSError) as exc:
         result = {"ok": False, "error": str(exc)}
     print(json.dumps(result, ensure_ascii=False))

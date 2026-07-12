@@ -6,8 +6,17 @@ import os
 import base64
 import mimetypes
 import subprocess
-from .config import PROJECT_ROOT, STATE_FILE
-from . import config as _cfg
+from pathlib import Path
+
+from .runtime import RuntimeContext
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -661,13 +670,11 @@ COMPLEX_FUNCTIONS = {
 # CLI 执行器
 # ---------------------------------------------------------------------------
 
-def _run_cli(argv: list) -> str:
+def _run_cli(argv: list, context: RuntimeContext) -> str:
     try:
-        # 传入 TRPG_MODULE 环境变量,确保子进程读写的 world_state.json
-        # 与运行时切换后的活跃模组一致(set_active_module 不写 os.environ)
         env = {
             **os.environ,
-            "TRPG_MODULE": _cfg.MODULE_NAME,
+            **context.child_process_env(),
             "PYTHONIOENCODING": "utf-8",
         }
         # shell=False + argv 列表：经 CreateProcess 直接启动，exe 路径含
@@ -675,7 +682,7 @@ def _run_cli(argv: list) -> str:
         result = subprocess.run(
             [str(a) for a in argv], shell=False, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            timeout=30, cwd=PROJECT_ROOT, env=env
+            timeout=30, cwd=context.project_root, env=env
         )
         output = result.stdout.strip()
         if result.returncode != 0:
@@ -688,8 +695,17 @@ def _run_cli(argv: list) -> str:
         return f"[异常] {e}"
 
 
-def execute_function(name: str, args: dict) -> str:
+def execute_function(
+    name: str,
+    args: dict,
+    *,
+    context: RuntimeContext | None = None,
+) -> str:
+    context = context or RuntimeContext.local()
     exe = sys.executable  # frozen exe 路径；argv 列表经 CreateProcess 启动，不怕空格/中文
+
+    def run_cli(argv: list) -> str:
+        return _run_cli(argv, context)
 
     if name == "skill_check":
         bonus = args.get("bonus_dice", 0) or 0
@@ -697,41 +713,41 @@ def execute_function(name: str, args: dict) -> str:
         argv = [exe, "tools/skill_check.py", args.get("skill", "spot_hidden"), bonus, penalty]
         if args.get("push", False):
             argv.append("--push")
-        return _run_cli(argv)
+        return run_cli(argv)
     elif name == "dice_roll":
-        return _run_cli([exe, "tools/dice.py", args.get('spec', 'd20')])
+        return run_cli([exe, "tools/dice.py", args.get('spec', 'd20')])
     elif name == "state_get":
-        return _run_cli([exe, "tools/state_manager.py", "get", args.get('path', 'pc.hp')])
+        return run_cli([exe, "tools/state_manager.py", "get", args.get('path', 'pc.hp')])
     elif name == "state_set":
-        return _run_cli([exe, "tools/state_manager.py", "set", args.get('path', ''), args.get('value', '')])
+        return run_cli([exe, "tools/state_manager.py", "set", args.get('path', ''), args.get('value', '')])
     elif name == "state_npcs":
-        return _run_cli([exe, "tools/state_manager.py", "npcs"])
+        return run_cli([exe, "tools/state_manager.py", "npcs"])
     elif name == "state_clues":
-        return _run_cli([exe, "tools/state_manager.py", "clues"])
+        return run_cli([exe, "tools/state_manager.py", "clues"])
     elif name == "state_add_clue":
         argv = [exe, "tools/state_manager.py", "add-clue", args.get("text", ""), args.get("category", "investigation")]
         asset_id = args.get("asset_id", "") or ""
         if asset_id:
             argv.append(asset_id)
-        return _run_cli(argv)
+        return run_cli(argv)
     elif name == "state_add_item":
-        return _run_cli([exe, "tools/state_manager.py", "add-item", args.get('item', '')])
+        return run_cli([exe, "tools/state_manager.py", "add-item", args.get('item', '')])
     elif name == "state_remove_item":
-        return _run_cli([exe, "tools/state_manager.py", "remove-item", args.get('item', '')])
+        return run_cli([exe, "tools/state_manager.py", "remove-item", args.get('item', '')])
     elif name == "apply_damage":
-        return _run_cli([exe, "tools/damage.py", "damage", args.get('target', 'pc'), args.get('amount', 0), args.get('damage_type', '物理')])
+        return run_cli([exe, "tools/damage.py", "damage", args.get('target', 'pc'), args.get('amount', 0), args.get('damage_type', '物理')])
     elif name == "apply_heal":
-        return _run_cli([exe, "tools/damage.py", "heal", args.get('target', 'pc'), args.get('amount', 0)])
+        return run_cli([exe, "tools/damage.py", "heal", args.get('target', 'pc'), args.get('amount', 0)])
     elif name == "sanity_loss":
-        return _run_cli([exe, "tools/sanity.py", "loss", args.get('severity', 'moderate')])
+        return run_cli([exe, "tools/sanity.py", "loss", args.get('severity', 'moderate')])
     elif name == "sanity_restore":
-        return _run_cli([exe, "tools/sanity.py", "restore", args.get('amount', 0)])
+        return run_cli([exe, "tools/sanity.py", "restore", args.get('amount', 0)])
     elif name == "sanity_check":
-        return _run_cli([exe, "tools/sanity.py", "check"])
+        return run_cli([exe, "tools/sanity.py", "check"])
     elif name == "import_module":
-        return _run_cli([exe, "tools/module_loader.py", args.get('path', '')])
+        return run_cli([exe, "tools/module_loader.py", args.get('path', '')])
     elif name == "create_character":
-        return _run_cli([
+        return run_cli([
             exe,
             "tools/character.py",
             "create",
@@ -740,19 +756,19 @@ def execute_function(name: str, args: dict) -> str:
             args.get("violence_stance", "conditional"),
         ])
     elif name == "load_character":
-        return _run_cli([exe, "tools/character.py", "load", args.get('path', '')])
+        return run_cli([exe, "tools/character.py", "load", args.get('path', '')])
     elif name == "use_item":
-        return _run_cli([exe, "tools/item.py", json.dumps(args, ensure_ascii=False)])
+        return run_cli([exe, "tools/item.py", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_start":
-        return _run_cli([exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)])
+        return run_cli([exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_status":
-        return _run_cli([exe, "tools/combat.py", "status", "{}"])
+        return run_cli([exe, "tools/combat.py", "status", "{}"])
     elif name == "combat_action":
-        return _run_cli([exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)])
+        return run_cli([exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_decide":
-        return _run_cli([exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)])
+        return run_cli([exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)])
     elif name == "combat_end":
-        return _run_cli([exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)])
+        return run_cli([exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)])
     elif name == "suggest_check":
         skill = args.get("skill", "?")
         attr = args.get("attribute", "?")
@@ -775,12 +791,10 @@ def execute_function(name: str, args: dict) -> str:
         scene_id = args.get("scene_id", "")
         desc = args.get("description", "")
         try:
-            with open(STATE_FILE, "r+", encoding="utf-8") as f:
-                data = json.load(f)
+            def cache(data: dict) -> None:
                 data.setdefault("scene_cache", {})[scene_id] = desc
-                f.seek(0)
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                f.truncate()
+
+            context.world_store.update(cache)
             return json.dumps({"cached": True, "scene_id": scene_id})
         except Exception as e:
             return json.dumps({"cached": False, "error": str(e)})
@@ -789,22 +803,23 @@ def execute_function(name: str, args: dict) -> str:
         ending = args.get("ending_type", "neutral")
         title = args.get("title", "故事结束")
         summary = args.get("summary", "")
-        with open(_cfg.STATE_FILE, "r+", encoding="utf-8") as f:
-            data = json.load(f)
+        def finish(data: dict) -> None:
             data["game_over"] = {
                 "type": ending,
                 "title": title,
                 "summary": summary
             }
-            f.seek(0)
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            f.truncate()
+
+        context.world_store.update(finish)
         return json.dumps({"game_over": True, "ending_type": ending, "title": title, "summary": summary})
 
     elif name == "read_file":
         path = args.get("path", "")
-        full_path = (PROJECT_ROOT / path).resolve()
-        if not str(full_path).startswith(str(PROJECT_ROOT)):
+        if path == "world://state":
+            return json.dumps(context.world_store.load(), ensure_ascii=False, indent=2)
+        full_path = (context.project_root / path).resolve()
+        allowed_roots = (context.project_root.resolve(), context.runtime_root.resolve())
+        if not any(_is_relative_to(full_path, root) for root in allowed_roots):
             return "[错误] 不允许读取项目外的文件"
         if not full_path.exists():
             return f"[错误] 文件不存在: {path}"
@@ -812,13 +827,13 @@ def execute_function(name: str, args: dict) -> str:
     elif name == "attribute_check":
         bonus = args.get("bonus_dice", 0) or 0
         penalty = args.get("penalty_dice", 0) or 0
-        return _run_cli([exe, "tools/skill_check.py", args.get("attribute", "STR"), bonus, penalty])
+        return run_cli([exe, "tools/skill_check.py", args.get("attribute", "STR"), bonus, penalty])
     elif name == "luck_check":
-        return _run_cli([exe, "tools/skill_check.py", "POW"])
+        return run_cli([exe, "tools/skill_check.py", "POW"])
     elif name == "psychoanalysis":
-        return _run_cli([exe, "tools/sanity.py", "psychoanalysis", args.get('target', 'pc')])
+        return run_cli([exe, "tools/sanity.py", "psychoanalysis", args.get('target', 'pc')])
     elif name == "reality_check":
-        return _run_cli([exe, "tools/sanity.py", "reality-check"])
+        return run_cli([exe, "tools/sanity.py", "reality-check"])
     elif name == "sanity_trigger":
         desc = args.get("description", "")
         # 基于关键词的 severity 建议
@@ -846,34 +861,34 @@ def execute_function(name: str, args: dict) -> str:
             }
         }, ensure_ascii=False)
     elif name == "set_psychological_trait":
-        return _run_cli([exe, "tools/state_manager.py", "psych-trait", args.get('category', 'phobia'), args.get('name', ''), args.get('context', '')])
+        return run_cli([exe, "tools/state_manager.py", "psych-trait", args.get('category', 'phobia'), args.get('name', ''), args.get('context', '')])
     elif name == "show_handout":
-        result = _run_cli([exe, "tools/state_manager.py", "show-handout", args.get('entity_type', 'npc'), args.get('entity_id', '')])
+        result = run_cli([exe, "tools/state_manager.py", "show-handout", args.get('entity_type', 'npc'), args.get('entity_id', '')])
         # 读取资产文件并转 base64 data URI（electron file:// 下 HTTP URL 不可用）
         try:
             info = json.loads(result)
             if info.get("found") and info.get("file"):
-                asset_path = _cfg.MODULE_DIR / "assets" / info["file"]
+                asset_path = context.assets_dir / info["file"]
                 if asset_path.exists():
                     mime = mimetypes.guess_type(str(asset_path))[0] or "image/png"
                     data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
                     info["asset_data_uri"] = f"data:{mime};base64,{data}"
                     # 同时保留 URL 供 web 模式使用
-                    info["asset_url"] = f"/api/assets/{_cfg.MODULE_NAME}/{info['file']}"
+                    info["asset_url"] = f"/api/assets/{context.module_name}/{info['file']}"
                     result = json.dumps(info, ensure_ascii=False)
         except Exception:
             pass
         return result
     elif name == "link_clues":
-        return _run_cli([exe, "tools/state_manager.py", "link-clues", args.get('from_id', ''), args.get('to_id', ''), args.get('reasoning', '')])
+        return run_cli([exe, "tools/state_manager.py", "link-clues", args.get('from_id', ''), args.get('to_id', ''), args.get('reasoning', '')])
     elif name == "npc_reveal":
-        return _run_cli([exe, "tools/state_manager.py", "npc-reveal", args.get('npc_id', ''), args.get('tier', 1), args.get('entry_text', '')])
+        return run_cli([exe, "tools/state_manager.py", "npc-reveal", args.get('npc_id', ''), args.get('tier', 1), args.get('entry_text', '')])
     elif name == "get_npc_secret":
-        return _run_cli([exe, "tools/state_manager.py", "npc-secret", args.get('npc_id', '')])
+        return run_cli([exe, "tools/state_manager.py", "npc-secret", args.get('npc_id', '')])
     elif name == "get_private_memory":
-        return _run_cli([exe, "tools/state_manager.py", "private-memory"])
+        return run_cli([exe, "tools/state_manager.py", "private-memory"])
     elif name == "update_private_memory":
-        return _run_cli([exe, "tools/state_manager.py", "private-memory-update", args.get('section', ''), args.get('value', '')])
+        return run_cli([exe, "tools/state_manager.py", "private-memory-update", args.get('section', ''), args.get('value', '')])
     else:
         return f"[错误] 未知函数: {name}"
 

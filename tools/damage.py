@@ -3,67 +3,62 @@
 
 import json
 import sys
-import os
-import subprocess
+from pathlib import Path
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SM = os.path.join(PROJECT_ROOT, "tools", "state_manager.py")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime import RuntimeContext  # noqa: E402
+from tools.state_manager import _resolve_path, _set_path  # noqa: E402
 
 
-def _run_state_manager(*args):
-    """调用 state_manager 并返回解析后的结果"""
-    cmd = [sys.executable, SM] + list(args)
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    result = subprocess.run(
-        cmd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", env=env
-    )
-    if result.returncode != 0:
-        print(f"ERROR: state_manager 调用失败: {result.stderr}", file=sys.stderr)
-        sys.exit(1)
-    try:
-        return json.loads(result.stdout.strip())
-    except json.JSONDecodeError:
-        return result.stdout.strip()
+CONTEXT = RuntimeContext.from_env()
 
 
 def apply_damage(target_path, amount, damage_type="物理"):
     """对目标造成伤害"""
-    current_hp = _run_state_manager("get", f"{target_path}.hp")
-    if isinstance(current_hp, str):
-        current_hp = _run_state_manager("get", f"{target_path}.hp")  # retry
-    new_hp = max(0, current_hp - amount)
-    _run_state_manager("set", f"{target_path}.hp", str(new_hp))
+    result = None
 
-    result = {
-        "target": target_path,
-        "damage": amount,
-        "damage_type": damage_type,
-        "hp_before": current_hp,
-        "hp_after": new_hp,
-        "status": "alive" if new_hp > 0 else "dying"
-    }
+    def mutate(world: dict) -> None:
+        nonlocal result
+        current_hp = _resolve_path(world, f"{target_path}.hp")
+        new_hp = max(0, current_hp - amount)
+        _set_path(world, f"{target_path}.hp", new_hp)
+        result = {
+            "target": target_path,
+            "damage": amount,
+            "damage_type": damage_type,
+            "hp_before": current_hp,
+            "hp_after": new_hp,
+            "status": "alive" if new_hp > 0 else "dying",
+        }
+
+    CONTEXT.world_store.update(mutate)
     print(json.dumps(result, ensure_ascii=False))
 
-    if new_hp <= 0:
+    if result["hp_after"] <= 0:
         print(f"!!! {target_path} 生命值归零，进入濒死状态！", file=sys.stderr)
 
 
 def apply_heal(target_path, amount):
     """治疗目标"""
-    current_hp = _run_state_manager("get", f"{target_path}.hp")
-    max_hp = _run_state_manager("get", f"{target_path}.max_hp")
-    new_hp = min(max_hp, current_hp + amount)
-    actual_heal = new_hp - current_hp
-    _run_state_manager("set", f"{target_path}.hp", str(new_hp))
+    result = None
 
-    result = {
-        "target": target_path,
-        "heal_amount": amount,
-        "actual_heal": actual_heal,
-        "hp_before": current_hp,
-        "hp_after": new_hp
-    }
+    def mutate(world: dict) -> None:
+        nonlocal result
+        current_hp = _resolve_path(world, f"{target_path}.hp")
+        max_hp = _resolve_path(world, f"{target_path}.max_hp")
+        new_hp = min(max_hp, current_hp + amount)
+        _set_path(world, f"{target_path}.hp", new_hp)
+        result = {
+            "target": target_path,
+            "heal_amount": amount,
+            "actual_heal": new_hp - current_hp,
+            "hp_before": current_hp,
+            "hp_after": new_hp,
+        }
+
+    CONTEXT.world_store.update(mutate)
     print(json.dumps(result, ensure_ascii=False))
 
 

@@ -27,6 +27,7 @@ class TurnState(TypedDict, total=False):
     tool_calls: list[dict]
     turn_had_check: bool
     tool_outputs: list[tuple[str, str]]
+    control_turn: bool
 
 
 def _tool_category(tool_calls: list[dict]) -> str:
@@ -43,6 +44,7 @@ def _tool_category(tool_calls: list[dict]) -> str:
 def _prepare_turn(state: TurnState) -> dict:
     engine = state["engine"]
     user_content = state.get("user_content")
+    control_turn = user_content is None and engine._has_pending_control_instruction()
 
     if user_content:
         engine._player_turn_count += 1
@@ -58,12 +60,16 @@ def _prepare_turn(state: TurnState) -> dict:
         "tool_calls": [],
         "turn_had_check": bool(FORCE_PRO),
         "tool_outputs": [],
+        "control_turn": control_turn,
     }
 
 
 def _call_story_agent(state: TurnState) -> dict:
     engine = state["engine"]
-    text, tool_calls = engine._stream_llm(engine.current_model)
+    text, tool_calls = engine._stream_llm(
+        engine.current_model,
+        buffer_if_tools=bool(state.get("control_turn") and state.get("tool_round", 0) == 0),
+    )
     return {"text": text, "tool_calls": tool_calls}
 
 
@@ -72,6 +78,7 @@ def _call_combat_agent(state: TurnState) -> dict:
     text, tool_calls = engine._stream_llm(
         engine.current_model,
         system_overlay=engine._combat_system_overlay(),
+        buffer_if_tools=bool(state.get("control_turn") and state.get("tool_round", 0) == 0),
     )
     return {"text": text, "tool_calls": tool_calls}
 
