@@ -11,6 +11,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.module_compiler import compile_payload  # noqa: E402
 from src.module_format import manifest_json_schema, module_json_schema  # noqa: E402
 from src.module_registry import (  # noqa: E402
     ModulePackageError,
@@ -47,6 +48,64 @@ def cmd_schema(output: Path) -> int:
     return 0
 
 
+def _read_project_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ModulePackageError("missing_file", f"模组工程缺少: {path.name}") from exc
+    except UnicodeDecodeError as exc:
+        raise ModulePackageError("invalid_encoding", f"{path.name} 必须使用 UTF-8") from exc
+    except json.JSONDecodeError as exc:
+        raise ModulePackageError(
+            "invalid_json",
+            f"{path.name} 不是有效 JSON: 第 {exc.lineno} 行第 {exc.colno} 列",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ModulePackageError("invalid_json", f"{path.name} 根节点必须是 object")
+    return payload
+
+
+def cmd_compile(source: Path, output: Path | None) -> int:
+    """从作者工程生成编译报告；仅指定 output 时才写入编译产物。"""
+    source = source.resolve()
+    if not source.is_dir():
+        raise ModulePackageError("invalid_source", f"模组工程目录不存在: {source}")
+    manifest = _read_project_json(source / "manifest.json")
+    module = _read_project_json(source / "module.json")
+    keeper_path = (
+        source / "keeper.md"
+        if manifest.get("keeper_document", "keeper.md") == "keeper.md"
+        else None
+    )
+    try:
+        keeper_notes = (
+            keeper_path.read_text(encoding="utf-8")
+            if keeper_path is not None and keeper_path.exists()
+            else ""
+        )
+    except UnicodeDecodeError as exc:
+        raise ModulePackageError("invalid_encoding", "keeper.md 必须使用 UTF-8") from exc
+
+    preview = compile_payload(manifest, module, keeper_notes)
+    if preview.ok and output is not None:
+        output.mkdir(parents=True, exist_ok=True)
+        result = preview.result
+        assert result is not None
+        atomic_write_json(output / "world_state_initial.json", result.world_state)
+        (output / "module.md").write_text(result.keeper_prompt, encoding="utf-8")
+        atomic_write_json(
+            output / "compilation-report.json",
+            preview.to_dict(include_outputs=False),
+        )
+        print(f"编译产物已写入: {output}")
+    print(json.dumps(
+        preview.to_dict(include_outputs=output is None),
+        ensure_ascii=False,
+        indent=2,
+    ))
+    return 0 if preview.ok else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="TRPG Master 模组包工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -61,6 +120,14 @@ def main() -> int:
     schema_parser = subparsers.add_parser("schema", help="生成编辑器共享的 JSON Schema")
     schema_parser.add_argument("output", type=Path)
 
+    compile_parser = subparsers.add_parser("compile", help="编译模组工程并输出诊断与来源追踪")
+    compile_parser.add_argument("source", type=Path)
+    compile_parser.add_argument(
+        "--output",
+        type=Path,
+        help="可选的编译产物目录；省略时只打印无副作用预览",
+    )
+
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -69,6 +136,8 @@ def main() -> int:
             return cmd_pack(args.source, args.output)
         if args.command == "schema":
             return cmd_schema(args.output)
+        if args.command == "compile":
+            return cmd_compile(args.source, args.output)
     except ModulePackageError as exc:
         _print_error(exc)
         return 2

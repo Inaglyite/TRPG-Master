@@ -299,6 +299,26 @@ NPC、场景、线索、PC、初始状态和模组顶层都可使用 `extensions
 
 错误响应包含稳定的 `error_code`、面向用户的 `error` 和可定位字段的 `details`。
 
+### 6.1 编译器契约
+
+`src/module_compiler.py` 是游戏安装器、HTTP 预览和 CLI 共同使用的权威编译入口：
+
+```text
+manifest.json + module.json + keeper.md
+  -> CompilationResult
+     ├── world_state
+     ├── keeper_prompt
+     ├── diagnostics[]
+     └── trace[]
+```
+
+`diagnostics` 的 `level` 分为 `error`、`warning`、`advice`。每项包含稳定 `code`、阶段
+`phase`、作者态字段 `path` 和说明 `message`；只有 `error` 阻止安装。`trace` 列出
+`source_path -> output_path` 与转换动作，供编辑器解释“这个运行时值从哪里来”。
+
+编译器本身不读写文件、不安装模组、不创建世界。包路径、素材是否存在、checksum 和 ZIP 安全
+由 `module_registry` 在编译前检查；落盘也只发生在注册表安装或 CLI 明确指定 `--output` 时。
+
 ## 7. 安全限制
 
 | 限制 | v1 值 |
@@ -339,6 +359,13 @@ NPC、场景、线索、PC、初始状态和模组顶层都可使用 `extensions
 仓库包含完整示例工程：[module-template](../examples/module-template/manifest.json)。
 
 ```bash
+# 无副作用编译预览：向 stdout 输出诊断、trace 和编译产物
+venv/bin/python tools/module_packager.py compile examples/module-template
+
+# 显式写出运行时文件与 compilation-report.json
+venv/bin/python tools/module_packager.py compile examples/module-template \
+  --output /tmp/whispering-archive-compiled
+
 # 生成包
 venv/bin/python tools/module_packager.py pack \
   examples/module-template dist/whispering-archive.trpgmod

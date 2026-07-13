@@ -119,6 +119,7 @@ flowchart TD
 - [x] 定义 `.trpgmod` v1：ZIP 容器、`manifest.json`、`module.json` 与 Markdown 正文。
 - [x] 使用 Pydantic 2 定义作者态领域模型并生成 Draft 2020-12 JSON Schema。
 - [x] 分离全部线索目录与开局已知线索，编译当前引擎使用的世界模板和守秘人提示。
+- [x] 把编译器抽成无副作用服务，统一安装器、HTTP/CLI 预览、结构化诊断与字段来源追踪。
 - [x] 实现路径、符号链接、文件类型、体积、压缩比、checksum 与交叉引用校验。
 - [x] 实现 `ModuleRegistry`，统一发现内置模组和版本化用户模组。
 - [x] 让 `RuntimeContext`、角色、主题、素材和 Skill 都从固定 `ModuleRecord.path` 读取。
@@ -135,8 +136,9 @@ flowchart TD
 - 玩家开局状态只包含 `initially_known` 线索，完整目录不提前进入 `clues_found`。
 - 编辑器前后端可消费同一份 Schema，导出的包继续经过服务端权威校验。
 
-验证证据：`tests/test_module_packages.py` 覆盖编译、引用、Schema、打包、幂等安装、版本并存、
-冲突、引擎兼容、跨平台路径、路径穿越、符号链接、脚本、缺失素材与 HTTP 导入。
+验证证据：`tests/test_module_packages.py` 覆盖编译结果、字段诊断、来源追踪、无副作用 HTTP 预览、
+引用、Schema、打包、幂等安装、版本并存、冲突、引擎兼容、跨平台路径、路径穿越、符号链接、
+脚本、缺失素材与 HTTP 导入。
 
 ### M1：多人房间内核
 

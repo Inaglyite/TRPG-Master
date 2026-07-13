@@ -167,7 +167,9 @@ trpg-master/
 │   ├── persistence.py        # Skill 组装、存档与快照恢复
 │   ├── characters.py         # 调查员选择与长期履历
 │   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
-│   ├── module_format.py      # v1 模组领域模型、Schema 与运行时编译
+│   ├── module_format.py      # v1 模组领域模型、引用校验与 Schema
+│   ├── module_compiler.py    # 无副作用编译、编译产物与字段来源追踪
+│   ├── module_diagnostics.py # 结构化错误、警告与作者建议
 │   ├── module_registry.py    # 内置/用户模组发现及安全包安装
 │   ├── world_store.py        # revision、房间锁、原子写与备份恢复
 │   ├── world_migrations.py   # 世界 schema 迁移注册表
@@ -243,13 +245,19 @@ module-project/
 └── assets/                   # 可选，图片与音频
 ```
 
-生成、检查和导入：
+编译预览、生成、检查和导入：
 
 ```bash
+venv/bin/python tools/module_packager.py compile examples/module-template
+venv/bin/python tools/module_packager.py compile examples/module-template \
+  --output /tmp/example-compiled
 venv/bin/python tools/module_packager.py pack \
   examples/module-template /tmp/example.trpgmod
 venv/bin/python tools/module_packager.py validate /tmp/example.trpgmod
 ```
+
+`compile` 直接调用游戏安装流程使用的编译内核，返回字段级诊断和输入到输出的来源追踪；不传
+`--output` 时不会写文件。编辑器也可调用 `POST /api/modules/compile` 获得同样的结果。
 
 游戏开始页的“导入”按钮会先做格式、安全和引用预检，确认后安装到
 `<runtime>/modules/<id>/<version>/` 并自动切换。安装过程生成兼容当前引擎的 `module.md` 和

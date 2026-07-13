@@ -85,6 +85,7 @@ from src.engine import GameEngine, EngineCallbacks
 from src.config import AUTO_SAVE_SLOT, DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
 from src.persistence import delete_save
 from src.characters import list_character_options
+from src.module_compiler import compile_payload
 from src.module_format import manifest_json_schema, module_json_schema
 from src.module_registry import (
     MAX_PACKAGE_BYTES,
@@ -691,6 +692,18 @@ async def get_module_manifest_schema():
 @app.get("/api/modules/schema/module-v1")
 async def get_module_definition_schema():
     return module_json_schema()
+
+
+@app.post("/api/modules/compile")
+async def compile_module_preview(data: dict):
+    """无副作用地校验并编译作者态数据，供编辑器实时预览。"""
+    preview = await asyncio.to_thread(
+        compile_payload,
+        data.get("manifest"),
+        data.get("module"),
+        data.get("keeper_document", ""),
+    )
+    return preview.to_dict()
 
 
 @app.post("/api/modules/inspect")

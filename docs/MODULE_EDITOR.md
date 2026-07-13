@@ -189,16 +189,21 @@ connectScenes
 | 模块 | 职责 |
 |---|---|
 | `src/module_workspace.py` | 工程打开、保存、自动恢复和路径权限 |
-| `src/module_diagnostics.py` | 编辑器建议级校验和快速修复描述 |
-| `src/module_preview.py` | 玩家/守秘人/编译结果预览 |
+| `src/module_preview.py` | 玩家视角与守秘人视角的脱敏预览 |
 | `frontend/editor/` | 独立编辑器应用 |
 
 已经具备并应直接复用：
 
-- `src/module_format.py`：领域模型、交叉引用校验和运行时编译。
+- `src/module_format.py`：领域模型、交叉引用校验和 JSON Schema。
+- `src/module_compiler.py`：权威无副作用编译、运行时产物和字段来源追踪。
+- `src/module_diagnostics.py`：带级别、阶段、错误码与字段路径的结构化诊断。
 - `src/module_registry.py`：包检查、安装和模组发现。
-- `tools/module_packager.py`：Schema、校验与打包 CLI。
-- `/api/modules/inspect`、`/import` 和 `/schema/*`。
+- `tools/module_packager.py`：compile、Schema、校验与打包 CLI。
+- `/api/modules/compile`、`/inspect`、`/import` 和 `/schema/*`。
+
+编辑器首版不应复制一份 TypeScript 编译器。AJV 用于输入时的快速结构反馈，保存/预览时把内存中的
+`manifest`、`module` 与 `keeperDocument` 发送到 `/api/modules/compile`，以 Python 返回的
+`CompilationResult` 为权威。诊断 `path` 可直接关联表单字段，`trace` 可用于编译结果检查器。
 
 ## 9. 工程 API 草案
 
@@ -214,6 +219,8 @@ connectScenes
 | `POST` | `/api/editor/projects/{session}/playtest` | 安装并创建隔离试玩世界 |
 
 工程保存请求携带 `expected_revision`，避免两个编辑器窗口静默覆盖。
+其中项目级 preview 应委托现有 `/api/modules/compile`，只额外负责从 session 读取工程数据和生成
+玩家/守秘人视角，不再实现另一套运行时转换。
 
 ## 10. 安全与信息边界
 

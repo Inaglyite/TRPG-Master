@@ -36,6 +36,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/modules` | 模组列表与活动模组 |
 | `GET` | `/api/modules/schema/manifest-v1` | manifest JSON Schema |
 | `GET` | `/api/modules/schema/module-v1` | 模组定义 JSON Schema |
+| `POST` | `/api/modules/compile` | 无副作用编译作者态数据并返回诊断/trace |
 | `POST` | `/api/modules/inspect` | 预检 `.trpgmod`，不安装 |
 | `POST` | `/api/modules/import` | 校验并版本化安装 `.trpgmod` |
 | `GET` | `/api/characters` | 当前模组可选调查员 |
@@ -133,7 +134,57 @@ GET /api/modules/schema/module-v1
 返回 Draft 2020-12 JSON Schema。未来编辑器和第三方工具应消费这些 Schema，但后端
 Pydantic/语义校验仍是导入权威。
 
-### 2.6 `POST /api/modules/inspect`
+### 2.6 `POST /api/modules/compile`
+
+供模组编辑器实时校验和预览。请求体直接携带作者态对象，不接收 ZIP：
+
+```json
+{
+  "manifest": { "format_version": "1.0", "id": "example.demo", "version": "1.0.0", "title": "示例" },
+  "module": {
+    "format_version": "1.0",
+    "entry_scene_id": "start",
+    "scenes": { "start": { "name": "起点", "description": "故事从这里开始。" } }
+  },
+  "keeper_document": "# 守秘人正文"
+}
+```
+
+成功编译和作者态校验失败都返回 HTTP 200，调用方根据 `ok` 判断；字段错误不会变成难以关联表单的
+HTTP 异常。响应结构：
+
+```json
+{
+  "ok": true,
+  "compiler_version": "1.0.0",
+  "diagnostics": [
+    {
+      "phase": "content_advice",
+      "level": "warning",
+      "code": "license_missing",
+      "path": "manifest.license",
+      "message": "模组尚未声明许可证或授权信息"
+    }
+  ],
+  "trace": [
+    {
+      "output_path": "world_state.current_scene",
+      "source_path": "module.scenes.start",
+      "operation": "select entry scene"
+    }
+  ],
+  "outputs": {
+    "world_state_initial": {},
+    "module_md": "..."
+  }
+}
+```
+
+存在 `error` 级诊断时 `ok:false`、`outputs:null`；`warning` 和 `advice` 不阻止编译。该接口不读写
+工程、不安装包、不创建世界，也不检查 ZIP/checksum 或素材文件是否真实存在；发布前仍必须调用
+`/inspect` 或 `/import` 完成包级安全校验。
+
+### 2.7 `POST /api/modules/inspect`
 
 请求体是 `.trpgmod` 原始字节，不使用 multipart：
 
@@ -166,7 +217,7 @@ X-Module-Filename: example.trpgmod
 该接口执行 ZIP 安全、Schema、最低引擎版本、交叉引用、capability、UTF-8 和 checksum 校验，
 不写入用户模组目录。
 
-### 2.7 `POST /api/modules/import`
+### 2.8 `POST /api/modules/import`
 
 请求格式与 inspect 相同。服务端重复执行全部校验，在 staging 目录编译运行时文件，然后原子安装到
 `modules/<package-id>/<version>/`。
@@ -204,7 +255,7 @@ X-Module-Filename: example.trpgmod
 
 包上限为 64 MiB；其余大小和安全限制见 `docs/MODULE_FORMAT.md`。
 
-### 2.8 `GET /api/characters`
+### 2.9 `GET /api/characters`
 
 列出当前活动模组的新游戏候选调查员。
 
@@ -256,7 +307,7 @@ X-Module-Filename: example.trpgmod
 | `module` | 当前 `ModuleRecord.path/characters/*.json` |
 | `custom` | `characters/custom/*.json` |
 
-### 2.9 `POST /api/modules/switch`
+### 2.10 `POST /api/modules/switch`
 
 请求：
 
@@ -287,7 +338,7 @@ X-Module-Filename: example.trpgmod
 
 此接口打开该模组稳定的 `local-<module>` 世界，并把它设为 REST 与后续无参数 WebSocket 连接的默认 context；不会修改已经连接的 `GameEngine`。桌面前端使用 WebSocket `switch_module`，因为它会切换当前连接并同时刷新主题、角色与存档列表。
 
-### 2.10 `GET /api/assets/{module_name}/{filename:path}`
+### 2.11 `GET /api/assets/{module_name}/{filename:path}`
 
 从内置或用户模组返回 `assets/<filename>`，支持子目录、中文与 URL 编码文件名。
 
@@ -295,7 +346,7 @@ X-Module-Filename: example.trpgmod
 - 文件不存在：HTTP 404，`{"error":"not found"}`。
 - 路径越界：HTTP 403，`{"error":"forbidden"}`。
 
-### 2.11 静态前端
+### 2.12 静态前端
 
 当 `frontend/dist` 存在时，它被挂载到 `/`。否则根路由返回构建提示：
 

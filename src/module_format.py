@@ -1,16 +1,11 @@
-"""TRPG Master v1 模组定义、校验与运行时编译。"""
+"""TRPG Master v1 模组定义与 JSON Schema。"""
 
 from __future__ import annotations
 
-import copy
-import json
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from .world_migrations import CURRENT_WORLD_SCHEMA_VERSION
-
 
 MODULE_FORMAT_VERSION = "1.0"
 ENGINE_VERSION = "1.0.0"
@@ -384,122 +379,11 @@ class ModuleDefinition(StrictModel):
         return self
 
 
-def _merge_extensions(data: dict[str, Any]) -> dict[str, Any]:
-    extensions = data.pop("extensions", {}) or {}
-    for key, value in extensions.items():
-        if key not in data:
-            data[key] = value
-    return data
-
-
-def _runtime_asset(asset_id: str | None, assets: dict[str, AssetDefinition]) -> dict | None:
-    if not asset_id:
-        return None
-    asset = assets[asset_id]
-    return {
-        "id": asset_id,
-        "file": asset.file.removeprefix("assets/"),
-        "label": asset.label,
-    }
-
-
-def _runtime_asset_map(assets: dict[str, AssetDefinition]) -> dict[str, dict]:
-    return {
-        asset_id: {
-            "file": asset.file.removeprefix("assets/"),
-            "label": asset.label or asset_id,
-        }
-        for asset_id, asset in assets.items()
-    }
-
-
 def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> dict[str, Any]:
-    """把作者态模组定义编译为当前引擎可直接 reset 的世界模板。"""
-    entry = module.scenes[module.entry_scene_id]
-    current_scene = _merge_extensions(entry.model_dump(exclude={"asset_id", "document"}))
-    current_scene["id"] = module.entry_scene_id
+    """兼容旧调用；新代码应从 ``module_compiler`` 导入。"""
+    from .module_compiler import compile_world_state as compile_state
 
-    npcs = []
-    for npc_id, definition in module.npcs.items():
-        data = definition.model_dump(exclude={
-            "asset_id", "initial_reveal", "initial_reveal_entries", "notes"
-        })
-        data = _merge_extensions(data)
-        data["id"] = npc_id
-        if data.get("max_hp") is None:
-            data["max_hp"] = data.get("hp", 0)
-        data["revealed"] = {
-            "level": definition.initial_reveal,
-            "entries": copy.deepcopy(definition.initial_reveal_entries),
-        }
-        npcs.append(data)
-
-    known_ids = set(module.initial_state.known_clue_ids)
-    known_ids.update(clue_id for clue_id, clue in module.clues.items() if clue.initially_known)
-    clues_found = {category: [] for category in CLUE_CATEGORIES}
-    clue_catalog = {}
-    for clue_id, definition in module.clues.items():
-        data = definition.model_dump(exclude={"category", "asset_id", "initially_known", "discovery_notes"})
-        data = _merge_extensions(data)
-        data.update({
-            "id": clue_id,
-            "discovered_at": None,
-            "asset": _runtime_asset(definition.asset_id, module.assets.clues),
-        })
-        clue_catalog[clue_id] = {
-            **copy.deepcopy(data),
-            "category": definition.category,
-            "discovery_notes": definition.discovery_notes,
-        }
-        if clue_id in known_ids:
-            clues_found[definition.category].append(copy.deepcopy(data))
-
-    pc = _merge_extensions(module.initial_state.pc.model_dump())
-    private_memory = module.initial_state.private_memory.model_dump()
-    hidden_facts = private_memory.setdefault("hidden_facts", {})
-    for npc_id, npc in module.npcs.items():
-        if npc.secret and npc_id not in hidden_facts:
-            hidden_facts[npc_id] = npc.secret[:150] + ("..." if len(npc.secret) > 150 else "")
-
-    scene_catalog = {}
-    for scene_id, definition in module.scenes.items():
-        scene_data = _merge_extensions(definition.model_dump(exclude={"asset_id", "document"}))
-        scene_data.update({"id": scene_id, "document": definition.document})
-        scene_catalog[scene_id] = scene_data
-
-    endings = []
-    for ending_id, ending in module.endings.items():
-        endings.append({"id": ending_id, **ending.model_dump()})
-
-    initial_extensions = copy.deepcopy(module.initial_state.extensions)
-    world = {
-        "schema_version": CURRENT_WORLD_SCHEMA_VERSION,
-        "revision": 0,
-        "module": manifest.id,
-        "module_version": manifest.version,
-        "current_scene": current_scene,
-        "pc": pc,
-        "npcs": npcs,
-        "clues_found": clues_found,
-        "flags": copy.deepcopy(module.initial_state.flags),
-        "case_clocks": copy.deepcopy(module.initial_state.case_clocks),
-        "scene_cache": {module.entry_scene_id: entry.description},
-        "scene_catalog": scene_catalog,
-        "clue_catalog": clue_catalog,
-        "endings": endings,
-        "private_memory": private_memory,
-        "asset_map": {
-            "npcs": _runtime_asset_map(module.assets.npcs),
-            "scenes": _runtime_asset_map(module.assets.scenes),
-            "clues": _runtime_asset_map(module.assets.clues),
-        },
-        "clue_links": [link.model_dump(by_alias=True) for link in module.clue_links],
-        "module_rules": copy.deepcopy(module.rules),
-        "module_opening": module.opening_prompt,
-    }
-    world.update(initial_extensions)
-    world.update(copy.deepcopy(module.extensions))
-    return world
+    return compile_state(manifest, module)
 
 
 def render_keeper_prompt(
@@ -507,38 +391,10 @@ def render_keeper_prompt(
     module: ModuleDefinition,
     keeper_notes: str = "",
 ) -> str:
-    """生成现有提示加载器可读取的 module.md。"""
-    payload = module.model_dump(by_alias=True, exclude_none=True)
-    payload.get("initial_state", {}).pop("pc", None)
-    structured = json.dumps(payload, ensure_ascii=False, indent=2)
-    notes = keeper_notes.strip() or "（本模组没有额外守秘人正文。）"
-    frontmatter = {
-        "module": manifest.id,
-        "version": manifest.version,
-        "title": manifest.title,
-        "author": manifest.author,
-        "system": manifest.system,
-        "era": manifest.era,
-        "description": manifest.description,
-    }
-    frontmatter_text = "\n".join(
-        f"{key}: {json.dumps(value, ensure_ascii=False)}"
-        for key, value in frontmatter.items()
-    )
-    return (
-        "---\n"
-        f"{frontmatter_text}\n"
-        "---\n\n"
-        "# 运行时身份约束\n\n"
-        "玩家调查员身份只来自 `world://state.pc`。下述模组定义、示例和守秘人正文"
-        "均不得覆盖玩家姓名、职业、背景或角色所有权。\n\n"
-        "# 结构化模组定义\n\n"
-        "```json\n"
-        f"{structured}\n"
-        "```\n\n"
-        "# 守秘人正文\n\n"
-        f"{notes}\n"
-    )
+    """兼容旧调用；新代码应从 ``module_compiler`` 导入。"""
+    from .module_compiler import render_keeper_prompt as render_prompt
+
+    return render_prompt(manifest, module, keeper_notes)
 
 
 def manifest_json_schema() -> dict[str, Any]:

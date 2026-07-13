@@ -18,13 +18,12 @@ from typing import Callable
 
 from pydantic import ValidationError
 
+from .module_compiler import compile_module
 from .module_format import (
     ModuleDefinition,
     ModuleManifest,
-    compile_world_state,
     engine_supports,
     is_portable_path_component,
-    render_keeper_prompt,
 )
 from .world_store import atomic_write_json
 
@@ -286,16 +285,24 @@ class ModuleRegistry:
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     destination.write_bytes(archive.read(info))
 
-            world = compile_world_state(inspection.manifest, inspection.module)
-            atomic_write_json(staging / "world_state_initial.json", world)
-            (staging / "module.md").write_text(
-                render_keeper_prompt(
-                    inspection.manifest,
-                    inspection.module,
-                    inspection.keeper_notes,
-                ),
-                encoding="utf-8",
+            compiled = compile_module(
+                inspection.manifest,
+                inspection.module,
+                inspection.keeper_notes,
             )
+            if not compiled.ok:
+                details = [
+                    f"{diagnostic.path}: {diagnostic.message}"
+                    for diagnostic in compiled.diagnostics
+                    if diagnostic.level == "error"
+                ]
+                raise ModulePackageError(
+                    "compile_failed",
+                    "模组编译失败",
+                    details=details,
+                )
+            atomic_write_json(staging / "world_state_initial.json", compiled.world_state)
+            (staging / "module.md").write_text(compiled.keeper_prompt, encoding="utf-8")
             if not (staging / "theme.json").exists():
                 atomic_write_json(staging / "theme.json", {
                     "title": manifest.title,
@@ -307,6 +314,7 @@ class ModuleRegistry:
                 "package_sha256": inspection.package_sha256,
                 "installed_at": datetime.now(timezone.utc).isoformat(),
                 "format_version": manifest.format_version,
+                "compiler_version": compiled.compiler_version,
             })
             target.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staging, target)

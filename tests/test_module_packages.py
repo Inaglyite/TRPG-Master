@@ -13,13 +13,18 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from src.config import PROJECT_ROOT
+from src.module_compiler import (
+    compile_module,
+    compile_payload,
+    compile_world_state,
+    render_keeper_prompt,
+)
 from src.module_format import (
     ModuleDefinition,
     ModuleManifest,
-    compile_world_state,
+    compile_world_state as legacy_compile_world_state,
     manifest_json_schema,
     module_json_schema,
-    render_keeper_prompt,
 )
 from src.module_registry import (
     ModulePackageError,
@@ -123,6 +128,69 @@ class ModuleFormatTests(unittest.TestCase):
         self.assertEqual(parsed["title"], manifest.title)
         self.assertEqual(parsed["description"], manifest.description)
 
+    def test_compiler_result_contains_diagnostics_outputs_and_trace(self):
+        manifest, module = load_template()
+        keeper_notes = (TEMPLATE / "keeper.md").read_text(encoding="utf-8")
+
+        result = compile_module(manifest, module, keeper_notes)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.world_state["current_scene"]["id"], "archive_study")
+        self.assertIn("# 守秘人正文", result.keeper_prompt)
+        self.assertIn(keeper_notes.strip(), result.keeper_prompt)
+        trace = {(entry.output_path, entry.source_path) for entry in result.trace}
+        self.assertIn(
+            ("world_state.current_scene", "module.scenes.archive_study"),
+            trace,
+        )
+        self.assertIn(
+            (
+                "world_state.clues_found.task[0]",
+                "module.clues.commission_missing_manuscript",
+            ),
+            trace,
+        )
+
+    def test_compile_payload_returns_located_validation_diagnostics(self):
+        manifest = json.loads((TEMPLATE / "manifest.json").read_text(encoding="utf-8"))
+        module = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        module["scenes"]["archive_study"]["description"] = ""
+
+        preview = compile_payload(manifest, module)
+
+        self.assertFalse(preview.ok)
+        self.assertIsNone(preview.result)
+        diagnostics = preview.to_dict()["diagnostics"]
+        self.assertTrue(any(
+            diagnostic["path"] == "module.scenes.archive_study.description"
+            and diagnostic["level"] == "error"
+            for diagnostic in diagnostics
+        ))
+        self.assertIsNone(preview.to_dict()["outputs"])
+
+    def test_blocking_compile_diagnostic_hides_preview_outputs(self):
+        manifest = json.loads((TEMPLATE / "manifest.json").read_text(encoding="utf-8"))
+        module = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        manifest["min_engine_version"] = "99.0.0"
+
+        preview = compile_payload(manifest, module)
+
+        self.assertFalse(preview.ok)
+        self.assertIsNotNone(preview.result)
+        report = preview.to_dict()
+        self.assertIsNone(report["outputs"])
+        self.assertTrue(any(
+            diagnostic["code"] == "engine_too_old"
+            for diagnostic in report["diagnostics"]
+        ))
+
+    def test_module_format_compiler_entry_remains_backward_compatible(self):
+        manifest, module = load_template()
+        self.assertEqual(
+            legacy_compile_world_state(manifest, module),
+            compile_world_state(manifest, module),
+        )
+
 
 class ModulePackageTests(unittest.TestCase):
     def test_pack_inspect_install_and_runtime_roundtrip(self):
@@ -157,6 +225,10 @@ class ModulePackageTests(unittest.TestCase):
             self.assertEqual(world["module_version"], "1.0.0")
             self.assertTrue((record.path / "module.md").exists())
             self.assertTrue((record.path / "world_state_initial.json").exists())
+            install_metadata = json.loads(
+                (record.path / "install.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(install_metadata["compiler_version"], "1.0.0")
             with zipfile.ZipFile(package) as archive:
                 self.assertEqual(
                     (record.path / "manifest.json").read_bytes(),
@@ -362,6 +434,46 @@ class ModulePackageTests(unittest.TestCase):
 
 
 class ModuleImportApiTests(unittest.TestCase):
+    def test_http_compile_preview_is_located_and_has_no_runtime_side_effects(self):
+        import server
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir) / "runtime"
+            payload = {
+                "manifest": json.loads(
+                    (TEMPLATE / "manifest.json").read_text(encoding="utf-8")
+                ),
+                "module": json.loads(
+                    (TEMPLATE / "module.json").read_text(encoding="utf-8")
+                ),
+                "keeper_document": (TEMPLATE / "keeper.md").read_text(encoding="utf-8"),
+            }
+            with (
+                patch.object(server, "RUNTIME_ROOT", runtime_root),
+                TestClient(server.app) as client,
+            ):
+                response = client.post("/api/modules/compile", json=payload)
+
+                self.assertEqual(response.status_code, 200)
+                report = response.json()
+                self.assertTrue(report["ok"])
+                self.assertEqual(
+                    report["outputs"]["world_state_initial"]["current_scene"]["id"],
+                    "archive_study",
+                )
+                self.assertTrue(report["trace"])
+
+                payload["module"]["scenes"]["archive_study"]["description"] = ""
+                invalid = client.post("/api/modules/compile", json=payload).json()
+                self.assertFalse(invalid["ok"])
+                self.assertIsNone(invalid["outputs"])
+                self.assertEqual(
+                    invalid["diagnostics"][0]["path"],
+                    "module.scenes.archive_study.description",
+                )
+
+            self.assertFalse(runtime_root.exists())
+
     def test_http_inspect_and_import(self):
         import server
 

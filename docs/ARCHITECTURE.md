@@ -81,7 +81,9 @@ flowchart LR
 | 确定性规则 | `tools/*.py` | 检定、骰子、战斗、状态、伤害、SAN、角色、模组导入 |
 | 持久化 | `src/persistence.py` | system prompt 组装、存档列表、快照迁移与恢复 |
 | 角色服务 | `src/characters.py` | 候选角色、角色复制、案件结算与长期履历 |
-| 模组格式 | `src/module_format.py` | v1 作者态模型、引用校验、JSON Schema、世界模板与提示编译 |
+| 模组格式 | `src/module_format.py` | v1 作者态模型、交叉引用校验与 JSON Schema |
+| 模组编译器 | `src/module_compiler.py` | 无副作用地生成世界模板、守秘人提示、诊断和字段来源追踪 |
+| 模组诊断 | `src/module_diagnostics.py` | 统一模型错误、兼容性错误、警告与作者建议 |
 | 模组注册表 | `src/module_registry.py` | 内置/用户模组发现、包安全检查、版本化原子安装 |
 | 运行时上下文 | `src/runtime.py` | `world_id`、模组定义路径、可写世界路径与旧单人数据迁移 |
 | 世界存储 | `src/world_store.py`、`src/world_migrations.py` | 房间锁、revision、原子替换、备份恢复与 schema 迁移 |
@@ -228,7 +230,7 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 | 模组定义 | `mod/<name>/module.md` | 模组作者 | 版本控制 |
 | 初始世界 | `mod/<name>/world_state_initial.json` | 模组作者/导入器 | 新游戏模板 |
 | 用户模组源文件 | `modules/<id>/<version>/manifest.json`、`module.json`、`keeper.md` | `.trpgmod` 导入器 | 指定模组版本 |
-| 用户模组编译产物 | `modules/<id>/<version>/module.md`、`world_state_initial.json` | `module_format` | 指定模组版本 |
+| 用户模组编译产物 | `modules/<id>/<version>/module.md`、`world_state_initial.json` | `module_compiler` | 指定模组版本 |
 | 世界元数据 | `worlds/<world_id>/world.json` | `RuntimeContext` | 本地运行数据 |
 | 当前世界 | `worlds/<world_id>/world_state.json` | `WorldStore` | 当前案件 |
 | 世界备份 | `worlds/<world_id>/world_state.backup.json` | `WorldStore` | 最后一次提交前的有效状态 |
@@ -294,12 +296,15 @@ sequenceDiagram
     participant API as FastAPI
     participant PKG as Package Inspector
     participant REG as ModuleRegistry
+    participant Compiler as Module Compiler
     UI->>API: POST /api/modules/inspect (raw package)
     API->>PKG: ZIP/security/schema/engine/reference checks
     PKG-->>UI: manifest summary + warnings
     UI->>API: POST /api/modules/import
     API->>REG: install(package)
-    REG->>REG: compile + staging + atomic rename
+    REG->>Compiler: compile_module(manifest, module, keeper)
+    Compiler-->>REG: outputs + diagnostics + trace
+    REG->>REG: staging + atomic rename
     REG-->>UI: module record (id@version)
     UI->>API: WS switch_module
 ```
@@ -307,6 +312,12 @@ sequenceDiagram
 作者态 `module.json` 保存全部内容定义，运行时编译器只把初始已知线索写入 `clues_found`，并将
 完整定义保存到私有 `clue_catalog`/`scene_catalog`。模组版本和世界状态 schema 分别迁移，不能
 共用一个版本号。完整契约见 `docs/MODULE_FORMAT.md`。
+
+编译边界分为四层：`module_format` 定义语言，`module_diagnostics` 产生稳定且可定位的反馈，
+`module_compiler` 负责纯转换，`module_registry` 负责 ZIP 安全、落盘和原子安装。
+`POST /api/modules/compile` 与 `tools/module_packager.py compile` 都直接消费同一个编译入口；预览
+不会创建世界、安装模组或修改作者工程。旧的 `module_format.compile_world_state` 与
+`render_keeper_prompt` 仅作为兼容转发保留。
 
 ## 9. 前端结构
 
@@ -372,7 +383,7 @@ sequenceDiagram
 
 1. 从 `examples/module-template/` 复制作者工程。
 2. 编辑 `manifest.json`、`module.json`、`keeper.md` 与可选素材目录。
-3. 运行 `tools/module_packager.py pack`；不能手写编译产物。
+3. 运行 `tools/module_packager.py compile` 查看诊断，再运行 `pack`；不能手写编译产物。
 4. 从开始界面导入，验证玩家预览、开场、读档隔离和图片发放。
 5. 已发布实体 ID 保持稳定；不兼容内容变更提升模组主版本。
 
