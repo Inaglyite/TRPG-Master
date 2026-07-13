@@ -106,12 +106,19 @@ class GameEngine:
             and latest.get("content", "").startswith(self.CONTROL_MESSAGE_PREFIX)
         )
 
-    def reset(self, character_ref: dict | None = None):
+    def reset(self, character_ref: dict | None = None) -> dict | None:
         """开始新游戏——重置对话 + 世界状态"""
         log_game(f"新游戏 | world={self.context.world_id} | 模组={self.context.module_name}")
         self.context.reset_world()
 
-        self._apply_starting_character(character_ref)
+        selected_character = self._apply_starting_character(character_ref)
+        identity_instruction = ""
+        if selected_character:
+            identity = json.dumps({
+                "name": selected_character.get("name", ""),
+                "occupation": selected_character.get("occupation", ""),
+            }, ensure_ascii=False)
+            identity_instruction = f"本局玩家调查员身份已锁定为 {identity}；"
 
         self.prepare_session()
         self.append_control_instruction(
@@ -120,12 +127,14 @@ class GameEngine:
             "world://state。"
             "然后调用 get_private_memory 了解当前信息边界。"
             "再调用 state_clues 和 state_npcs 确认已知线索和 NPC 揭示状态。"
+            f"{identity_instruction}"
             "玩家调查员姓名、职业、背景必须以该 world_state.json 的 pc 字段为唯一来源；"
             "不要使用 module.md、示例文本或旧存档里的默认调查员姓名来称呼玩家。"
             "工具调用全部完成后，第一段可见文本直接描述开场场景并提供选项。"
         )
+        return selected_character
 
-    def _apply_starting_character(self, character_ref: dict | None):
+    def _apply_starting_character(self, character_ref: dict | None) -> dict | None:
         """将选择的调查员复制进当前模组 world_state.pc。"""
         selected_ref = character_ref or default_character_ref(
             self.context.module_name, context=self.context
@@ -133,8 +142,11 @@ class GameEngine:
         if not selected_ref:
             return
 
+        selected_character: dict | None = None
+
         def apply(state: dict) -> None:
-            apply_character_to_state(
+            nonlocal selected_character
+            selected_character = apply_character_to_state(
                 selected_ref,
                 state,
                 self.context.module_name,
@@ -142,6 +154,9 @@ class GameEngine:
             )
 
         self.context.world_store.update(apply)
+        if selected_character is None:
+            raise ValueError("无法读取所选调查员，请返回角色选择界面后重试。")
+        return selected_character
 
     def has_save(self) -> bool:
         return has_save(context=self.context)

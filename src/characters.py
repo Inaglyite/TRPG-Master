@@ -288,6 +288,7 @@ def _character_summary(char: dict, ref: dict, *, source_label: str) -> dict:
     derived = char.get("derived", {})
     career = _normalize_career(char.get("career"))
     skills = char.get("skills", {})
+    backstory = char.get("backstory", {})
     numeric_skills = [(key, value) for key, value in skills.items() if isinstance(value, int)]
     top_skills = [
         {"id": key, "value": value}
@@ -300,6 +301,7 @@ def _character_summary(char: dict, ref: dict, *, source_label: str) -> dict:
         "name": char.get("name", "未命名调查员"),
         "occupation": char.get("occupation", ""),
         "age": char.get("age"),
+        "era": char.get("era", ""),
         "source": ref.get("source", ""),
         "source_label": source_label,
         "hp": derived.get("HP", char.get("hp", 0)),
@@ -309,7 +311,12 @@ def _character_summary(char: dict, ref: dict, *, source_label: str) -> dict:
         "reputation": career.get("reputation", 0),
         "completed_modules": len(career.get("completed_modules", [])),
         "top_skills": top_skills,
-        "description": (char.get("backstory") or {}).get("description", ""),
+        "attributes": copy.deepcopy(char.get("attributes", {})),
+        "derived": copy.deepcopy(derived if isinstance(derived, dict) else {}),
+        "inventory": copy.deepcopy(char.get("inventory", [])),
+        "credit_rating": char.get("credit_rating", skills.get("credit_rating", 0)),
+        "backstory": copy.deepcopy(backstory if isinstance(backstory, dict) else {}),
+        "description": backstory.get("description", "") if isinstance(backstory, dict) else "",
     }
 
 

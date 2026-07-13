@@ -1,28 +1,27 @@
-/**
- * start.ts — 开局与 GM 回合流程
- *
- * 管理游戏全局状态：gameStarted（是否已开始）、gameStarting（开场回合是否进行中）。
- * 负责：onGmTurnStart()、resetStartButton()、startGame()、continueGame()、
- *       onSaveAvailable()、onSaveList()，以及开始界面提示更新。
- * 同时绑定开始 / 继续 / 新游戏按钮事件。
- */
+/** 开局主菜单、调查员选择与 GM 首回合状态。 */
 
 import {
   startOverlay,
+  startMenuView,
+  characterSelectView,
   btnStart,
   btnContinue,
+  btnExit,
   btnNew,
+  btnCharacterBack,
+  btnCharacterConfirm,
   characterChoiceList,
   characterSelectedSummary,
+  characterDetail,
+  characterModuleName,
 } from "./dom";
 import { safeSend } from "./ws";
-import { addMsg, showGmThinking } from "./renderer";
+import { showGmThinking } from "./renderer";
 import { openSavePanel, renderSavePanel } from "./panels";
 import { enableInput } from "./options";
 
-// ---- 全局游戏状态 ----
-export let gameStarted = false; // 游戏是否已开始（隐藏开场遮罩用）
-export let gameStarting = false; // 开场回合是否进行中（防重复点击）
+export let gameStarted = false;
+export let gameStarting = false;
 
 type CharacterRef = {
   source: string;
@@ -37,6 +36,8 @@ type CharacterOption = {
   id: string;
   name: string;
   occupation: string;
+  age?: number | null;
+  era?: string;
   source_label: string;
   hp: number;
   max_hp: number;
@@ -44,6 +45,11 @@ type CharacterOption = {
   max_san: number;
   reputation: number;
   completed_modules: number;
+  credit_rating?: number;
+  attributes?: Record<string, number>;
+  derived?: Record<string, number | string>;
+  inventory?: unknown[];
+  backstory?: Record<string, unknown>;
   top_skills?: { id: string; value: number }[];
   description?: string;
 };
@@ -54,8 +60,92 @@ type CharacterGroup = {
   characters: CharacterOption[];
 };
 
+type ModuleOption = {
+  id: string;
+  title: string;
+};
+
+const ATTRIBUTE_LABELS: Record<string, string> = {
+  STR: "力量",
+  CON: "体质",
+  SIZ: "体型",
+  DEX: "敏捷",
+  APP: "外貌",
+  INT: "智力",
+  POW: "意志",
+  EDU: "教育",
+};
+
+const SKILL_LABELS: Record<string, string> = {
+  spot_hidden: "侦查",
+  listen: "聆听",
+  library_use: "图书馆使用",
+  psychology: "心理学",
+  fast_talk: "话术",
+  persuade: "说服",
+  charm: "魅惑",
+  intimidate: "恐吓",
+  fighting_brawl: "格斗",
+  firearms_handgun: "手枪",
+  firearms_rifle: "步枪/霰弹枪",
+  dodge: "闪避",
+  stealth: "潜行",
+  first_aid: "急救",
+  medicine: "医学",
+  occult: "神秘学",
+  history: "历史",
+  law: "法律",
+  navigate: "导航",
+  track: "追踪",
+  language_own: "母语",
+  credit_rating: "信用评级",
+  cthulhu_mythos: "克苏鲁神话",
+};
+
 let selectedCharacterRef: CharacterRef | null = null;
 let selectedCharacterId = "";
+let characterGroups: CharacterGroup[] = [];
+let charactersReady = false;
+let hasSaves = false;
+let moduleSwitchPending = false;
+let activeModule = "";
+let activeModuleTitle = "当前模组";
+let saveHintText = "正在读取存档…";
+
+function createElement<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className = "",
+  text = "",
+): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function allCharacters(): CharacterOption[] {
+  return characterGroups.flatMap((group) => group.characters || []);
+}
+
+function isCharacterViewOpen(): boolean {
+  return !characterSelectView.classList.contains("hidden");
+}
+
+function showStartView(view: "menu" | "characters") {
+  const showCharacters = view === "characters";
+  startMenuView.classList.toggle("hidden", showCharacters);
+  characterSelectView.classList.toggle("hidden", !showCharacters);
+  if (showCharacters) {
+    requestAnimationFrame(() => {
+      const selected = characterChoiceList.querySelector<HTMLButtonElement>(
+        ".character-card.selected",
+      );
+      (selected || btnCharacterBack).focus();
+    });
+  } else {
+    requestAnimationFrame(() => btnStart.focus());
+  }
+}
 
 export function getGameStarted(): boolean {
   return gameStarted;
@@ -65,161 +155,170 @@ export function getGameStarting(): boolean {
   return gameStarting;
 }
 
-// ---- GM 回合开始 ----
 export function onGmTurnStart() {
-  // 服务端开始跑 GM 回合：隐藏开场遮罩，进入"等待叙述"状态
   if (!gameStarted) {
     gameStarted = true;
     startOverlay.classList.add("hidden");
   }
-  // GM 回合进行中：禁用输入，提示玩家等待，显示思考动画
   enableInput(false);
   showGmThinking();
 }
 
-// ---- 重置开始按钮状态（连接错误等场景） ----
 export function resetStartButton() {
   gameStarting = false;
-  btnStart.disabled = false;
-  btnContinue.disabled = false;
-  btnStart.textContent = btnContinue.classList.contains("hidden")
-    ? "🕯 点燃烛火，开始故事"
-    : "🕯 开始新游戏";
-  btnContinue.textContent = "📜 继续游戏";
+  moduleSwitchPending = false;
+  const moduleSelect = document.getElementById("module-select") as HTMLSelectElement | null;
+  if (moduleSelect) {
+    moduleSelect.disabled = false;
+    moduleSelect.value = activeModule;
+  }
+  document.getElementById("start-hint")!.textContent = saveHintText;
+  btnStart.disabled = !charactersReady || allCharacters().length === 0;
+  btnContinue.disabled = !hasSaves;
+  btnCharacterBack.disabled = false;
+  btnCharacterConfirm.disabled = selectedCharacterRef === null;
+  btnCharacterConfirm.textContent = "以此调查员开始";
 }
 
-// ---- 开始新游戏 ----
+function openCharacterSelection() {
+  if (gameStarting || moduleSwitchPending || !charactersReady) return;
+  characterModuleName.textContent = activeModuleTitle;
+  showStartView("characters");
+}
+
 export function startGame() {
-  if (gameStarting) return;
+  if (gameStarting || !selectedCharacterRef) return;
   gameStarting = true;
   btnStart.disabled = true;
   btnContinue.disabled = true;
-  btnStart.textContent = "守秘人正在布景……";
+  btnCharacterBack.disabled = true;
+  btnCharacterConfirm.disabled = true;
+  btnCharacterConfirm.textContent = "守秘人正在布景…";
   safeSend(JSON.stringify({ type: "start", character_ref: selectedCharacterRef }));
 }
 
-// ---- 继续游戏 ----
 export function continueGame() {
-  // 打开存档面板让玩家选——不直接加载最新档
-  openSavePanel();
+  if (!hasSaves) return;
+  openSavePanel("load");
 }
 
-// ---- 服务端通知有存档可用 ----
 export function onSaveAvailable(data: any) {
-  if (data.has_save) {
-    btnContinue.classList.remove("hidden");
-    btnStart.textContent = "🕯 开始新游戏";
-  }
+  if (!data.has_save) return;
+  hasSaves = true;
+  btnContinue.disabled = false;
 }
 
-// ---- 收到存档列表 ----
 export function onSaveList(data: any) {
-  const saves = data.saves || [];
+  const saves = Array.isArray(data.saves) ? data.saves : [];
   const hint = document.getElementById("start-hint")!;
+  hasSaves = saves.length > 0;
+  btnContinue.disabled = !hasSaves;
 
-  // 开始界面：只显示最近存档摘要 + 继续游戏按钮
-  if (saves.length > 0) {
-    btnContinue.classList.remove("hidden");
-    btnStart.textContent = "🕯 开始新游戏";
-    const latest = saves[0];
-    hint.textContent =
-      `最近存档: ${latest.scene_name || "?"} | HP ${latest.hp || "?"} SAN ${latest.san || "?"} | ${latest.clue_count || 0} 条线索`;
-  } else {
-    hint.textContent = "还未有存档。开始游戏后进度将自动保存。";
-  }
-
-  // 游戏内的存档管理面板始终同步
+  saveHintText = "";
+  hint.textContent = saveHintText;
   renderSavePanel(saves);
 }
 
-// ==================== 模组下拉框（由 WS module_list 事件填充） ====================
+export function populateModuleList(modules: ModuleOption[], active: string) {
+  const select = document.getElementById("module-select") as HTMLSelectElement;
+  if (!select) return;
 
-let activeModule = "";
-
-export function populateModuleList(modules: any[], active: string) {
-  const sel = document.getElementById("module-select") as HTMLSelectElement;
-  if (!sel) return;
-  sel.innerHTML = "";
-  modules.forEach((m: any) => {
-    const opt = document.createElement("option");
-    opt.value = m.id;
-    opt.textContent = m.title;
-    if (m.id === active) { opt.selected = true; activeModule = m.id; }
-    sel.appendChild(opt);
-  });
-  sel.onchange = () => {
-    const chosen = sel.value;
-    if (chosen === activeModule) return;
-    // 通过 WS 切换模组（electron 下 fetch 不可用，且 WS 切换无需 reload）
-    activeModule = chosen;
+  const changed = Boolean(activeModule && activeModule !== active);
+  if (changed) {
     selectedCharacterRef = null;
     selectedCharacterId = "";
+    characterGroups = [];
+    charactersReady = false;
+    hasSaves = false;
     renderCharacterList([]);
-    characterSelectedSummary.textContent = "正在读取调查员…";
+  }
+
+  activeModule = active;
+  activeModuleTitle = modules.find((module) => module.id === active)?.title || active;
+  characterModuleName.textContent = activeModuleTitle;
+  moduleSwitchPending = false;
+  select.disabled = false;
+  select.replaceChildren();
+
+  for (const module of modules) {
+    const option = document.createElement("option");
+    option.value = module.id;
+    option.textContent = module.title;
+    option.selected = module.id === active;
+    select.appendChild(option);
+  }
+
+  btnStart.disabled = !charactersReady || allCharacters().length === 0;
+  select.onchange = () => {
+    const chosen = select.value;
+    if (chosen === activeModule || moduleSwitchPending) return;
+    moduleSwitchPending = true;
+    btnStart.disabled = true;
+    btnContinue.disabled = true;
+    select.disabled = true;
+    document.getElementById("start-hint")!.textContent = "正在切换模组…";
     safeSend(JSON.stringify({ type: "switch_module", module: chosen }));
   };
 }
 
 export function populateCharacterList(groups: CharacterGroup[]) {
-  renderCharacterList(groups || []);
+  characterGroups = groups || [];
+  charactersReady = true;
+  renderCharacterList(characterGroups);
+  btnStart.disabled = allCharacters().length === 0 || moduleSwitchPending;
 }
 
 function renderCharacterList(groups: CharacterGroup[]) {
-  characterChoiceList.innerHTML = "";
-  const allCharacters = groups.flatMap((group) => group.characters || []);
-  if (allCharacters.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "character-empty";
-    empty.textContent = "暂无可用调查员。";
-    characterChoiceList.appendChild(empty);
-    characterSelectedSummary.textContent = "未选择";
+  characterChoiceList.replaceChildren();
+  const characters = groups.flatMap((group) => group.characters || []);
+  if (characters.length === 0) {
+    selectedCharacterRef = null;
+    selectedCharacterId = "";
+    characterChoiceList.appendChild(
+      createElement("div", "character-empty", charactersReady ? "暂无可用调查员" : "正在读取调查员…"),
+    );
+    characterSelectedSummary.textContent = charactersReady ? "未选择调查员" : "等待角色列表…";
+    btnCharacterConfirm.disabled = true;
+    characterDetail.replaceChildren(
+      createElement(
+        "div",
+        "character-detail-empty",
+        charactersReady ? "当前模组没有可用的调查员档案" : "正在读取调查员档案…",
+      ),
+    );
     return;
   }
 
-  if (!selectedCharacterRef || !allCharacters.some((c) => c.id === selectedCharacterId)) {
-    selectedCharacterRef = allCharacters[0].ref;
-    selectedCharacterId = allCharacters[0].id;
-  }
+  const selected = characters.find((character) => character.id === selectedCharacterId)
+    || characters[0];
 
   for (const group of groups) {
-    if (!group.characters || group.characters.length === 0) continue;
-
-    const section = document.createElement("section");
-    section.className = "character-group";
-
-    const title = document.createElement("div");
-    title.className = "character-group-title";
-    title.textContent = group.title;
-    section.appendChild(title);
-
-    const row = document.createElement("div");
-    row.className = "character-card-row";
+    if (!group.characters?.length) continue;
+    const section = createElement("section", "character-group");
+    const groupTitle = group.id === "module"
+      ? `${activeModuleTitle} 特色调查员`
+      : group.title;
+    section.appendChild(createElement("div", "character-group-title", groupTitle));
+    const row = createElement("div", "character-card-row");
 
     for (const character of group.characters) {
-      const card = document.createElement("button");
+      const card = createElement("button", "character-card") as HTMLButtonElement;
       card.type = "button";
-      card.className = "character-card";
-      if (character.id === selectedCharacterId) card.classList.add("selected");
-      card.title = character.description || `${character.name} — ${character.occupation}`;
+      card.dataset.characterId = character.id;
+      card.setAttribute("aria-controls", "character-detail");
 
-      const name = document.createElement("span");
-      name.className = "character-card-name";
-      name.textContent = character.name;
-      const meta = document.createElement("span");
-      meta.className = "character-card-meta";
-      meta.textContent = `${character.occupation || "调查员"} · HP ${character.hp}/${character.max_hp} · SAN ${character.san}/${character.max_san}`;
-      const career = document.createElement("span");
-      career.className = "character-card-career";
-      career.textContent = `${character.source_label}${character.completed_modules ? ` · ${character.completed_modules}案` : ""}${character.reputation ? ` · 声望 ${character.reputation}` : ""}`;
-
-      card.appendChild(name);
-      card.appendChild(meta);
-      card.appendChild(career);
-      card.onclick = () => {
-        selectedCharacterRef = character.ref;
-        selectedCharacterId = character.id;
-        renderCharacterList(groups);
-      };
+      card.appendChild(createElement("span", "character-card-name", character.name));
+      card.appendChild(createElement(
+        "span",
+        "character-card-meta",
+        character.occupation || "调查员",
+      ));
+      card.appendChild(createElement(
+        "span",
+        "character-card-vitals",
+        `HP ${character.hp}/${character.max_hp} · SAN ${character.san}/${character.max_san}`,
+      ));
+      card.onclick = () => selectCharacter(character);
       row.appendChild(card);
     }
 
@@ -227,12 +326,166 @@ function renderCharacterList(groups: CharacterGroup[]) {
     characterChoiceList.appendChild(section);
   }
 
-  const selected = allCharacters.find((c) => c.id === selectedCharacterId) || allCharacters[0];
-  characterSelectedSummary.textContent = `${selected.name} · ${selected.occupation || "调查员"}`;
+  selectCharacter(selected);
 }
 
-// ==================== 按钮事件绑定 ====================
+function selectCharacter(character: CharacterOption) {
+  selectedCharacterRef = character.ref;
+  selectedCharacterId = character.id;
+  characterChoiceList.querySelectorAll<HTMLButtonElement>(".character-card").forEach((card) => {
+    const selected = card.dataset.characterId === character.id;
+    card.classList.toggle("selected", selected);
+    card.setAttribute("aria-pressed", String(selected));
+  });
+  characterSelectedSummary.textContent = `${character.name} · ${character.occupation || "调查员"}`;
+  btnCharacterConfirm.disabled = gameStarting;
+  renderCharacterDetail(character);
+}
 
-btnStart.onclick = startGame;
+function appendDetailSection(
+  parent: HTMLElement,
+  title: string,
+  content: HTMLElement,
+) {
+  const section = createElement("section", "character-detail-section");
+  section.append(createElement("h4", "", title), content);
+  parent.appendChild(section);
+}
+
+function backstoryText(backstory: Record<string, unknown>, key: string): string {
+  const value = backstory[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function formatInventoryItem(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (item && typeof item === "object") {
+    const record = item as Record<string, unknown>;
+    const label = record.label || record.name || record.id;
+    if (typeof label === "string") {
+      const count = typeof record.quantity === "number" ? ` × ${record.quantity}` : "";
+      return `${label}${count}`;
+    }
+  }
+  return String(item);
+}
+
+function renderCharacterDetail(character: CharacterOption) {
+  const article = createElement("article", "character-dossier");
+  const header = createElement("header", "character-detail-header");
+  const identity = createElement("div", "character-detail-identity");
+  identity.appendChild(createElement("h3", "", character.name));
+
+  const identityParts = [character.occupation || "调查员"];
+  if (character.age) identityParts.push(`${character.age} 岁`);
+  if (character.era) identityParts.push(character.era);
+  identity.appendChild(createElement("p", "", identityParts.join(" · ")));
+  header.append(identity, createElement("span", "character-source-badge", character.source_label));
+  article.appendChild(header);
+
+  const derived = character.derived || {};
+  const vitals = createElement("div", "character-vitals-grid");
+  const vitalValues: [string, string | number | undefined][] = [
+    ["HP", `${character.hp}/${character.max_hp}`],
+    ["SAN", `${character.san}/${character.max_san}`],
+    ["MP", derived.MP],
+    ["幸运", derived.LUCK],
+    ["移动", derived.MOV],
+    ["伤害加值", derived.DB],
+    ["体格", derived.BUILD],
+    ["信用", character.credit_rating],
+  ];
+  for (const [label, value] of vitalValues) {
+    if (value === undefined || value === null || value === "") continue;
+    const stat = createElement("div", "character-vital");
+    stat.append(createElement("span", "", label), createElement("strong", "", String(value)));
+    vitals.appendChild(stat);
+  }
+  article.appendChild(vitals);
+
+  const attributes = character.attributes || {};
+  const attributeGrid = createElement("div", "character-attribute-grid");
+  for (const id of Object.keys(ATTRIBUTE_LABELS)) {
+    if (typeof attributes[id] !== "number") continue;
+    const stat = createElement("div", "character-attribute");
+    stat.append(
+      createElement("span", "", `${ATTRIBUTE_LABELS[id]} ${id}`),
+      createElement("strong", "", String(attributes[id])),
+    );
+    attributeGrid.appendChild(stat);
+  }
+  if (attributeGrid.childElementCount) appendDetailSection(article, "基础属性", attributeGrid);
+
+  const skillList = createElement("div", "character-skill-list");
+  for (const skill of character.top_skills || []) {
+    const row = createElement("div", "character-skill");
+    row.append(
+      createElement("span", "", SKILL_LABELS[skill.id] || skill.id.replaceAll("_", " ")),
+      createElement("strong", "", String(skill.value)),
+    );
+    skillList.appendChild(row);
+  }
+  if (skillList.childElementCount) appendDetailSection(article, "擅长技能", skillList);
+
+  const backstory = character.backstory || {};
+  const description = character.description?.trim() || backstoryText(backstory, "description");
+  const background = backstoryText(backstory, "background");
+  const beliefs = backstoryText(backstory, "beliefs");
+  const traits = backstoryText(backstory, "traits");
+  if (description || background || beliefs || traits) {
+    const story = createElement("div", "character-story");
+    for (const [label, value] of [
+      ["外貌", description],
+      ["经历", background],
+      ["信念", beliefs],
+      ["特质", traits],
+    ]) {
+      if (!value) continue;
+      const paragraph = createElement("p");
+      paragraph.append(createElement("strong", "", `${label}：`), document.createTextNode(value));
+      story.appendChild(paragraph);
+    }
+    appendDetailSection(article, "人物档案", story);
+  }
+
+  const inventory = Array.isArray(character.inventory) ? character.inventory : [];
+  if (inventory.length) {
+    const list = createElement("ul", "character-inventory");
+    for (const item of inventory) {
+      list.appendChild(createElement("li", "", formatInventoryItem(item)));
+    }
+    appendDetailSection(article, "随身物品", list);
+  }
+
+  if (character.completed_modules || character.reputation) {
+    const career = createElement(
+      "div",
+      "character-career-note",
+      `完成案件 ${character.completed_modules} · 声望 ${character.reputation}`,
+    );
+    appendDetailSection(article, "调查履历", career);
+  }
+
+  characterDetail.replaceChildren(article);
+}
+
+btnStart.onclick = openCharacterSelection;
 btnContinue.onclick = continueGame;
+btnCharacterBack.onclick = () => {
+  if (!gameStarting) showStartView("menu");
+};
+btnCharacterConfirm.onclick = startGame;
+btnExit.hidden = !/\bElectron\//.test(navigator.userAgent);
+btnExit.onclick = () => window.close();
 btnNew.onclick = () => location.reload();
+
+document.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Escape"
+    && isCharacterViewOpen()
+    && !gameStarting
+    && document.getElementById("module-import-overlay")?.classList.contains("hidden")
+  ) {
+    showStartView("menu");
+  }
+});

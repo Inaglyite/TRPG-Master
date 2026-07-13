@@ -279,6 +279,7 @@ X-Module-Filename: example.trpgmod
           "name": "黄千陆",
           "occupation": "侦探/警方顾问",
           "age": 32,
+          "era": "1920年代",
           "source": "default",
           "source_label": "默认调查员",
           "hp": 10,
@@ -287,6 +288,14 @@ X-Module-Filename: example.trpgmod
           "max_san": 70,
           "reputation": 0,
           "completed_modules": 0,
+          "credit_rating": 25,
+          "attributes": {"STR": 45, "DEX": 55, "INT": 65},
+          "derived": {"MP": 14, "MOV": 8, "LUCK": 55, "DB": "-1"},
+          "inventory": ["笔记本与钢笔", "手电筒"],
+          "backstory": {
+            "description": "衣着整洁朴素，永远一丝不苟。",
+            "beliefs": "行动是最好的回击。"
+          },
           "top_skills": [
             {"id": "spot_hidden", "value": 70}
           ],
@@ -297,6 +306,9 @@ X-Module-Filename: example.trpgmod
   ]
 }
 ```
+
+开始界面先使用姓名、职业和 HP/SAN 渲染调查员名单；选中后使用 `attributes`、`derived`、
+`inventory`、`backstory` 和 `top_skills` 在本地渲染完整角色档案，不需要额外读取角色文件。
 
 固定分组及来源：
 
@@ -474,7 +486,8 @@ X-Module-Filename: example.trpgmod
 1. 用当前 `ModuleRecord.path/world_state_initial.json` 重建 `worlds/<world_id>/world_state.json`，并递增 revision。
 2. 把选中的调查员复制到当前 world 的 `pc`。
 3. 重建 system prompt 与会话消息。
-4. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
+4. 返回 `character_state`，让客户端在揭开开始界面前同步权威调查员资料。
+5. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
 
 ### 4.5 玩家动作
 
@@ -495,7 +508,7 @@ narrative_chunk * N
 done
 ```
 
-新游戏、读档和普通 `action` 都先发送 `gm_turn_start`，客户端以它和 `done` 作为一轮 GM 回合的边界。工具执行期间到达的 `handout` 或 `state_data` 可能早于最终叙述；正式前端会暂存这些展示更新，在 `done` 后显示材料并重新请求最终状态。
+新游戏和读档先发送 `character_state`，随后与普通 `action` 一样发送 `gm_turn_start`；客户端以 `gm_turn_start` 和 `done` 作为一轮 GM 回合的边界。工具执行期间到达的 `handout` 或 `state_data` 可能早于最终叙述；正式前端会暂存这些展示更新，在 `done` 后显示材料并重新请求最终状态。
 
 ### 4.6 回复检定确认
 
@@ -565,9 +578,10 @@ done
 成功顺序：
 
 1. `loaded`
-2. `gm_turn_start`
-3. GM 回合事件
-4. `done`
+2. `character_state`
+3. `gm_turn_start`
+4. GM 回合事件
+5. `done`
 
 读档会通过 `WorldStore.restore()` 把 `snapshot.json` 恢复到当前 world，执行 schema 迁移并生成新的 revision；待确认的战斗动作也随完整快照恢复。若读取槽位期间当前 world 已被其他动作更新，服务端发送 revision 过期的 `error`，不会覆盖新状态。随后模型消息加入“基于存档续写、不要重新开场”的指令。
 
@@ -939,6 +953,17 @@ done
 
 ### 5.3 状态事件
 
+#### `character_state`
+
+```json
+{
+  "type": "character_state",
+  "data": "{\"name\":\"黄千陆\",\"occupation\":\"侦探/警方顾问\",\"hp\":10,\"max_hp\":10,\"san\":70,\"max_san\":70}"
+}
+```
+
+新游戏完成角色套用、或读档恢复快照后立即发送。`data` 是 JSON 编码后的完整 `pc` 对象；客户端应立即刷新角色面板，不必等待本轮叙述结束。该事件不包含线索，避免开场信息提前揭示。
+
 #### `state_data`
 
 ```json
@@ -1103,6 +1128,7 @@ sequenceDiagram
     participant C as Client
     participant S as Server
     C->>S: start(character_ref)
+    S-->>C: character_state
     S-->>C: gm_turn_start
     loop Streaming
         S-->>C: narrative_chunk
@@ -1136,6 +1162,7 @@ sequenceDiagram
     participant S as Server
     C->>S: save_load(slot_id)
     S-->>C: loaded
+    S-->>C: character_state
     S-->>C: gm_turn_start
     S-->>C: narrative_chunk * N
     S-->>C: done

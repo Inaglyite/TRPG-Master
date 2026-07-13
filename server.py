@@ -289,6 +289,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         except Exception as e:
             print(f"[ws] emit 失败: {e}", file=sys.stderr)
 
+    async def send_character_state():
+        """在进入叙述前同步角色栏，不提前发送线索。"""
+        try:
+            pc_data = engine.context.world_store.load().get("pc", {})
+        except Exception:
+            pc_data = {}
+        await ws.send_json({
+            "type": "character_state",
+            "data": json.dumps(pc_data, ensure_ascii=False),
+        })
+
     # ---- 同步回调（被引擎在工作线程里同步调用）----
     def on_narrative(text: str):
         emit({"type": "narrative_chunk", "text": text})
@@ -450,7 +461,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
-                engine.reset(data.get("character_ref"))
+                try:
+                    engine.reset(data.get("character_ref"))
+                except ValueError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    continue
+                await send_character_state()
                 await ws.send_json({"type": "gm_turn_start"})
                 run_turn(engine.handle_action, None)
 
@@ -471,6 +487,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                         "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
                         "不要从头开场，不要重新介绍世界观。"
                     )
+                    await send_character_state()
                     await ws.send_json({"type": "gm_turn_start"})
                     run_turn(engine.handle_action, None)
 
@@ -524,6 +541,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                         "不要从头开场，不要重新介绍世界观。"
                     )
                     await ws.send_json({"type": "loaded", "ok": True, "slot_id": slot_id, "count": cnt})
+                    await send_character_state()
                     await ws.send_json({"type": "gm_turn_start"})
                     run_turn(engine.handle_action, None)
                 else:

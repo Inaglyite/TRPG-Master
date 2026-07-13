@@ -37,10 +37,10 @@
       <!-- 角色面板 -->
       <aside id="char-panel" class="collapsed">
         <div id="char-content">
-          <h3 id="char-name">爱德华·温斯洛</h3>
-          <p class="sub" id="char-occupation">私家侦探</p>
-          <div class="stat-row"><span>HP</span> <span id="hp-bar">12 / 12</span></div>
-          <div class="stat-row"><span>SAN</span> <span id="san-bar">62 / 65</span></div>
+          <h3 id="char-name">调查员</h3>
+          <p class="sub" id="char-occupation">档案载入中…</p>
+          <div class="stat-row"><span>HP</span> <span id="hp-bar">-- / --</span></div>
+          <div class="stat-row"><span>SAN</span> <span id="san-bar">-- / --</span></div>
           <hr />
           <div id="attr-list"></div>
           <hr />
@@ -56,27 +56,66 @@
     <!-- 开始游戏遮罩 -->
     <div id="start-overlay">
       <div id="start-box">
-        <div id="start-title">🏛 疯狂宅邸</div>
-        <div id="start-subtitle">A TRPG of Madness &amp; Mystery</div>
-        <div id="module-selector">
-          <label for="module-select">📚 模组选择</label>
-          <div class="module-select-row">
-            <select id="module-select"></select>
-            <button id="btn-import-module" type="button" title="导入 .trpgmod 模组包">⇧ <span>导入</span></button>
+        <section id="start-menu-view" class="start-view" aria-label="主菜单">
+          <div class="start-brand">
+            <div id="start-title">疯狂宅邸</div>
+            <div id="start-subtitle">A TRPG of Madness &amp; Mystery</div>
           </div>
-          <input id="module-file-input" type="file" accept=".trpgmod,application/zip" hidden />
-          <div id="module-import-status" aria-live="polite"></div>
-        </div>
-        <div id="character-selector">
-          <div class="selector-header">
-            <span>🪪 调查员</span>
+
+          <div id="module-selector">
+            <label for="module-select">当前模组</label>
+            <div class="module-select-row">
+              <select id="module-select" aria-label="选择模组"></select>
+              <button id="btn-import-module" type="button" title="导入 .trpgmod 模组包">⇧ <span>导入模组</span></button>
+            </div>
+            <input id="module-file-input" type="file" accept=".trpgmod,application/zip" hidden />
+            <div id="module-import-status" aria-live="polite"></div>
+          </div>
+
+          <nav class="start-menu-actions" aria-label="游戏菜单">
+            <button id="btn-start" class="start-art-button" type="button" aria-label="开始新游戏" disabled>
+              <span class="start-menu-icon" aria-hidden="true">▶</span>
+              <span id="start-new-label">开始新游戏</span>
+            </button>
+            <button id="btn-continue" class="start-art-button" type="button" aria-label="从存档开始" disabled>
+              <span class="start-menu-icon" aria-hidden="true">▤</span>
+              <span>从存档开始</span>
+            </button>
+            <button id="btn-exit" class="start-menu-button start-menu-exit" type="button" hidden>
+              <span class="start-menu-icon" aria-hidden="true">⏻</span>
+              <span>退出游戏</span>
+            </button>
+          </nav>
+          <div id="start-hint" aria-live="polite">正在读取存档…</div>
+        </section>
+
+        <section id="character-select-view" class="start-view hidden" aria-label="调查员选择">
+          <header class="character-select-header">
+            <button id="btn-character-back" type="button" class="character-back-button" aria-label="返回主菜单" title="返回主菜单">
+              <span aria-hidden="true">←</span>
+              <span>返回主菜单</span>
+            </button>
+            <div class="character-select-heading">
+              <h2>选择调查员</h2>
+              <div id="character-module-name">当前模组</div>
+            </div>
+          </header>
+
+          <div class="investigator-layout">
+            <section id="character-selector" class="character-roster" aria-label="可用调查员">
+              <div class="character-roster-title">可用调查员</div>
+              <div id="character-choice-list"></div>
+            </section>
+            <aside id="character-detail" aria-live="polite">
+              <div class="character-detail-empty">正在读取调查员档案…</div>
+            </aside>
+          </div>
+
+          <footer class="character-select-footer">
             <span id="character-selected-summary">等待角色列表…</span>
-          </div>
-          <div id="character-choice-list"></div>
-        </div>
-        <button id="btn-start">🕯 点燃烛火，开始故事</button>
-        <button id="btn-continue" class="secondary hidden">📜 继续游戏</button>
-        <div id="start-hint">继续游戏将从上次存档处恢复进度</div>
+            <button id="btn-character-confirm" type="button" disabled>以此调查员开始</button>
+          </footer>
+        </section>
       </div>
     </div>
 
@@ -96,7 +135,7 @@
   <div id="save-panel-overlay" class="hidden">
     <div id="save-panel">
       <div id="save-panel-header">
-        <h3>💾 存档管理</h3>
+        <h3 id="save-panel-title">💾 存档管理</h3>
         <button id="save-panel-close" class="panel-close-btn">关闭</button>
       </div>
       <div id="save-panel-body">

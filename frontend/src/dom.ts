@@ -35,6 +35,7 @@ export function setConn(state: "connecting" | "connected" | "disconnected") {
 }
 
 export const savePanelOverlay = document.getElementById("save-panel-overlay")!;
+export const savePanelTitle = document.getElementById("save-panel-title")!;
 export const savePanelClose = document.getElementById("save-panel-close")!;
 export const savePanelNew = document.getElementById("save-panel-new")!;
 export const savePanelList = document.getElementById("save-panel-list")!;
@@ -45,10 +46,17 @@ export const modalActions = document.getElementById("modal-actions")!;
 export const modalYes = document.getElementById("modal-yes")!;
 export const modalNo = document.getElementById("modal-no")!;
 export const startOverlay = document.getElementById("start-overlay")!;
+export const startMenuView = document.getElementById("start-menu-view")!;
+export const characterSelectView = document.getElementById("character-select-view")!;
 export const btnStart = document.getElementById("btn-start") as HTMLButtonElement;
 export const btnContinue = document.getElementById("btn-continue") as HTMLButtonElement;
+export const btnExit = document.getElementById("btn-exit") as HTMLButtonElement;
+export const btnCharacterBack = document.getElementById("btn-character-back") as HTMLButtonElement;
+export const btnCharacterConfirm = document.getElementById("btn-character-confirm") as HTMLButtonElement;
 export const characterChoiceList = document.getElementById("character-choice-list")!;
 export const characterSelectedSummary = document.getElementById("character-selected-summary")!;
+export const characterDetail = document.getElementById("character-detail")!;
+export const characterModuleName = document.getElementById("character-module-name")!;
 export const btnImportModule = document.getElementById("btn-import-module") as HTMLButtonElement;
 export const moduleFileInput = document.getElementById("module-file-input") as HTMLInputElement;
 export const moduleImportStatus = document.getElementById("module-import-status")!;

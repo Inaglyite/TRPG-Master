@@ -138,7 +138,7 @@ function handleMessage(e: MessageEvent) {
       break;
     case "error":
       addMsg("error", data.message);
-      if (getGameStarting()) resetStartButton();
+      if (!getGameStarted() || getGameStarting()) resetStartButton();
       break;
     case "saved":
       if (data.slot_id === "slot_000") finishQuickSave(Boolean(data.ok));
@@ -195,6 +195,10 @@ function handleMessage(e: MessageEvent) {
       break;
     case "case_settled":
       addMsg("system", data.ok ? "案件经历已写入调查员长期履历。" : `履历写入失败：${data.error || "未知错误"}`);
+      break;
+    case "character_state":
+      // 新游戏/读档确认后立即采用服务端的权威角色，避免显示静态占位角色。
+      updateCharPanel(data.data);
       break;
     case "state_data":
       // 开场前的预取状态可能属于旧存档；回合中的状态又可能早于叙述。

@@ -10,6 +10,7 @@ import {
   optionsBar,
   charPanel,
   savePanelOverlay,
+  savePanelTitle,
   savePanelClose,
   savePanelNew,
   savePanelList,
@@ -379,9 +380,12 @@ export function showEnding(data: any) {
 }
 
 // ---- 存档面板 ----
-export function openSavePanel() {
+export function openSavePanel(mode: "load" | "manage" = "manage") {
   // 如果开始界面还在显示，先隐藏
   if (!getGameStarted()) startOverlay.classList.add("hidden");
+  savePanelOverlay.dataset.mode = mode;
+  savePanelTitle.textContent = mode === "load" ? "从存档开始" : "存档管理";
+  savePanelNew.classList.toggle("hidden", mode === "load");
   savePanelOverlay.classList.remove("hidden");
   safeSend(JSON.stringify({ type: "save_list" }));
 }
@@ -590,7 +594,7 @@ export function finishQuickSave(ok: boolean) {
 // ==================== 按钮事件绑定 ====================
 
 btnSave.onclick = quickSave;
-btnLoad.onclick = openSavePanel;
+btnLoad.onclick = () => openSavePanel("manage");
 btnPanel.onclick = () => {
   charPanel.classList.toggle("collapsed");
   if (!charPanel.classList.contains("collapsed")) loadState();

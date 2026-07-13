@@ -7,7 +7,7 @@
  */
 
 import { connect } from "./ws";
-import { btnStart, getConnState, setConn } from "./dom";
+import { getConnState, setConn } from "./dom";
 import "./module-import";
 
 export { populateModuleList } from "./start";
@@ -62,11 +62,10 @@ export function applyTheme(theme: any) {
       setConn(getConnState());
     }
     const el = document.getElementById("start-title");
-    if (el) el.textContent = `🏛 ${theme.title}`;
+    if (el) el.textContent = theme.title;
   }
   const sub = document.getElementById("start-subtitle");
   if (sub && theme.subtitle) sub.textContent = theme.subtitle;
-  if (btnStart && theme.startButtonText) btnStart.textContent = theme.startButtonText;
 }
 
 // 启动：先连接 WS，主题/模组列表/存档列表都由 WS 下发
