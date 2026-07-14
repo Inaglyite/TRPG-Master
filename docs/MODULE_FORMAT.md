@@ -34,6 +34,7 @@ example.trpgmod
 ├── module.json         必需：权威结构化模组定义
 ├── keeper.md           可选：守秘人长篇正文
 ├── theme.json          可选：游戏主题
+├── lorebook.json       可选：按回合检索的 Lorebook v3
 ├── assets/             可选：图片与音频素材
 ├── skills/             可选：模组专属 Skill
 ├── characters/         可选：模组调查员 JSON
@@ -77,6 +78,7 @@ example.trpgmod
 | `entry` | 是 | v1 固定为 `module.json` |
 | `keeper_document` | 否 | v1 固定为 `keeper.md`，无正文时设为 `null` |
 | `theme` | 否 | v1 固定为 `theme.json`，无主题时设为 `null` |
+| `lorebook` | 否 | 固定为 `lorebook.json`；未使用时省略或设为 `null` |
 | `capabilities` | 否 | 包内高层能力声明 |
 | `tags` | 否 | 模组筛选标签 |
 | `created_with` | 否 | 生成这个包的编辑器版本 |
@@ -179,6 +181,18 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
     "related_npcs": [],
     "related_scenes": ["archive_courtyard"],
     "asset_id": "fragment_photo",
+    "granted_item": "井边纸片",
+    "flag_effects": {},
+    "discovery_rules": [
+      {
+        "intent": "search",
+        "targets": ["排水沟", "旧井"],
+        "skill": "spot_hidden",
+        "requires_success": true,
+        "sanity_severity": "minor",
+        "npc_reveals": []
+      }
+    ],
     "initially_known": false,
     "discovery_notes": "调查排水沟成功后揭示。"
   }
@@ -194,6 +208,23 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
 
 所有线索保存在 `clue_catalog`，只有 `initially_known: true` 或列入
 `initial_state.known_clue_ids` 的线索才进入开局 `clues_found`。
+`granted_item` 可选，用于“发现线索时同时获得同名实物”；运行时会幂等加入背包，旧存档已有
+线索但缺少该物品时也会补齐。
+
+`discovery_rules` 是运行时可靠触发契约。每条规则包含：
+
+- `intent`：`examine`、`search`、`read`、`take`、`talk`、`enter` 或 `use`。
+- `targets`：玩家话语中可识别的目标别名，至少一个；不接受正则或可执行代码。
+- `skill`：可选的技能 ID；`requires_success: true` 时必填。
+- `requires_success`：为真时，只有本轮指定技能成功才发放线索。
+- `sanity_severity`：可选的 `minor`、`moderate` 或 `major`，命中后在叙事前结算 SAN。
+- `npc_reveals`：同一发现中原子提交的人物揭示，包含 `npc_id`、`tier` 和 `entry_text`。
+
+规则仅匹配线索 `source` / `related_scenes` 对应的当前场景，否定句、询问能否行动、已发现线索
+不会触发。命中后引擎在模型生成正文前提交线索、素材、SAN、人物揭示和 `flag_effects`，避免
+长工具链与延迟分发。`discovery_notes` 仍用于作者说明和编辑器提示，不承担运行时语义。
+
+`flag_effects` 的键必须预先存在于 `initial_state.flags`；发现或重新对账该线索时会幂等应用。
 
 ### 4.5 结局
 
@@ -203,12 +234,17 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
     "title": "手稿归档",
     "trigger": "找回手稿并封住旧井",
     "description": "低语终于停止。",
-    "ending_type": "good"
+    "ending_type": "good",
+    "required_flags": {
+      "manuscript_recovered": true,
+      "well_sealed": true
+    }
   }
 }
 ```
 
-`ending_type` 支持 `good`、`neutral`、`bad`、`secret`。
+`ending_type` 支持 `good`、`neutral`、`bad`、`secret`。`required_flags` 是运行时结局硬门槛；
+`end_game` 会按作者态定义校验当前 flags，缺少任一条件时拒绝结算。
 
 ### 4.6 素材
 
@@ -223,10 +259,39 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
       }
     },
     "scenes": {},
-    "clues": {}
+    "clues": {
+      "fragment_photo": {
+        "file": "assets/fragment.png",
+        "label": "井边纸片",
+        "reveal_on": [
+          {
+            "event": "clue_discovered",
+            "match_all": ["纸片", "纤维"]
+          }
+        ]
+      }
+    }
   }
 }
 ```
+
+NPC、场景或线索填写 `asset_id` 后，编译器会自动生成精确触发：人物首次揭示、进入场景或按
+稳定 `clue_id` 发现线索时分发对应素材。`state_add_clue` 命中 `clue_catalog` 时应传 `clue_id`；
+模型是否记得调用 `show_handout` 不再是素材能否出现的前提。
+
+`reveal_on` 是可选的声明式兜底，适合兼容自由文本线索或确实需要从理智事件触发的素材：
+
+| `event` | 触发源 | 推荐条件 |
+|---|---|---|
+| `npc_revealed` | NPC 首次揭示 | `entity_id` |
+| `scene_entered` | 当前场景切换 | `entity_id` |
+| `clue_discovered` | 新线索写入状态 | `entity_id` 或文本条件 |
+| `sanity_triggered` | 守秘人确认玩家目击冲击场面 | `match_all` / `match_any` |
+
+`match_all` 中的词必须全部出现，`match_any` 至少出现一个；同时填写时两组条件都要满足。规则
+只接受上述白名单事件、实体 ID 和文本条件，不执行脚本。运行时按素材 ID 持久化首次展示状态，
+因此自动触发不会重复刷图；图片线索也会写回 `clues_found[].asset`，读档后仍可查看。展示一个
+能映射到 `clue_catalog` 的线索素材时，引擎会确保该线索同时进入清单。
 
 允许的素材扩展名：
 
@@ -256,6 +321,7 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
       "conditions": []
     },
     "known_clue_ids": [],
+    "granted_items": ["档案室黄铜钥匙"],
     "flags": { "well_opened": false },
     "case_clocks": { "whispers": 0 },
     "private_memory": {
@@ -268,11 +334,66 @@ NPC、场景、线索和结局均使用稳定 ID 作为对象键：
 ```
 
 实际玩家调查员在开局时由角色选择覆盖。模组作者不能通过 PC 模板指定玩家身份。
+`granted_items` 在角色覆盖后合并进调查员背包，适合模组必需的开场钥匙或委托物；重复名称只加入一次。
 
 ### 4.8 extensions
 
 NPC、场景、线索、PC、初始状态和模组顶层都可使用 `extensions` 保存编辑器插件数据。
 编译器会把这些字段合并进对应运行时对象，但扩展字段不能覆盖标准字段。
+
+### 4.9 lorebook.json
+
+叙事知识库复用 [Character Card V3 Lorebook 规范](https://github.com/kwaroran/character-card-spec-v3/blob/main/SPEC_V3.md)，不另造不兼容的条目格式。独立文件使用标准信封：
+
+```json
+{
+  "$schema": "https://trpg-master.local/schemas/lorebook-v3.json",
+  "spec": "lorebook_v3",
+  "data": {
+    "scan_depth": 2,
+    "token_budget": 600,
+    "recursive_scanning": false,
+    "extensions": {},
+    "entries": [
+      {
+        "id": "study-sound",
+        "keys": [],
+        "content": "从窗框轻震、远处翻书声或壁炉余烬中选一个细节。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "sensory_palette",
+            "scene_ids": ["archive_study"],
+            "group": "study-palette",
+            "cooldown_turns": 1
+          }
+        },
+        "enabled": true,
+        "insertion_order": 10,
+        "use_regex": false,
+        "constant": true,
+        "priority": 100
+      }
+    ]
+  }
+}
+```
+
+标准字段 `keys`、`constant`、`selective`、`secondary_keys`、`case_sensitive`、`priority`、`insertion_order`、`scan_depth` 和 `token_budget` 参与本地检索。当前版本会无损保留但不执行 `use_regex:true` 与 `recursive_scanning:true`，导入预览会给出 warning；这样可以避免不受信任的正则造成回合阻塞，也避免条目内容互相激活。
+
+`extensions.trpg_master` 可包含：
+
+| 字段 | 说明 |
+|---|---|
+| `kind` | `fact`、`sensory_palette`、`npc_voice`、`scene_pressure` 或 `style` |
+| `scene_ids` / `npc_ids` | 仅在对应场景或在场人物满足时可用 |
+| `required_flags` / `forbidden_flags` | 世界 flag 门槛；支持点分路径 |
+| `required_clue_ids` | 只有线索已经进入玩家线索清单后才可用 |
+| `visibility` | `public` 或 `gated`；`gated` 必须有 flag/线索门槛 |
+| `group` / `weight` | 同组每回合只确定性选择一个变体 |
+| `cooldown_turns` | 使用后多少叙事回合内不重复 |
+| `sensory_focus` | 供守秘人控制本轮感官重点的短标签 |
+
+场景、NPC、线索和 flag 引用会在编译/导入阶段校验。玩家输入中的关键词只负责激活已经满足信息门槛的条目，不能解锁 `gated` 内容。运行时不发起额外模型请求、不生成 embedding，也不把检索素材加入常驻 system prompt；它在当前回合权威状态之后追加一个有 token 上限的私有素材块。
 
 ## 5. keeper.md
 
@@ -292,19 +413,21 @@ NPC、场景、线索、PC、初始状态和模组顶层都可使用 `extensions
 1. ZIP 路径与体积安全检查。
 2. `manifest.json` Pydantic/JSON Schema 与最低引擎版本校验。
 3. `module.json` 结构校验。
-4. NPC、场景、出口、线索和素材交叉引用校验。
+4. NPC、场景、出口、线索、Lorebook 和素材交叉引用校验。
 5. capability 与目录一致性校验。
 6. UTF-8、JSON 与 SHA-256 校验。
 7. 编译运行时模板并原子安装。
 
 错误响应包含稳定的 `error_code`、面向用户的 `error` 和可定位字段的 `details`。
+未被实体引用且没有 `reveal_on` 的素材不会阻止导入，但编译器会产生
+`asset_without_reveal_path` warning，编辑器应在发布前明确展示。
 
 ### 6.1 编译器契约
 
 `src/module_compiler.py` 是游戏安装器、HTTP 预览和 CLI 共同使用的权威编译入口：
 
 ```text
-manifest.json + module.json + keeper.md
+manifest.json + module.json + keeper.md + lorebook.json（可选校验输入）
   -> CompilationResult
      ├── world_state
      ├── keeper_prompt
@@ -348,7 +471,7 @@ manifest.json + module.json + keeper.md
 用户模组的运行时 key 是 `<id>@<version>`。同一 ID 的多个版本可以并存；相同版本、不同内容
 不会被覆盖，作者必须提升版本号。相同 SHA-256 的包重复导入是幂等操作。
 
-安装目录保留包内 `manifest.json`、`module.json` 与作者文件的原始字节，只额外生成
+安装目录保留包内 `manifest.json`、`module.json`、`lorebook.json` 与作者文件的原始字节，只额外生成
 `module.md`、`world_state_initial.json`、`install.json`，并在缺少主题时生成默认 `theme.json`。
 因此包内 checksum 的含义不会在安装后改变。
 

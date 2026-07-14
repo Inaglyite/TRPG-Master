@@ -9,6 +9,7 @@
 import { connect } from "./ws";
 import { getConnState, setConn } from "./dom";
 import "./module-import";
+import "./settings";
 
 export { populateModuleList } from "./start";
 

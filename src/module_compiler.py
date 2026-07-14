@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import ValidationError
 
+from .lorebook import LorebookEnvelope, validate_lorebook_references
 from .module_diagnostics import (
     ModuleDiagnostic,
     analyze_module,
@@ -18,6 +19,7 @@ from .module_diagnostics import (
 from .module_format import (
     CLUE_CATEGORIES,
     AssetDefinition,
+    AssetRevealTrigger,
     ModuleDefinition,
     ModuleManifest,
 )
@@ -116,14 +118,30 @@ def _runtime_asset(asset_id: str | None, assets: dict[str, AssetDefinition]) -> 
     }
 
 
-def _runtime_asset_map(assets: dict[str, AssetDefinition]) -> dict[str, dict]:
-    return {
+def _runtime_asset_map(
+    assets: dict[str, AssetDefinition],
+    bindings: dict[str, Any],
+    event: str,
+) -> dict[str, dict]:
+    result = {
         asset_id: {
             "file": asset.file.removeprefix("assets/"),
             "label": asset.label or asset_id,
+            "alt": asset.alt,
+            "media_type": asset.media_type,
+            "reveal_on": [trigger.model_dump() for trigger in asset.reveal_on],
         }
         for asset_id, asset in assets.items()
     }
+    for entity_id, definition in bindings.items():
+        asset_id = definition.asset_id
+        if not asset_id:
+            continue
+        trigger = AssetRevealTrigger(event=event, entity_id=entity_id).model_dump()
+        triggers = result[asset_id]["reveal_on"]
+        if trigger not in triggers:
+            triggers.append(trigger)
+    return result
 
 
 def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> dict[str, Any]:
@@ -193,8 +211,17 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
         "revision": 0,
         "module": manifest.id,
         "module_version": manifest.version,
+        "module_meta": {
+            "id": manifest.id,
+            "version": manifest.version,
+            "title": manifest.title,
+            "system": manifest.system,
+            "era": manifest.era,
+            "language": manifest.language,
+        },
         "current_scene": current_scene,
         "pc": pc,
+        "module_starting_inventory": copy.deepcopy(module.initial_state.granted_items),
         "npcs": npcs,
         "clues_found": clues_found,
         "flags": copy.deepcopy(module.initial_state.flags),
@@ -204,10 +231,20 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
         "clue_catalog": clue_catalog,
         "endings": endings,
         "private_memory": private_memory,
+        "narrative_memory": {
+            "turn_sequence": 0,
+            "recent_lore": [],
+        },
         "asset_map": {
-            "npcs": _runtime_asset_map(module.assets.npcs),
-            "scenes": _runtime_asset_map(module.assets.scenes),
-            "clues": _runtime_asset_map(module.assets.clues),
+            "npcs": _runtime_asset_map(
+                module.assets.npcs, module.npcs, "npc_revealed"
+            ),
+            "scenes": _runtime_asset_map(
+                module.assets.scenes, module.scenes, "scene_entered"
+            ),
+            "clues": _runtime_asset_map(
+                module.assets.clues, module.clues, "clue_discovered"
+            ),
         },
         "clue_links": [link.model_dump(by_alias=True) for link in module.clue_links],
         "module_rules": copy.deepcopy(module.rules),
@@ -267,6 +304,7 @@ def _build_trace(
         TraceEntry("world_state.revision", "compiler.default", "set to zero"),
         TraceEntry("world_state.module", "manifest.id", "copy"),
         TraceEntry("world_state.module_version", "manifest.version", "copy"),
+        TraceEntry("world_state.module_meta", "manifest", "copy runtime metadata"),
         TraceEntry(
             "world_state.current_scene",
             f"module.scenes.{module.entry_scene_id}",
@@ -278,6 +316,11 @@ def _build_trace(
             "seed entry scene cache",
         ),
         TraceEntry("world_state.pc", "module.initial_state.pc", "copy template"),
+        TraceEntry(
+            "world_state.module_starting_inventory",
+            "module.initial_state.granted_items",
+            "copy module-granted items",
+        ),
         TraceEntry("world_state.flags", "module.initial_state.flags", "deep copy"),
         TraceEntry("world_state.case_clocks", "module.initial_state.case_clocks", "deep copy"),
         TraceEntry(
@@ -372,6 +415,7 @@ def compile_payload(
     manifest_payload: Any,
     module_payload: Any,
     keeper_notes: str = "",
+    lorebook_payload: Any | None = None,
 ) -> CompilationPreview:
     diagnostics: list[ModuleDiagnostic] = []
     if not isinstance(keeper_notes, str):
@@ -384,6 +428,7 @@ def compile_payload(
         ))
     manifest = None
     module = None
+    lorebook = None
     try:
         manifest = ModuleManifest.model_validate(manifest_payload)
     except ValidationError as exc:
@@ -400,7 +445,69 @@ def compile_payload(
             phase="module_validation",
             root="module",
         ))
+    if lorebook_payload is not None:
+        try:
+            lorebook = LorebookEnvelope.model_validate(lorebook_payload)
+        except ValidationError as exc:
+            diagnostics.extend(diagnostics_from_validation_error(
+                exc,
+                phase="lorebook_validation",
+                root="lorebook",
+            ))
+    if manifest is not None:
+        if manifest.lorebook and lorebook_payload is None:
+            diagnostics.append(ModuleDiagnostic(
+                phase="lorebook_validation",
+                level="error",
+                code="missing_file",
+                path="lorebook",
+                message="manifest 声明了 lorebook.json，但未提供 Lorebook 数据",
+            ))
+        if not manifest.lorebook and lorebook is not None:
+            diagnostics.append(ModuleDiagnostic(
+                phase="lorebook_validation",
+                level="error",
+                code="undeclared_lorebook",
+                path="manifest.lorebook",
+                message="提供了 Lorebook 数据，但 manifest.lorebook 未声明 lorebook.json",
+            ))
+    if module is not None and lorebook is not None:
+        for message in validate_lorebook_references(
+            lorebook,
+            scene_ids=set(module.scenes),
+            npc_ids=set(module.npcs),
+            clue_ids=set(module.clues),
+            flag_ids=set(module.initial_state.flags),
+        ):
+            diagnostics.append(ModuleDiagnostic(
+                phase="lorebook_validation",
+                level="error",
+                code="invalid_reference",
+                path="lorebook.data.entries",
+                message=message,
+            ))
+    if lorebook is not None and lorebook.data.recursive_scanning:
+        diagnostics.append(ModuleDiagnostic(
+            phase="lorebook_validation",
+            level="warning",
+            code="recursive_scanning_unsupported",
+            path="lorebook.data.recursive_scanning",
+            message="当前运行时会保留但不会执行 recursive_scanning",
+        ))
+    if lorebook is not None and any(entry.use_regex for entry in lorebook.data.entries):
+        diagnostics.append(ModuleDiagnostic(
+            phase="lorebook_validation",
+            level="warning",
+            code="regex_matching_unsupported",
+            path="lorebook.data.entries",
+            message="当前运行时会保留但不会执行 use_regex 条目",
+        ))
     if manifest is None or module is None or has_blocking_diagnostics(tuple(diagnostics)):
         return CompilationPreview(diagnostics=tuple(diagnostics))
     result = compile_module(manifest, module, keeper_notes)
+    if diagnostics:
+        result = replace(
+            result,
+            diagnostics=tuple(diagnostics) + result.diagnostics,
+        )
     return CompilationPreview(diagnostics=result.diagnostics, result=result)

@@ -12,7 +12,12 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .config import FORCE_PRO, MAX_TOOL_ROUNDS, MODEL_FLASH, MODEL_PRO
+from .config import (
+    ENABLE_TURN_AUDIT,
+    JUDGEMENT_MODEL,
+    MAX_TOOL_ROUNDS,
+    NARRATIVE_MODEL,
+)
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error, tool as log_tool
 from .tools import COMPLEX_FUNCTIONS, dice_summary
@@ -27,7 +32,10 @@ class TurnState(TypedDict, total=False):
     tool_calls: list[dict]
     turn_had_check: bool
     tool_outputs: list[tuple[str, str]]
+    executed_tools: list[dict]
     control_turn: bool
+    lore_active: bool
+    lore_entry_ids: list[str]
 
 
 def _tool_category(tool_calls: list[dict]) -> str:
@@ -45,22 +53,60 @@ def _prepare_turn(state: TurnState) -> dict:
     engine = state["engine"]
     user_content = state.get("user_content")
     control_turn = user_content is None and engine._has_pending_control_instruction()
+    resolved_discoveries: list[dict] = []
+    lore_selection = None
 
     if user_content:
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
-        engine.messages.append({"role": "user", "content": f"[玩家行动] {user_content}"})
+        engine._resolve_scene_transition(user_content)
+        discovery_matches, discovery_skill = engine._match_discoveries(user_content)
+        check_result = engine._resolve_action_check(user_content, discovery_skill)
+        resolved_discoveries = engine._resolve_discoveries(
+            discovery_matches,
+            check_result,
+        )
+        authority = engine._authoritative_turn_context(
+            check_result,
+            resolved_discoveries,
+        )
+        retrieve_lore = getattr(engine, "_retrieve_lore_context", None)
+        lore_selection = retrieve_lore(user_content) if retrieve_lore else None
+        content = f"[玩家行动] {user_content}"
+        if authority:
+            content += f"\n\n{authority}"
+        if lore_selection and lore_selection.context:
+            content += f"\n\n{lore_selection.context}"
+        engine.messages.append({"role": "user", "content": content})
         engine._detect_content_skill_hint(user_content)
+    else:
+        check_result = None
+        if control_turn:
+            authority = engine._authoritative_turn_context()
+            if authority and "[引擎权威状态｜仅供守秘人，不得复述]" not in engine.messages[-1].get("content", ""):
+                engine.messages[-1]["content"] += f"\n\n{authority}"
+            retrieve_lore = getattr(engine, "_retrieve_lore_context", None)
+            lore_selection = retrieve_lore() if retrieve_lore else None
+            if (
+                lore_selection
+                and lore_selection.context
+                and "[本轮 Lorebook 检索素材｜仅供守秘人，不得复述标签]"
+                not in engine.messages[-1].get("content", "")
+            ):
+                engine.messages[-1]["content"] += f"\n\n{lore_selection.context}"
 
-    engine.current_model = MODEL_PRO if FORCE_PRO else MODEL_FLASH
+    engine.current_model = getattr(engine, "narrative_model", NARRATIVE_MODEL)
     return {
         "tool_round": 0,
         "narrative": "",
         "text": "",
         "tool_calls": [],
-        "turn_had_check": bool(FORCE_PRO),
+        "turn_had_check": bool(check_result or resolved_discoveries),
         "tool_outputs": [],
+        "executed_tools": [],
         "control_turn": control_turn,
+        "lore_active": lore_selection is not None,
+        "lore_entry_ids": list(lore_selection.entry_ids) if lore_selection else [],
     }
 
 
@@ -68,7 +114,7 @@ def _call_story_agent(state: TurnState) -> dict:
     engine = state["engine"]
     text, tool_calls = engine._stream_llm(
         engine.current_model,
-        buffer_if_tools=bool(state.get("control_turn") and state.get("tool_round", 0) == 0),
+        buffer_if_tools=False,
     )
     return {"text": text, "tool_calls": tool_calls}
 
@@ -76,9 +122,9 @@ def _call_story_agent(state: TurnState) -> dict:
 def _call_combat_agent(state: TurnState) -> dict:
     engine = state["engine"]
     text, tool_calls = engine._stream_llm(
-        engine.current_model,
+        getattr(engine, "judgement_model", JUDGEMENT_MODEL),
         system_overlay=engine._combat_system_overlay(),
-        buffer_if_tools=bool(state.get("control_turn") and state.get("tool_round", 0) == 0),
+        buffer_if_tools=False,
     )
     return {"text": text, "tool_calls": tool_calls}
 
@@ -108,6 +154,9 @@ def _execute_tools(state: TurnState) -> dict:
     complex_hit = any(tc["function"]["name"] in COMPLEX_FUNCTIONS for tc in tool_calls)
     if complex_hit:
         turn_had_check = True
+        engine.current_model = getattr(
+            engine, "judgement_model", JUDGEMENT_MODEL
+        )
     if complex_hit and state.get("tool_round", 0) == 0:
         engine.cb.on_tension(tension(_tool_category(tool_calls)), _tool_category(tool_calls))
 
@@ -120,19 +169,22 @@ def _execute_tools(state: TurnState) -> dict:
     engine.messages.append(assistant_msg)
 
     tool_outputs: list[tuple[str, str]] = []
+    executed_tools = list(state.get("executed_tools", []))
     for tc in tool_calls:
         name = tc["function"]["name"]
         try:
             args = json.loads(tc["function"]["arguments"])
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             args = {}
 
-        output = engine._execute_tool(name, args)
+        try:
+            output = engine._execute_tool(name, args)
+        except Exception as exc:
+            log_error(f"工具 {name} 执行异常: {type(exc).__name__}: {exc}")
+            output = "[错误] 工具执行失败，请检查参数后重试"
+        executed_tools.append({"name": name, "args": args, "output": output})
         engine.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
         log_tool(name, args)
-
-        _handle_tool_side_effects(engine, name, args, output)
-        engine._maybe_hint_optional_skill(name)
 
         if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
             summary = dice_summary(output)
@@ -143,6 +195,9 @@ def _execute_tools(state: TurnState) -> dict:
                     roll_data = None
                 engine.cb.on_dice(summary, roll_data)
 
+        if name in {"sanity_event", "sanity_loss"}:
+            _emit_sanity_dice(engine, output)
+
         if name in {"combat_start", "combat_action"}:
             _emit_combat_dice(engine, output)
 
@@ -151,6 +206,14 @@ def _execute_tools(state: TurnState) -> dict:
 
         if name == "end_game":
             _handle_end_game(engine, output)
+
+    # A tool-calling assistant message must be followed immediately by every
+    # matching tool response. Optional skill instructions are user messages, so
+    # they can only be appended after the whole batch has been answered.
+    for name in dict.fromkeys(
+        tc["function"]["name"] for tc in tool_calls
+    ):
+        engine._maybe_hint_optional_skill(name)
 
     if tool_outputs:
         quick = glm_quick_summary(tool_outputs, text or narrative)
@@ -161,42 +224,16 @@ def _execute_tools(state: TurnState) -> dict:
         "narrative": narrative,
         "turn_had_check": turn_had_check,
         "tool_outputs": tool_outputs,
+        "executed_tools": executed_tools,
         "tool_round": state.get("tool_round", 0) + 1,
     }
-
-
-def _handle_tool_side_effects(engine: Any, name: str, args: dict, output: str) -> None:
-    if name == "npc_reveal":
-        try:
-            data = json.loads(output)
-            if data.get("ok") and data.get("revealed_level") == 1:
-                engine._auto_handout("npc", args.get("npc_id", ""))
-        except Exception:
-            pass
-
-    if name == "state_set" and args.get("path", "") == "current_scene":
-        try:
-            val = json.loads(args.get("value", "{}"))
-            scene_id = val.get("id", "") if isinstance(val, dict) else ""
-        except Exception:
-            scene_id = ""
-        if scene_id:
-            engine._auto_handout("scene", scene_id)
-
-    if name == "state_add_clue":
-        try:
-            data = json.loads(output)
-            asset = data.get("clue", {}).get("asset") or {}
-            asset_id = asset.get("id")
-            if data.get("ok") and asset_id:
-                engine._auto_handout("clue", asset_id)
-        except Exception:
-            pass
 
 
 def _handle_end_game(engine: Any, output: str) -> None:
     try:
         end_data = json.loads(output)
+        if not end_data.get("game_over"):
+            return
         engine.cb.on_game_over(
             end_data.get("ending_type", "neutral"),
             end_data.get("title", "故事结束"),
@@ -244,6 +281,30 @@ def _emit_combat_dice(engine: Any, output: str) -> None:
     )
 
 
+def _emit_sanity_dice(engine: Any, output: str) -> None:
+    try:
+        data = json.loads(output)
+        roll = int(data["san_roll"])
+        before = int(data["san_before"])
+        loss = int(data["actual_loss"])
+        success = bool(data["san_check_success"])
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return
+    engine.cb.on_dice(
+        f"理智检定 {roll} vs {before}，{'成功' if success else '失败'}，SAN -{loss}",
+        {
+            "spec": "d100",
+            "sides": 100,
+            "count": 1,
+            "rolls": [roll],
+            "total": roll,
+            "sanity": True,
+            "success": success,
+            "loss": loss,
+        },
+    )
+
+
 def _finalize_turn(state: TurnState) -> dict:
     engine = state["engine"]
     narrative = state.get("narrative", "")
@@ -251,13 +312,36 @@ def _finalize_turn(state: TurnState) -> dict:
     tool_calls = state.get("tool_calls", [])
 
     if not tool_calls and text:
-        narrative = text
+        if narrative and not narrative.endswith(("\n", " ")):
+            narrative += "\n\n"
+        narrative += text
 
     if narrative.strip():
         engine.messages.append({"role": "assistant", "content": narrative.strip()})
     else:
         log_error("空回合：模型未生成任何叙述或工具调用")
         engine.cb.on_error("守秘人陷入了沉思……")
+
+    if narrative.strip():
+        engine._reconcile_narrative_entities(narrative)
+        if (
+            ENABLE_TURN_AUDIT
+            and
+            state.get("user_content")
+            and engine._turn_needs_model_audit(
+                state.get("executed_tools", []),
+                player_action=state.get("user_content") or "",
+                narrative=narrative,
+            )
+        ):
+            engine._reconcile_turn(
+                state.get("user_content") or "",
+                narrative,
+                state.get("executed_tools", []),
+            )
+        engine._dispatch_narrative_handouts(narrative)
+        if state.get("lore_active"):
+            engine._record_lore_usage(tuple(state.get("lore_entry_ids", [])))
 
     engine.save("slot_000")
     engine._last_turn_high_risk = state.get("turn_had_check", False)

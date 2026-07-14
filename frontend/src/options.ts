@@ -25,6 +25,7 @@ import {
   showRollPending,
   getStreamTarget,
   setStreamTarget,
+  flushNarrativeStream,
 } from "./renderer";
 import { safeSend } from "./ws";
 import { escapeHtml } from "./text";
@@ -33,6 +34,7 @@ let activeDecisionId: string | null = null;
 
 // ---- 建议检定弹窗 ----
 export function onSuggest(data: any) {
+  flushNarrativeStream();
   removeLoading();
   modalActions.replaceChildren(modalYes, modalNo);
   modalText.innerHTML = `
@@ -48,6 +50,7 @@ export function onSuggest(data: any) {
 
 // ---- 通用多选决定（战斗防御等） ----
 export function onDecision(data: any) {
+  flushNarrativeStream();
   removeLoading();
   activeDecisionId = data.id || null;
   const options = Array.isArray(data.options) ? data.options : [];
@@ -79,6 +82,7 @@ export function onDecision(data: any) {
 
 // ---- GM 叙述结束，解析选项 ----
 export function onDone() {
+  flushNarrativeStream();
   removeLoading();
   removeRollPending();
   // 结束流式光标

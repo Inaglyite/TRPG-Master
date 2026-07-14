@@ -1,0 +1,115 @@
+{
+  "$schema": "https://trpg-master.local/schemas/lorebook-v3.json",
+  "spec": "lorebook_v3",
+  "data": {
+    "name": "低语档案馆叙事素材",
+    "description": "按场景检索的感官素材与人物语气示例。",
+    "scan_depth": 2,
+    "token_budget": 450,
+    "recursive_scanning": false,
+    "extensions": {
+      "trpg_master": {
+        "version": 1
+      }
+    },
+    "entries": [
+      {
+        "id": "study-paper",
+        "name": "书房纸张与尘埃",
+        "keys": [],
+        "content": "描写书房时可选取纸页受潮后的轻微卷曲、旧胶水与灰尘混合的气味，或指腹擦过书脊留下的浅痕；每次只使用一两个细节。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "sensory_palette",
+            "scene_ids": ["archive_study"],
+            "group": "archive-study-palette",
+            "cooldown_turns": 1,
+            "sensory_focus": "触觉与气味"
+          }
+        },
+        "enabled": true,
+        "insertion_order": 10,
+        "use_regex": false,
+        "constant": true,
+        "priority": 100
+      },
+      {
+        "id": "study-sound",
+        "name": "书房声响",
+        "keys": [],
+        "content": "让安静由细小声响显形：窗框受风轻震、远处翻书声忽然停顿、壁炉余烬偶尔塌落。避免同时堆叠全部声音。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "sensory_palette",
+            "scene_ids": ["archive_study"],
+            "group": "archive-study-palette",
+            "cooldown_turns": 1,
+            "sensory_focus": "听觉"
+          }
+        },
+        "enabled": true,
+        "insertion_order": 10,
+        "use_regex": false,
+        "constant": true,
+        "priority": 100
+      },
+      {
+        "id": "courtyard-weather",
+        "name": "庭院天气",
+        "keys": [],
+        "content": "庭院的氛围可借潮湿石板、屋檐滴水和穿过拱门的冷风呈现；不要把天气写成超自然征兆。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "sensory_palette",
+            "scene_ids": ["archive_courtyard"],
+            "group": "archive-courtyard-palette",
+            "cooldown_turns": 1,
+            "sensory_focus": "温度与环境"
+          }
+        },
+        "enabled": true,
+        "insertion_order": 10,
+        "use_regex": false,
+        "constant": true,
+        "priority": 100
+      },
+      {
+        "id": "archivist-voice",
+        "name": "林管理员语气",
+        "keys": ["林管理员", "管理员", "问他", "询问"],
+        "content": "林管理员答话时先给出准确而简短的事实，再用一次停顿或改口表现谨慎；不要让他替调查员直接下结论。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "npc_voice",
+            "npc_ids": ["archivist_lin"],
+            "cooldown_turns": 1
+          }
+        },
+        "enabled": true,
+        "insertion_order": 20,
+        "use_regex": false,
+        "constant": false,
+        "priority": 110
+      },
+      {
+        "id": "fragment-after-discovery",
+        "name": "纸片已发现后的客观细节",
+        "keys": ["纸片", "残片", "井"],
+        "content": "纸片已经成为已知线索时，可强调其纤维受潮、断口不整齐和墨迹深浅差异；这些是观察角度，不额外解释来源或真相。",
+        "extensions": {
+          "trpg_master": {
+            "kind": "fact",
+            "visibility": "gated",
+            "required_clue_ids": ["well_paper_fragment"],
+            "cooldown_turns": 2
+          }
+        },
+        "enabled": true,
+        "insertion_order": 30,
+        "use_regex": false,
+        "constant": false,
+        "priority": 120
+      }
+    ]
+  }
+}

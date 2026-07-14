@@ -32,6 +32,7 @@ import {
   showHandout,
 } from "./panels";
 import { applyTheme } from "./main";
+import { onModelSettings, onModelSettingsError } from "./settings";
 
 // ---- 后端地址 ----
 const WS_HOST = location.hostname || "localhost";
@@ -180,6 +181,12 @@ function handleMessage(e: MessageEvent) {
       break;
     case "theme":
       applyTheme(data.theme);
+      break;
+    case "model_settings":
+      onModelSettings(data);
+      break;
+    case "model_settings_error":
+      onModelSettingsError(data.message);
       break;
     case "save_list":
       onSaveList(data);

@@ -58,7 +58,50 @@ API_KEY = os.environ.get("OPENAI_API_KEY", "")
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com")
 MODEL_FLASH = os.environ.get("TRPG_FLASH_MODEL", "deepseek-v4-flash")
 MODEL_PRO = os.environ.get("TRPG_PRO_MODEL", "deepseek-v4-pro")
-FORCE_PRO = os.environ.get("TRPG_FORCE_PRO", "") in ("1", "true", "yes")
+_legacy_force_pro = os.environ.get("TRPG_FORCE_PRO")
+_default_role_model = (
+    MODEL_FLASH
+    if _legacy_force_pro is not None
+    and _legacy_force_pro.strip().lower() in ("0", "false", "no", "off")
+    else MODEL_PRO
+)
+NARRATIVE_MODEL = os.environ.get(
+    "TRPG_NARRATIVE_MODEL", _default_role_model
+).strip() or _default_role_model
+JUDGEMENT_MODEL = os.environ.get(
+    "TRPG_JUDGEMENT_MODEL",
+    os.environ.get("TRPG_JUDGMENT_MODEL", _default_role_model),
+).strip() or _default_role_model
+# Compatibility aliases for older integrations. New code should use the two
+# role-specific models above instead of inferring behavior from FORCE_PRO.
+FORCE_PRO = NARRATIVE_MODEL == MODEL_PRO and JUDGEMENT_MODEL == MODEL_PRO
+PRIMARY_MODEL = NARRATIVE_MODEL
+ENABLE_TURN_AUDIT = os.environ.get("TRPG_ENABLE_TURN_AUDIT", "") in (
+    "1", "true", "yes",
+)
+ENABLE_LOREBOOK = os.environ.get("TRPG_ENABLE_LOREBOOK", "1").lower() not in (
+    "0", "false", "no", "off",
+)
+
+# DeepSeek supports usage in the final streaming chunk. Keep auto-detection so
+# other OpenAI-compatible providers do not receive an unsupported parameter.
+_stream_usage_setting = os.environ.get("TRPG_STREAM_USAGE", "auto").lower()
+ENABLE_STREAM_USAGE = (
+    "deepseek.com" in BASE_URL.lower()
+    if _stream_usage_setting == "auto"
+    else _stream_usage_setting in ("1", "true", "yes", "on")
+)
+PROMPT_PROFILE = os.environ.get("TRPG_PROMPT_PROFILE", "hybrid").strip().lower()
+if PROMPT_PROFILE not in {"full", "hybrid"}:
+    PROMPT_PROFILE = "full"
+ENABLE_DYNAMIC_TOOLS = os.environ.get("TRPG_DYNAMIC_TOOLS", "1").lower() not in (
+    "0", "false", "no", "off",
+)
+STORY_THINKING_MODE = os.environ.get(
+    "TRPG_STORY_THINKING", "auto"
+).strip().lower()
+if STORY_THINKING_MODE not in {"auto", "disabled", "enabled", "provider"}:
+    STORY_THINKING_MODE = "auto"
 
 # ---- GLM-4 Flash 快速模型（免费，检定即时摘要） ----
 GLM_API_KEY = os.environ.get("GLM_API_KEY", "")
@@ -81,13 +124,14 @@ SKILL_LOAD_ORDER = [
     "keeper/keeper_sanity.skill",
 ]
 
-# 按需加载的 skill：特定工具被调用时，引擎自动提示模型 read_file 加载对应 skill
+# 按需加载的 skill：特定工具被调用时，引擎直接把规则内容注入上下文。
 OPTIONAL_SKILL_HINTS = {
     "apply_damage": "skills/keeper/keeper_combat.skill",
     "apply_heal": "skills/keeper/keeper_combat.skill",
     "combat_start": "skills/keeper/keeper_combat.skill",
     "combat_action": "skills/keeper/keeper_combat.skill",
     "use_item": "skills/keeper/keeper_items.skill",
+    "sanity_event": "skills/keeper/keeper_psychology.skill",
     "sanity_loss": "skills/keeper/keeper_psychology.skill",
     "create_character": "skills/investigator/investigator_creation.skill",
 }

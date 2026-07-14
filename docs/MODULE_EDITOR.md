@@ -78,18 +78,20 @@ NPC
 - 模组元数据与 capability。
 - NPC 列表、属性、技能、秘密、位置与肖像。
 - 场景列表、出口、在场 NPC、描述和场景文档。
-- 线索分类、层级、发现说明、人物/场景/素材关联。
+- 线索分类、层级、声明式发现规则、发现说明、人物/场景/素材关联与旗标效果。
 - 结局触发条件和类型。
 - Flags、案件时钟、初始已知线索。
 - `keeper.md` Markdown 编辑与预览。
 - `theme.json` 基础色彩、字体和开始页文案。
+- `lorebook.json` 条目、关键词、场景/NPC/线索门槛、优先级、分组与冷却编辑。
 
 ### 4.3 资产
 
 - 拖入图片并复制到 `assets/`。
 - 缩略图、文件大小、尺寸、格式和未使用状态。
 - 重命名素材 ID 时更新引用。
-- 检测缺失、重复和未引用素材。
+- 为自由文本兼容场景编辑白名单式 `reveal_on` 事件及 `match_all` / `match_any` 条件。
+- 检测缺失、重复、未引用以及没有任何分发路径的素材。
 - v1 不做图片裁剪和 AI 生成；只提供外部编辑后重新载入。
 
 ### 4.4 图关系
@@ -103,7 +105,9 @@ NPC
 
 - 玩家可见开场：只显示初始场景和已知线索。
 - 守秘人预览：显示完整 NPC 秘密、线索目录和 `keeper.md`。
+- 发现规则模拟器：输入玩家行动与当前场景，显示命中的线索、技能门槛、SAN、NPC、素材和旗标效果，但不修改工程或试玩状态。
 - 编译预览：查看生成的 `world_state_initial.json` 与 `module.md`。
+- Lorebook 命中模拟器：输入场景、已知线索、flags 和最近消息，显示本轮条目与 token 预算，不调用模型。
 - 一键“导出、安装并开始新世界”。
 - 试玩世界与编辑工程隔离，重置试玩不能修改工程。
 
@@ -129,10 +133,14 @@ NPC
 |---|---:|---|
 | Error | 是 | 悬空引用、重复 ID、缺失入口场景 |
 | Warning | 否 | 无许可证、自定义 Skill、未使用素材 |
-| Advice | 否 | NPC 没有动机、隐藏线索缺少发现说明 |
+| Advice | 否 | NPC 没有动机、隐藏线索缺少 `discovery_rules` |
 
 结构校验使用同一份 JSON Schema；场景出口、素材和信息边界使用 Python 语义校验器。前端校验用于
 即时反馈，后端导出校验仍是最终权威。
+
+线索属性面板中的发现规则使用结构化控件：意图下拉框、目标别名列表、技能下拉框、成功门槛开关、
+SAN 严重度下拉框和 NPC 揭示列表。`requires_success` 没有技能、NPC 引用不存在、旗标效果引用
+未声明 flag 时阻止导出。`discovery_notes` 是给作者看的补充说明，不能替代可执行规则。
 
 ## 6. 技术选型
 
@@ -195,6 +203,7 @@ connectScenes
 已经具备并应直接复用：
 
 - `src/module_format.py`：领域模型、交叉引用校验和 JSON Schema。
+- `src/lorebook.py`：Lorebook v3 兼容模型、引用校验和确定性检索。
 - `src/module_compiler.py`：权威无副作用编译、运行时产物和字段来源追踪。
 - `src/module_diagnostics.py`：带级别、阶段、错误码与字段路径的结构化诊断。
 - `src/module_registry.py`：包检查、安装和模组发现。
@@ -202,7 +211,7 @@ connectScenes
 - `/api/modules/compile`、`/inspect`、`/import` 和 `/schema/*`。
 
 编辑器首版不应复制一份 TypeScript 编译器。AJV 用于输入时的快速结构反馈，保存/预览时把内存中的
-`manifest`、`module` 与 `keeperDocument` 发送到 `/api/modules/compile`，以 Python 返回的
+`manifest`、`module`、`keeperDocument` 与可选 `lorebook` 发送到 `/api/modules/compile`，以 Python 返回的
 `CompilationResult` 为权威。诊断 `path` 可直接关联表单字段，`trace` 可用于编译结果检查器。
 
 ## 9. 工程 API 草案
@@ -229,7 +238,7 @@ connectScenes
 - Markdown 预览禁用原始 HTML、脚本、远程 iframe 和危险 URL。
 - 第三方 `.trpgmod` 先走现有包安全检查，再解包为工程。
 - Skill 编辑页持续显示“会进入模型上下文”的风险标记。
-- 玩家预览不得包含 NPC `secret`、未发现线索和 `discovery_notes`。
+- 玩家预览不得包含 NPC `secret`、未发现线索、`discovery_rules` 和 `discovery_notes`。
 - 发布前显示作者、来源、许可证和素材授权检查项。
 
 ## 11. 非功能要求

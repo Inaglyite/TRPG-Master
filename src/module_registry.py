@@ -18,6 +18,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
+from .lorebook import LorebookEnvelope, validate_lorebook_references
 from .module_compiler import compile_module
 from .module_format import (
     ModuleDefinition,
@@ -33,7 +34,13 @@ MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 MAX_SINGLE_FILE_BYTES = 32 * 1024 * 1024
 MAX_PACKAGE_FILES = 1024
 
-_ROOT_FILES = {"manifest.json", "module.json", "keeper.md", "theme.json"}
+_ROOT_FILES = {
+    "manifest.json",
+    "module.json",
+    "keeper.md",
+    "theme.json",
+    "lorebook.json",
+}
 _ALLOWED_EXTENSIONS = {
     "assets": {".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".mp3", ".ogg", ".wav"},
     "skills": {".skill"},
@@ -140,6 +147,7 @@ class PackageInspection:
     module: ModuleDefinition
     keeper_notes: str
     theme: dict
+    lorebook: LorebookEnvelope | None
     files: tuple[str, ...]
     package_sha256: str
     warnings: tuple[str, ...] = ()
@@ -158,6 +166,7 @@ class PackageInspection:
             "description": self.manifest.description,
             "system": self.manifest.system,
             "capabilities": self.manifest.capabilities,
+            "has_lorebook": self.lorebook is not None,
             "file_count": len(self.files),
             "package_sha256": self.package_sha256,
             "warnings": list(self.warnings),
@@ -346,7 +355,14 @@ def _load_json_entry(read: Callable[[str], bytes], name: str) -> dict:
 def _validate_package_content(
     names: set[str],
     read: Callable[[str], bytes],
-) -> tuple[ModuleManifest, ModuleDefinition, str, dict, list[str]]:
+) -> tuple[
+    ModuleManifest,
+    ModuleDefinition,
+    str,
+    dict,
+    LorebookEnvelope | None,
+    list[str],
+]:
     required = {"manifest.json", "module.json"}
     missing = sorted(required - names)
     if missing:
@@ -375,6 +391,8 @@ def _validate_package_content(
         referenced_files.add(manifest.keeper_document)
     if manifest.theme:
         referenced_files.add(manifest.theme)
+    if manifest.lorebook:
+        referenced_files.add(manifest.lorebook)
     for group in (module.assets.npcs, module.assets.scenes, module.assets.clues):
         referenced_files.update(asset.file for asset in group.values())
     referenced_files.update(
@@ -386,6 +404,11 @@ def _validate_package_content(
             "missing_reference",
             "模组定义引用了包内不存在的文件",
             details=missing_refs,
+        )
+    if "lorebook.json" in names and not manifest.lorebook:
+        raise ModulePackageError(
+            "undeclared_lorebook",
+            "模组包包含 lorebook.json，但 manifest.lorebook 未声明该文件",
         )
 
     skill_files = [name for name in names if name.startswith("skills/")]
@@ -421,6 +444,31 @@ def _validate_package_content(
     theme = {}
     if manifest.theme:
         theme = _load_json_entry(read, manifest.theme)
+    lorebook = None
+    if manifest.lorebook:
+        try:
+            lorebook = LorebookEnvelope.model_validate(
+                _load_json_entry(read, manifest.lorebook)
+            )
+        except ValidationError as exc:
+            raise ModulePackageError(
+                "invalid_lorebook",
+                "lorebook.json 校验失败",
+                details=_validation_details(exc),
+            ) from exc
+        reference_errors = validate_lorebook_references(
+            lorebook,
+            scene_ids=set(module.scenes),
+            npc_ids=set(module.npcs),
+            clue_ids=set(module.clues),
+            flag_ids=set(module.initial_state.flags),
+        )
+        if reference_errors:
+            raise ModulePackageError(
+                "invalid_lorebook_reference",
+                "lorebook.json 引用了不存在的模组实体",
+                details=reference_errors,
+            )
     for path in character_files:
         _load_json_entry(read, path)
     for path in skill_files + scene_files:
@@ -432,9 +480,13 @@ def _validate_package_content(
     warnings = []
     if "custom_skills" in declared:
         warnings.append("模组包含会进入守秘人上下文的自定义 Skill")
+    if lorebook and lorebook.data.recursive_scanning:
+        warnings.append("当前版本会保留但不会执行 Lorebook recursive_scanning")
+    if lorebook and any(entry.use_regex for entry in lorebook.data.entries):
+        warnings.append("当前版本会保留但不会执行 Lorebook 正则触发词")
     if not manifest.license:
         warnings.append("模组未声明许可证或授权信息")
-    return manifest, module, keeper_notes, theme, warnings
+    return manifest, module, keeper_notes, theme, lorebook, warnings
 
 
 def inspect_package(package_path: Path) -> PackageInspection:
@@ -478,14 +530,20 @@ def inspect_package(package_path: Path) -> PackageInspection:
             except (zipfile.BadZipFile, RuntimeError) as exc:
                 raise ModulePackageError("invalid_archive", f"ZIP 条目损坏: {name}") from exc
 
-        manifest, module, keeper_notes, theme, warnings = _validate_package_content(
-            set(names), read
-        )
+        (
+            manifest,
+            module,
+            keeper_notes,
+            theme,
+            lorebook,
+            warnings,
+        ) = _validate_package_content(set(names), read)
     return PackageInspection(
         manifest=manifest,
         module=module,
         keeper_notes=keeper_notes,
         theme=theme,
+        lorebook=lorebook,
         files=tuple(sorted(names)),
         package_sha256=_sha256_path(package_path),
         warnings=tuple(warnings),
@@ -540,8 +598,8 @@ def build_package(source_dir: Path, output_path: Path) -> PackageInspection:
     def read_source(name: str) -> bytes:
         return source_overrides.get(name) or source_files[name].read_bytes()
 
-    manifest, _module, _notes, _theme, _warnings = _validate_package_content(
-        set(source_files), read_source
+    manifest, _module, _notes, _theme, _lorebook, _warnings = (
+        _validate_package_content(set(source_files), read_source)
     )
     manifest_data = manifest.model_dump(by_alias=True, exclude_none=True)
     manifest_data["checksums"] = {

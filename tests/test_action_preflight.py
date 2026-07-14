@@ -91,6 +91,23 @@ class ActionPreflightTests(unittest.TestCase):
         self.assertEqual(engine._turn_graph.inputs, [])
         self.assertIn("行动发生前取消", engine.messages[-1]["content"])
 
+    def test_conversation_about_a_death_reaches_gm_without_confirmation(self):
+        events: list[str] = []
+        content = (
+            "你是说，莱特教授的死很有可能和巫术有关？法伦先生，我来自遥远的东方，"
+            "也从来没有听说过这样神奇的巫术。能够通过一个文档将人杀死。"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = WorldStore(Path(temp_dir) / "world")
+            store.initialize(make_world())
+            engine = self._engine("cancel_violence", events, store)
+            engine.handle_action(content)
+
+        self.assertEqual(events, ["graph"])
+        submitted = engine._turn_graph.inputs[0][0]["user_content"]
+        self.assertEqual(submitted, content)
+
     def test_matching_tool_confirmation_consumes_one_time_authorization(self):
         engine = self._engine("confirm_violence", [])
         engine._preconfirmed_escalation = {

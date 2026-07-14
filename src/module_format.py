@@ -22,6 +22,12 @@ _SEMVER_RE = re.compile(
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CAPABILITIES = {"custom_skills", "bundled_characters", "scene_documents"}
 CLUE_CATEGORIES = ("investigation", "event", "task", "npc")
+HANDOUT_REVEAL_EVENTS = (
+    "npc_revealed",
+    "scene_entered",
+    "clue_discovered",
+    "sanity_triggered",
+)
 _WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{number}" for number in range(1, 10)),
@@ -95,6 +101,7 @@ class ModuleManifest(StrictModel):
     entry: Literal["module.json"] = "module.json"
     keeper_document: Literal["keeper.md"] | None = "keeper.md"
     theme: Literal["theme.json"] | None = "theme.json"
+    lorebook: Literal["lorebook.json"] | None = None
     capabilities: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list, max_length=20)
     created_with: str = Field(default="", max_length=120)
@@ -116,7 +123,7 @@ class ModuleManifest(StrictModel):
             raise ValueError("版本必须是 SemVer，例如 1.2.0")
         return value
 
-    @field_validator("keeper_document", "theme")
+    @field_validator("keeper_document", "theme", "lorebook")
     @classmethod
     def validate_optional_path(cls, value: str | None) -> str | None:
         return None if value is None else _safe_relative_path(value, "文件路径")
@@ -144,11 +151,49 @@ class ModuleManifest(StrictModel):
         return result
 
 
+class AssetRevealTrigger(StrictModel):
+    event: Literal[
+        "npc_revealed",
+        "scene_entered",
+        "clue_discovered",
+        "sanity_triggered",
+    ]
+    entity_id: str | None = None
+    match_all: list[str] = Field(default_factory=list, max_length=8)
+    match_any: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("entity_id")
+    @classmethod
+    def validate_entity_id(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_entity_id(value, "素材触发实体 ID")
+
+    @field_validator("match_all", "match_any")
+    @classmethod
+    def validate_match_terms(cls, values: list[str]) -> list[str]:
+        normalized = [str(value).strip() for value in values]
+        if any(not value or len(value) > 120 for value in normalized):
+            raise ValueError("素材触发词长度必须为 1-120 个字符")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("素材触发词不能重复")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_match_condition(self) -> "AssetRevealTrigger":
+        if not self.entity_id and not self.match_all and not self.match_any:
+            raise ValueError("素材触发规则必须指定 entity_id 或文本匹配条件")
+        if self.event == "sanity_triggered" and not self.match_all and not self.match_any:
+            raise ValueError("sanity_triggered 必须指定文本匹配条件")
+        if self.event == "sanity_triggered" and self.entity_id:
+            raise ValueError("sanity_triggered 没有实体 ID，请使用文本匹配条件")
+        return self
+
+
 class AssetDefinition(StrictModel):
     file: str
     label: str = Field(default="", max_length=200)
     alt: str = Field(default="", max_length=500)
     media_type: str = Field(default="", max_length=100)
+    reveal_on: list[AssetRevealTrigger] = Field(default_factory=list, max_length=16)
 
     @field_validator("file")
     @classmethod
@@ -220,6 +265,40 @@ class SceneDefinition(StrictModel):
         return value
 
 
+class NpcRevealEffectDefinition(StrictModel):
+    npc_id: str
+    tier: int = Field(default=1, ge=1, le=3)
+    entry_text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("npc_id")
+    @classmethod
+    def validate_npc_id(cls, value: str) -> str:
+        return _validate_entity_id(value, "NPC ID")
+
+
+class DiscoveryRuleDefinition(StrictModel):
+    intent: Literal["examine", "search", "read", "take", "talk", "enter", "use"]
+    targets: list[str] = Field(min_length=1)
+    skill: str | None = Field(default=None, min_length=1, max_length=100)
+    requires_success: bool = False
+    sanity_severity: Literal["minor", "moderate", "major"] | None = None
+    npc_reveals: list[NpcRevealEffectDefinition] = Field(default_factory=list)
+
+    @field_validator("targets")
+    @classmethod
+    def validate_targets(cls, values: list[str]) -> list[str]:
+        targets = [str(value).strip() for value in values]
+        if any(not value for value in targets):
+            raise ValueError("发现规则的目标别名不能为空")
+        return targets
+
+    @model_validator(mode="after")
+    def validate_required_skill(self) -> "DiscoveryRuleDefinition":
+        if self.requires_success and not self.skill:
+            raise ValueError("requires_success=true 时必须指定 skill")
+        return self
+
+
 class ClueDefinition(StrictModel):
     text: str = Field(min_length=1)
     category: Literal["investigation", "event", "task", "npc"] = "investigation"
@@ -229,6 +308,9 @@ class ClueDefinition(StrictModel):
     related_npcs: list[str] = Field(default_factory=list)
     related_scenes: list[str] = Field(default_factory=list)
     asset_id: str | None = None
+    granted_item: str | None = Field(default=None, max_length=200)
+    flag_effects: dict[str, bool | int | str] = Field(default_factory=dict)
+    discovery_rules: list[DiscoveryRuleDefinition] = Field(default_factory=list)
     initially_known: bool = False
     discovery_notes: str = ""
     extensions: dict[str, Any] = Field(default_factory=dict)
@@ -243,12 +325,21 @@ class ClueDefinition(StrictModel):
     def validate_asset_id(cls, value: str | None) -> str | None:
         return None if value is None else _validate_entity_id(value)
 
+    @field_validator("granted_item")
+    @classmethod
+    def validate_granted_item(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
 
 class EndingDefinition(StrictModel):
     title: str = Field(min_length=1, max_length=200)
     trigger: str = Field(min_length=1)
     description: str = Field(min_length=1)
     ending_type: Literal["good", "neutral", "bad", "secret"] = "neutral"
+    required_flags: dict[str, bool | int | str] = Field(default_factory=dict)
 
 
 class ClueLinkDefinition(StrictModel):
@@ -290,6 +381,7 @@ class PrivateMemoryDefinition(StrictModel):
 
 class InitialStateDefinition(StrictModel):
     pc: PcTemplate = Field(default_factory=PcTemplate)
+    granted_items: list[Any] = Field(default_factory=list)
     known_clue_ids: list[str] = Field(default_factory=list)
     flags: dict[str, Any] = Field(default_factory=dict)
     case_clocks: dict[str, int] = Field(default_factory=dict)
@@ -340,6 +432,21 @@ class ModuleDefinition(StrictModel):
         npc_ids = set(self.npcs)
         scene_ids = set(self.scenes)
         clue_ids = set(self.clues)
+        trigger_targets = {
+            "npc_revealed": npc_ids,
+            "scene_entered": scene_ids,
+            "clue_discovered": clue_ids,
+        }
+        for group_name in ("npcs", "scenes", "clues"):
+            for asset_id, asset in getattr(self.assets, group_name).items():
+                for trigger in asset.reveal_on:
+                    targets = trigger_targets.get(trigger.event)
+                    if trigger.entity_id and targets is not None:
+                        if trigger.entity_id not in targets:
+                            raise ValueError(
+                                f"素材 {asset_id} 的 {trigger.event} 触发实体不存在: "
+                                f"{trigger.entity_id}"
+                            )
         for scene_id, scene in self.scenes.items():
             missing_exits = sorted(set(scene.exits) - scene_ids)
             missing_npcs = sorted(set(scene.npcs_present) - npc_ids)
@@ -365,12 +472,37 @@ class ModuleDefinition(StrictModel):
                 raise ValueError(f"线索 {clue_id} 引用了不存在的场景: {missing_scenes}")
             if clue.asset_id and clue.asset_id not in self.assets.clues:
                 raise ValueError(f"线索 {clue_id} 的素材不存在: {clue.asset_id}")
+            for rule in clue.discovery_rules:
+                missing_reveals = sorted({
+                    reveal.npc_id
+                    for reveal in rule.npc_reveals
+                    if reveal.npc_id not in npc_ids
+                })
+                if missing_reveals:
+                    raise ValueError(
+                        f"线索 {clue_id} 的发现规则引用了不存在的 NPC: "
+                        f"{missing_reveals}"
+                    )
 
         known = set(self.initial_state.known_clue_ids)
         known.update(clue_id for clue_id, clue in self.clues.items() if clue.initially_known)
         missing_known = sorted(known - clue_ids)
         if missing_known:
             raise ValueError(f"初始线索不存在: {missing_known}")
+
+        flag_ids = set(self.initial_state.flags)
+        for clue_id, clue in self.clues.items():
+            missing_flags = sorted(set(clue.flag_effects) - flag_ids)
+            if missing_flags:
+                raise ValueError(
+                    f"线索 {clue_id} 的 flag_effects 不存在: {missing_flags}"
+                )
+        for ending_id, ending in self.endings.items():
+            missing_flags = sorted(set(ending.required_flags) - flag_ids)
+            if missing_flags:
+                raise ValueError(
+                    f"结局 {ending_id} 的 required_flags 不存在: {missing_flags}"
+                )
 
         for link in self.clue_links:
             missing = [clue_id for clue_id in (link.from_id, link.to_id) if clue_id not in clue_ids]

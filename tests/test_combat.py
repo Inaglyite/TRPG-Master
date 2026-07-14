@@ -74,6 +74,23 @@ class CombatStateMachineTests(unittest.TestCase):
         self.assertIsNone(preview_player_escalation(world, "如果朝法伦开枪会怎么样？"))
         self.assertIsNone(preview_player_escalation(world, "我收起枪，不朝法伦开枪"))
 
+    def test_preflight_ignores_reported_deaths_and_conversational_questions(self):
+        world = make_world()
+        world["npcs"][0]["id"] = "bryce_fallon"
+        world["npcs"][0]["name"] = "布莱斯·法伦"
+        world["npcs"][0]["disposition"] = "cooperative"
+
+        dialogue = (
+            "你是说，莱特教授的死很有可能和巫术有关？法伦先生，我来自遥远的东方，"
+            "也从来没有听说过这样神奇的巫术。能够通过一个文档将人杀死。"
+        )
+
+        self.assertIsNone(preview_player_escalation(world, dialogue))
+        self.assertIsNone(
+            preview_player_escalation(world, "我问法伦：莱特教授是被人杀死的吗？")
+        )
+        self.assertIsNotNone(preview_player_escalation(world, "我决定杀死法伦"))
+
     def test_preflight_does_not_interrupt_attack_on_hostile_target(self):
         world = make_world()
 

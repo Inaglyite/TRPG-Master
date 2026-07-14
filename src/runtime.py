@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from .handouts import refresh_static_handout_config
 from .module_registry import ModuleRecord, ModuleRegistry
 from .world_store import WorldStore, atomic_write_json
 
@@ -26,6 +27,11 @@ def _validate_component(value: str, label: str) -> str:
     if not value or value in {".", ".."} or Path(value).name != value:
         raise ValueError(f"非法的 {label}: {value!r}")
     return value
+
+
+def _file_revision(path: Path) -> str:
+    stat = path.stat()
+    return f"{stat.st_mtime_ns}:{stat.st_size}"
 
 
 @dataclass(frozen=True)
@@ -73,6 +79,10 @@ class RuntimeContext:
     @property
     def theme_file(self) -> Path:
         return self.module_dir / "theme.json"
+
+    @property
+    def lorebook_file(self) -> Path:
+        return self.module_dir / "lorebook.json"
 
     @property
     def assets_dir(self) -> Path:
@@ -149,6 +159,20 @@ class RuntimeContext:
                 metadata["migrated_from"] = migrated_from
                 metadata["migrated_at"] = datetime.now().isoformat()
                 atomic_write_json(self.metadata_file, metadata)
+
+        initial_state_revision = (
+            _file_revision(self.initial_state_file)
+            if self.initial_state_file.exists()
+            else ""
+        )
+        if initial_state_revision and (
+            metadata.get("initial_state_revision") != initial_state_revision
+        ):
+            template = json.loads(self.initial_state_file.read_text(encoding="utf-8"))
+            with self.world_store.transaction() as state:
+                refresh_static_handout_config(state, template)
+            metadata["initial_state_revision"] = initial_state_revision
+            atomic_write_json(self.metadata_file, metadata)
 
         if migrate_legacy and not metadata.get("legacy_saves_migrated"):
             legacy_save_dirs = [

@@ -8,6 +8,7 @@ import mimetypes
 import subprocess
 from pathlib import Path
 
+from .endings import validate_ending
 from .runtime import RuntimeContext
 
 
@@ -117,7 +118,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "state_add_clue",
-            "description": "记录新发现的线索。只在检定成功或确凿发现了信息时调用。根据线索性质选择分类：investigation(探案/现场证据)、event(事件/剧情)、task(任务/目标)、npc(人物相关发现)。如果该线索对应 asset_map.clues 中的展示材料，请提供 asset_id；引擎会在记录线索后自动分发图片。",
+            "description": "记录新发现的线索。只在检定成功或确凿发现了信息时调用。根据线索性质选择分类：investigation(探案/现场证据)、event(事件/剧情)、task(任务/目标)、npc(人物相关发现)。若发现对应 clue_catalog 中的预设线索，优先提供 clue_id；引擎会采用模组定义并可靠分发关联素材。asset_id 只用于没有预设线索的兼容场景。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -130,6 +131,10 @@ TOOLS = [
                     "asset_id": {
                         "type": "string",
                         "description": "可选。对应 world_state.asset_map.clues 的键，如 wright_body、monster_manifest、wick_dinner。仅在线索确实对应该图片时填写。"
+                    },
+                    "clue_id": {
+                        "type": "string",
+                        "description": "可选。对应 world_state.clue_catalog 的稳定线索 ID；匹配预设线索时优先填写，以使用作者配置的分类、关联与素材触发。"
                     }
                 },
                 "required": ["text", "category"]
@@ -168,6 +173,45 @@ TOOLS = [
                     "amount": {"type": "integer", "description": "治疗量"}
                 },
                 "required": ["target", "amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sanity_event",
+            "description": "一次性结算恐怖事件：根据场景描述确认严重度、执行SAN检定与损失，并触发关联展示素材。关联素材对应的预设线索及其flag_effects会自动提交；结果会列出auto_committed，禁止再重复调用state_add_clue或state_set。首次目击尸体、超自然现象或其他恐怖事件时只调用本工具一次。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "玩家实际目击的恐怖场景简述"
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["trivial", "minor", "moderate", "major", "catastrophic"],
+                        "description": "按模组设定选择的损失严重度"
+                    },
+                    "clue_id": {
+                        "type": "string",
+                        "description": "同一恐怖发现对应的available_scene_clues稳定ID；没有时传空字符串"
+                    },
+                    "npc_reveals": {
+                        "type": "array",
+                        "description": "同一事件已明确揭示的NPC信息；没有时传空数组",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "npc_id": {"type": "string"},
+                                "tier": {"type": "integer"},
+                                "entry_text": {"type": "string"}
+                            },
+                            "required": ["npc_id", "tier", "entry_text"]
+                        }
+                    }
+                },
+                "required": ["description", "severity", "clue_id", "npc_reveals"]
             }
         }
     },
@@ -431,14 +475,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "end_game",
-            "description": "结束游戏。当故事到达结局时调用：侦探成功破案、角色死亡/疯狂、真相大白等。调用后游戏将进入结局画面。",
+            "description": "请求结束游戏。若模组定义了结局，必须提供 ending_id；引擎会校验 required_flags，前置条件未满足时拒绝进入结局画面。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "ending_id": {
+                        "type": "string",
+                        "description": "world_state.endings 中的稳定结局 ID"
+                    },
                     "ending_type": {
                         "type": "string",
-                        "enum": ["good", "bad", "neutral"],
-                        "description": "结局类型：good=真相大白/成功破案，bad=死亡/疯狂/失败，neutral=撤退/不了了之"
+                        "enum": ["good", "bad", "neutral", "secret"],
+                        "description": "结局类型"
                     },
                     "title": {"type": "string", "description": "结局标题，如「真相大白」「疯狂之末」"},
                     "summary": {"type": "string", "description": "结局概要，200字以内，总结整个冒险的关键发现和最终命运"}
@@ -635,6 +683,59 @@ TOOLS = [
     }
 ]
 
+
+# These remain available to the engine and old save histories, but exposing
+# them to the story model creates redundant read/display/model round trips.
+_ENGINE_ONLY_TOOL_NAMES = {
+    "cache_scene",
+    "read_file",
+    "state_npcs",
+    "state_clues",
+    "get_private_memory",
+    "show_handout",
+    "sanity_trigger",
+    "sanity_loss",
+    "update_private_memory",
+}
+
+MODEL_TOOLS = [
+    tool
+    for tool in TOOLS
+    if tool.get("function", {}).get("name") not in _ENGINE_ONLY_TOOL_NAMES
+]
+
+_STORY_EXCLUDED_MODEL_TOOLS = {
+    "create_character",
+    "load_character",
+    "combat_status",
+    "combat_action",
+    "combat_end",
+}
+
+_COMBAT_EXCLUDED_MODEL_TOOLS = {
+    "create_character",
+    "load_character",
+    "combat_start",
+    "suggest_check",
+    "link_clues",
+    "set_psychological_trait",
+    "get_npc_secret",
+}
+
+
+def model_tools_for(role: str) -> list[dict]:
+    """Return a stable, role-specific subset without changing tool execution."""
+    excluded = (
+        _COMBAT_EXCLUDED_MODEL_TOOLS
+        if role == "combat"
+        else _STORY_EXCLUDED_MODEL_TOOLS
+    )
+    return [
+        tool
+        for tool in MODEL_TOOLS
+        if tool.get("function", {}).get("name") not in excluded
+    ]
+
 # ---------------------------------------------------------------------------
 # 工具分类
 # ---------------------------------------------------------------------------
@@ -644,7 +745,7 @@ COMPLEX_FUNCTIONS = {
     "dice_roll",
     "apply_damage", "apply_heal",
     "combat_start", "combat_action", "combat_end",
-    "sanity_loss", "sanity_restore", "sanity_check",
+    "sanity_event", "sanity_loss", "sanity_restore", "sanity_check",
     "create_character",
     "attribute_check", "luck_check",
     "psychoanalysis", "reality_check",
@@ -712,8 +813,9 @@ def execute_function(
     elif name == "state_add_clue":
         argv = [exe, "tools/state_manager.py", "add-clue", args.get("text", ""), args.get("category", "investigation")]
         asset_id = args.get("asset_id", "") or ""
-        if asset_id:
-            argv.append(asset_id)
+        clue_id = args.get("clue_id", "") or ""
+        if asset_id or clue_id:
+            argv.extend([asset_id, clue_id])
         return run_cli(argv)
     elif name == "state_add_item":
         return run_cli([exe, "tools/state_manager.py", "add-item", args.get('item', '')])
@@ -723,6 +825,22 @@ def execute_function(
         return run_cli([exe, "tools/damage.py", "damage", args.get('target', 'pc'), args.get('amount', 0), args.get('damage_type', '物理')])
     elif name == "apply_heal":
         return run_cli([exe, "tools/damage.py", "heal", args.get('target', 'pc'), args.get('amount', 0)])
+    elif name == "sanity_event":
+        trigger = json.loads(execute_function(
+            "sanity_trigger",
+            {"description": args.get("description", "")},
+            context=context,
+        ))
+        loss = json.loads(execute_function(
+            "sanity_loss",
+            {"severity": args.get("severity", trigger.get("suggestion", "moderate"))},
+            context=context,
+        ))
+        return json.dumps({
+            **loss,
+            "description": args.get("description", ""),
+            "suggested_severity": trigger.get("suggestion"),
+        }, ensure_ascii=False)
     elif name == "sanity_loss":
         return run_cli([exe, "tools/sanity.py", "loss", args.get('severity', 'moderate')])
     elif name == "sanity_restore":
@@ -783,30 +901,66 @@ def execute_function(
             return json.dumps({"cached": False, "error": str(e)})
 
     elif name == "end_game":
-        ending = args.get("ending_type", "neutral")
-        title = args.get("title", "故事结束")
-        summary = args.get("summary", "")
+        resolution = validate_ending(context.world_store.load(), args)
+        if not resolution.get("ok"):
+            return json.dumps({"game_over": False, **resolution}, ensure_ascii=False)
+        ending = resolution["ending_type"]
+        title = resolution["title"]
+        summary = resolution["summary"]
         def finish(data: dict) -> None:
             data["game_over"] = {
+                "id": resolution.get("ending_id"),
                 "type": ending,
                 "title": title,
                 "summary": summary
             }
 
         context.world_store.update(finish)
-        return json.dumps({"game_over": True, "ending_type": ending, "title": title, "summary": summary})
+        return json.dumps({
+            "ok": True,
+            "game_over": True,
+            "ending_id": resolution.get("ending_id"),
+            "ending_type": ending,
+            "title": title,
+            "summary": summary,
+        }, ensure_ascii=False)
 
     elif name == "read_file":
-        path = args.get("path", "")
-        if path == "world://state":
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return "[错误] 文件路径不能为空"
+
+        normalized_path = path.replace("\\", "/").lstrip("./")
+        module_name = context.module_name
+        world_aliases = {
+            "world://state",
+            "world_state.json",
+            f"mod/{module_name}/world_state.json",
+            f"modules/{module_name}/world_state.json",
+        }
+        if normalized_path in world_aliases:
             return json.dumps(context.world_store.load(), ensure_ascii=False, indent=2)
-        full_path = (context.project_root / path).resolve()
+
+        module_aliases = {
+            "module.md",
+            f"mod/{module_name}/module.md",
+            f"modules/{module_name}/module.md",
+        }
+        if normalized_path in module_aliases:
+            full_path = (context.module_dir / "module.md").resolve()
+        else:
+            full_path = (context.project_root / path).resolve()
         allowed_roots = (context.project_root.resolve(), context.runtime_root.resolve())
         if not any(_is_relative_to(full_path, root) for root in allowed_roots):
             return "[错误] 不允许读取项目外的文件"
         if not full_path.exists():
             return f"[错误] 文件不存在: {path}"
-        return full_path.read_text(encoding="utf-8")
+        if not full_path.is_file():
+            return f"[错误] 不能读取目录: {path}"
+        try:
+            return full_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return f"[错误] 文件读取失败: {exc}"
     elif name == "attribute_check":
         bonus = args.get("bonus_dice", 0) or 0
         penalty = args.get("penalty_dice", 0) or 0
@@ -846,7 +1000,16 @@ def execute_function(
     elif name == "set_psychological_trait":
         return run_cli([exe, "tools/state_manager.py", "psych-trait", args.get('category', 'phobia'), args.get('name', ''), args.get('context', '')])
     elif name == "show_handout":
-        result = run_cli([exe, "tools/state_manager.py", "show-handout", args.get('entity_type', 'npc'), args.get('entity_id', '')])
+        argv = [
+            exe,
+            "tools/state_manager.py",
+            "show-handout",
+            args.get("entity_type", "npc"),
+            args.get("entity_id", ""),
+        ]
+        if args.get("asset_id"):
+            argv.append(args["asset_id"])
+        result = run_cli(argv)
         # 读取资产文件并转 base64 data URI（electron file:// 下 HTTP URL 不可用）
         try:
             info = json.loads(result)

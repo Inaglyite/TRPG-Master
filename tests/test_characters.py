@@ -54,6 +54,30 @@ class CharacterListTests(unittest.TestCase):
             self.assertEqual(context.world_store.load()["pc"]["name"], "黄千陆")
             self.assertIn('"name": "黄千陆"', engine.messages[-1]["content"])
 
+    def test_module_starting_items_are_merged_with_selected_character(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.local(
+                "猩红文档",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+            options = list_character_options(context=context)
+            character = next(
+                item
+                for group in options["groups"]
+                for item in group["characters"]
+                if item["id"] == "default:黄千陆"
+            )
+            engine = GameEngine.__new__(GameEngine)
+            engine.context = context
+
+            engine.reset(character["ref"])
+
+            inventory = context.world_store.load()["pc"]["inventory"]
+            self.assertIn("手电筒", inventory)
+            self.assertIn("莱特办公室的黄铜钥匙", inventory)
+            self.assertIn("莱特小屋的黄铜钥匙", inventory)
+
 
 if __name__ == "__main__":
     unittest.main()

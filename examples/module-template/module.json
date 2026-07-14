@@ -51,6 +51,14 @@
       "related_npcs": [],
       "related_scenes": ["archive_courtyard"],
       "initially_known": false,
+      "discovery_rules": [
+        {
+          "intent": "search",
+          "targets": ["排水沟", "旧井"],
+          "skill": "spot_hidden",
+          "requires_success": true
+        }
+      ],
       "discovery_notes": "调查排水沟或旧井周边时，侦查成功后揭示。"
     }
   },
@@ -59,7 +67,11 @@
       "title": "手稿归档",
       "trigger": "调查员找回手稿并封住旧井",
       "description": "低语随着井盖最后一枚铆钉落下而停止。",
-      "ending_type": "good"
+      "ending_type": "good",
+      "required_flags": {
+        "well_opened": true,
+        "manuscript_recovered": true
+      }
     }
   },
   "rules": {},

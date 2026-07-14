@@ -36,6 +36,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/modules` | 模组列表与活动模组 |
 | `GET` | `/api/modules/schema/manifest-v1` | manifest JSON Schema |
 | `GET` | `/api/modules/schema/module-v1` | 模组定义 JSON Schema |
+| `GET` | `/api/modules/schema/lorebook-v3` | Lorebook v3 JSON Schema |
 | `POST` | `/api/modules/compile` | 无副作用编译作者态数据并返回诊断/trace |
 | `POST` | `/api/modules/inspect` | 预检 `.trpgmod`，不安装 |
 | `POST` | `/api/modules/import` | 校验并版本化安装 `.trpgmod` |
@@ -129,6 +130,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 ```text
 GET /api/modules/schema/manifest-v1
 GET /api/modules/schema/module-v1
+GET /api/modules/schema/lorebook-v3
 ```
 
 返回 Draft 2020-12 JSON Schema。未来编辑器和第三方工具应消费这些 Schema，但后端
@@ -146,7 +148,11 @@ Pydantic/语义校验仍是导入权威。
     "entry_scene_id": "start",
     "scenes": { "start": { "name": "起点", "description": "故事从这里开始。" } }
   },
-  "keeper_document": "# 守秘人正文"
+  "keeper_document": "# 守秘人正文",
+  "lorebook": {
+    "spec": "lorebook_v3",
+    "data": { "extensions": {}, "entries": [] }
+  }
 }
 ```
 
@@ -374,7 +380,8 @@ X-Module-Filename: example.trpgmod
 1. `module_list`
 2. `character_list`
 3. `theme`
-4. `save_list`
+4. `model_settings`
+5. `save_list`
 
 如果引擎初始化失败，服务端发送 `error` 并关闭连接。
 
@@ -392,6 +399,8 @@ X-Module-Filename: example.trpgmod
 | `type` | 关键字段 | 作用 |
 |---|---|---|
 | `ping` | 无 | 心跳 |
+| `model_settings_get` | 无 | 请求当前叙述/判定模型配置 |
+| `model_settings_update` | `narrative_model`, `judgement_model` | 校验、保存并热更新模型路由 |
 | `module_list` | 无 | 导入后重新请求内置/用户模组列表 |
 | `switch_module` | `module` | 切换活动模组并刷新开局数据 |
 | `start` | `character_ref` | 新游戏 |
@@ -446,7 +455,29 @@ X-Module-Filename: example.trpgmod
 
 成功后当前连接切换到该模组的默认本地世界，并依次返回新的 `theme`、`module_list`、`character_list` 和 `save_list`。切换不重置世界状态；新游戏的 `start` 才会从初始模板重建当前 world。
 
-### 4.4 开始新游戏
+### 4.4 模型设置
+
+连接初始化时服务端已经主动发送当前配置；客户端也可重新请求：
+
+```json
+{"type":"model_settings_get"}
+```
+
+更新请求：
+
+```json
+{
+  "type": "model_settings_update",
+  "narrative_model": "deepseek-v4-flash",
+  "judgement_model": "deepseek-v4-pro"
+}
+```
+
+两个值都是 OpenAI 兼容接口使用的模型 ID。服务端只接受 1-120 位字母、数字及 `._:/@+-`，不限制为预设列表中的模型。更新仅在当前连接没有运行 GM 回合时执行；成功后原子写入 `.env.json`，保留 API Key 等其他字段，并返回带 `saved:true` 的 `model_settings`。当前引擎从下一次请求开始使用新路由，后续连接也采用该配置。
+
+生成中更新或校验/写入失败时返回 `model_settings_error`，现有设置保持不变。系统环境变量在服务重启时仍优先于 `.env.json`。
+
+### 4.5 开始新游戏
 
 ```json
 {
@@ -489,7 +520,7 @@ X-Module-Filename: example.trpgmod
 4. 返回 `character_state`，让客户端在揭开开始界面前同步权威调查员资料。
 5. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
 
-### 4.5 玩家动作
+### 4.6 玩家动作
 
 ```json
 {
@@ -510,7 +541,7 @@ done
 
 新游戏和读档先发送 `character_state`，随后与普通 `action` 一样发送 `gm_turn_start`；客户端以 `gm_turn_start` 和 `done` 作为一轮 GM 回合的边界。工具执行期间到达的 `handout` 或 `state_data` 可能早于最终叙述；正式前端会暂存这些展示更新，在 `done` 后显示材料并重新请求最终状态。
 
-### 4.6 回复检定确认
+### 4.7 回复检定确认
 
 服务端发送 `suggest_check` 后，客户端回复：
 
@@ -523,7 +554,7 @@ done
 
 `confirmed:false` 表示放弃。服务端工作线程最多等待 120 秒；超时按未确认处理。
 
-### 4.7 回复多选决定
+### 4.8 回复多选决定
 
 服务端发送 `decision_request` 后，客户端必须回传原决定 ID 和选项 ID：
 
@@ -537,7 +568,7 @@ done
 
 服务端只接受当前活动决定中列出的选项。工作线程最多等待 120 秒；超时会采用服务端提供的 `default_option`，并发送 `decision_resolved`。
 
-### 4.8 请求当前状态
+### 4.9 请求当前状态
 
 ```json
 {"type":"state"}
@@ -545,7 +576,7 @@ done
 
 响应为 `state_data`。注意：`data` 和 `clues` 当前是 JSON 编码后的字符串，不是直接嵌套对象，客户端需要再次 `JSON.parse`。
 
-### 4.9 快速存档
+### 4.10 快速存档
 
 ```json
 {
@@ -558,7 +589,7 @@ done
 
 `manual:true` 是早期兼容字段；当前持久化层会把空 `slot_id` 同样解析成自动槽。新客户端必须使用 `save_create` 创建手动槽，不应依赖 `manual:true`。
 
-### 4.10 新建手动存档
+### 4.11 新建手动存档
 
 ```json
 {"type":"save_create"}
@@ -566,7 +597,7 @@ done
 
 服务端查找最小可用编号，创建 `slot_001`、`slot_002` 等，响应 `saved`。
 
-### 4.11 加载存档
+### 4.12 加载存档
 
 ```json
 {
@@ -585,7 +616,7 @@ done
 
 读档会通过 `WorldStore.restore()` 把 `snapshot.json` 恢复到当前 world，执行 schema 迁移并生成新的 revision；待确认的战斗动作也随完整快照恢复。若读取槽位期间当前 world 已被其他动作更新，服务端发送 revision 过期的 `error`，不会覆盖新状态。随后模型消息加入“基于存档续写、不要重新开场”的指令。
 
-### 4.12 删除存档
+### 4.13 删除存档
 
 ```json
 {
@@ -596,7 +627,7 @@ done
 
 成功返回 `save_deleted`。`slot_000` 不允许删除，会返回 `error`。
 
-### 4.13 重命名存档
+### 4.14 重命名存档
 
 ```json
 {
@@ -608,7 +639,7 @@ done
 
 重命名只修改 `meta.json.label`，不改槽位目录名。空字符串表示 UI 回退显示 `scene_name`。
 
-### 4.14 结算案件
+### 4.15 结算案件
 
 ```json
 {
@@ -628,7 +659,7 @@ done
 5. 发送新的 `character_list`。
 6. 当前实现额外发送一个无 payload 的 `{"type":"state"}` 兼容刷新标记；正式客户端应主动发送客户端 `state` 请求并等待 `state_data`。
 
-### 4.15 退出当前会话
+### 4.16 退出当前会话
 
 ```json
 {"type":"quit"}
@@ -674,6 +705,32 @@ done
     "colors": {},
     "fonts": {}
   }
+}
+```
+
+#### `model_settings`
+
+```json
+{
+  "type": "model_settings",
+  "narrative_model": "deepseek-v4-pro",
+  "judgement_model": "deepseek-v4-pro",
+  "available_models": [
+    {"id":"deepseek-v4-flash","label":"Flash"},
+    {"id":"deepseek-v4-pro","label":"Pro"}
+  ],
+  "saved": true
+}
+```
+
+初始化和 `model_settings_get` 响应不含 `saved`；只有更新成功响应带 `saved:true`。`available_models` 是界面预设，不是服务端白名单。
+
+#### `model_settings_error`
+
+```json
+{
+  "type": "model_settings_error",
+  "message": "当前回合尚未结束，请在本轮叙述完成后重试。"
 }
 ```
 
@@ -919,6 +976,7 @@ done
 ```json
 {
   "type": "handout",
+  "asset_id": "fallon_portrait",
   "file": "布莱斯·法伦.png",
   "label": "法伦教授",
   "asset_data_uri": "data:image/png;base64,...",
@@ -928,7 +986,8 @@ done
 }
 ```
 
-`entity_type` 为 `npc`、`scene` 或 `clue`。Electron 使用 `asset_data_uri`，浏览器可使用 `asset_url`。
+`entity_type` 为 `npc`、`scene` 或 `clue`；`entity_id` 是触发该材料的游戏实体，`asset_id` 是
+模组素材表中的稳定 ID，两者可以不同。Electron 使用 `asset_data_uri`，浏览器可使用 `asset_url`。
 
 #### `game_over`
 

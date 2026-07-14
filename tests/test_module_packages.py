@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from src.config import PROJECT_ROOT
+from src.lorebook import lorebook_json_schema
 from src.module_compiler import (
     compile_module,
     compile_payload,
@@ -72,6 +73,11 @@ class ModuleFormatTests(unittest.TestCase):
         })
         self.assertEqual(world["current_scene"]["id"], "archive_study")
         self.assertEqual(world["module_version"], "1.0.0")
+        self.assertEqual(world["module_meta"]["era"], "1920s")
+        self.assertEqual(
+            world["endings"][0]["required_flags"],
+            {"well_opened": True, "manuscript_recovered": True},
+        )
         self.assertEqual(world["pc"]["name"], "")
 
     def test_reference_validation_rejects_missing_scene(self):
@@ -80,6 +86,62 @@ class ModuleFormatTests(unittest.TestCase):
         with self.assertRaises(ValidationError) as raised:
             ModuleDefinition.model_validate(raw)
         self.assertIn("不存在的出口", str(raised.exception))
+
+    def test_ending_rejects_unknown_required_flag(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        raw["endings"]["manuscript_recovered"]["required_flags"] = {
+            "unknown_flag": True,
+        }
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("required_flags 不存在", str(raised.exception))
+
+    def test_clue_rejects_unknown_flag_effect(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        raw["clues"]["well_paper_fragment"]["flag_effects"] = {
+            "unknown_flag": True,
+        }
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("flag_effects 不存在", str(raised.exception))
+
+    def test_discovery_rule_is_compiled_into_runtime_catalog(self):
+        manifest, module = load_template()
+
+        world = compile_world_state(manifest, module)
+
+        rules = world["clue_catalog"]["well_paper_fragment"]["discovery_rules"]
+        self.assertEqual(rules[0]["intent"], "search")
+        self.assertEqual(rules[0]["skill"], "spot_hidden")
+        self.assertTrue(rules[0]["requires_success"])
+
+    def test_discovery_rule_rejects_unknown_npc_reveal(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        raw["clues"]["well_paper_fragment"]["discovery_rules"][0][
+            "npc_reveals"
+        ] = [{
+            "npc_id": "missing_npc",
+            "tier": 1,
+            "entry_text": "不存在的人物揭示。",
+        }]
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("发现规则引用了不存在的 NPC", str(raised.exception))
+
+    def test_discovery_rule_requires_skill_for_success_gate(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        del raw["clues"]["well_paper_fragment"]["discovery_rules"][0]["skill"]
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("必须指定 skill", str(raised.exception))
 
     def test_manifest_rejects_wrong_schema_and_reserved_package_id(self):
         raw = json.loads((TEMPLATE / "manifest.json").read_text(encoding="utf-8"))
@@ -95,12 +157,14 @@ class ModuleFormatTests(unittest.TestCase):
     def test_generated_schemas_declare_draft_and_stable_ids(self):
         manifest_schema = manifest_json_schema()
         module_schema = module_json_schema()
+        lorebook_schema = lorebook_json_schema()
         self.assertEqual(
             manifest_schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema",
         )
         self.assertTrue(manifest_schema["$id"].endswith("module-manifest-v1.json"))
         self.assertTrue(module_schema["$id"].endswith("module-v1.json"))
+        self.assertTrue(lorebook_schema["$id"].endswith("lorebook-v3.json"))
         self.assertEqual(
             manifest_schema,
             json.loads(
@@ -112,6 +176,13 @@ class ModuleFormatTests(unittest.TestCase):
             module_schema,
             json.loads(
                 (PROJECT_ROOT / "schemas/trpgmod/module-v1.schema.json")
+                .read_text(encoding="utf-8")
+            ),
+        )
+        self.assertEqual(
+            lorebook_schema,
+            json.loads(
+                (PROJECT_ROOT / "schemas/trpgmod/lorebook-v3.schema.json")
                 .read_text(encoding="utf-8")
             ),
         )
@@ -156,7 +227,8 @@ class ModuleFormatTests(unittest.TestCase):
         module = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
         module["scenes"]["archive_study"]["description"] = ""
 
-        preview = compile_payload(manifest, module)
+        lorebook = json.loads((TEMPLATE / "lorebook.json").read_text(encoding="utf-8"))
+        preview = compile_payload(manifest, module, lorebook_payload=lorebook)
 
         self.assertFalse(preview.ok)
         self.assertIsNone(preview.result)
@@ -173,7 +245,8 @@ class ModuleFormatTests(unittest.TestCase):
         module = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
         manifest["min_engine_version"] = "99.0.0"
 
-        preview = compile_payload(manifest, module)
+        lorebook = json.loads((TEMPLATE / "lorebook.json").read_text(encoding="utf-8"))
+        preview = compile_payload(manifest, module, lorebook_payload=lorebook)
 
         self.assertFalse(preview.ok)
         self.assertIsNotNone(preview.result)
@@ -183,6 +256,24 @@ class ModuleFormatTests(unittest.TestCase):
             diagnostic["code"] == "engine_too_old"
             for diagnostic in report["diagnostics"]
         ))
+
+    def test_compile_payload_warns_for_preserved_unsupported_lore_features(self):
+        manifest = json.loads((TEMPLATE / "manifest.json").read_text(encoding="utf-8"))
+        module = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        lorebook = json.loads((TEMPLATE / "lorebook.json").read_text(encoding="utf-8"))
+        lorebook["data"]["recursive_scanning"] = True
+        lorebook["data"]["entries"][0]["use_regex"] = True
+
+        preview = compile_payload(
+            manifest,
+            module,
+            lorebook_payload=lorebook,
+        )
+
+        self.assertTrue(preview.ok)
+        codes = {item.code for item in preview.diagnostics}
+        self.assertIn("recursive_scanning_unsupported", codes)
+        self.assertIn("regex_matching_unsupported", codes)
 
     def test_module_format_compiler_entry_remains_backward_compatible(self):
         manifest, module = load_template()
@@ -201,6 +292,7 @@ class ModulePackageTests(unittest.TestCase):
             self.assertEqual(inspection.module_key, "example.whispering-archive@1.0.0")
             self.assertTrue(inspection.package_sha256)
             self.assertIn("module.json", inspection.files)
+            self.assertTrue(inspection.summary()["has_lorebook"])
 
             runtime_root = root / "runtime"
             registry = ModuleRegistry(PROJECT_ROOT, runtime_root)
@@ -225,6 +317,7 @@ class ModulePackageTests(unittest.TestCase):
             self.assertEqual(world["module_version"], "1.0.0")
             self.assertTrue((record.path / "module.md").exists())
             self.assertTrue((record.path / "world_state_initial.json").exists())
+            self.assertTrue((record.path / "lorebook.json").exists())
             install_metadata = json.loads(
                 (record.path / "install.json").read_text(encoding="utf-8")
             )
@@ -447,11 +540,19 @@ class ModuleImportApiTests(unittest.TestCase):
                     (TEMPLATE / "module.json").read_text(encoding="utf-8")
                 ),
                 "keeper_document": (TEMPLATE / "keeper.md").read_text(encoding="utf-8"),
+                "lorebook": json.loads(
+                    (TEMPLATE / "lorebook.json").read_text(encoding="utf-8")
+                ),
             }
             with (
                 patch.object(server, "RUNTIME_ROOT", runtime_root),
                 TestClient(server.app) as client,
             ):
+                schema_response = client.get("/api/modules/schema/lorebook-v3")
+                self.assertEqual(schema_response.status_code, 200)
+                self.assertTrue(
+                    schema_response.json()["$id"].endswith("lorebook-v3.json")
+                )
                 response = client.post("/api/modules/compile", json=payload)
 
                 self.assertEqual(response.status_code, 200)

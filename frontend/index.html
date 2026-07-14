@@ -16,6 +16,7 @@
         <button id="btn-load" title="存档管理" aria-label="打开存档管理">📂</button>
         <button id="btn-new" title="新游戏" aria-label="开始新游戏">🆕</button>
         <button id="btn-panel" title="角色/线索" aria-label="打开角色和线索面板">📋</button>
+        <button id="btn-model-settings" title="模型设置" aria-label="打开模型设置">⚙</button>
       </div>
     </header>
 
@@ -80,6 +81,10 @@
             <button id="btn-continue" class="start-art-button" type="button" aria-label="从存档开始" disabled>
               <span class="start-menu-icon" aria-hidden="true">▤</span>
               <span>从存档开始</span>
+            </button>
+            <button id="btn-settings" class="start-menu-button" type="button">
+              <span class="start-menu-icon" aria-hidden="true">⚙</span>
+              <span>模型设置</span>
             </button>
             <button id="btn-exit" class="start-menu-button start-menu-exit" type="button" hidden>
               <span class="start-menu-icon" aria-hidden="true">⏻</span>
@@ -169,6 +174,46 @@
         <button id="module-import-cancel" type="button">取消</button>
         <button id="module-import-confirm" type="button" disabled>导入并切换</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 模型路由设置 -->
+  <div id="model-settings-overlay" class="hidden">
+    <div id="model-settings-panel" role="dialog" aria-modal="true" aria-labelledby="model-settings-title">
+      <header class="model-settings-header">
+        <div>
+          <div class="model-settings-eyebrow">KEEPER / MODEL ROUTING</div>
+          <h2 id="model-settings-title">模型设置</h2>
+        </div>
+        <button id="model-settings-close" type="button" title="关闭" aria-label="关闭模型设置">✕</button>
+      </header>
+
+      <div class="model-settings-body">
+        <div id="model-preset-control" class="model-preset-control" role="group" aria-label="模型预设">
+          <button type="button" data-model-preset="pro">全 Pro</button>
+          <button type="button" data-model-preset="balanced">均衡</button>
+          <button type="button" data-model-preset="flash">全 Flash</button>
+        </div>
+
+        <div class="model-role-grid">
+          <label class="model-role-field" for="narrative-model-input">
+            <span>叙述模型</span>
+            <input id="narrative-model-input" list="model-id-options" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="model-role-field" for="judgement-model-input">
+            <span>判定模型</span>
+            <input id="judgement-model-input" list="model-id-options" autocomplete="off" spellcheck="false" />
+          </label>
+          <datalist id="model-id-options"></datalist>
+        </div>
+
+        <div id="model-settings-status" aria-live="polite"></div>
+      </div>
+
+      <footer class="model-settings-actions">
+        <button id="model-settings-cancel" type="button">取消</button>
+        <button id="model-settings-save" type="button">应用设置</button>
+      </footer>
     </div>
   </div>
 

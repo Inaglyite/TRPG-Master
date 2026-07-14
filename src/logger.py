@@ -78,11 +78,49 @@ def game_event(event: str):
     get().info(f"GAME  {event}")
 
 
-def model_call(model: str, role: str, elapsed: float, first_token: float | None, finish: str | None, tools: int):
+def model_call(
+    model: str,
+    role: str,
+    elapsed: float,
+    first_token: float | None,
+    finish: str | None,
+    tools: int,
+    *,
+    usage: dict | None = None,
+    system_chars: int | None = None,
+    tool_schema_chars: int | None = None,
+    prompt_profile: str | None = None,
+    thinking_mode: str | None = None,
+):
     ttft = f"{first_token:.2f}s" if first_token is not None else "-"
-    get().info(
-        f"MODEL {role} | {model} | total={elapsed:.2f}s | first={ttft} | finish={finish or '-'} | tools={tools}"
-    )
+    parts = [
+        f"MODEL {role} | {model}",
+        f"total={elapsed:.2f}s",
+        f"first={ttft}",
+        f"finish={finish or '-'}",
+        f"tools={tools}",
+    ]
+    if prompt_profile:
+        parts.append(f"prompt={prompt_profile}")
+    if thinking_mode:
+        parts.append(f"thinking={thinking_mode}")
+    if system_chars is not None:
+        parts.append(f"system_chars={system_chars}")
+    if tool_schema_chars is not None:
+        parts.append(f"tool_chars={tool_schema_chars}")
+    if usage:
+        prompt_tokens = usage.get("prompt_tokens")
+        hit = usage.get("prompt_cache_hit_tokens")
+        miss = usage.get("prompt_cache_miss_tokens")
+        if prompt_tokens is not None:
+            parts.append(f"input_tokens={prompt_tokens}")
+        if hit is not None:
+            parts.append(f"cache_hit={hit}")
+        if miss is not None:
+            parts.append(f"cache_miss={miss}")
+        if isinstance(hit, int) and isinstance(miss, int) and hit + miss:
+            parts.append(f"cache_rate={hit / (hit + miss):.1%}")
+    get().info(" | ".join(parts))
 
 
 def _brief(d: dict) -> str:

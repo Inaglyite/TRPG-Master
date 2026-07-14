@@ -70,6 +70,8 @@ if _ENV_FILE.exists():
             "base_url": "OPENAI_BASE_URL",
             "flash_model": "TRPG_FLASH_MODEL",
             "pro_model": "TRPG_PRO_MODEL",
+            "narrative_model": "TRPG_NARRATIVE_MODEL",
+            "judgement_model": "TRPG_JUDGEMENT_MODEL",
             "glm_api_key": "GLM_API_KEY",
             "glm_base_url": "GLM_BASE_URL",
             "glm_model": "GLM_MODEL",
@@ -82,11 +84,23 @@ if _ENV_FILE.exists():
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
 from src.engine import GameEngine, EngineCallbacks
-from src.config import AUTO_SAVE_SLOT, DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from src.config import (
+    AUTO_SAVE_SLOT,
+    DEFAULT_MODULE_NAME,
+    JUDGEMENT_MODEL,
+    MODEL_FLASH,
+    MODEL_PRO,
+    NARRATIVE_MODEL,
+    PROJECT_ROOT,
+    RUNTIME_ROOT,
+)
+from src.model_settings import ModelSettings, persist_model_settings
 from src.persistence import delete_save
 from src.characters import list_character_options
 from src.module_compiler import compile_payload
 from src.module_format import manifest_json_schema, module_json_schema
+from src.lorebook import lorebook_json_schema
+from src.handouts import resolve_handout_asset
 from src.module_registry import (
     MAX_PACKAGE_BYTES,
     ModulePackageError,
@@ -111,11 +125,22 @@ app.add_middleware(
 )
 MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
+_active_model_settings = ModelSettings.validated(
+    NARRATIVE_MODEL, JUDGEMENT_MODEL
+)
 
 
 def _set_active_context(context: RuntimeContext) -> None:
     global _active_context
     _active_context = context
+
+
+def _model_settings_payload(settings: ModelSettings | None = None) -> dict:
+    settings = settings or _active_model_settings
+    return {
+        "type": "model_settings",
+        **settings.to_payload(MODEL_FLASH, MODEL_PRO),
+    }
 
 
 def _load_theme(context: RuntimeContext | None = None) -> dict:
@@ -184,7 +209,7 @@ def _append_npc_profiles(enriched: dict, world_state: dict):
     profiles = []
     for npc_id in _collect_known_npc_ids(world_state):
         npc = npc_by_id.get(npc_id)
-        asset = npc_assets.get(npc_id)
+        _, asset = resolve_handout_asset(world_state, "npc", npc_id)
         if not npc or not isinstance(asset, dict) or not asset.get("file"):
             continue
 
@@ -254,6 +279,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     普通同步函数；它们用 run_coroutine_threadsafe 把 ws.send_json 安全地
     调度到主事件循环（FastAPI/uvicorn 所在的 loop）。
     """
+    global _active_model_settings
+
     import threading
 
     loop = asyncio.get_running_loop()
@@ -278,6 +305,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     import traceback
                     print(f"[ws] 回合异常: {e}", file=sys.stderr)
                     traceback.print_exc(file=sys.stderr)
+                    emit({
+                        "type": "error",
+                        "message": "本轮处理失败，请重新发送刚才的行动。",
+                    })
+                    emit({"type": "done"})
         loop.run_in_executor(None, _wrapped)
 
     def emit(payload: dict):
@@ -363,6 +395,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_handout(info: dict):
         emit({"type": "handout", "file": info.get("file", ""),
               "label": info.get("label", ""),
+              "asset_id": info.get("asset_id", ""),
               "asset_data_uri": info.get("asset_data_uri", ""),   # base64 data URI（electron 兼容）
               "asset_url": info.get("asset_url", ""),             # HTTP URL（web 兼容，fallback）
               "entity_type": info.get("entity_type", ""), "entity_id": info.get("entity_id", "")})
@@ -384,6 +417,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
     # 故主题也走 WS 下发）
     await ws.send_json({"type": "theme", "theme": _load_theme(engine.context)})
+    await ws.send_json(_model_settings_payload(ModelSettings.validated(
+        engine.narrative_model,
+        engine.judgement_model,
+    )))
 
     saves = engine.list_saves()
     await ws.send_json({"type": "save_list", "saves": saves})
@@ -414,6 +451,42 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
             if msg_type == "ping":
                 await ws.send_json({"type": "pong"})
+
+            elif msg_type == "model_settings_get":
+                await ws.send_json(_model_settings_payload(ModelSettings.validated(
+                    engine.narrative_model,
+                    engine.judgement_model,
+                )))
+
+            elif msg_type == "model_settings_update":
+                if not turn_lock.acquire(blocking=False):
+                    await ws.send_json({
+                        "type": "model_settings_error",
+                        "message": "当前回合尚未结束，请在本轮叙述完成后重试。",
+                    })
+                    continue
+                try:
+                    settings = ModelSettings.validated(
+                        data.get("narrative_model"),
+                        data.get("judgement_model"),
+                    )
+                    persist_model_settings(_ENV_FILE, settings)
+                    engine.configure_models(
+                        settings.narrative_model,
+                        settings.judgement_model,
+                    )
+                    _active_model_settings = settings
+                    await ws.send_json({
+                        **_model_settings_payload(settings),
+                        "saved": True,
+                    })
+                except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+                    await ws.send_json({
+                        "type": "model_settings_error",
+                        "message": f"模型设置保存失败：{exc}",
+                    })
+                finally:
+                    turn_lock.release()
 
             elif msg_type == "module_list":
                 await ws.send_json({
@@ -712,6 +785,11 @@ async def get_module_definition_schema():
     return module_json_schema()
 
 
+@app.get("/api/modules/schema/lorebook-v3")
+async def get_lorebook_schema():
+    return lorebook_json_schema()
+
+
 @app.post("/api/modules/compile")
 async def compile_module_preview(data: dict):
     """无副作用地校验并编译作者态数据，供编辑器实时预览。"""
@@ -720,6 +798,7 @@ async def compile_module_preview(data: dict):
         data.get("manifest"),
         data.get("module"),
         data.get("keeper_document", ""),
+        data.get("lorebook"),
     )
     return preview.to_dict()
 
@@ -804,6 +883,10 @@ async def game_ws(ws: WebSocket):
                 runtime_root=RUNTIME_ROOT,
             )
         engine = GameEngine(context)
+        engine.configure_models(
+            _active_model_settings.narrative_model,
+            _active_model_settings.judgement_model,
+        )
         engine.prepare_session()
     except Exception as e:
         # 配置/初始化失败时，把错误发回客户端而不是静默断开

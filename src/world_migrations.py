@@ -77,4 +77,23 @@ def migrate_world_state(raw_state: dict) -> tuple[dict, bool]:
     if not isinstance(revision, int) or revision < 0:
         state["revision"] = 0
         changed = True
+    narrative_memory = state.get("narrative_memory")
+    if not isinstance(narrative_memory, dict):
+        state["narrative_memory"] = {
+            "turn_sequence": 0,
+            "recent_lore": [],
+        }
+        changed = True
+    else:
+        try:
+            turn_sequence = int(narrative_memory.get("turn_sequence", 0))
+        except (TypeError, ValueError):
+            turn_sequence = 0
+        if turn_sequence < 0 or narrative_memory.get("turn_sequence") != turn_sequence:
+            narrative_memory["turn_sequence"] = max(0, turn_sequence)
+            changed = True
+        recent_lore = narrative_memory.get("recent_lore", [])
+        if "recent_lore" not in narrative_memory or not isinstance(recent_lore, list):
+            narrative_memory["recent_lore"] = []
+            changed = True
     return state, changed

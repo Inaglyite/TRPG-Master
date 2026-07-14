@@ -9,6 +9,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.runtime import RuntimeContext  # noqa: E402
+from src.handouts import (  # noqa: E402
+    attach_matching_clue_asset,
+    resolve_handout_asset,
+)
 
 
 CONTEXT = RuntimeContext.from_env()
@@ -213,14 +217,77 @@ def _find_clue_by_asset(data: dict, *, asset_id: str | None = None,
     return None
 
 
+def _find_clue_by_id(data: dict, clue_id: str):
+    for cat in CLUE_CATEGORIES:
+        for item in data.get("clues_found", {}).get(cat, []):
+            if item.get("id") == clue_id:
+                return item
+    return None
+
+
+def _apply_clue_flag_effects(data: dict, catalog_entry: dict | None) -> dict:
+    if not isinstance(catalog_entry, dict):
+        return {}
+    effects = catalog_entry.get("flag_effects", {})
+    flags = data.get("flags", {})
+    if not isinstance(effects, dict) or not isinstance(flags, dict):
+        return {}
+    applied = {}
+    for key, value in effects.items():
+        if key not in flags or isinstance(value, (dict, list)):
+            continue
+        if flags.get(key) != value:
+            flags[key] = value
+            applied[key] = value
+    return applied
+
+
 def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
                   source=None, related_npcs="", related_scenes="", asset_file=None,
-                  asset_id=None):
+                  asset_id=None, clue_id=None):
     """添加线索。向后兼容旧版纯 text 调用。"""
-    if category not in CLUE_CATEGORIES:
-        category = "investigation"
     data = _load()
     _migrate_old_clue_format(data)
+    catalog = data.get("clue_catalog", {})
+    catalog_entry = catalog.get(clue_id) if clue_id and isinstance(catalog, dict) else None
+    if clue_id:
+        existing_clue = _find_clue_by_id(data, clue_id)
+        if existing_clue:
+            result = {
+                "ok": True,
+                "duplicate": True,
+                "clue": existing_clue,
+            }
+            granted_item = (
+                catalog_entry.get("granted_item")
+                if isinstance(catalog_entry, dict)
+                else None
+            )
+            changed = False
+            if granted_item:
+                inventory = data.setdefault("pc", {}).setdefault("inventory", [])
+                item_added = granted_item not in inventory
+                if item_added:
+                    inventory.append(granted_item)
+                    changed = True
+                result["granted_item"] = granted_item
+                result["item_added"] = item_added
+            flag_effects = _apply_clue_flag_effects(data, catalog_entry)
+            if flag_effects:
+                result["flag_effects"] = flag_effects
+                changed = True
+            if changed:
+                _save(data)
+            print(json.dumps(result, ensure_ascii=False))
+            return
+    if isinstance(catalog_entry, dict):
+        category = catalog_entry.get("category", category)
+        clue_type = catalog_entry.get("type", clue_type)
+        tier = catalog_entry.get("tier", tier)
+        source = source or catalog_entry.get("source")
+        text = text or catalog_entry.get("text", "")
+    if category not in CLUE_CATEGORIES:
+        category = "investigation"
 
     next_id = _clue_counter(data)
     asset = None
@@ -250,21 +317,79 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
             }
         else:
             asset = {"file": asset_file, "label": text[:80]}
+    elif isinstance(catalog_entry, dict):
+        catalog_asset = catalog_entry.get("asset")
+        if isinstance(catalog_asset, dict) and catalog_asset.get("id"):
+            existing = _find_clue_by_asset(data, asset_id=catalog_asset["id"])
+            if existing:
+                skipped_asset = {
+                    "id": catalog_asset["id"],
+                    "reason": "asset_already_attached",
+                    "existing_clue_id": existing.get("id"),
+                }
+            else:
+                asset = {
+                    "id": catalog_asset["id"],
+                    "file": catalog_asset.get("file"),
+                    "label": catalog_asset.get("label", text[:80]),
+                }
 
     clue = {
-        "id": f"clue_{next_id:03d}",
+        "id": clue_id or f"clue_{next_id:03d}",
         "text": text,
         "type": clue_type,
         "tier": int(tier),
         "source": source if source else None,
-        "related_npcs": [n.strip() for n in related_npcs.split(",") if n.strip()] if related_npcs else [],
-        "related_scenes": [s.strip() for s in related_scenes.split(",") if s.strip()] if related_scenes else [],
+        "related_npcs": (
+            [n.strip() for n in related_npcs.split(",") if n.strip()]
+            if related_npcs
+            else list(catalog_entry.get("related_npcs", []))
+            if isinstance(catalog_entry, dict)
+            else []
+        ),
+        "related_scenes": (
+            [s.strip() for s in related_scenes.split(",") if s.strip()]
+            if related_scenes
+            else list(catalog_entry.get("related_scenes", []))
+            if isinstance(catalog_entry, dict)
+            else []
+        ),
         "discovered_at": __import__("datetime").datetime.now().isoformat(),
         "asset": asset
     }
+    if clue_id:
+        clue["catalog_id"] = clue_id
+    if asset is None and not skipped_asset:
+        matched_asset_id = attach_matching_clue_asset(data, clue)
+        if matched_asset_id:
+            existing = _find_clue_by_asset(data, asset_id=matched_asset_id)
+            if existing:
+                clue["asset"] = None
+                skipped_asset = {
+                    "id": matched_asset_id,
+                    "reason": "asset_already_attached",
+                    "existing_clue_id": existing.get("id"),
+                }
     data["clues_found"][category].append(clue)
+    granted_item = (
+        catalog_entry.get("granted_item")
+        if isinstance(catalog_entry, dict)
+        else None
+    )
+    item_added = False
+    if granted_item:
+        inventory = data.setdefault("pc", {}).setdefault("inventory", [])
+        if granted_item not in inventory:
+            inventory.append(granted_item)
+            item_added = True
+    flag_effects = _apply_clue_flag_effects(data, catalog_entry)
     _save(data)
     result = {"ok": True, "clue": clue}
+    if granted_item:
+        result["granted_item"] = granted_item
+        result["item_added"] = item_added
+    if flag_effects:
+        result["flag_effects"] = flag_effects
     if skipped_asset:
         result["skipped_asset"] = skipped_asset
     print(json.dumps(result, ensure_ascii=False))
@@ -322,22 +447,39 @@ def cmd_link_clues(from_id, to_id, reasoning):
     print(json.dumps({"ok": True, "link": link, "inference": inference}, ensure_ascii=False))
 
 
-def cmd_show_handout(entity_type, entity_id):
+def cmd_show_handout(entity_type, entity_id, asset_id=None):
     """查找资产映射，返回图片文件信息。"""
     data = _load()
-    asset_map = data.get("asset_map", {})
-    section = asset_map.get(entity_type + "s", {})  # npcs / scenes / clues
-    entry = section.get(entity_id)
+    resolved_asset_id, entry = resolve_handout_asset(
+        data,
+        entity_type,
+        entity_id,
+        asset_id=asset_id,
+    )
     if entry:
         seen = data.setdefault("seen_handouts", {})
         seen_key = entity_type + "s"
         if not isinstance(seen.get(seen_key), list):
             seen[seen_key] = []
+        seen_assets = data.setdefault("seen_handout_assets", {})
+        if not isinstance(seen_assets.get(seen_key), list):
+            seen_assets[seen_key] = []
+        already_seen = (
+            resolved_asset_id in seen_assets[seen_key]
+            or resolved_asset_id in seen[seen_key]
+        )
+        changed = False
         if entity_id and entity_id not in seen[seen_key]:
             seen[seen_key].append(entity_id)
+            changed = True
+        if resolved_asset_id and resolved_asset_id not in seen_assets[seen_key]:
+            seen_assets[seen_key].append(resolved_asset_id)
+            changed = True
+        if changed:
             _save(data)
         result = {"found": True, "entity_type": entity_type, "entity_id": entity_id,
-                  "file": entry["file"], "label": entry.get("label", "")}
+                  "asset_id": resolved_asset_id, "file": entry["file"],
+                  "label": entry.get("label", ""), "already_seen": already_seen}
     else:
         result = {"found": False, "entity_type": entity_type, "entity_id": entity_id,
                   "hint": f"资产映射中未找到 {entity_type}={entity_id}"}
@@ -347,9 +489,21 @@ def cmd_show_handout(entity_type, entity_id):
 def cmd_add_item(item_name):
     data = _load()
     inv = data.setdefault("pc", {}).setdefault("inventory", [])
+    item_name = str(item_name).strip()
+    if item_name in inv:
+        print(json.dumps({
+            "ok": True,
+            "duplicate": True,
+            "item": item_name,
+        }, ensure_ascii=False))
+        return
     inv.append(item_name)
     _save(data)
-    print(f"物品已添加: {item_name}")
+    print(json.dumps({
+        "ok": True,
+        "duplicate": False,
+        "item": item_name,
+    }, ensure_ascii=False))
 
 
 def cmd_remove_item(item_name):
@@ -372,7 +526,18 @@ def cmd_npc_reveal(npc_id, tier, entry_text):
     for npc in npcs:
         if npc.get("id") == npc_id:
             revealed = npc.setdefault("revealed", {"level": 0, "entries": []})
-            revealed["entries"].append({"tier": tier_int, "text": entry_text})
+            new_entry = {"tier": tier_int, "text": entry_text}
+            if new_entry in revealed["entries"]:
+                print(json.dumps({
+                    "ok": True,
+                    "duplicate": True,
+                    "npc_id": npc_id,
+                    "npc_name": npc["name"],
+                    "revealed_level": revealed.get("level", 0),
+                    "new_entry": new_entry,
+                }, ensure_ascii=False))
+                return
+            revealed["entries"].append(new_entry)
             # 自动升级 level 到最高已揭示 tier
             max_tier = max(e["tier"] for e in revealed["entries"])
             revealed["level"] = max_tier
@@ -382,8 +547,9 @@ def cmd_npc_reveal(npc_id, tier, entry_text):
                 "ok": True,
                 "npc_id": npc_id,
                 "npc_name": npc["name"],
+                "duplicate": False,
                 "revealed_level": revealed["level"],
-                "new_entry": {"tier": tier_int, "text": entry_text}
+                "new_entry": new_entry
             }, ensure_ascii=False))
             break
     if not found:
@@ -470,7 +636,7 @@ def cmd_usage():
     print("  python state_manager.py set <json_path> <val>  修改字段（值用 JSON 格式）")
     print("  python state_manager.py npcs                   列出所有 NPC（含揭示程度）")
     print("  python state_manager.py clues                  列出已发现线索")
-    print("  python state_manager.py add-clue <text> [category] [asset_id]  添加线索")
+    print("  python state_manager.py add-clue <text> [category] [asset_id] [clue_id]  添加线索")
     print("        category: investigation/event/task/npc，默认 investigation")
     print("  python state_manager.py add-item <name>        添加物品到背包")
     print("  python state_manager.py remove-item <name>     从背包移除物品")
@@ -517,11 +683,12 @@ def _dispatch():
         cmd_set(sys.argv[2], sys.argv[3])
     elif cmd == "add-clue":
         if len(sys.argv) < 3:
-            print("ERROR: add-clue 需要 <text> [category] [asset_id] 参数", file=sys.stderr)
+            print("ERROR: add-clue 需要 <text> [category] [asset_id] [clue_id] 参数", file=sys.stderr)
             sys.exit(1)
         cat = sys.argv[3] if len(sys.argv) > 3 else "investigation"
         asset_id = sys.argv[4] if len(sys.argv) > 4 else None
-        cmd_add_clue(sys.argv[2], cat, asset_id=asset_id)
+        clue_id = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else None
+        cmd_add_clue(sys.argv[2], cat, asset_id=asset_id, clue_id=clue_id)
     elif cmd == "npcs":
         cmd_list_npcs()
     elif cmd == "clues":
@@ -568,7 +735,8 @@ def _dispatch():
         if len(sys.argv) < 4:
             print("ERROR: show-handout 需要 <entity_type> <entity_id>", file=sys.stderr)
             sys.exit(1)
-        cmd_show_handout(sys.argv[2], sys.argv[3])
+        asset_id = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
+        cmd_show_handout(sys.argv[2], sys.argv[3], asset_id)
     else:
         print(f"ERROR: 未知命令 '{cmd}'", file=sys.stderr)
         cmd_usage()

@@ -112,6 +112,22 @@ def analyze_module(
                 path=f"module.clues.{clue_id}.discovery_notes",
                 message="隐藏线索尚未说明发现条件",
             ))
+    for group_name in ("npcs", "scenes", "clues"):
+        definitions = getattr(module, group_name)
+        referenced = {
+            definition.asset_id
+            for definition in definitions.values()
+            if definition.asset_id
+        }
+        for asset_id, asset in getattr(module.assets, group_name).items():
+            if asset_id not in referenced and not asset.reveal_on:
+                diagnostics.append(ModuleDiagnostic(
+                    phase="content_advice",
+                    level="warning",
+                    code="asset_without_reveal_path",
+                    path=f"module.assets.{group_name}.{asset_id}",
+                    message="素材没有实体关联或 reveal_on 触发规则，游戏中不会自动分发",
+                ))
     return tuple(diagnostics)
 
 

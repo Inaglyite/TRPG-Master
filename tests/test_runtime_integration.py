@@ -7,8 +7,14 @@ from unittest.mock import patch
 from src.config import PROJECT_ROOT
 from src.combat import combat_action, start_combat
 from src.engine import EngineCallbacks, GameEngine
-from src.persistence import load_game, restore_snapshot, save_game
+from src.persistence import (
+    load_game,
+    normalize_tool_message_history,
+    restore_snapshot,
+    save_game,
+)
 from src.runtime import RuntimeContext
+from src.tools import execute_function
 from src.world_store import StaleRevisionError
 
 
@@ -34,6 +40,74 @@ def combat_world() -> dict:
             "conditions": [],
         }],
     }
+
+
+class ReadFileToolSafetyTests(unittest.TestCase):
+    def test_read_file_rejects_empty_path_and_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.create(
+                "read-file-safety",
+                "mansion_of_madness",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+
+            empty = execute_function("read_file", {"path": ""}, context=context)
+            directory = execute_function(
+                "read_file", {"path": "src"}, context=context
+            )
+
+            self.assertIn("路径不能为空", empty)
+            self.assertIn("不能读取目录", directory)
+
+    def test_read_file_supports_world_and_module_aliases(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.create(
+                "read-file-aliases",
+                "mansion_of_madness",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+
+            world = json.loads(execute_function(
+                "read_file",
+                {"path": "modules/mansion_of_madness/world_state.json"},
+                context=context,
+            ))
+            module_text = execute_function(
+                "read_file",
+                {"path": "modules/mansion_of_madness/module.md"},
+                context=context,
+            )
+
+            self.assertIn("pc", world)
+            self.assertEqual(
+                module_text,
+                (context.module_dir / "module.md").read_text(encoding="utf-8"),
+            )
+
+    def test_tool_history_moves_interrupted_instruction_after_responses(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_a", "function": {"name": "one"}},
+                    {"id": "call_b", "function": {"name": "two"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_a", "content": "a"},
+            {"role": "user", "content": "optional skill"},
+            {"role": "tool", "tool_call_id": "call_b", "content": "b"},
+        ]
+
+        repaired = normalize_tool_message_history(messages)
+
+        self.assertEqual(
+            [message["role"] for message in repaired],
+            ["assistant", "tool", "tool", "user"],
+        )
+        self.assertEqual(repaired[2]["tool_call_id"], "call_b")
 
 
 class RuntimeIsolationIntegrationTests(unittest.TestCase):

@@ -14,6 +14,7 @@
   "entry": "module.json",
   "keeper_document": "keeper.md",
   "theme": "theme.json",
+  "lorebook": "lorebook.json",
   "capabilities": [],
   "tags": ["示例", "调查"],
   "created_with": "TRPG Master template"

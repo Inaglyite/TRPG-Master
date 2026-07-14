@@ -600,15 +600,64 @@
     "clues": {
       "wright_body": {
         "file": "莱特教授的尸体.png",
-        "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫"
+        "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫",
+        "reveal_on": [
+          {
+            "event": "sanity_triggered",
+            "match_any": [
+              "莱特教授的遗体",
+              "莱特教授的尸体",
+              "莱特的遗体",
+              "莱特的尸体"
+            ]
+          },
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "莱特"
+            ],
+            "match_any": [
+              "尸体",
+              "遗体",
+              "眼球",
+              "眼部热损伤"
+            ]
+          }
+        ]
       },
       "monster_manifest": {
         "file": "墨中怪物显形.png",
-        "label": "墨中怪物从文字中显形"
+        "label": "墨中怪物从文字中显形",
+        "reveal_on": [
+          {
+            "event": "sanity_triggered",
+            "match_any": [
+              "墨中怪物显形",
+              "怪物从文字中显形",
+              "墨水中的怪物"
+            ]
+          },
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "怪物",
+              "显形"
+            ]
+          }
+        ]
       },
       "wick_dinner": {
         "file": "与阿伯那·维克的晚餐会.png",
-        "label": "与阿伯那·维克的晚餐——古董店的秘密交易"
+        "label": "与阿伯那·维克的晚餐——古董店的秘密交易",
+        "reveal_on": [
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "维克",
+              "晚餐"
+            ]
+          }
+        ]
       }
     }
   },

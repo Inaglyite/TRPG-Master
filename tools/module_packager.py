@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.module_compiler import compile_payload  # noqa: E402
+from src.lorebook import lorebook_json_schema  # noqa: E402
 from src.module_format import manifest_json_schema, module_json_schema  # noqa: E402
 from src.module_registry import (  # noqa: E402
     ModulePackageError,
@@ -44,6 +45,7 @@ def cmd_schema(output: Path) -> int:
     output.mkdir(parents=True, exist_ok=True)
     atomic_write_json(output / "module-manifest-v1.schema.json", manifest_json_schema())
     atomic_write_json(output / "module-v1.schema.json", module_json_schema())
+    atomic_write_json(output / "lorebook-v3.schema.json", lorebook_json_schema())
     print(f"Schema 已写入: {output}")
     return 0
 
@@ -86,7 +88,16 @@ def cmd_compile(source: Path, output: Path | None) -> int:
     except UnicodeDecodeError as exc:
         raise ModulePackageError("invalid_encoding", "keeper.md 必须使用 UTF-8") from exc
 
-    preview = compile_payload(manifest, module, keeper_notes)
+    lorebook = None
+    lorebook_path = (
+        source / "lorebook.json"
+        if manifest.get("lorebook") == "lorebook.json"
+        else None
+    )
+    if lorebook_path is not None:
+        lorebook = _read_project_json(lorebook_path)
+
+    preview = compile_payload(manifest, module, keeper_notes, lorebook)
     if preview.ok and output is not None:
         output.mkdir(parents=True, exist_ok=True)
         result = preview.result

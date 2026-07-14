@@ -2,6 +2,14 @@
   "schema_version": 1,
   "revision": 0,
   "module": "猩红文档",
+  "module_meta": {
+    "id": "scarlet-letters",
+    "version": "1.0.0",
+    "title": "猩红文档",
+    "system": "COC 第七版",
+    "era": "1920s",
+    "language": "zh-CN"
+  },
   "current_scene": {
     "id": "miskatonic_university",
     "name": "密斯卡托尼克大学",
@@ -34,6 +42,10 @@
       "manias": []
     }
   },
+  "module_starting_inventory": [
+    "莱特办公室的黄铜钥匙",
+    "莱特小屋的黄铜钥匙"
+  ],
   "npcs": [
     {
       "name": "布莱斯·法伦",
@@ -401,7 +413,9 @@
     "wicks_shop_searched": false,
     "monster_manifested": false,
     "gangsters_dealt_with": false,
-    "monster_defeated": false
+    "monster_defeated": false,
+    "documents_given_to_wick": false,
+    "investigation_abandoned": false
   },
   "case_clocks": {
     "monster_manifestation": 0,
@@ -418,24 +432,208 @@
     "hobhouse_mansion": "一栋殖民地晚期风格的三层建筑，摇摇欲坠，孤独地矗立在杂草丛生的空地上，距离阿卡姆市区约半小时车程。宅邸覆满灰尘，空无一人。附近的乡间林地极为阴郁荒芜。这里是约书亚·霍布豪斯生前隐居的地方，也是阿卡姆女巫审判文档最初的来源。",
     "arkham_sanatorium": "一座阴郁的医疗设施，收治精神疾病患者。塞西尔·亨特被关押在这里的住院病房中，穿着紧身衣，受到密切观察。他有时能清醒思考，有时只能病态地呢喃。调查员可以通过特定关键词触发他对真相的碎片化描述。隔壁的软壁病房昨晚还有病人，但今早已经搬空。"
   },
+  "scene_catalog": {
+    "miskatonic_university": {
+      "id": "miskatonic_university",
+      "name": "密斯卡托尼克大学",
+      "description": "新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。法伦主任的办公室位于行政楼二层。",
+      "exits": ["wright_office", "miskatonic_medical"],
+      "npcs_present": ["bryce_fallon", "emilia_court", "harland_lodge"]
+    },
+    "wright_office": {
+      "id": "wright_office",
+      "name": "莱特的办公室",
+      "description": "狭小的教职办公室，书桌、文件柜、壁炉和一面部分熔化的裂镜构成了主要现场。",
+      "exits": ["miskatonic_university"],
+      "npcs_present": []
+    },
+    "wright_cottage": {
+      "id": "wright_cottage",
+      "name": "莱特的小屋",
+      "description": "校园附近一座整理到一半的两层教职员住宅，莱特似乎原本准备匆忙离开。",
+      "exits": [],
+      "npcs_present": []
+    },
+    "miskatonic_medical": {
+      "id": "miskatonic_medical",
+      "name": "密斯卡托尼克大学医学院",
+      "description": "医学院地下的冰冷停尸房，莱特的遗体被锁在冷柜中。",
+      "exits": ["miskatonic_university"],
+      "npcs_present": ["john_whitcroft"]
+    },
+    "sheb_tavern": {
+      "id": "sheb_tavern",
+      "name": "希布酒馆",
+      "description": "镇郊一处以餐馆掩护非法酒水生意的高档场所。",
+      "exits": [],
+      "npcs_present": ["lucy_stone", "ox_and_shanassy"]
+    },
+    "trivial_pursuits": {
+      "id": "trivial_pursuits",
+      "name": "轻率琐事古董店",
+      "description": "阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。",
+      "exits": [],
+      "npcs_present": ["abner_wick", "hector_kara_feldman"]
+    },
+    "hobhouse_mansion": {
+      "id": "hobhouse_mansion",
+      "name": "霍布豪斯宅邸",
+      "description": "距离阿卡姆约半小时车程的荒废殖民地晚期宅邸，是女巫审判文档最初的来源。",
+      "exits": [],
+      "npcs_present": []
+    },
+    "arkham_sanatorium": {
+      "id": "arkham_sanatorium",
+      "name": "阿卡姆疗养院",
+      "description": "收治塞西尔·亨特的阴郁医疗设施。",
+      "exits": [],
+      "npcs_present": ["cecil_hunter"]
+    }
+  },
+  "clue_catalog": {
+    "wright_body_evidence": {
+      "id": "wright_body_evidence",
+      "text": "莱特教授的遗体呈现无法由普通心脏病解释的眼部热损伤与全身器官衰竭。",
+      "category": "investigation",
+      "type": "obvious",
+      "tier": 1,
+      "source": "miskatonic_medical",
+      "related_npcs": ["john_whitcroft"],
+      "related_scenes": ["miskatonic_medical"],
+      "flag_effects": {"body_examined": true},
+      "discovery_rules": [
+        {
+          "intent": "examine",
+          "targets": ["莱特教授的遗体", "莱特教授遗体", "莱特遗体", "莱特的尸体"],
+          "requires_success": false,
+          "sanity_severity": "minor",
+          "npc_reveals": [
+            {
+              "npc_id": "john_whitcroft",
+              "tier": 1,
+              "entry_text": "惠特克罗夫特医生承认莱特的死亡证明掩盖了眼部热损伤和全身器官同时衰竭的异常。"
+            }
+          ]
+        }
+      ],
+      "discovered_at": null,
+      "asset": {
+        "id": "wright_body",
+        "file": "莱特教授的尸体.png",
+        "label": "莱特教授尸体"
+      },
+      "discovery_notes": "调查员亲眼查看莱特遗体时立即发现并展示图片。"
+    },
+    "wright_private_diary": {
+      "id": "wright_private_diary",
+      "text": "莱特的私人日记记载了文档隐藏墨水层、塞西尔·亨特的参与和持续噩梦。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 1,
+      "source": "wright_office",
+      "related_npcs": ["cecil_hunter"],
+      "related_scenes": ["wright_office"],
+      "discovered_at": null,
+      "asset": null,
+      "granted_item": "莱特的私人日记",
+      "discovery_notes": "搜查莱特办公桌暗格后发现。"
+    },
+    "hunter_copy": {
+      "id": "hunter_copy",
+      "text": "塞西尔·亨特制作的审判文档复制件带有会在烛光下蠕动的深黑墨迹。",
+      "category": "investigation",
+      "type": "obvious",
+      "tier": 1,
+      "source": "cecil_hunter",
+      "related_npcs": ["cecil_hunter"],
+      "related_scenes": ["arkham_sanatorium"],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "只有实际取得或检查亨特的复制件后才记录。"
+    },
+    "witch_trial_documents": {
+      "id": "witch_trial_documents",
+      "text": "失踪的阿卡姆女巫审判文档已经被调查员找回。",
+      "category": "task",
+      "type": "obvious",
+      "tier": 2,
+      "source": "module_objective",
+      "related_npcs": [],
+      "related_scenes": [],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "仅在调查员实际取得原始文档时记录，并同步 documents_recovered。"
+    },
+    "abner_seal": {
+      "id": "abner_seal",
+      "text": "阿伯那·维克的银质徽章可用于关闭墨中怪物的通道。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 2,
+      "source": "trivial_pursuits",
+      "related_npcs": ["abner_wick"],
+      "related_scenes": ["trivial_pursuits"],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "只有实际发现徽章或得知其用途后记录。"
+    }
+  },
   "endings": [
     {
-      "title": "good - 真相大白，怪物被制伏",
-      "description": "触发: 调查员找回女巫审判文档，成功摧毁或封印文档中的怪物\n描述: 墨中怪物被驱散或彻底消灭。调查员阻止了它在阿卡姆显形造成大规模伤亡的灾难。法伦主任获得了文档（可能不知道危险的部分已被处理），调查员获得了报酬和一位有权势的联系人。每名调查员恢复1D6点理智值。"
+      "id": "truth_and_seal",
+      "title": "真相大白，怪物被制伏",
+      "trigger": "调查员找回女巫审判文档，成功摧毁或封印文档中的怪物",
+      "description": "墨中怪物被驱散或彻底消灭。调查员阻止了它在阿卡姆显形造成大规模伤亡的灾难。",
+      "ending_type": "good",
+      "required_flags": {
+        "documents_recovered": true,
+        "monster_defeated": true
+      }
     },
     {
-      "title": "neutral - 逃离阿卡姆",
-      "description": "触发: 调查员放弃调查，离开阿卡姆\n描述: 调查员带着未解之谜离开了阿卡姆。但在数日后的报纸上，他们读到密斯卡托尼克大学发生离奇惨案、多人死亡的头条新闻。怪物在阿卡姆某处显形，造成死伤惨重。调查员需要进行理智检定（1D3/1D10），为自己未能阻止这一切而承受精神创伤。"
+      "id": "leave_arkham",
+      "title": "逃离阿卡姆",
+      "trigger": "调查员明确放弃调查并离开阿卡姆",
+      "description": "调查员带着未解之谜离开，随后从报纸得知阿卡姆发生了惨案。",
+      "ending_type": "neutral",
+      "required_flags": {
+        "investigation_abandoned": true
+      }
     },
     {
-      "title": "bad - 被怪物吞噬",
-      "description": "触发: 调查员未能阻止怪物完全显形，或全员理智归零\n描述: 墨中怪物完全挣脱了束缚，在阿卡姆中心显形。难以名状的恐怖席卷大学城，街道被蠕虫般的暗影吞没。调查员的意识在无边的恐惧中消散，成为怪物力量的一部分。"
+      "id": "devoured_by_ink",
+      "title": "被怪物吞噬",
+      "trigger": "调查员未能阻止怪物完全显形，或调查员理智归零",
+      "description": "墨中怪物完全挣脱束缚，难以名状的恐怖席卷大学城。",
+      "ending_type": "bad",
+      "required_flags": {
+        "monster_manifested": true,
+        "monster_defeated": false
+      }
     },
     {
-      "title": "secret - 与维克交易",
-      "description": "触发: 调查员将女巫审判文档交给阿伯那·维克，由他处理怪物\n描述: 维克利用邪恶的仪式控制了墨中怪物，以牺牲多名受害者满足其毁灭欲望为代价。文档归维克所有，怪物暂时被压制。调查员获得了维克的\"感激\"，但从此欠下一个危险的非人存在的人情。维克成为了他们未来冒险中一个令人不安的\"盟友\"。"
+      "id": "deal_with_wick",
+      "title": "与维克交易",
+      "trigger": "调查员将女巫审判文档交给阿伯那·维克，由他处理怪物",
+      "description": "维克以邪恶仪式暂时压制怪物，调查员从此欠下危险的人情。",
+      "ending_type": "secret",
+      "required_flags": {
+        "documents_recovered": true,
+        "documents_given_to_wick": true
+      }
     }
   ],
+  "module_rules": {
+    "era": "1920s",
+    "technology_constraints": "不得出现手持对讲机、电子蜂鸣探测器、数字相机等时代外设备；通信依赖固定电话、电报、书信或派人传话。",
+    "sanity_triggers": [
+      {"match": "第一次阅读女巫审判文档中的手写段落", "severity": "minor"},
+      {"match": "查看莱特教授异常遗体或尸体照片", "severity": "minor"},
+      {"match": "目睹墨中怪物从文字或尸体中显形", "severity": "major"},
+      {"match": "在维克地下室发现被割喉的尸体收藏", "severity": "major"},
+      {"match": "近距离确认费德曼兄妹的非人特征", "severity": "minor"}
+    ]
+  },
   "private_memory": {
     "goals_and_plans": "调查莱特教授离奇死亡真相，找回失踪的阿卡姆女巫审判文档，在怪物完全显形前阻止灾难。",
     "hidden_facts": {
@@ -509,15 +707,64 @@
     "clues": {
       "wright_body": {
         "file": "莱特教授的尸体.png",
-        "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫"
+        "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫",
+        "reveal_on": [
+          {
+            "event": "sanity_triggered",
+            "match_any": [
+              "莱特教授的遗体",
+              "莱特教授的尸体",
+              "莱特的遗体",
+              "莱特的尸体"
+            ]
+          },
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "莱特"
+            ],
+            "match_any": [
+              "尸体",
+              "遗体",
+              "眼球",
+              "眼部热损伤"
+            ]
+          }
+        ]
       },
       "monster_manifest": {
         "file": "墨中怪物显形.png",
-        "label": "墨中怪物从文字中显形"
+        "label": "墨中怪物从文字中显形",
+        "reveal_on": [
+          {
+            "event": "sanity_triggered",
+            "match_any": [
+              "墨中怪物显形",
+              "怪物从文字中显形",
+              "墨水中的怪物"
+            ]
+          },
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "怪物",
+              "显形"
+            ]
+          }
+        ]
       },
       "wick_dinner": {
         "file": "与阿伯那·维克的晚餐会.png",
-        "label": "与阿伯那·维克的晚餐——古董店的秘密交易"
+        "label": "与阿伯那·维克的晚餐——古董店的秘密交易",
+        "reveal_on": [
+          {
+            "event": "clue_discovered",
+            "match_all": [
+              "维克",
+              "晚餐"
+            ]
+          }
+        ]
       }
     }
   },

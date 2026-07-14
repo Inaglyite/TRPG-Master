@@ -45,6 +45,25 @@ _PREFLIGHT_NEGATIONS = (
     "不攻击", "不要攻击", "停止攻击", "只是问", "假如", "假设", "如果",
     "会怎样", "会怎么样",
 )
+_PREFLIGHT_NON_ACTION_MARKERS = (
+    "能够", "可以", "可能", "是否", "是不是", "会不会", "能不能",
+    "为什么", "为何", "怎么会", "据说", "据称", "传闻", "例如",
+)
+_PREFLIGHT_REPORTING_MARKERS = (
+    "告诉", "询问", "问", "听说", "听到", "看到", "看见", "目睹",
+    "认为", "觉得", "怀疑", "解释", "提到", "谈到", "讨论", "描述",
+    "调查", "得知", "发现", "证明", "推测", "想象", "回忆", "想知道",
+    "阻止", "避免", "防止", "命令", "要求", "不让",
+)
+_PLAYER_ACTION_PREFIX_RE = re.compile(
+    r"(?:^|[，,:：])\s*(?:我|我们|调查员)"
+    r"(?:现在|立刻|直接|就|要|想要|准备|决定|打算|试图|尝试|先|随后|然后|接着|二话不说)?"
+    r"[^，,:：]{0,18}$"
+)
+_IMPLICIT_ACTION_PREFIX_RE = re.compile(
+    r"^(?:(?:立刻|直接|现在|随后|然后|接着|二话不说|转身|上前|冲过去)\s*)?"
+    r"(?:(?:掏出?|拔出?|拿出?|举起?|端起?|抬起?).{0,10})?$"
+)
 _FIREARM_ATTACK_PATTERNS = (
     re.compile(r"(?:朝着?|向|对着?).{0,20}(?:开枪|射击|扣动扳机)"),
     re.compile(r"(?:用|拿|举|持|拔).{0,8}(?:枪|手枪|左轮).{0,16}(?:打|攻击|射|杀)"),
@@ -250,7 +269,8 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
     intent = _detect_preflight_intent(content)
     if intent is None:
         return None
-    target = _preflight_target(world, content)
+    kind, action_type, action_segment = intent
+    target = _preflight_target(world, action_segment)
     if target is not None and bool(
         target.get("hostile_to_pc") or target.get("disposition") == "hostile"
     ):
@@ -262,7 +282,6 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
             "disposition": "unknown",
         }
 
-    kind, action_type = intent
     action = {
         "actor_id": "pc",
         "target_id": target.get("id"),
@@ -568,17 +587,44 @@ def _build_threat_decision(world: dict, action: dict, target: dict) -> dict:
     return pending
 
 
-def _detect_preflight_intent(content: str) -> tuple[str, str] | None:
+def _detect_preflight_intent(content: str) -> tuple[str, str, str] | None:
     text = str(content or "").strip()
-    if not text or any(phrase in text for phrase in _PREFLIGHT_NEGATIONS):
+    if not text:
         return None
-    if any(pattern.search(text) for pattern in _FIREARM_ATTACK_PATTERNS):
-        return "irreversible_violence", "firearm"
-    if any(pattern.search(text) for pattern in _MELEE_ATTACK_PATTERNS):
-        return "irreversible_violence", "melee"
-    if any(pattern.search(text) for pattern in _WEAPON_THREAT_PATTERNS):
-        return "coercive_threat", "threat"
+
+    pattern_groups = (
+        ("irreversible_violence", "firearm", _FIREARM_ATTACK_PATTERNS),
+        ("irreversible_violence", "melee", _MELEE_ATTACK_PATTERNS),
+        ("coercive_threat", "threat", _WEAPON_THREAT_PATTERNS),
+    )
+    for raw_segment in re.split(r"(?<=[。！？!?；;\n])", text):
+        segment = raw_segment.strip()
+        if not segment or any(phrase in segment for phrase in _PREFLIGHT_NEGATIONS):
+            continue
+        for kind, action_type, patterns in pattern_groups:
+            for pattern in patterns:
+                match = pattern.search(segment)
+                if match and _is_explicit_player_action(segment, match):
+                    return kind, action_type, segment
     return None
+
+
+def _is_explicit_player_action(segment: str, match: re.Match[str]) -> bool:
+    """Reject reports, questions and hypotheticals while keeping direct commands."""
+    if segment.rstrip().endswith(("?", "？")):
+        return False
+    if any(marker in segment for marker in _PREFLIGHT_NON_ACTION_MARKERS):
+        return False
+
+    prefix = segment[:match.start()].strip(" \t\"'“”‘’")
+    if any(marker in prefix for marker in _PREFLIGHT_REPORTING_MARKERS):
+        return False
+    if "被" in prefix or "让" in prefix:
+        return False
+    return bool(
+        _PLAYER_ACTION_PREFIX_RE.search(prefix)
+        or _IMPLICIT_ACTION_PREFIX_RE.fullmatch(prefix)
+    )
 
 
 def _preflight_target(world: dict, content: str) -> dict | None:
@@ -608,7 +654,7 @@ def _preflight_target(world: dict, content: str) -> dict | None:
                 if isinstance(npc, dict) and npc.get("id") == combat_npc_ids[0]:
                     return npc
 
-    pronouns = ("他", "她", "对方", "这个人", "那个人")
+    pronouns = ("他", "她", "你", "对方", "这个人", "那个人")
     if not any(pronoun in content for pronoun in pronouns):
         return None
     present = [

@@ -15,8 +15,10 @@
 - d100 技能检定、属性检定、伤害、SAN 与心理状态等确定性工具。
 - 模组切换、调查员选择、长期角色履历和按世界实例隔离的多槽位存档。
 - `.trpgmod` 模组包预检、一键导入、版本并存、JSON Schema 与安全安装。
+- Character Card V3 Lorebook：按场景、人物、已知线索和 flags 本地检索叙事素材，带预算、分组与跨存档冷却。
 - `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
+- 模组声明式发现规则，在叙事前可靠结算线索、SAN、人物揭示、图片与旗标效果。
 - 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
 - TIER 信息边界、NPC 揭示记录和私有工作记忆，降低模型提前剧透的概率。
 - Windows 安装包/便携版构建，以及 Linux 源码桌面启动脚本。
@@ -68,6 +70,8 @@ python3 start.py --config
   "base_url": "https://api.deepseek.com",
   "flash_model": "deepseek-v4-flash",
   "pro_model": "deepseek-v4-pro",
+  "narrative_model": "deepseek-v4-pro",
+  "judgement_model": "deepseek-v4-pro",
   "glm_api_key": "optional-glm-key",
   "glm_base_url": "https://open.bigmodel.cn/api/paas/v4/",
   "glm_model": "glm-4-flash-250414"
@@ -80,9 +84,16 @@ python3 start.py --config
 |---|---|---|
 | `OPENAI_API_KEY` | 主模型 API Key | 空 |
 | `OPENAI_BASE_URL` | OpenAI 兼容请求地址 | `https://api.deepseek.com` |
-| `TRPG_FLASH_MODEL` | 常规叙事模型 | `deepseek-v4-flash` |
-| `TRPG_PRO_MODEL` | 强制 Pro 与上下文摘要兜底模型 | `deepseek-v4-pro` |
-| `TRPG_FORCE_PRO` | 全程强制使用 Pro，支持 `1/true/yes` | 关闭 |
+| `TRPG_FLASH_MODEL` | 设置页“Flash”预设对应的模型 ID | `deepseek-v4-flash` |
+| `TRPG_PRO_MODEL` | 设置页“Pro”预设对应的模型 ID | `deepseek-v4-pro` |
+| `TRPG_NARRATIVE_MODEL` | 探索、社交和开场叙述模型 | `deepseek-v4-pro` |
+| `TRPG_JUDGEMENT_MODEL` | 战斗、复杂工具后续、模型审计和摘要兜底模型 | `deepseek-v4-pro` |
+| `TRPG_FORCE_PRO` | 旧版兼容开关；显式设为 `0/false/no/off` 且未指定角色模型时，两者改用 Flash | 未设置 |
+| `TRPG_ENABLE_TURN_AUDIT` | 诊断用回合模型审计，支持 `1/true/yes` | 关闭 |
+| `TRPG_ENABLE_LOREBOOK` | 启用模组 Lorebook 本地检索，支持 `0/false/no/off` 关闭 | 开启 |
+| `TRPG_PROMPT_PROFILE` | `hybrid` 使用模组剧情脊柱，缺失时自动回退 `full` | `hybrid` |
+| `TRPG_DYNAMIC_TOOLS` | 按回合只发送相关工具 Schema | 开启 |
+| `TRPG_STORY_THINKING` | 叙述请求思考模式：`auto/disabled/enabled/provider` | `auto` |
 | `GLM_API_KEY` | 可选摘要模型 API Key | 空 |
 | `GLM_BASE_URL` | GLM 请求地址 | `https://open.bigmodel.cn/api/paas/v4/` |
 | `GLM_MODEL` | GLM 模型名 | `glm-4-flash-250414` |
@@ -139,6 +150,7 @@ npm run electron:dev
 - `快速存档`：直接覆盖当前世界的自动槽 `slot_000`。
 - `存档管理`：读取、新建手动存档、重命名和删除手动槽。
 - `角色/线索`：查看当前调查员状态、物品、线索和已发放图片。
+- `模型设置`：分别选择叙述模型和判定模型，支持全 Pro、均衡、全 Flash 与自定义模型 ID。
 - `新游戏`：返回开始流程，重新选择模组与调查员。
 
 每个 GM 回合完成时也会更新自动槽。退出确认窗口仍建议玩家先快速存档，以免在正在生成的回合中途关闭。
@@ -168,6 +180,7 @@ trpg-master/
 │   ├── characters.py         # 调查员选择与长期履历
 │   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
 │   ├── module_format.py      # v1 模组领域模型、引用校验与 Schema
+│   ├── lorebook.py           # Lorebook v3 模型、门槛、检索与冷却记忆
 │   ├── module_compiler.py    # 无副作用编译、编译产物与字段来源追踪
 │   ├── module_diagnostics.py # 结构化错误、警告与作者建议
 │   ├── module_registry.py    # 内置/用户模组发现及安全包安装
@@ -239,6 +252,7 @@ module-project/
 ├── module.json
 ├── keeper.md                 # 可选
 ├── theme.json                # 可选
+├── lorebook.json             # 可选，Character Card V3 Lorebook
 ├── skills/                   # 可选，需声明 custom_skills
 ├── characters/               # 可选，需声明 bundled_characters
 ├── scenes/                   # 可选，需声明 scene_documents

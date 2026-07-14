@@ -129,13 +129,16 @@ export function removeRollPending() {
 
 // ---- 流式文本缓冲 ----
 let streamBuffer = "";
+let pendingStreamText = "";
+let streamFrame: number | null = null;
 
-// ---- 流式文本到达 ----
-export function onNarrativeChunk(text: string) {
-  // 动 DOM 前先用【实时位置】判断是否在底部。不用 pinnedToBottom 状态——
-  // 状态靠 scroll 事件更新，有竞态：chunk 到达时状态还没更新，就会把已上滚
-  // 的用户拉回底部。实时 wasAtBottom 反映浏览器已处理的滚轮输入，零抽搐
-  // （ZCode/Codex 同款做法）。
+export function flushNarrativeStream() {
+  if (streamFrame !== null) {
+    cancelAnimationFrame(streamFrame);
+    streamFrame = null;
+  }
+  if (!pendingStreamText) return;
+
   const wasAtBottom = isNearBottom();
   removeLoading();
   if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
@@ -143,19 +146,33 @@ export function onNarrativeChunk(text: string) {
     streamTarget.classList.add("streaming-cursor");
     streamBuffer = "";
   }
-  streamBuffer += text;
+  streamBuffer += pendingStreamText;
+  pendingStreamText = "";
   streamTarget.innerHTML = marked.parse(streamBuffer) as string;
   if (wasAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// ---- 流式文本到达 ----
+export function onNarrativeChunk(text: string) {
+  pendingStreamText += text;
+  if (streamFrame === null) {
+    streamFrame = requestAnimationFrame(() => {
+      streamFrame = null;
+      flushNarrativeStream();
+    });
+  }
+}
+
 // ---- 紧张感提示 ----
 export function onTension(text: string) {
+  flushNarrativeStream();
   addMsg("tension", text);
   showGmThinking();
 }
 
 // ---- 骰子结果 ----
 export function onDice(text: string, rollData?: DiceRollData) {
+  flushNarrativeStream();
   removeLoading();
   removeRollPending();
   if (streamTarget) {
@@ -332,5 +349,6 @@ function animateDice(el: HTMLElement, dice: VisualDie[], valueEls: HTMLSpanEleme
 
 // ---- GM 摘要 ----
 export function onSummary(text: string) {
+  flushNarrativeStream();
   addMsg("summary", text);
 }

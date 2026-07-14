@@ -24,6 +24,14 @@
           "maxLength": 100,
           "title": "Media Type",
           "type": "string"
+        },
+        "reveal_on": {
+          "items": {
+            "$ref": "#/$defs/AssetRevealTrigger"
+          },
+          "maxItems": 16,
+          "title": "Reveal On",
+          "type": "array"
         }
       },
       "required": [
@@ -58,6 +66,54 @@
         }
       },
       "title": "AssetMapDefinition",
+      "type": "object"
+    },
+    "AssetRevealTrigger": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "enum": [
+            "npc_revealed",
+            "scene_entered",
+            "clue_discovered",
+            "sanity_triggered"
+          ],
+          "title": "Event",
+          "type": "string"
+        },
+        "entity_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entity Id"
+        },
+        "match_all": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Match All",
+          "type": "array"
+        },
+        "match_any": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Match Any",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "title": "AssetRevealTrigger",
       "type": "object"
     },
     "ClueDefinition": {
@@ -134,6 +190,43 @@
           "default": null,
           "title": "Asset Id"
         },
+        "granted_item": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Granted Item"
+        },
+        "flag_effects": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Flag Effects",
+          "type": "object"
+        },
+        "discovery_rules": {
+          "items": {
+            "$ref": "#/$defs/DiscoveryRuleDefinition"
+          },
+          "title": "Discovery Rules",
+          "type": "array"
+        },
         "initially_known": {
           "default": false,
           "title": "Initially Known",
@@ -180,6 +273,81 @@
       "title": "ClueLinkDefinition",
       "type": "object"
     },
+    "DiscoveryRuleDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "enum": [
+            "examine",
+            "search",
+            "read",
+            "take",
+            "talk",
+            "enter",
+            "use"
+          ],
+          "title": "Intent",
+          "type": "string"
+        },
+        "targets": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Targets",
+          "type": "array"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skill"
+        },
+        "requires_success": {
+          "default": false,
+          "title": "Requires Success",
+          "type": "boolean"
+        },
+        "sanity_severity": {
+          "anyOf": [
+            {
+              "enum": [
+                "minor",
+                "moderate",
+                "major"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sanity Severity"
+        },
+        "npc_reveals": {
+          "items": {
+            "$ref": "#/$defs/NpcRevealEffectDefinition"
+          },
+          "title": "Npc Reveals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "intent",
+        "targets"
+      ],
+      "title": "DiscoveryRuleDefinition",
+      "type": "object"
+    },
     "EndingDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -209,6 +377,23 @@
           ],
           "title": "Ending Type",
           "type": "string"
+        },
+        "required_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Required Flags",
+          "type": "object"
         }
       },
       "required": [
@@ -224,6 +409,11 @@
       "properties": {
         "pc": {
           "$ref": "#/$defs/PcTemplate"
+        },
+        "granted_items": {
+          "items": {},
+          "title": "Granted Items",
+          "type": "array"
         },
         "known_clue_ids": {
           "items": {
@@ -384,6 +574,34 @@
         "name"
       ],
       "title": "NpcDefinition",
+      "type": "object"
+    },
+    "NpcRevealEffectDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "npc_id": {
+          "title": "Npc Id",
+          "type": "string"
+        },
+        "tier": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Tier",
+          "type": "integer"
+        },
+        "entry_text": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Entry Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "npc_id",
+        "entry_text"
+      ],
+      "title": "NpcRevealEffectDefinition",
       "type": "object"
     },
     "PcTemplate": {

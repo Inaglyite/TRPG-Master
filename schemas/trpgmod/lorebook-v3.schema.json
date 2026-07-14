@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "LorebookData": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "scan_depth": {
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 2,
+          "title": "Scan Depth"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "maximum": 8000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 600,
+          "title": "Token Budget"
+        },
+        "recursive_scanning": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "title": "Recursive Scanning"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/LorebookEntry"
+          },
+          "maxItems": 2000,
+          "title": "Entries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "extensions",
+        "entries"
+      ],
+      "title": "LorebookData",
+      "type": "object"
+    },
+    "LorebookEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "keys": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Keys",
+          "type": "array"
+        },
+        "content": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "insertion_order": {
+          "title": "Insertion Order",
+          "type": "integer"
+        },
+        "use_regex": {
+          "title": "Use Regex",
+          "type": "boolean"
+        },
+        "constant": {
+          "default": false,
+          "title": "Constant",
+          "type": "boolean"
+        },
+        "case_sensitive": {
+          "default": false,
+          "title": "Case Sensitive",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Comment"
+        },
+        "selective": {
+          "default": false,
+          "title": "Selective",
+          "type": "boolean"
+        },
+        "secondary_keys": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Secondary Keys",
+          "type": "array"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "enum": [
+                "before_char",
+                "after_char"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
+        }
+      },
+      "required": [
+        "keys",
+        "content",
+        "extensions",
+        "enabled",
+        "insertion_order",
+        "use_regex"
+      ],
+      "title": "LorebookEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "anyOf": [
+        {
+          "const": "https://trpg-master.local/schemas/lorebook-v3.json",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "$Schema"
+    },
+    "spec": {
+      "const": "lorebook_v3",
+      "default": "lorebook_v3",
+      "title": "Spec",
+      "type": "string"
+    },
+    "data": {
+      "$ref": "#/$defs/LorebookData"
+    }
+  },
+  "required": [
+    "data"
+  ],
+  "title": "LorebookEnvelope",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/lorebook-v3.json"
+}

@@ -106,6 +106,19 @@
       "default": "theme.json",
       "title": "Theme"
     },
+    "lorebook": {
+      "anyOf": [
+        {
+          "const": "lorebook.json",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lorebook"
+    },
     "capabilities": {
       "items": {
         "type": "string"

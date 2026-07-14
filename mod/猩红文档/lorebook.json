@@ -1,0 +1,130 @@
+{
+  "$schema": "https://trpg-master.local/schemas/lorebook-v3.json",
+  "spec": "lorebook_v3",
+  "data": {
+    "name": "猩红文档叙事素材",
+    "description": "不会改变事实与信息边界的场景感官素材。",
+    "scan_depth": 2,
+    "token_budget": 420,
+    "recursive_scanning": false,
+    "extensions": {
+      "trpg_master": {
+        "version": 1
+      }
+    },
+    "entries": [
+      {
+        "id": "university-stone",
+        "keys": [],
+        "content": "大学场景可从被雨水浸深颜色的石墙、楼梯扶手被无数手掌磨亮的部分、门缝里透出的粉笔灰气味中选一项落笔。保持日常秩序感。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["miskatonic_university"], "group": "university-palette", "cooldown_turns": 1, "sensory_focus": "材质与气味"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "university-rhythm",
+        "keys": [],
+        "content": "大学里的紧张不必靠异象：可用走廊脚步在门外经过、打字机短暂歇停、行政人员压低声音等正常动静衬出谈话中的迟疑。",
+        "extensions": {"trpg_master": {"kind": "scene_pressure", "scene_ids": ["miskatonic_university"], "group": "university-palette", "cooldown_turns": 1, "sensory_focus": "背景声"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "office-cold-light",
+        "keys": [],
+        "content": "莱特办公室可从窗外冷光切过桌面、纸张边缘留下的指印、壁炉灰中不同深浅的层次选取细节。现场未证实的异常不要提前写成结论。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["wright_office"], "group": "office-palette", "cooldown_turns": 1, "sensory_focus": "光线与痕迹"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "office-stillness",
+        "keys": [],
+        "content": "办公室的空置感可通过座椅略微偏离桌面、纸页压在镇纸下却有一角颤动、楼内远处关门后的回声呈现。一次只选一处。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["wright_office"], "group": "office-palette", "cooldown_turns": 1, "sensory_focus": "空间与声音"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "cottage-lived-in",
+        "keys": [],
+        "content": "小屋的生活痕迹可落在半收拾的抽屉、杯底干掉的茶渍、衣架上空出的间隔。用未完成的日常动作制造匆忙感，不替玩家解释原因。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["wright_cottage"], "group": "cottage-palette", "cooldown_turns": 1, "sensory_focus": "生活痕迹"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "cottage-weather",
+        "keys": [],
+        "content": "小屋里可用木地板受潮后的轻响、窗帘边缘积下的细尘、屋外风压过灌木的摩擦声维持安静。不要把普通声响直接写成怪物。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["wright_cottage"], "group": "cottage-palette", "cooldown_turns": 1, "sensory_focus": "触觉与听觉"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "medical-temperature",
+        "keys": [],
+        "content": "医学院地下空间可从金属把手的低温、消毒剂遮不住的潮气、白瓷与搪瓷表面的硬质反光中选取细节。保持临床观察的克制。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["miskatonic_medical"], "group": "medical-palette", "cooldown_turns": 1, "sensory_focus": "温度与气味"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "medical-procedure",
+        "keys": [],
+        "content": "停尸房里的压迫感可来自程序化动作：钥匙碰响、标签被逐字核对、抽屉滑轨发出短促摩擦。先呈现可观察事实，再等待调查员提问。",
+        "extensions": {"trpg_master": {"kind": "scene_pressure", "scene_ids": ["miskatonic_medical"], "group": "medical-palette", "cooldown_turns": 1, "sensory_focus": "动作节奏"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "tavern-surface",
+        "keys": [],
+        "content": "希布酒馆表面仍是体面的餐馆：玻璃杯的碰响、过亮的桌布、侍者刻意不在某桌停留。用秩序里的小偏差暗示风险，不直接宣布敌意。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["sheb_tavern"], "group": "tavern-palette", "cooldown_turns": 1, "sensory_focus": "社交环境"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "tavern-gaze",
+        "keys": [],
+        "content": "酒馆的戒备可通过谈笑声在调查员经过时降低一瞬、某人用杯沿遮住视线、后门开合带来的冷风表现。不要替 NPC 发动尚未发生的行动。",
+        "extensions": {"trpg_master": {"kind": "scene_pressure", "scene_ids": ["sheb_tavern"], "group": "tavern-palette", "cooldown_turns": 1, "sensory_focus": "视线与停顿"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "shop-clutter",
+        "keys": [],
+        "content": "古董店可从不同年代物件挤在同一视野里的不协调、黄铜边缘被反复擦拭的亮处、旧木柜散出的蜡味中选取细节。物件没有被确认前不要赋予神秘功效。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["trivial_pursuits"], "group": "shop-palette", "cooldown_turns": 1, "sensory_focus": "物件与气味"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "shop-depth",
+        "keys": [],
+        "content": "店内空间的深度可通过柜台后半掩的门、地下传来的模糊搬动声、灯光无法照进的货架缝隙呈现；这些只营造方向感，不提前揭示地下内容。",
+        "extensions": {"trpg_master": {"kind": "scene_pressure", "scene_ids": ["trivial_pursuits"], "group": "shop-palette", "cooldown_turns": 1, "sensory_focus": "空间层次"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "mansion-decay",
+        "keys": [],
+        "content": "荒宅的年代感可从墙纸接缝翘起、潮湿木料的甜腐气味、脚步震落的细灰中选取。建筑破败不等于每个角落都有超自然活动。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["hobhouse_mansion"], "group": "mansion-palette", "cooldown_turns": 1, "sensory_focus": "材质与气味"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "mansion-distance",
+        "keys": [],
+        "content": "荒宅的空旷可借声音传播表现：门轴声穿过数间空房、楼上落下的灰尘晚于脚步、风从破窗进入又在走廊尽头消失。不要虚构移动的人影。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["hobhouse_mansion"], "group": "mansion-palette", "cooldown_turns": 1, "sensory_focus": "声音与距离"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "sanatorium-order",
+        "keys": [],
+        "content": "疗养院先呈现制度化的压迫：门锁依次开启、记录表上的铅笔划痕、护理人员用固定措辞回答。不要用夸张疯癫替代人物的具体状态。",
+        "extensions": {"trpg_master": {"kind": "scene_pressure", "scene_ids": ["arkham_sanatorium"], "group": "sanatorium-palette", "cooldown_turns": 1, "sensory_focus": "秩序与动作"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      },
+      {
+        "id": "sanatorium-air",
+        "keys": [],
+        "content": "疗养院的环境可从暖气管断续敲击、肥皂和药味混合的空气、窗户只能推开一条窄缝等细节中选择。保持克制，不把病患污名化。",
+        "extensions": {"trpg_master": {"kind": "sensory_palette", "scene_ids": ["arkham_sanatorium"], "group": "sanatorium-palette", "cooldown_turns": 1, "sensory_focus": "声音与空气"}},
+        "enabled": true, "insertion_order": 10, "use_regex": false, "constant": true, "priority": 100
+      }
+    ]
+  }
+}

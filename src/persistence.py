@@ -18,11 +18,13 @@ from pathlib import Path
 from .config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
+    PROMPT_PROFILE,
     PROJECT_ROOT,
     RUNTIME_ROOT,
     SKILL_LOAD_ORDER,
 )
 from .runtime import RuntimeContext, default_world_id
+from .handouts import refresh_static_handout_config
 from .world_migrations import migrate_world_state
 from .world_store import atomic_write_json
 
@@ -67,8 +69,18 @@ def _module_prompt_content(content: str) -> str:
     return content
 
 
-def load_system_prompt(context: RuntimeContext | None = None) -> str:
+_PROMPT_SPINE_MARKER = "trpg-master:prompt-role=spine"
+
+
+def load_system_prompt(
+    context: RuntimeContext | None = None,
+    *,
+    profile: str | None = None,
+) -> str:
     context = _runtime_context(context)
+    profile = (profile or PROMPT_PROFILE).lower()
+    if profile not in {"full", "hybrid"}:
+        profile = "full"
     parts = []
     # 核心 skill
     for name in SKILL_LOAD_ORDER:
@@ -77,19 +89,28 @@ def load_system_prompt(context: RuntimeContext | None = None) -> str:
             content = path.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
-    # 当前模组的剧情设定（module.md）——让 GM 知道本模组的故事背景
-    module_md = context.module_dir / "module.md"
-    if module_md.exists():
-        content = _module_prompt_content(module_md.read_text(encoding="utf-8")).strip()
-        if content:
-            parts.append(content)
-    # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
+    # hybrid 只在模组明确提供足量剧情脊柱时生效；否则无声回退 full。
     mod_skills_dir = context.module_dir / "skills"
+    mod_skill_contents: list[str] = []
     if mod_skills_dir.exists():
         for mod_skill in sorted(mod_skills_dir.glob("*.skill")):
             content = mod_skill.read_text(encoding="utf-8").strip()
             if content:
-                parts.append(content)
+                mod_skill_contents.append(content)
+    spine_parts = [
+        content for content in mod_skill_contents
+        if _PROMPT_SPINE_MARKER in content[:300]
+    ]
+    use_spine = profile == "hybrid" and sum(map(len, spine_parts)) >= 1000
+
+    # 当前模组的剧情设定（module.md）——让 GM 知道本模组的故事背景
+    module_md = context.module_dir / "module.md"
+    if module_md.exists() and not use_spine:
+        content = _module_prompt_content(module_md.read_text(encoding="utf-8")).strip()
+        if content:
+            parts.append(content)
+    # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
+    parts.extend(spine_parts if use_spine else mod_skill_contents)
     return "\n\n---\n\n".join(parts)
 
 
@@ -181,6 +202,61 @@ def save_game(
     return slot_id
 
 
+def normalize_tool_message_history(messages: list[dict]) -> list[dict]:
+    """Repair interrupted tool batches from older saves.
+
+    OpenAI-compatible APIs require all responses to an assistant tool-call batch
+    before any user or assistant message. Older builds could insert an optional
+    skill instruction between those responses.
+    """
+    repaired: list[dict] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if message.get("role") != "assistant" or not isinstance(tool_calls, list):
+            repaired.append(message)
+            index += 1
+            continue
+
+        expected_ids = [
+            str(call.get("id") or "")
+            for call in tool_calls
+            if isinstance(call, dict) and call.get("id")
+        ]
+        if not expected_ids:
+            repaired.append(message)
+            index += 1
+            continue
+
+        repaired.append(message)
+        responses: dict[str, dict] = {}
+        deferred: list[dict] = []
+        cursor = index + 1
+        while cursor < len(messages) and len(responses) < len(expected_ids):
+            candidate = messages[cursor]
+            role = candidate.get("role") if isinstance(candidate, dict) else None
+            if role == "assistant":
+                break
+            if role == "tool":
+                call_id = str(candidate.get("tool_call_id") or "")
+                if call_id in expected_ids and call_id not in responses:
+                    responses[call_id] = candidate
+            else:
+                deferred.append(candidate)
+            cursor += 1
+
+        for call_id in expected_ids:
+            repaired.append(responses.get(call_id, {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": "[错误] 旧存档缺少该工具调用的返回结果",
+            }))
+        repaired.extend(deferred)
+        index = cursor
+    return repaired
+
+
 def load_game(
     slot_id: str | None = None,
     *,
@@ -213,7 +289,9 @@ def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
     if not msg_file.exists():
         return None, None
 
-    messages = json.loads(msg_file.read_text(encoding="utf-8"))
+    messages = normalize_tool_message_history(
+        json.loads(msg_file.read_text(encoding="utf-8"))
+    )
     snapshot = json.loads(snap_file.read_text(encoding="utf-8")) if snap_file.exists() else {}
 
     return messages, snapshot
@@ -236,6 +314,9 @@ def restore_snapshot(
     if not snapshot:
         return False
     snapshot = _migrate_snapshot(snapshot)
+    if context.initial_state_file.exists():
+        template = json.loads(context.initial_state_file.read_text(encoding="utf-8"))
+        refresh_static_handout_config(snapshot, template)
     context.world_store.restore(snapshot, expected_revision=expected_revision)
     return True
 
