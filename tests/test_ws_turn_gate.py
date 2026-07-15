@@ -12,6 +12,21 @@ from src.runtime import RuntimeContext
 
 
 class WebSocketTurnGateTests(unittest.TestCase):
+    def test_unknown_message_returns_explicit_protocol_error(self):
+        import server
+
+        with patch("src.engine.API_KEY", "test-api-key"):
+            with TestClient(server.app) as client:
+                with client.websocket_connect("/ws") as ws:
+                    for _ in range(5):
+                        ws.receive_json()
+                    ws.send_json({"type": "future_client_message"})
+                    response = ws.receive_json()
+
+        self.assertEqual("protocol_error", response["type"])
+        self.assertEqual("unknown_message_type", response["code"])
+        self.assertEqual("future_client_message", response["message_type"])
+
     def test_second_action_is_rejected_before_another_turn_starts(self):
         import server
 

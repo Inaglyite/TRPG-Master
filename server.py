@@ -115,6 +115,7 @@ from src.runtime import RuntimeContext
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
 from src.ws_session import PendingReply, SessionTurnGate, TurnLease, TurnRejection
+from src.ws_router import WsMessageRouter
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -526,6 +527,72 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
+    router = WsMessageRouter()
+
+    @router.handler("ping")
+    async def handle_ping(_data: dict) -> None:
+        await outbound.send({"type": "pong"})
+
+    @router.handler("turn_recovery_get")
+    async def handle_turn_recovery(data: dict) -> None:
+        await outbound.send(turn_recovery_payload(data.get("turn_id")))
+
+    @router.handler("turn_diagnostics_get")
+    async def handle_turn_diagnostics(data: dict) -> None:
+        await outbound.send({
+            "type": "turn_diagnostics",
+            "diagnostics": engine.turn_diagnostics(data.get("turn_id")),
+        })
+
+    @router.handler("world_list")
+    async def handle_world_list(_data: dict) -> None:
+        await outbound.send(world_list_payload())
+
+    @router.handler("player_notes_get")
+    async def handle_player_notes_get(_data: dict) -> None:
+        notes = PlayerNotesStore(engine.context.world_dir).load()
+        await outbound.send({"type": "player_notes", **notes})
+
+    @router.handler("model_settings_get")
+    async def handle_model_settings_get(_data: dict) -> None:
+        await outbound.send(_model_settings_payload(ModelSettings.validated(
+            engine.narrative_model,
+            engine.judgement_model,
+        )))
+
+    @router.handler("module_list")
+    async def handle_module_list(_data: dict) -> None:
+        await outbound.send({
+            "type": "module_list",
+            "modules": _list_mods(),
+            "active": engine.context.module_name,
+        })
+
+    @router.handler("suggest_reply")
+    async def handle_suggest_reply(data: dict) -> None:
+        suggest_reply.resolve(bool(data.get("confirmed", False)))
+
+    @router.handler("decision_reply")
+    async def handle_decision_reply(data: dict) -> None:
+        decision_reply.resolve(
+            data.get("option_id"),
+            request_id=data.get("decision_id"),
+        )
+
+    @router.handler("save_list")
+    async def handle_save_list(_data: dict) -> None:
+        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+
+    @router.handler("character_list")
+    async def handle_character_list(_data: dict) -> None:
+        await outbound.send({
+            "type": "character_list",
+            **list_character_options(
+                engine.context.module_name,
+                context=engine.context,
+            ),
+        })
+
     # 保持首连的五条初始化消息稳定；世界身份随 module_list 一并下发。
     await outbound.send({
         "type": "module_list",
@@ -574,28 +641,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             except json.JSONDecodeError:
                 continue
 
-            msg_type = data.get("type", "")
+            routed = await router.dispatch(data)
+            if routed.handled:
+                continue
+            msg_type = routed.message_type
 
-            if msg_type == "ping":
-                await outbound.send({"type": "pong"})
-
-            elif msg_type == "turn_recovery_get":
-                await outbound.send(turn_recovery_payload(data.get("turn_id")))
-
-            elif msg_type == "turn_diagnostics_get":
-                await outbound.send({
-                    "type": "turn_diagnostics",
-                    "diagnostics": engine.turn_diagnostics(data.get("turn_id")),
-                })
-
-            elif msg_type == "world_list":
-                await outbound.send(world_list_payload())
-
-            elif msg_type == "player_notes_get":
-                notes = PlayerNotesStore(engine.context.world_dir).load()
-                await outbound.send({"type": "player_notes", **notes})
-
-            elif msg_type == "player_notes_update":
+            if msg_type == "player_notes_update":
                 try:
                     notes = PlayerNotesStore(engine.context.world_dir).save(
                         data.get("text", ""),
@@ -720,12 +771,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     continue
                 await launch_rewrite(turn_id)
 
-            elif msg_type == "model_settings_get":
-                await outbound.send(_model_settings_payload(ModelSettings.validated(
-                    engine.narrative_model,
-                    engine.judgement_model,
-                )))
-
             elif msg_type == "model_settings_update":
                 if not turn_gate.try_acquire_session():
                     await outbound.send({
@@ -755,13 +800,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     })
                 finally:
                     turn_gate.release_session()
-
-            elif msg_type == "module_list":
-                await outbound.send({
-                    "type": "module_list",
-                    "modules": _list_mods(),
-                    "active": engine.context.module_name,
-                })
 
             elif msg_type == "switch_module":
                 # 切换活跃模组（开场前在下拉框选择）
@@ -873,15 +911,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     player_input=data.get("content", ""),
                 )
 
-            elif msg_type == "suggest_reply":
-                suggest_reply.resolve(bool(data.get("confirmed", False)))
-
-            elif msg_type == "decision_reply":
-                decision_reply.resolve(
-                    data.get("option_id"),
-                    request_id=data.get("decision_id"),
-                )
-
             elif msg_type == "save":
                 is_manual = data.get("manual", False)
                 slot_id = None if is_manual else AUTO_SAVE_SLOT
@@ -895,18 +924,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     continue
                 sid = engine.save(slot_id)
                 await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
-
-            elif msg_type == "save_list":
-                saves = engine.list_saves()
-                await outbound.send({"type": "save_list", "saves": saves})
-
-            elif msg_type == "character_list":
-                await outbound.send({
-                    "type": "character_list",
-                    **list_character_options(
-                        engine.context.module_name, context=engine.context
-                    ),
-                })
 
             elif msg_type == "save_load":
                 if not await reserve_turn():
@@ -1040,6 +1057,14 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     "type": "state_data",
                     "data": json.dumps(pc_data, ensure_ascii=False),
                     "clues": json.dumps(clues_data, ensure_ascii=False)
+                })
+
+            else:
+                await outbound.send({
+                    "type": "protocol_error",
+                    "code": "unknown_message_type",
+                    "message_type": msg_type,
+                    "message": "客户端发送了当前服务端不支持的消息类型。",
                 })
 
     except WebSocketDisconnect:
