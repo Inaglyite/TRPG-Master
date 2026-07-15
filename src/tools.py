@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .endings import validate_ending
 from .runtime import RuntimeContext
-from .tool_runtime import ToolRuntime
+from .tool_runtime import ToolRuntime, UnknownToolError
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -881,6 +881,238 @@ for _tool_name, _argv_builder in _CLI_TOOL_BUILDERS.items():
     _register_cli_tool(_tool_name, _argv_builder)
 
 
+@TOOL_RUNTIME.handler("skill_check")
+def _skill_check(args: dict, context: RuntimeContext) -> str:
+    argv = [
+        sys.executable,
+        "tools/skill_check.py",
+        args.get("skill", "spot_hidden"),
+        args.get("bonus_dice", 0) or 0,
+        args.get("penalty_dice", 0) or 0,
+    ]
+    if args.get("push", False):
+        argv.append("--push")
+    return _run_cli(argv, context)
+
+
+@TOOL_RUNTIME.handler("state_add_clue")
+def _state_add_clue(args: dict, context: RuntimeContext) -> str:
+    argv = [
+        sys.executable,
+        "tools/state_manager.py",
+        "add-clue",
+        args.get("text", ""),
+        args.get("category", "investigation"),
+    ]
+    asset_id = args.get("asset_id", "") or ""
+    clue_id = args.get("clue_id", "") or ""
+    if asset_id or clue_id:
+        argv.extend([asset_id, clue_id])
+    return _run_cli(argv, context)
+
+
+@TOOL_RUNTIME.handler("create_character")
+def _create_character(args: dict, context: RuntimeContext) -> str:
+    return _run_cli([
+        sys.executable,
+        "tools/character.py",
+        "create",
+        args.get("name", "调查员"),
+        args.get("occupation", "私家侦探"),
+        args.get("violence_stance", "conditional"),
+    ], context)
+
+
+@TOOL_RUNTIME.handler("sanity_trigger")
+def _sanity_trigger(args: dict, _context: RuntimeContext) -> str:
+    description = args.get("description", "")
+    severity_keywords = (
+        ("catastrophic", ["直视", "伟大", "克苏鲁", "神话生物完全显形"]),
+        ("major", ["朋友被杀", "目击死亡", "尸雨", "严刑拷打", "割喉"]),
+        (
+            "moderate",
+            [
+                "恐怖尸体", "血肉模糊", "超自然", "非人", "不是人类",
+                "食尸鬼", "深潜者", "怪物显形", "第一次杀人",
+            ],
+        ),
+        (
+            "minor",
+            [
+                "尸体", "血迹", "诡异", "禁忌文本", "噩梦", "幻觉",
+                "异常倒影", "第一次目睹",
+            ],
+        ),
+        ("trivial", ["不安", "违和感", "奇怪", "不对劲"]),
+    )
+    suggestion = "moderate"
+    for severity, keywords in severity_keywords:
+        if any(keyword in description for keyword in keywords):
+            suggestion = severity
+            break
+    return json.dumps({
+        "suggestion": suggestion,
+        "note": "这是建议的严重度，最终由守秘人根据具体情境决定。确认后调用 sanity_loss(severity=...)",
+        "severity_options": {
+            "trivial": "0/1 (几乎无损失)",
+            "minor": "0/1D4 (轻微不适)",
+            "moderate": "1/1D6+1 (明显冲击)",
+            "major": "1D4/2D6+2 (严重创伤)",
+            "catastrophic": "1D10/1D100 (终极恐怖)",
+        },
+    }, ensure_ascii=False)
+
+
+@TOOL_RUNTIME.handler("sanity_event")
+def _sanity_event(args: dict, context: RuntimeContext) -> str:
+    trigger = json.loads(TOOL_RUNTIME.execute(
+        "sanity_trigger",
+        {"description": args.get("description", "")},
+        context,
+    ))
+    loss = json.loads(TOOL_RUNTIME.execute(
+        "sanity_loss",
+        {"severity": args.get("severity", trigger["suggestion"])},
+        context,
+    ))
+    return json.dumps({
+        **loss,
+        "description": args.get("description", ""),
+        "suggested_severity": trigger.get("suggestion"),
+    }, ensure_ascii=False)
+
+
+@TOOL_RUNTIME.handler("suggest_check")
+def _suggest_check(args: dict, _context: RuntimeContext) -> str:
+    skill = args.get("skill", "?")
+    attribute = args.get("attribute", "?")
+    dc = args.get("dc", 15)
+    print()
+    print(f"  ⚡ 检定提议：{args.get('description', '')}")
+    print(
+        f"     【{skill}】（{attribute}）— "
+        f"难度：{args.get('dc_label', '中等')}（DC {dc}）"
+    )
+    try:
+        answer = input("  → 确定尝试吗？(y/n) ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer in ("y", "yes", "是"):
+        return json.dumps({
+            "confirmed": True,
+            "skill": skill,
+            "attribute": attribute,
+            "dc": dc,
+        })
+    return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
+
+
+@TOOL_RUNTIME.handler("cache_scene")
+def _cache_scene(args: dict, context: RuntimeContext) -> str:
+    scene_id = args.get("scene_id", "")
+    description = args.get("description", "")
+    try:
+        def cache(data: dict) -> None:
+            data.setdefault("scene_cache", {})[scene_id] = description
+
+        context.world_store.update(cache)
+        return json.dumps({"cached": True, "scene_id": scene_id})
+    except Exception as exc:
+        return json.dumps({"cached": False, "error": str(exc)})
+
+
+@TOOL_RUNTIME.handler("end_game")
+def _end_game(args: dict, context: RuntimeContext) -> str:
+    resolution = validate_ending(context.world_store.load(), args)
+    if not resolution.get("ok"):
+        return json.dumps({"game_over": False, **resolution}, ensure_ascii=False)
+
+    def finish(data: dict) -> None:
+        data["game_over"] = {
+            "id": resolution.get("ending_id"),
+            "type": resolution["ending_type"],
+            "title": resolution["title"],
+            "summary": resolution["summary"],
+        }
+
+    context.world_store.update(finish)
+    return json.dumps({
+        "ok": True,
+        "game_over": True,
+        "ending_id": resolution.get("ending_id"),
+        "ending_type": resolution["ending_type"],
+        "title": resolution["title"],
+        "summary": resolution["summary"],
+    }, ensure_ascii=False)
+
+
+@TOOL_RUNTIME.handler("read_file")
+def _read_file(args: dict, context: RuntimeContext) -> str:
+    path = str(args.get("path") or "").strip()
+    if not path:
+        return "[错误] 文件路径不能为空"
+    normalized_path = path.replace("\\", "/").lstrip("./")
+    module_name = context.module_name
+    world_aliases = {
+        "world://state",
+        "world_state.json",
+        f"mod/{module_name}/world_state.json",
+        f"modules/{module_name}/world_state.json",
+    }
+    if normalized_path in world_aliases:
+        return json.dumps(context.world_store.load(), ensure_ascii=False, indent=2)
+    module_aliases = {
+        "module.md",
+        f"mod/{module_name}/module.md",
+        f"modules/{module_name}/module.md",
+    }
+    full_path = (
+        (context.module_dir / "module.md").resolve()
+        if normalized_path in module_aliases
+        else (context.project_root / path).resolve()
+    )
+    allowed_roots = (context.project_root.resolve(), context.runtime_root.resolve())
+    if not any(_is_relative_to(full_path, root) for root in allowed_roots):
+        return "[错误] 不允许读取项目外的文件"
+    if not full_path.exists():
+        return f"[错误] 文件不存在: {path}"
+    if not full_path.is_file():
+        return f"[错误] 不能读取目录: {path}"
+    try:
+        return full_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"[错误] 文件读取失败: {exc}"
+
+
+@TOOL_RUNTIME.handler("show_handout")
+def _show_handout(args: dict, context: RuntimeContext) -> str:
+    argv = [
+        sys.executable,
+        "tools/state_manager.py",
+        "show-handout",
+        args.get("entity_type", "npc"),
+        args.get("entity_id", ""),
+    ]
+    if args.get("asset_id"):
+        argv.append(args["asset_id"])
+    result = _run_cli(argv, context)
+    try:
+        info = json.loads(result)
+        if info.get("found") and info.get("file"):
+            asset_path = context.assets_dir / info["file"]
+            if asset_path.exists():
+                mime = mimetypes.guess_type(str(asset_path))[0] or "image/png"
+                data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
+                info["asset_data_uri"] = f"data:{mime};base64,{data}"
+                info["asset_url"] = (
+                    f"/api/assets/{context.module_name}/{info['file']}"
+                )
+                result = json.dumps(info, ensure_ascii=False)
+    except (json.JSONDecodeError, OSError, TypeError):
+        pass
+    return result
+
+
 def execute_function(
     name: str,
     args: dict,
@@ -888,256 +1120,9 @@ def execute_function(
     context: RuntimeContext | None = None,
 ) -> str:
     context = context or RuntimeContext.local()
-    if name in TOOL_RUNTIME.names:
+    try:
         return TOOL_RUNTIME.execute(name, args, context)
-    exe = sys.executable  # frozen exe 路径；argv 列表经 CreateProcess 启动，不怕空格/中文
-
-    def run_cli(argv: list) -> str:
-        return _run_cli(argv, context)
-
-    if name == "skill_check":
-        bonus = args.get("bonus_dice", 0) or 0
-        penalty = args.get("penalty_dice", 0) or 0
-        argv = [exe, "tools/skill_check.py", args.get("skill", "spot_hidden"), bonus, penalty]
-        if args.get("push", False):
-            argv.append("--push")
-        return run_cli(argv)
-    elif name == "dice_roll":
-        return run_cli([exe, "tools/dice.py", args.get('spec', 'd20')])
-    elif name == "state_get":
-        return run_cli([exe, "tools/state_manager.py", "get", args.get('path', 'pc.hp')])
-    elif name == "state_set":
-        return run_cli([exe, "tools/state_manager.py", "set", args.get('path', ''), args.get('value', '')])
-    elif name == "state_npcs":
-        return run_cli([exe, "tools/state_manager.py", "npcs"])
-    elif name == "state_clues":
-        return run_cli([exe, "tools/state_manager.py", "clues"])
-    elif name == "state_add_clue":
-        argv = [exe, "tools/state_manager.py", "add-clue", args.get("text", ""), args.get("category", "investigation")]
-        asset_id = args.get("asset_id", "") or ""
-        clue_id = args.get("clue_id", "") or ""
-        if asset_id or clue_id:
-            argv.extend([asset_id, clue_id])
-        return run_cli(argv)
-    elif name == "state_add_item":
-        return run_cli([exe, "tools/state_manager.py", "add-item", args.get('item', '')])
-    elif name == "state_remove_item":
-        return run_cli([exe, "tools/state_manager.py", "remove-item", args.get('item', '')])
-    elif name == "apply_damage":
-        return run_cli([exe, "tools/damage.py", "damage", args.get('target', 'pc'), args.get('amount', 0), args.get('damage_type', '物理')])
-    elif name == "apply_heal":
-        return run_cli([exe, "tools/damage.py", "heal", args.get('target', 'pc'), args.get('amount', 0)])
-    elif name == "sanity_event":
-        trigger = json.loads(execute_function(
-            "sanity_trigger",
-            {"description": args.get("description", "")},
-            context=context,
-        ))
-        loss = json.loads(execute_function(
-            "sanity_loss",
-            {"severity": args.get("severity", trigger.get("suggestion", "moderate"))},
-            context=context,
-        ))
-        return json.dumps({
-            **loss,
-            "description": args.get("description", ""),
-            "suggested_severity": trigger.get("suggestion"),
-        }, ensure_ascii=False)
-    elif name == "sanity_loss":
-        return run_cli([exe, "tools/sanity.py", "loss", args.get('severity', 'moderate')])
-    elif name == "sanity_restore":
-        return run_cli([exe, "tools/sanity.py", "restore", args.get('amount', 0)])
-    elif name == "sanity_check":
-        return run_cli([exe, "tools/sanity.py", "check"])
-    elif name == "create_character":
-        return run_cli([
-            exe,
-            "tools/character.py",
-            "create",
-            args.get("name", "调查员"),
-            args.get("occupation", "私家侦探"),
-            args.get("violence_stance", "conditional"),
-        ])
-    elif name == "load_character":
-        return run_cli([exe, "tools/character.py", "load", args.get('path', '')])
-    elif name == "use_item":
-        return run_cli([exe, "tools/item.py", json.dumps(args, ensure_ascii=False)])
-    elif name == "combat_start":
-        return run_cli([exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)])
-    elif name == "combat_status":
-        return run_cli([exe, "tools/combat.py", "status", "{}"])
-    elif name == "combat_action":
-        return run_cli([exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)])
-    elif name == "combat_decide":
-        return run_cli([exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)])
-    elif name == "combat_end":
-        return run_cli([exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)])
-    elif name == "suggest_check":
-        skill = args.get("skill", "?")
-        attr = args.get("attribute", "?")
-        dc = args.get("dc", 15)
-        dc_label = args.get("dc_label", "中等")
-        desc = args.get("description", "")
-        print()
-        print(f"  ⚡ 检定提议：{desc}")
-        print(f"     【{skill}】（{attr}）— 难度：{dc_label}（DC {dc}）")
-        try:
-            answer = input("  → 确定尝试吗？(y/n) ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        if answer in ("y", "yes", "是"):
-            return json.dumps({"confirmed": True, "skill": skill, "attribute": attr, "dc": dc})
-        else:
-            return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
-
-    elif name == "cache_scene":
-        scene_id = args.get("scene_id", "")
-        desc = args.get("description", "")
-        try:
-            def cache(data: dict) -> None:
-                data.setdefault("scene_cache", {})[scene_id] = desc
-
-            context.world_store.update(cache)
-            return json.dumps({"cached": True, "scene_id": scene_id})
-        except Exception as e:
-            return json.dumps({"cached": False, "error": str(e)})
-
-    elif name == "end_game":
-        resolution = validate_ending(context.world_store.load(), args)
-        if not resolution.get("ok"):
-            return json.dumps({"game_over": False, **resolution}, ensure_ascii=False)
-        ending = resolution["ending_type"]
-        title = resolution["title"]
-        summary = resolution["summary"]
-        def finish(data: dict) -> None:
-            data["game_over"] = {
-                "id": resolution.get("ending_id"),
-                "type": ending,
-                "title": title,
-                "summary": summary
-            }
-
-        context.world_store.update(finish)
-        return json.dumps({
-            "ok": True,
-            "game_over": True,
-            "ending_id": resolution.get("ending_id"),
-            "ending_type": ending,
-            "title": title,
-            "summary": summary,
-        }, ensure_ascii=False)
-
-    elif name == "read_file":
-        path = str(args.get("path") or "").strip()
-        if not path:
-            return "[错误] 文件路径不能为空"
-
-        normalized_path = path.replace("\\", "/").lstrip("./")
-        module_name = context.module_name
-        world_aliases = {
-            "world://state",
-            "world_state.json",
-            f"mod/{module_name}/world_state.json",
-            f"modules/{module_name}/world_state.json",
-        }
-        if normalized_path in world_aliases:
-            return json.dumps(context.world_store.load(), ensure_ascii=False, indent=2)
-
-        module_aliases = {
-            "module.md",
-            f"mod/{module_name}/module.md",
-            f"modules/{module_name}/module.md",
-        }
-        if normalized_path in module_aliases:
-            full_path = (context.module_dir / "module.md").resolve()
-        else:
-            full_path = (context.project_root / path).resolve()
-        allowed_roots = (context.project_root.resolve(), context.runtime_root.resolve())
-        if not any(_is_relative_to(full_path, root) for root in allowed_roots):
-            return "[错误] 不允许读取项目外的文件"
-        if not full_path.exists():
-            return f"[错误] 文件不存在: {path}"
-        if not full_path.is_file():
-            return f"[错误] 不能读取目录: {path}"
-        try:
-            return full_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            return f"[错误] 文件读取失败: {exc}"
-    elif name == "attribute_check":
-        bonus = args.get("bonus_dice", 0) or 0
-        penalty = args.get("penalty_dice", 0) or 0
-        return run_cli([exe, "tools/skill_check.py", args.get("attribute", "STR"), bonus, penalty])
-    elif name == "luck_check":
-        return run_cli([exe, "tools/skill_check.py", "POW"])
-    elif name == "psychoanalysis":
-        return run_cli([exe, "tools/sanity.py", "psychoanalysis", args.get('target', 'pc')])
-    elif name == "reality_check":
-        return run_cli([exe, "tools/sanity.py", "reality-check"])
-    elif name == "sanity_trigger":
-        desc = args.get("description", "")
-        # 基于关键词的 severity 建议
-        if any(w in desc for w in ["直视", "伟大", "克苏鲁", "神话生物完全显形"]):
-            suggestion = "catastrophic"
-        elif any(w in desc for w in ["朋友被杀", "目击死亡", "尸雨", "严刑拷打", "割喉"]):
-            suggestion = "major"
-        elif any(w in desc for w in ["恐怖尸体", "血肉模糊", "超自然", "非人", "不是人类", "食尸鬼", "深潜者", "怪物显形", "第一次杀人"]):
-            suggestion = "moderate"
-        elif any(w in desc for w in ["尸体", "血迹", "诡异", "禁忌文本", "噩梦", "幻觉", "异常倒影", "第一次目睹"]):
-            suggestion = "minor"
-        elif any(w in desc for w in ["不安", "违和感", "奇怪", "不对劲"]):
-            suggestion = "trivial"
-        else:
-            suggestion = "moderate"  # 默认
-        return json.dumps({
-            "suggestion": suggestion,
-            "note": "这是建议的严重度，最终由守秘人根据具体情境决定。确认后调用 sanity_loss(severity=...)",
-            "severity_options": {
-                "trivial": "0/1 (几乎无损失)",
-                "minor": "0/1D4 (轻微不适)",
-                "moderate": "1/1D6+1 (明显冲击)",
-                "major": "1D4/2D6+2 (严重创伤)",
-                "catastrophic": "1D10/1D100 (终极恐怖)"
-            }
-        }, ensure_ascii=False)
-    elif name == "set_psychological_trait":
-        return run_cli([exe, "tools/state_manager.py", "psych-trait", args.get('category', 'phobia'), args.get('name', ''), args.get('context', '')])
-    elif name == "show_handout":
-        argv = [
-            exe,
-            "tools/state_manager.py",
-            "show-handout",
-            args.get("entity_type", "npc"),
-            args.get("entity_id", ""),
-        ]
-        if args.get("asset_id"):
-            argv.append(args["asset_id"])
-        result = run_cli(argv)
-        # 读取资产文件并转 base64 data URI（electron file:// 下 HTTP URL 不可用）
-        try:
-            info = json.loads(result)
-            if info.get("found") and info.get("file"):
-                asset_path = context.assets_dir / info["file"]
-                if asset_path.exists():
-                    mime = mimetypes.guess_type(str(asset_path))[0] or "image/png"
-                    data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
-                    info["asset_data_uri"] = f"data:{mime};base64,{data}"
-                    # 同时保留 URL 供 web 模式使用
-                    info["asset_url"] = f"/api/assets/{context.module_name}/{info['file']}"
-                    result = json.dumps(info, ensure_ascii=False)
-        except Exception:
-            pass
-        return result
-    elif name == "link_clues":
-        return run_cli([exe, "tools/state_manager.py", "link-clues", args.get('from_id', ''), args.get('to_id', ''), args.get('reasoning', '')])
-    elif name == "npc_reveal":
-        return run_cli([exe, "tools/state_manager.py", "npc-reveal", args.get('npc_id', ''), args.get('tier', 1), args.get('entry_text', '')])
-    elif name == "get_npc_secret":
-        return run_cli([exe, "tools/state_manager.py", "npc-secret", args.get('npc_id', '')])
-    elif name == "get_private_memory":
-        return run_cli([exe, "tools/state_manager.py", "private-memory"])
-    elif name == "update_private_memory":
-        return run_cli([exe, "tools/state_manager.py", "private-memory-update", args.get('section', ''), args.get('value', '')])
-    else:
+    except UnknownToolError:
         return f"[错误] 未知函数: {name}"
 
 

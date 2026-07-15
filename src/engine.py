@@ -5,7 +5,6 @@
 import copy
 import json
 import re
-import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -59,6 +58,7 @@ from .turn_reconciler import (
 from .runtime import RuntimeContext
 from .agent_graph import build_turn_graph
 from .model_settings import ModelSettings
+from .model_session import ModelSession
 from .turn_journal import TurnJournal
 from .logger import error as log_error, summary_event as log_summary, \
     tier_inject as log_tier, game_event as log_game, model_call as log_model_call
@@ -182,10 +182,36 @@ class GameEngine:
 
     CONTROL_MESSAGE_PREFIX = "[引擎控制指令｜非玩家发言]"
 
+    def _ensure_model_session(self) -> ModelSession:
+        session = self.__dict__.get("_model_session")
+        if session is None:
+            session = ModelSession(
+                messages=self.__dict__.pop("messages", []),
+                diagnostics=self.__dict__.pop("_turn_diagnostics", []),
+            )
+            self.__dict__["_model_session"] = session
+        return session
+
+    @property
+    def messages(self) -> list[dict]:
+        return self._ensure_model_session().messages
+
+    @messages.setter
+    def messages(self, value: list[dict]) -> None:
+        self._ensure_model_session().replace_messages(value)
+
+    @property
+    def _turn_diagnostics(self) -> list[dict]:
+        return self._ensure_model_session().diagnostics
+
+    @_turn_diagnostics.setter
+    def _turn_diagnostics(self, value: list[dict]) -> None:
+        self._ensure_model_session().diagnostics = value
+
     def __init__(self, context: RuntimeContext | None = None):
         self.context = context or RuntimeContext.local()
         self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-        self.messages: list[dict] = []
+        self._model_session = ModelSession()
         self.narrative_model = NARRATIVE_MODEL
         self.judgement_model = JUDGEMENT_MODEL
         self.current_model = self.narrative_model
@@ -209,9 +235,6 @@ class GameEngine:
         self._active_turn_id: str | None = None
         self._turn_diagnostics: list[dict] = []
         self._turn_lore_diagnostics: dict = {}
-        self._turn_cancel_event = threading.Event()
-        self._active_stream_lock = threading.Lock()
-        self._active_stream: object | None = None
         # 摘要策略：按玩家回合静默压缩，避免内部工具消息过多导致频繁打断沉浸。
         self.SUMMARY_PLAYER_TURN_INTERVAL = 50
         self.SUMMARY_KEEP_RECENT_MESSAGES = 24
@@ -256,20 +279,15 @@ class GameEngine:
 
     def _ensure_turn_cancellation_state(self) -> None:
         # A few narrow unit tests construct GameEngine with __new__.
-        if not hasattr(self, "_turn_cancel_event"):
-            self._turn_cancel_event = threading.Event()
-        if not hasattr(self, "_active_stream_lock"):
-            self._active_stream_lock = threading.Lock()
-        if not hasattr(self, "_active_stream"):
-            self._active_stream = None
+        self._ensure_model_session()
 
     def clear_turn_cancellation(self) -> None:
         self._ensure_turn_cancellation_state()
-        self._turn_cancel_event.clear()
+        self._model_session.clear_cancellation()
 
     def turn_cancellation_requested(self) -> bool:
         self._ensure_turn_cancellation_state()
-        return self._turn_cancel_event.is_set()
+        return self._model_session.cancellation_requested
 
     def raise_if_turn_cancelled(self) -> None:
         if self.turn_cancellation_requested():
@@ -278,33 +296,18 @@ class GameEngine:
     def cancel_active_turn(self) -> None:
         """Cancel model streaming so a disconnected world releases its turn lock."""
         self._ensure_turn_cancellation_state()
-        self._turn_cancel_event.set()
-        with self._active_stream_lock:
-            stream = self._active_stream
-        close = getattr(stream, "close", None)
-        if close is not None:
-            try:
-                close()
-            except Exception:
-                pass
+        self._model_session.cancel()
 
     def _set_active_stream(self, stream: object | None) -> None:
         self._ensure_turn_cancellation_state()
-        with self._active_stream_lock:
-            self._active_stream = stream
+        self._model_session.set_active_stream(stream)
 
     def _clear_active_stream(self, stream: object) -> None:
         self._ensure_turn_cancellation_state()
-        with self._active_stream_lock:
-            if self._active_stream is stream:
-                self._active_stream = None
+        self._model_session.clear_active_stream(stream)
 
     def _append_model_diagnostic(self, diagnostic: dict) -> None:
-        calls = getattr(self, "_turn_diagnostics", None)
-        if calls is None:
-            calls = []
-            self._turn_diagnostics = calls
-        calls.append(diagnostic)
+        self._ensure_model_session().append_diagnostic(diagnostic)
 
     def _retrieve_lore_context(self, player_action: str = "") -> LoreSelection | None:
         lorebook = getattr(self, "_lorebook", None)

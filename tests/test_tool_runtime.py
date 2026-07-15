@@ -56,5 +56,28 @@ class ToolRuntimeTests(unittest.TestCase):
         self.assertEqual("RuntimeError", record.error_type)
 
 
+class BuiltinToolContractTests(unittest.TestCase):
+    def test_every_declared_model_tool_has_exactly_one_runtime_handler(self):
+        from src.tools import TOOLS, TOOL_RUNTIME
+
+        declared = {tool["function"]["name"] for tool in TOOLS}
+
+        self.assertEqual(set(), declared - TOOL_RUNTIME.names)
+
+    def test_public_execute_function_preserves_unknown_tool_error_protocol(self):
+        from src.tools import execute_function
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext(
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+                world_id="unknown-tool-test",
+                module_name="mansion_of_madness",
+            )
+            result = execute_function("not_installed", {}, context=context)
+
+        self.assertEqual("[错误] 未知函数: not_installed", result)
+
+
 if __name__ == "__main__":
     unittest.main()

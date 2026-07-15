@@ -81,8 +81,8 @@ class ToolRuntime:
         finally:
             record = ToolExecutionRecord(
                 name=name,
-                world_id=context.world_id,
-                module_name=context.module_name,
+                world_id=str(getattr(context, "world_id", "unknown")),
+                module_name=str(getattr(context, "module_name", "unknown")),
                 started_ns=started,
                 duration_ns=time.monotonic_ns() - started,
                 ok=ok,
