@@ -16,6 +16,7 @@ from src.persistence import (
 from src.runtime import RuntimeContext
 from src.tools import execute_function
 from src.world_store import StaleRevisionError
+from src.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
 
 
 def combat_world() -> dict:
@@ -337,7 +338,10 @@ class SaveRestoreIntegrationTests(unittest.TestCase):
             self.assertEqual(count, 1)
             self.assertEqual(engine.messages[0]["content"], "new system")
             self.assertEqual(engine.messages[1]["content"], "旧冒险仍在继续。")
-            self.assertEqual(migrated["schema_version"], 1)
+            self.assertEqual(
+                migrated["schema_version"],
+                CURRENT_WORLD_SCHEMA_VERSION,
+            )
             self.assertIn("private_memory", migrated)
             self.assertIn("psychological_profile", migrated["pc"])
             self.assertIsNone(engine._preconfirmed_escalation)

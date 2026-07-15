@@ -1,4 +1,4 @@
-# TRPG Master 模组格式 v1
+# TRPG Master 模组格式 v1 / v2
 
 本文定义可导入、可验证、可被未来模组编辑器无损读写的 `.trpgmod` 格式。
 
@@ -7,6 +7,27 @@
 - 结构化数据：UTF-8 JSON
 - 长篇正文：UTF-8 Markdown
 - JSON Schema：Draft 2020-12
+
+## v2 主线安全契约
+
+`format_version: "2.0"` 在 v1 的场景、遭遇和发现规则之上增加
+`progression.essential_clue_ids`。被列为主线的线索必须满足：
+
+- 非初始线索必须具有 `discovery_rules`；
+- 需要技能或幸运成功的规则必须声明 `fallback`；
+- `grant_clue` 会在失败并支付可选时钟代价后发放当前主线线索；
+- `alternate_clue` 必须引用存在且自身可发现的线索；
+- fallback 使用的 `cost_clock` 必须在 `initial_state.case_clocks` 声明；
+- 从入口场景必须能沿 exits 到达全部场景。
+
+因此随机检定可以改变代价、叙事和调查路径，但不能让主线永久卡死。v1 模组仍可加载；作者可使用：
+
+```bash
+python tools/module_packager.py migrate-v2 <v1工程目录> <新的v2目录>
+```
+
+迁移器不会原地覆盖源工程，会写出 v2 manifest、module 和
+`migration-report.json`。生成的 fallback 是安全默认值，作者仍应根据模组风格补写具体失败叙事和代价。
 
 ## 1. 设计边界
 

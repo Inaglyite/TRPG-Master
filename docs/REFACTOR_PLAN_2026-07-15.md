@@ -120,3 +120,13 @@ Module package ──data/declared rules──> Domain
 - 切换世界不再改变既有 lease 的释放目标；
 - suggest / decision 回复改为封装握手，decision 使用请求 ID 防止乱序串答；
 - 已补充相应并发和断线回归测试。
+
+## 当前实施状态
+
+- WebSocket 消息已全部注册式路由，消息循环不再包含业务分支；
+- ToolRuntime 已覆盖全部声明工具并消除中央字符串分发；
+- ModelSession 已接管历史、活动流、取消和诊断；
+- GameApplication 已提取开始、继续、行动、改写与存档槽位用例；
+- 确定性领域层已包含行动阶段、遭遇、发现与后果分类；
+- 模组格式 v2 已提供主线可达性和失败保底证明，并有 v1→v2 迁移器；
+- 世界状态 v2 已提供领域所有权、迁移历史、迁移前备份与迁移报告。

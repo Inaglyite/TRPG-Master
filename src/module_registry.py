@@ -25,6 +25,8 @@ from .module_format import (
     ModuleManifest,
     engine_supports,
     is_portable_path_component,
+    parse_manifest,
+    parse_module,
 )
 from .world_store import atomic_write_json
 
@@ -209,7 +211,7 @@ class ModuleRegistry:
         if not manifest_file.exists() or not (path / "module.md").exists():
             return None
         try:
-            manifest = ModuleManifest.model_validate_json(manifest_file.read_text(encoding="utf-8"))
+            manifest = parse_manifest(json.loads(manifest_file.read_text(encoding="utf-8")))
         except (OSError, ValidationError):
             return None
         return ModuleRecord(
@@ -369,7 +371,7 @@ def _validate_package_content(
         raise ModulePackageError("missing_file", f"模组包缺少: {', '.join(missing)}")
 
     try:
-        manifest = ModuleManifest.model_validate(_load_json_entry(read, "manifest.json"))
+        manifest = parse_manifest(_load_json_entry(read, "manifest.json"))
     except ValidationError as exc:
         raise ModulePackageError(
             "invalid_manifest", "manifest.json 校验失败", details=_validation_details(exc)
@@ -380,11 +382,16 @@ def _validate_package_content(
             f"模组需要 TRPG Master {manifest.min_engine_version} 或更高版本",
         )
     try:
-        module = ModuleDefinition.model_validate(_load_json_entry(read, manifest.entry))
+        module = parse_module(_load_json_entry(read, manifest.entry))
     except ValidationError as exc:
         raise ModulePackageError(
             "invalid_module", "module.json 校验失败", details=_validation_details(exc)
         ) from exc
+    if module.format_version != manifest.format_version:
+        raise ModulePackageError(
+            "format_version_mismatch",
+            "manifest.json 与 module.json 的 format_version 必须一致",
+        )
 
     referenced_files = set()
     if manifest.keeper_document:

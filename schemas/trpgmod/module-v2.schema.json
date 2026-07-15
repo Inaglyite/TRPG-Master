@@ -901,6 +901,20 @@
       "title": "PrivateMemoryDefinition",
       "type": "object"
     },
+    "ProgressionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "essential_clue_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Essential Clue Ids",
+          "type": "array"
+        }
+      },
+      "title": "ProgressionDefinition",
+      "type": "object"
+    },
     "SceneDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -991,14 +1005,14 @@
   "additionalProperties": false,
   "properties": {
     "$schema": {
-      "const": "https://trpg-master.local/schemas/module-v1.json",
-      "default": "https://trpg-master.local/schemas/module-v1.json",
+      "const": "https://trpg-master.local/schemas/module-v2.json",
+      "default": "https://trpg-master.local/schemas/module-v2.json",
       "title": "$Schema",
       "type": "string"
     },
     "format_version": {
-      "const": "1.0",
-      "default": "1.0",
+      "const": "2.0",
+      "default": "2.0",
       "title": "Format Version",
       "type": "string"
     },
@@ -1061,14 +1075,17 @@
       "additionalProperties": true,
       "title": "Extensions",
       "type": "object"
+    },
+    "progression": {
+      "$ref": "#/$defs/ProgressionDefinition"
     }
   },
   "required": [
     "entry_scene_id",
     "scenes"
   ],
-  "title": "ModuleDefinition",
+  "title": "ModuleDefinitionV2",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://trpg-master.local/schemas/module-v1.json"
+  "$id": "https://trpg-master.local/schemas/module-v2.json"
 }

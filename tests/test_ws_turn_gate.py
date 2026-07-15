@@ -60,6 +60,50 @@ class WebSocketTurnGateTests(unittest.TestCase):
                 if target_lock.locked():
                     target_lock.release()
 
+    def test_empty_action_is_rejected_without_leaking_turn_lease(self):
+        import server
+
+        def completed_action(engine, content):
+            engine.cb.on_narrative(f"已处理：{content}")
+            engine.cb.on_done()
+
+        with (
+            patch("src.engine.API_KEY", "test-api-key"),
+            patch.object(server.GameEngine, "handle_action", completed_action),
+        ):
+            with TestClient(server.app) as client:
+                with client.websocket_connect("/ws") as ws:
+                    for _ in range(5):
+                        ws.receive_json()
+                    ws.send_json({"type": "action", "content": "   "})
+                    rejected = ws.receive_json()
+                    ws.send_json({"type": "action", "content": "查看书桌"})
+                    started = ws.receive_json()
+
+        self.assertEqual("error", rejected["type"])
+        self.assertIn("不能为空", rejected["message"])
+        self.assertEqual("gm_turn_start", started["type"])
+
+    def test_missing_resume_save_returns_error_and_session_stays_usable(self):
+        import server
+
+        with (
+            patch("src.engine.API_KEY", "test-api-key"),
+            patch.object(server.GameEngine, "load", return_value=None),
+        ):
+            with TestClient(server.app) as client:
+                with client.websocket_connect("/ws") as ws:
+                    for _ in range(5):
+                        ws.receive_json()
+                    ws.send_json({"type": "continue", "slot_id": "missing"})
+                    error = ws.receive_json()
+                    ws.send_json({"type": "ping"})
+                    pong = ws.receive_json()
+
+        self.assertEqual("error", error["type"])
+        self.assertIn("未找到存档", error["message"])
+        self.assertEqual("pong", pong["type"])
+
     def test_second_action_is_rejected_before_another_turn_starts(self):
         import server
 

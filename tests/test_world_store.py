@@ -55,6 +55,7 @@ class WorldStoreTests(unittest.TestCase):
 
             self.assertEqual(initial.revision, 0)
             self.assertEqual(initial.state["schema_version"], CURRENT_WORLD_SCHEMA_VERSION)
+            self.assertEqual("aggregate-v2", initial.state["state_meta"]["layout"])
 
             updated = store.update(
                 lambda state: state["pc"].update({"hp": 7}),
@@ -64,6 +65,34 @@ class WorldStoreTests(unittest.TestCase):
             self.assertEqual(store.load()["pc"]["hp"], 7)
             with self.assertRaises(StaleRevisionError):
                 store.update(lambda state: state["pc"].update({"hp": 1}), expected_revision=0)
+
+    def test_v1_load_creates_immutable_backup_and_migration_report(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            world_dir = Path(temp_dir) / "world"
+            world_dir.mkdir(parents=True)
+            original = {**base_world(), "schema_version": 1, "revision": 7}
+            (world_dir / "world_state.json").write_text(
+                json.dumps(original, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            store = WorldStore(world_dir)
+
+            migrated = store.load()
+
+            backup_path = world_dir / "world_state.v1.migration-backup.json"
+            self.assertEqual(original, json.loads(backup_path.read_text(encoding="utf-8")))
+            report = json.loads(store.migration_report_path.read_text(encoding="utf-8"))
+            self.assertEqual(1, report["from_version"])
+            self.assertEqual(CURRENT_WORLD_SCHEMA_VERSION, report["to_version"])
+            self.assertEqual(7, report["source_revision"])
+            self.assertEqual(CURRENT_WORLD_SCHEMA_VERSION, migrated["schema_version"])
+            self.assertEqual("aggregate-v2", migrated["state_meta"]["layout"])
+
+            store.load()
+            self.assertEqual(
+                original,
+                json.loads(backup_path.read_text(encoding="utf-8")),
+            )
 
     def test_future_schema_is_rejected_explicitly(self):
         with tempfile.TemporaryDirectory() as temp_dir:

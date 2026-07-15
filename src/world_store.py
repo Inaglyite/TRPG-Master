@@ -131,6 +131,7 @@ class WorldStore:
         self.state_path = self.world_dir / "world_state.json"
         self.backup_path = self.world_dir / "world_state.backup.json"
         self.lock_path = self.world_dir / ".world.lock"
+        self.migration_report_path = self.world_dir / "migration-report.json"
         self._thread_lock = _room_lock(self.state_path)
 
     @contextmanager
@@ -167,8 +168,21 @@ class WorldStore:
             state["revision"] = int(state.get("revision", 0)) + 2
             atomic_write_json(self.state_path, state)
 
+        source_version = int(state.get("schema_version", 0) or 0)
         migrated, changed = migrate_world_state(state)
         if changed:
+            backup_path = self.world_dir / (
+                f"world_state.v{source_version}.migration-backup.json"
+            )
+            if not backup_path.exists():
+                atomic_write_json(backup_path, state)
+            atomic_write_json(self.migration_report_path, {
+                "from_version": source_version,
+                "to_version": CURRENT_WORLD_SCHEMA_VERSION,
+                "source_revision": int(state.get("revision", 0) or 0),
+                "backup_file": backup_path.name,
+                "migrations": migrated.get("migration_history", []),
+            })
             self._commit_unlocked(migrated, preserve_backup=True)
         return migrated
 

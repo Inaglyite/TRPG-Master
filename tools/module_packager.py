@@ -13,12 +13,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.module_compiler import compile_payload  # noqa: E402
 from src.lorebook import lorebook_json_schema  # noqa: E402
-from src.module_format import manifest_json_schema, module_json_schema  # noqa: E402
+from src.module_format import (  # noqa: E402
+    manifest_json_schema,
+    manifest_v2_json_schema,
+    module_json_schema,
+    module_v2_json_schema,
+)
 from src.module_registry import (  # noqa: E402
     ModulePackageError,
     build_package,
     inspect_package,
 )
+from src.module_migrations import migrate_v1_to_v2  # noqa: E402
 from src.world_store import atomic_write_json  # noqa: E402
 
 
@@ -45,6 +51,11 @@ def cmd_schema(output: Path) -> int:
     output.mkdir(parents=True, exist_ok=True)
     atomic_write_json(output / "module-manifest-v1.schema.json", manifest_json_schema())
     atomic_write_json(output / "module-v1.schema.json", module_json_schema())
+    atomic_write_json(
+        output / "module-manifest-v2.schema.json",
+        manifest_v2_json_schema(),
+    )
+    atomic_write_json(output / "module-v2.schema.json", module_v2_json_schema())
     atomic_write_json(output / "lorebook-v3.schema.json", lorebook_json_schema())
     print(f"Schema 已写入: {output}")
     return 0
@@ -117,6 +128,26 @@ def cmd_compile(source: Path, output: Path | None) -> int:
     return 0 if preview.ok else 2
 
 
+def cmd_migrate_v2(source: Path, output: Path) -> int:
+    source = source.resolve()
+    output = output.resolve()
+    if source == output:
+        raise ModulePackageError(
+            "unsafe_output",
+            "v2 迁移必须输出到新目录，不能原地覆盖作者工程",
+        )
+    result = migrate_v1_to_v2(
+        _read_project_json(source / "manifest.json"),
+        _read_project_json(source / "module.json"),
+    )
+    output.mkdir(parents=True, exist_ok=False)
+    atomic_write_json(output / "manifest.json", result.manifest)
+    atomic_write_json(output / "module.json", result.module)
+    atomic_write_json(output / "migration-report.json", result.report)
+    print(f"v2 工程已写入: {output}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="TRPG Master 模组包工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -138,6 +169,12 @@ def main() -> int:
         type=Path,
         help="可选的编译产物目录；省略时只打印无副作用预览",
     )
+    migrate_parser = subparsers.add_parser(
+        "migrate-v2",
+        help="把 v1 作者工程安全迁移到新的 v2 目录",
+    )
+    migrate_parser.add_argument("source", type=Path)
+    migrate_parser.add_argument("output", type=Path)
 
     args = parser.parse_args()
     try:
@@ -149,6 +186,8 @@ def main() -> int:
             return cmd_schema(args.output)
         if args.command == "compile":
             return cmd_compile(args.source, args.output)
+        if args.command == "migrate-v2":
+            return cmd_migrate_v2(args.source, args.output)
     except ModulePackageError as exc:
         _print_error(exc)
         return 2

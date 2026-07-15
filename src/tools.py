@@ -11,6 +11,7 @@ from pathlib import Path
 from .endings import validate_ending
 from .runtime import RuntimeContext
 from .tool_runtime import ToolRuntime, UnknownToolError
+from .consequences import SanitySeverity, classify_sanity_consequence
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -926,39 +927,16 @@ def _create_character(args: dict, context: RuntimeContext) -> str:
 @TOOL_RUNTIME.handler("sanity_trigger")
 def _sanity_trigger(args: dict, _context: RuntimeContext) -> str:
     description = args.get("description", "")
-    severity_keywords = (
-        ("catastrophic", ["直视", "伟大", "克苏鲁", "神话生物完全显形"]),
-        ("major", ["朋友被杀", "目击死亡", "尸雨", "严刑拷打", "割喉"]),
-        (
-            "moderate",
-            [
-                "恐怖尸体", "血肉模糊", "超自然", "非人", "不是人类",
-                "食尸鬼", "深潜者", "怪物显形", "第一次杀人",
-            ],
-        ),
-        (
-            "minor",
-            [
-                "尸体", "血迹", "诡异", "禁忌文本", "噩梦", "幻觉",
-                "异常倒影", "第一次目睹",
-            ],
-        ),
-        ("trivial", ["不安", "违和感", "奇怪", "不对劲"]),
-    )
-    suggestion = "moderate"
-    for severity, keywords in severity_keywords:
-        if any(keyword in description for keyword in keywords):
-            suggestion = severity
-            break
+    consequence = classify_sanity_consequence(description)
     return json.dumps({
-        "suggestion": suggestion,
+        "suggestion": consequence.severity.value,
         "note": "这是建议的严重度，最终由守秘人根据具体情境决定。确认后调用 sanity_loss(severity=...)",
         "severity_options": {
-            "trivial": "0/1 (几乎无损失)",
-            "minor": "0/1D4 (轻微不适)",
-            "moderate": "1/1D6+1 (明显冲击)",
-            "major": "1D4/2D6+2 (严重创伤)",
-            "catastrophic": "1D10/1D100 (终极恐怖)",
+            SanitySeverity.TRIVIAL.value: "0/1 (几乎无损失)",
+            SanitySeverity.MINOR.value: "0/1D4 (轻微不适)",
+            SanitySeverity.MODERATE.value: "1/1D6+1 (明显冲击)",
+            SanitySeverity.MAJOR.value: "1D4/2D6+2 (严重创伤)",
+            SanitySeverity.CATASTROPHIC.value: "1D10/1D100 (终极恐怖)",
         },
     }, ensure_ascii=False)
 

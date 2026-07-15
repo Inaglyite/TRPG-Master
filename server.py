@@ -102,7 +102,12 @@ from src.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.persistence import delete_save, load_game
 from src.characters import list_character_options
 from src.module_compiler import compile_payload
-from src.module_format import manifest_json_schema, module_json_schema
+from src.module_format import (
+    manifest_json_schema,
+    manifest_v2_json_schema,
+    module_json_schema,
+    module_v2_json_schema,
+)
 from src.lorebook import lorebook_json_schema
 from src.handouts import resolve_handout_asset
 from src.module_registry import (
@@ -114,6 +119,11 @@ from src.module_registry import (
 from src.runtime import RuntimeContext
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
+from src.game_application import (
+    ApplicationUseCaseError,
+    GameApplication,
+    SaveNotFoundError,
+)
 from src.ws_session import SessionTurnGate, WsSessionContext
 from src.ws_router import WsMessageRouter
 
@@ -301,6 +311,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     outbound = OrderedTurnEventStream(ws, loop)
     turn_gate = SessionTurnGate(_world_turn_lock(engine.context))
     session = WsSessionContext(outbound=outbound, turn_gate=turn_gate)
+    game_app = GameApplication.for_engine(engine, auto_slot=AUTO_SAVE_SLOT)
     suggest_reply = session.suggest_reply
     decision_reply = session.decision_reply
     reserve_turn = session.reserve_turn
@@ -375,7 +386,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
         def _rewrite_worker():
             try:
-                result = engine.rewrite_turn(turn_id)
+                result = game_app.rewrite_turn.execute(turn_id)
                 result["source_turn_id"] = result.pop("turn_id")
                 outbound.end_turn({"type": "turn_rewritten", **result})
             except Exception as exc:
@@ -635,7 +646,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 "reason": "turn_in_progress",
             })
             return
-        sid = engine.save(slot_id)
+        sid = game_app.manage_saves.save(manual=bool(is_manual))
         await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
 
     @router.handler("save_delete")
@@ -660,18 +671,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 "reason": "turn_in_progress",
             })
             return
-        used = set()
-        for save in engine.list_saves():
-            if save["id"].startswith("slot_") and save["id"] != AUTO_SAVE_SLOT:
-                try:
-                    used.add(int(save["id"].split("_")[1]))
-                except (ValueError, IndexError):
-                    pass
-        number = 1
-        while number in used:
-            number += 1
-        slot_id = f"slot_{number:03d}"
-        sid = engine.save(slot_id)
+        sid = game_app.manage_saves.create_slot()
         await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
 
     @router.handler("save_rename")
@@ -904,7 +904,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         if not await reserve_turn():
             return
         try:
-            engine.reset(data.get("character_ref"))
+            intent = game_app.start_game.execute(data.get("character_ref"))
         except ValueError as exc:
             release_turn()
             await outbound.send({"type": "error", "message": str(exc)})
@@ -919,40 +919,34 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             raise
         await launch_reserved_turn(
             engine.handle_action,
-            None,
-            turn_kind="opening",
+            intent.engine_input,
+            turn_kind=intent.kind,
         )
 
     async def resume_game(slot_id: str | None, *, announce_loaded: bool) -> None:
         if not await reserve_turn():
             return
         try:
-            count = engine.load(slot_id)
+            intent = game_app.resume_game.execute(slot_id)
         except StaleRevisionError as exc:
             release_turn()
             await outbound.send({"type": "error", "message": str(exc)})
             return
-        except Exception:
-            release_turn()
-            raise
-        if count is None:
+        except SaveNotFoundError:
             release_turn()
             message = "未找到存档。" if announce_loaded else "未找到存档，请开始新游戏。"
             await outbound.send({"type": "error", "message": message})
             return
-        engine.append_control_instruction(
-            "继续游戏。之前的存档和世界状态已经恢复。"
-            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-            "不要从头开场，不要重新介绍世界观。"
-        )
+        except Exception:
+            release_turn()
+            raise
         try:
             if announce_loaded:
                 await outbound.send({
                     "type": "loaded",
                     "ok": True,
-                    "slot_id": slot_id or "",
-                    "count": count,
+                    "slot_id": intent.slot_id or "",
+                    "count": intent.loaded_message_count,
                 })
             await send_character_state()
         except Exception:
@@ -960,8 +954,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             raise
         await launch_reserved_turn(
             engine.handle_action,
-            None,
-            turn_kind="resume",
+            intent.engine_input,
+            turn_kind=intent.kind,
         )
 
     @router.handler("continue")
@@ -976,12 +970,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     async def handle_action(data: dict) -> None:
         if not await reserve_turn():
             return
-        content = data.get("content", "")
+        try:
+            intent = game_app.perform_action.execute(data.get("content", ""))
+        except ApplicationUseCaseError as exc:
+            release_turn()
+            await outbound.send({"type": "error", "message": str(exc)})
+            return
         await launch_reserved_turn(
             engine.handle_action,
-            content,
-            turn_kind="action",
-            player_input=content,
+            intent.engine_input,
+            turn_kind=intent.kind,
+            player_input=intent.player_input,
         )
 
     # 保持首连的五条初始化消息稳定；世界身份随 module_list 一并下发。
@@ -1141,6 +1140,16 @@ async def get_module_manifest_schema():
 @app.get("/api/modules/schema/module-v1")
 async def get_module_definition_schema():
     return module_json_schema()
+
+
+@app.get("/api/modules/schema/manifest-v2")
+async def get_module_manifest_v2_schema():
+    return manifest_v2_json_schema()
+
+
+@app.get("/api/modules/schema/module-v2")
+async def get_module_definition_v2_schema():
+    return module_v2_json_schema()
 
 
 @app.get("/api/modules/schema/lorebook-v3")

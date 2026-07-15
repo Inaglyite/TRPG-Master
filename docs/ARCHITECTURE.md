@@ -2,6 +2,17 @@
 
 本文描述当前仓库的实际运行结构。目标读者是准备修改引擎、前端、模组、存档或未来多人功能的开发者。
 
+## 运行时边界（2026-07）
+
+- `WsSessionContext` 与 `WsMessageRouter` 拥有连接生命周期、回合租约和协议分发；
+- `GameApplication` 提供开始、继续、行动、改写和存档用例，不依赖 FastAPI；
+- `ModelSession` 拥有消息历史、活动流、取消和模型诊断；
+- `ToolRuntime` 以唯一注册表执行工具并记录审计，模型 schema 与 handler 有覆盖契约；
+- `action_resolution`、`encounters`、`discovery`、`consequences` 是不依赖 LLM 的确定性领域层；
+- `WorldStore` 提供跨线程/进程单写、revision、原子提交、恢复和显式 schema 迁移。
+
+世界状态 v2 通过 `state_meta.domains` 声明每个聚合的唯一 JSON 路径，不复制可变状态。v1 首次加载时保留不可变迁移前备份并生成机器可读迁移报告。
+
 ## 1. 系统定位
 
 TRPG Master 当前是一个本地单机应用，但运行时已经按 `world_id` 隔离：Electron 提供桌面窗口，FastAPI 提供本地 HTTP/WebSocket 服务，`GameEngine` 持有一份 `RuntimeContext`，LangGraph 按该世界状态在叙事 Agent 与战斗 Agent 间路由，OpenAI 兼容模型负责叙事和行动意图，Python 工具通过 `WorldStore` 执行确定性规则与状态写入。

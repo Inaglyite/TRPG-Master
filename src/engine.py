@@ -1183,13 +1183,58 @@ class GameEngine:
         for match in matches:
             rule = match.rule
             required_skill = str(rule.get("skill") or "")
-            if rule.get("requires_success") and (
+            check_failed = bool(rule.get("requires_success") and (
                 not check_result
                 or not check_result.get("success")
                 or (
                     rule.get("check_type") != "luck"
                     and str(check_result.get("skill") or "") != required_skill
                 )
+            ))
+            fallback = rule.get("fallback") if check_failed else None
+            fallback = fallback if isinstance(fallback, dict) else None
+            if fallback and fallback.get("cost_clock") and fallback.get("cost_amount"):
+                clock_id = str(fallback["cost_clock"])
+                try:
+                    world = self.context.world_store.load()
+                    current = int((world.get("case_clocks") or {}).get(clock_id, 0))
+                    amount = int(fallback.get("cost_amount") or 0)
+                    self._execute_tool("state_set", {
+                        "path": f"case_clocks.{clock_id}",
+                        "value": json.dumps(current + amount),
+                    })
+                except (OSError, TypeError, ValueError):
+                    pass
+            if check_failed and fallback and fallback.get("mode") == "alternate_clue":
+                alternate_id = str(fallback.get("clue_id") or "")
+                try:
+                    alternate = (
+                        self.context.world_store.load().get("clue_catalog", {})
+                        .get(alternate_id, {})
+                    )
+                    alternate_category = str(
+                        alternate.get("category") or "investigation"
+                    )
+                except (OSError, TypeError, AttributeError):
+                    alternate_category = "investigation"
+                self._execute_tool("state_add_clue", {
+                    "text": "",
+                    "category": alternate_category,
+                    "clue_id": alternate_id,
+                })
+                resolved.append({
+                    "clue_id": match.clue_id,
+                    "discovered": False,
+                    "reason": "required_check_failed",
+                    "fallback": {
+                        "mode": "alternate_clue",
+                        "clue_id": alternate_id,
+                        "narrative": fallback.get("narrative", ""),
+                    },
+                })
+                continue
+            if check_failed and not (
+                fallback and fallback.get("mode") == "grant_clue"
             ):
                 resolved.append({
                     "clue_id": match.clue_id,
@@ -1230,6 +1275,7 @@ class GameEngine:
                         )
                     },
                     "npc_reveals": npc_reveals,
+                    "fallback": fallback if check_failed else None,
                 })
                 continue
 
@@ -1247,6 +1293,7 @@ class GameEngine:
                 "text": match.clue.get("text"),
                 "type": match.clue.get("type"),
                 "npc_reveals": npc_reveals,
+                "fallback": fallback if check_failed else None,
             })
         return resolved
 

@@ -6,7 +6,7 @@ import copy
 from collections.abc import Callable
 
 
-CURRENT_WORLD_SCHEMA_VERSION = 1
+CURRENT_WORLD_SCHEMA_VERSION = 2
 
 
 class UnsupportedWorldSchemaError(ValueError):
@@ -39,8 +39,35 @@ def _migrate_v0_to_v1(state: dict) -> dict:
     return state
 
 
+def _migrate_v1_to_v2(state: dict) -> dict:
+    """Declare stable aggregate ownership without duplicating mutable data."""
+    state["state_meta"] = {
+        "layout": "aggregate-v2",
+        "domains": {
+            "character": ["pc"],
+            "scene": ["current_scene", "scene_catalog", "scene_cache"],
+            "knowledge": ["clues_found", "clue_catalog", "clue_links"],
+            "encounter": ["npcs", "encounter_history"],
+            "clock": ["case_clocks", "flags"],
+            "journal": ["narrative_memory", "private_memory"],
+        },
+    }
+    history = state.setdefault("migration_history", [])
+    if not isinstance(history, list):
+        history = []
+        state["migration_history"] = history
+    history.append({
+        "from_version": 1,
+        "to_version": 2,
+        "migration": "aggregate-domain-ownership",
+    })
+    state["schema_version"] = 2
+    return state
+
+
 WORLD_MIGRATIONS: dict[int, Callable[[dict], dict]] = {
     0: _migrate_v0_to_v1,
+    1: _migrate_v1_to_v2,
 }
 
 

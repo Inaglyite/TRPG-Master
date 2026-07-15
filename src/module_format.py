@@ -11,6 +11,8 @@ MODULE_FORMAT_VERSION = "1.0"
 ENGINE_VERSION = "1.0.0"
 MANIFEST_SCHEMA_URI = "https://trpg-master.local/schemas/module-manifest-v1.json"
 MODULE_SCHEMA_URI = "https://trpg-master.local/schemas/module-v1.json"
+MANIFEST_V2_SCHEMA_URI = "https://trpg-master.local/schemas/module-manifest-v2.json"
+MODULE_V2_SCHEMA_URI = "https://trpg-master.local/schemas/module-v2.json"
 
 _PACKAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
 _ENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -315,6 +317,29 @@ class NpcRevealEffectDefinition(StrictModel):
         return _validate_entity_id(value, "NPC ID")
 
 
+class DiscoveryFallbackDefinition(StrictModel):
+    mode: Literal["grant_clue", "alternate_clue"]
+    clue_id: str | None = None
+    narrative: str = Field(default="", max_length=500)
+    cost_clock: str | None = None
+    cost_amount: int = Field(default=0, ge=0, le=100)
+
+    @field_validator("clue_id", "cost_clock")
+    @classmethod
+    def validate_optional_id(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_entity_id(value)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> "DiscoveryFallbackDefinition":
+        if self.mode == "alternate_clue" and not self.clue_id:
+            raise ValueError("alternate_clue 保底必须指定 clue_id")
+        if self.mode == "grant_clue" and self.clue_id:
+            raise ValueError("grant_clue 保底自动发放当前线索，不能指定 clue_id")
+        if self.cost_amount and not self.cost_clock:
+            raise ValueError("failure cost_amount 必须同时指定 cost_clock")
+        return self
+
+
 class DiscoveryRuleDefinition(StrictModel):
     intent: Literal["examine", "search", "read", "take", "talk", "enter", "use"]
     targets: list[str] = Field(min_length=1)
@@ -325,6 +350,7 @@ class DiscoveryRuleDefinition(StrictModel):
     requires_success: bool = False
     sanity_severity: Literal["minor", "moderate", "major"] | None = None
     npc_reveals: list[NpcRevealEffectDefinition] = Field(default_factory=list)
+    fallback: DiscoveryFallbackDefinition | None = None
 
     @field_validator("targets")
     @classmethod
@@ -438,6 +464,18 @@ class InitialStateDefinition(StrictModel):
     @classmethod
     def validate_known_clues(cls, values: list[str]) -> list[str]:
         return [_validate_entity_id(value, "线索 ID") for value in values]
+
+
+class ProgressionDefinition(StrictModel):
+    essential_clue_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("essential_clue_ids")
+    @classmethod
+    def validate_essential_clues(cls, values: list[str]) -> list[str]:
+        normalized = [_validate_entity_id(value, "主线线索 ID") for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("essential_clue_ids 不能重复")
+        return normalized
 
 
 class ModuleDefinition(StrictModel):
@@ -579,6 +617,91 @@ class ModuleDefinition(StrictModel):
         return self
 
 
+class ModuleManifestV2(ModuleManifest):
+    schema_uri: Literal[MANIFEST_V2_SCHEMA_URI] = Field(
+        default=MANIFEST_V2_SCHEMA_URI,
+        alias="$schema",
+    )
+    format_version: Literal["2.0"] = "2.0"
+
+
+class ModuleDefinitionV2(ModuleDefinition):
+    schema_uri: Literal[MODULE_V2_SCHEMA_URI] = Field(
+        default=MODULE_V2_SCHEMA_URI,
+        alias="$schema",
+    )
+    format_version: Literal["2.0"] = "2.0"
+    progression: ProgressionDefinition = Field(default_factory=ProgressionDefinition)
+
+    @model_validator(mode="after")
+    def validate_progression_safety(self) -> "ModuleDefinitionV2":
+        clue_ids = set(self.clues)
+        missing = sorted(set(self.progression.essential_clue_ids) - clue_ids)
+        if missing:
+            raise ValueError(f"主线线索不存在: {missing}")
+        reachable = {self.entry_scene_id}
+        frontier = [self.entry_scene_id]
+        while frontier:
+            scene_id = frontier.pop()
+            for target in self.scenes[scene_id].exits:
+                if target not in reachable:
+                    reachable.add(target)
+                    frontier.append(target)
+        unreachable = sorted(set(self.scenes) - reachable)
+        if unreachable:
+            raise ValueError(f"入口场景无法到达以下场景: {unreachable}")
+        for clue_id in self.progression.essential_clue_ids:
+            clue = self.clues[clue_id]
+            if clue.initially_known:
+                continue
+            if not clue.discovery_rules:
+                raise ValueError(f"主线线索 {clue_id} 没有发现规则")
+            for rule in clue.discovery_rules:
+                if rule.requires_success and rule.fallback is None:
+                    raise ValueError(
+                        f"主线线索 {clue_id} 的随机/检定失败路径缺少 fallback"
+                    )
+                fallback = rule.fallback
+                if (
+                    fallback
+                    and fallback.cost_clock
+                    and fallback.cost_clock not in self.initial_state.case_clocks
+                ):
+                    raise ValueError(
+                        f"主线线索 {clue_id} 的 fallback cost_clock 不存在: "
+                        f"{fallback.cost_clock}"
+                    )
+                if (
+                    fallback
+                    and fallback.mode == "alternate_clue"
+                    and fallback.clue_id not in clue_ids
+                ):
+                    raise ValueError(
+                        f"主线线索 {clue_id} 的 fallback 引用了不存在的线索: "
+                        f"{fallback.clue_id}"
+                    )
+                if fallback and fallback.mode == "alternate_clue":
+                    alternate = self.clues[fallback.clue_id]
+                    if not alternate.initially_known and not alternate.discovery_rules:
+                        raise ValueError(
+                            f"主线线索 {clue_id} 的 alternate fallback "
+                            f"{fallback.clue_id} 自身没有发现路径"
+                        )
+        return self
+
+
+def parse_manifest(payload: Any) -> ModuleManifest | ModuleManifestV2:
+    if isinstance(payload, dict) and payload.get("format_version") == "2.0":
+        return ModuleManifestV2.model_validate(payload)
+    return ModuleManifest.model_validate(payload)
+
+
+def parse_module(payload: Any) -> ModuleDefinition | ModuleDefinitionV2:
+    if isinstance(payload, dict) and payload.get("format_version") == "2.0":
+        return ModuleDefinitionV2.model_validate(payload)
+    return ModuleDefinition.model_validate(payload)
+
+
 def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> dict[str, Any]:
     """兼容旧调用；新代码应从 ``module_compiler`` 导入。"""
     from .module_compiler import compile_world_state as compile_state
@@ -608,4 +731,18 @@ def module_json_schema() -> dict[str, Any]:
     schema = ModuleDefinition.model_json_schema(by_alias=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = MODULE_SCHEMA_URI
+    return schema
+
+
+def manifest_v2_json_schema() -> dict[str, Any]:
+    schema = ModuleManifestV2.model_json_schema(by_alias=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = MANIFEST_V2_SCHEMA_URI
+    return schema
+
+
+def module_v2_json_schema() -> dict[str, Any]:
+    schema = ModuleDefinitionV2.model_json_schema(by_alias=True)
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = MODULE_V2_SCHEMA_URI
     return schema

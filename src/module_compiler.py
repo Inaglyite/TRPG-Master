@@ -22,6 +22,8 @@ from .module_format import (
     AssetRevealTrigger,
     ModuleDefinition,
     ModuleManifest,
+    parse_manifest,
+    parse_module,
 )
 from .world_migrations import CURRENT_WORLD_SCHEMA_VERSION
 
@@ -431,7 +433,7 @@ def compile_payload(
     module = None
     lorebook = None
     try:
-        manifest = ModuleManifest.model_validate(manifest_payload)
+        manifest = parse_manifest(manifest_payload)
     except ValidationError as exc:
         diagnostics.extend(diagnostics_from_validation_error(
             exc,
@@ -439,7 +441,7 @@ def compile_payload(
             root="manifest",
         ))
     try:
-        module = ModuleDefinition.model_validate(module_payload)
+        module = parse_module(module_payload)
     except ValidationError as exc:
         diagnostics.extend(diagnostics_from_validation_error(
             exc,
@@ -472,6 +474,21 @@ def compile_payload(
                 path="manifest.lorebook",
                 message="提供了 Lorebook 数据，但 manifest.lorebook 未声明 lorebook.json",
             ))
+    if (
+        manifest is not None
+        and module is not None
+        and manifest.format_version != module.format_version
+    ):
+        diagnostics.append(ModuleDiagnostic(
+            phase="compatibility",
+            level="error",
+            code="format_version_mismatch",
+            path="module.format_version",
+            message=(
+                f"manifest 使用 {manifest.format_version}，"
+                f"module 使用 {module.format_version}，两者必须一致"
+            ),
+        ))
     if module is not None and lorebook is not None:
         for message in validate_lorebook_references(
             lorebook,
