@@ -390,7 +390,14 @@ X-Module-Filename: example.trpgmod
 1. `ping`
 2. `state`
 
-没有协议级 request ID。请求与响应通过事件类型和客户端状态关联；一个连接内的 GM 回合由服务端串行执行。
+客户端请求尚无统一 request ID。GM 回合事件另有生命周期标识：从 `gm_turn_start` 到 `done`
+共享一个 `turn_id`，并携带严格递增的 `seq`。服务端在创建 `turn_id` 前同时占用连接级和
+`world_id` 级回合锁；忙时返回 `turn_rejected`，不会排入另一个生命周期或覆盖活动回合。
+
+桌面前端断线后使用 `1/2/5/10/30` 秒的有界指数退避，并只更新一条连接状态。若断线发生在
+活动回合中，前端停止 loading、关闭失效决定，重连后以原 `turn_id` 发送 `turn_recovery_get`。
+completed 记录会重放完整公开事件；同进程 active 记录继续轮询；failed/interrupted 才显示
+`save_load(slot_000)` 回退入口。该协议恢复完成回合，不等同于多人客户端按 ack 补发每条事件。
 
 ## 4. 客户端发送消息
 
@@ -402,6 +409,14 @@ X-Module-Filename: example.trpgmod
 | `model_settings_get` | 无 | 请求当前叙述/判定模型配置 |
 | `model_settings_update` | `narrative_model`, `judgement_model` | 校验、保存并热更新模型路由 |
 | `module_list` | 无 | 导入后重新请求内置/用户模组列表 |
+| `turn_recovery_get` | `turn_id` | 查询中断回合与最近完成回合 |
+| `turn_diagnostics_get` | `turn_id?` | 查询回合耗时、上下文分区和 Lorebook trace |
+| `turn_rewrite` | `turn_id` | 仅重新生成最后完成回合的叙事正文 |
+| `turn_branch_create` | `turn_id`, `label?` | 从完成回合创建并切换独立世界分支 |
+| `world_list` | 无 | 列出当前模组的主时间线与分支 |
+| `world_switch` | `world_id` | 切换世界并恢复其消息历史 |
+| `player_notes_get` | 无 | 读取当前世界的玩家笔记 |
+| `player_notes_update` | `text`, `revision` | 以乐观 revision 原子保存玩家笔记 |
 | `switch_module` | `module` | 切换活动模组并刷新开局数据 |
 | `start` | `character_ref` | 新游戏 |
 | `action` | `content` | 提交玩家动作 |
@@ -532,14 +547,23 @@ X-Module-Filename: example.trpgmod
 服务端不发送单独 ACK。一个典型回合为：
 
 ```text
-gm_turn_start
-narrative_chunk * N
+gm_turn_start(turn_id, seq=1)
+turn_phase * N
+前置 narrative_chunk?          # 场景移动/发现动作的可见建立
 tension? / suggest_check? / decision_request? / dice_result? / handout? / glm_summary?
 narrative_chunk * N
+choices?
 done
 ```
 
-新游戏和读档先发送 `character_state`，随后与普通 `action` 一样发送 `gm_turn_start`；客户端以 `gm_turn_start` 和 `done` 作为一轮 GM 回合的边界。工具执行期间到达的 `handout` 或 `state_data` 可能早于最终叙述；正式前端会暂存这些展示更新，在 `done` 后显示材料并重新请求最终状态。
+新游戏和读档先发送 `character_state`，随后与普通 `action` 一样发送 `gm_turn_start`；客户端以
+`gm_turn_start` 和 `done` 作为一轮 GM 回合的边界。同一回合所有事件通过单个 FIFO sender 下发。
+正式前端拒绝 `turn_id` 不匹配或 `seq` 非递增的迟到/重复事件。handout 只有在本轮还没有任何
+可见叙事时才暂存；第一段叙事出现后即可展示，`done` 后再请求最终权威状态。
+
+明确的预设调查行动或语义清楚的自由文本行动会被视为已确认，确定性预检可直接发送
+`dice_result`。只有模型为自由文本提出一个玩家未明确承诺的额外不确定尝试时，才使用
+`suggest_check -> suggest_reply` 再确认；防御和不可逆行动继续使用 `decision_request`。
 
 ### 4.7 回复检定确认
 
@@ -667,6 +691,23 @@ done
 
 服务端保存 `slot_000`，返回 `quit_ok`，然后结束当前 WebSocket 消息循环。Electron 窗口生命周期由桌面壳单独管理。
 
+### 4.17 回合恢复、改写、分支与笔记
+
+```json
+{"type":"turn_recovery_get","turn_id":"turn_20260715T120000000000Z_1234abcd"}
+{"type":"turn_diagnostics_get"}
+{"type":"turn_rewrite","turn_id":"turn_20260715T120000000000Z_1234abcd"}
+{"type":"turn_branch_create","turn_id":"turn_20260715T120000000000Z_1234abcd","label":"没有打开书架"}
+{"type":"world_list"}
+{"type":"world_switch","world_id":"local-scarlet-branch-20260715-120000-ab12"}
+{"type":"player_notes_get"}
+{"type":"player_notes_update","revision":3,"text":"法伦隐瞒了昨晚的行踪。"}
+```
+
+`turn_rewrite` 仅接受当前世界最后一个完成回合，并要求世界 revision 未继续推进；服务端禁用 tools，
+固定 choices、工具结果和世界快照。`turn_branch_create` 可以针对父链中的任一完成回合，原世界不变。
+玩家笔记不进入 system prompt、Lorebook 扫描或 `world_state`。
+
 ## 5. 服务端发送事件
 
 ### 5.1 初始化与目录事件
@@ -679,7 +720,9 @@ done
   "modules": [
     {"id":"mansion_of_madness","title":"疯狂宅邸","description":"..."}
   ],
-  "active": "mansion_of_madness"
+  "active": "mansion_of_madness",
+  "world_id": "local-mansion_of_madness",
+  "module_name": "mansion_of_madness"
 }
 ```
 
@@ -734,6 +777,20 @@ done
 }
 ```
 
+#### `turn_rejected`
+
+```json
+{
+  "type": "turn_rejected",
+  "reason": "turn_in_progress",
+  "message": "上一回合尚未结束，请等待守秘人完成叙述。"
+}
+```
+
+当同一连接或同一 `world_id` 已有回合时发送，且不创建新的 `turn_id`。`reason` 当前可能为
+`turn_in_progress`、`turn_finalizing` 或 `world_turn_in_progress`。正式客户端对活动回合保持等待；
+若只是 finalize 收尾，则恢复刚才被拒绝动作前的可操作状态。
+
 #### `save_list`
 
 ```json
@@ -763,13 +820,45 @@ done
 
 ### 5.2 回合事件
 
+从 `gm_turn_start` 到 `done` 的每个事件都额外包含：
+
+```json
+{
+  "turn_id": "8f3ab10c:7",
+  "seq": 12
+}
+```
+
+gameplay `turn_id` 是跨连接持久 ID；rewrite 使用只存在于该流式操作中的 `rewrite:<id>`。
+`seq` 从 `gm_turn_start` 的 1 开始严格递增。
+下列事件示例仅在需要强调时重复这两个字段。读档恢复等发生在回合外的
+`handout` 可以不带这两个字段。
+
 #### `gm_turn_start`
 
 ```json
-{"type":"gm_turn_start"}
+{
+  "type": "gm_turn_start",
+  "turn_id": "8f3ab10c:7",
+  "seq": 1
+}
 ```
 
 表示服务端开始一轮 GM 回合。首次收到时前端隐藏开始界面；每轮收到时均禁用输入并进入等待叙述状态。
+
+#### `turn_phase`
+
+```json
+{
+  "type": "turn_phase",
+  "phase": "resolving",
+  "label": "正在结算本轮行动……"
+}
+```
+
+稳定的玩家可见等待阶段。`phase` 当前包含 `preparing`、`resolving`、`updating`、`narrating`；
+客户端应显示 `label`，但不把它追加成永久聊天记录。正式前端在同一阶段等待超过 8 秒后更新
+累计等待时间，不展示模型思维链或内部工具名。
 
 #### `narrative_chunk`
 
@@ -781,6 +870,9 @@ done
 ```
 
 同一回合可发送任意数量，`text` 是增量而不是完整消息。
+当动作同时包含明确场景移动或模组编写的 `discovery_rules.approach_text` 时，
+第一个 `narrative_chunk` 是引擎生成的玩家可见前置叙事；它会早于该动作的骰子、SAN
+和素材事件，后续块由模型从该时刻续写。
 
 #### `tension`
 
@@ -988,6 +1080,8 @@ done
 
 `entity_type` 为 `npc`、`scene` 或 `clue`；`entity_id` 是触发该材料的游戏实体，`asset_id` 是
 模组素材表中的稳定 ID，两者可以不同。Electron 使用 `asset_data_uri`，浏览器可使用 `asset_url`。
+当旧模组以 NPC ID 直接作为 `asset_map.npcs` 的 key 且没有 `reveal_on` 时，运行时
+兼容为默认 `npc_revealed` 触发；新模组仍应由编译器生成显式触发。
 
 #### `game_over`
 
@@ -1002,13 +1096,34 @@ done
 
 它是结局提议，不会立刻写入长期履历。玩家确认后客户端再发送 `settle_case`。
 
+#### `choices`
+
+```json
+{
+  "type": "choices",
+  "choices": [
+    {"label":"检查书桌","isFree":false},
+    {"label":"[自由行动] 你决定做什么？","isFree":true}
+  ]
+}
+```
+
+服务端只解析最终叙事中明确 `你可以——` 标记之后的连续编号菜单，并在 `done` 前发送结构化结果。
+前端以该事件渲染按钮，不再从展示 HTML 猜选项；没有该事件时，仅为旧服务端保留“明确标记后的
+编号列表”降级，不会把正文最后一个任意有序列表当作菜单。
+
 #### `done`
 
 ```json
-{"type":"done"}
+{
+  "type": "done",
+  "turn_id": "8f3ab10c:7",
+  "seq": 416
+}
 ```
 
 表示本轮叙事、工具和自动存档已经完成。前端据此恢复操作并请求最新 `state`。
+在发送 `done` 前，服务端已经写完该回合的消息、世界快照和 `record.json` 提交标记。
 
 ### 5.3 状态事件
 
@@ -1178,6 +1293,21 @@ done
 
 目前错误只有面向用户的 `message`，没有稳定错误码。客户端不应通过中文文案分支业务逻辑。
 
+### 5.7 回合体验与时间线事件
+
+| 事件 | 关键字段 | 说明 |
+|---|---|---|
+| `turn_recovery` | `requested`, `active`, `latest_completed` | 公开回合状态及可重放事件，不含私有工具输出 |
+| `turn_diagnostics` | `diagnostics` | 模型计时、prompt 分区估算、工具名、Lorebook trace |
+| `turn_rewritten` | `source_turn_id`, `variant_id`, `narrative`, `choices` | 改写成功；事件自身属于 rewrite 操作 ID |
+| `turn_rewrite_failed` | `source_turn_id`, `message` | 原叙事保持不变 |
+| `turn_branched` | `source_turn_id`, `world_id`, `history` | 已创建并进入独立时间线 |
+| `world_context` | `world_id`, `module_name` | 切换后更新重连目标 |
+| `world_list` | `active_world_id`, `worlds` | 时间线目录 |
+| `world_switched` | `world_id`, `history` | 已切换并返回公开 TurnRecord 父链 |
+| `player_notes` | `revision`, `text`, `saved?` | 笔记读取/保存成功 |
+| `player_notes_conflict` | `revision`, `text`, `message` | 乐观 revision 冲突 |
+
 ## 6. 推荐事件时序
 
 ### 6.1 新游戏
@@ -1188,7 +1318,15 @@ sequenceDiagram
     participant S as Server
     C->>S: start(character_ref)
     S-->>C: character_state
-    S-->>C: gm_turn_start
+    S-->>C: gm_turn_start(turn_id, seq=1)
+    opt Authored setup
+        S-->>C: narrative_chunk (arrival / approach)
+    end
+    opt Deterministic discovery
+        S-->>C: tension
+        S-->>C: handout
+        S-->>C: dice_result
+    end
     loop Streaming
         S-->>C: narrative_chunk
     end
@@ -1211,7 +1349,8 @@ sequenceDiagram
     S-->>C: state_data
 ```
 
-图中 `handout` 是服务端发送时机。客户端在 GM 回合进行中不会立即渲染它，而是在 `done` 后与最终 `state_data` 一起揭示，避免图片或线索先于对应叙述出现。
+图中 `handout` 是服务端发送时机。正式客户端在本轮已有可见叙事时立即渲染；
+如果素材异常地早于第一段叙事到达，则缓存到第一段叙事出现，避免图片或线索剧透。
 
 ### 6.2 读档
 
@@ -1243,11 +1382,12 @@ sequenceDiagram
 
 ## 7. 兼容性与已知限制
 
-- WebSocket 协议没有 `version`、request ID 或结构化 error code；模组导入 HTTP API 已使用稳定 `error_code`。
+- WebSocket 协议没有总体 `version`、客户端 request ID 或结构化 error code；GM 回合已有 `turn_id + seq`，模组导入 HTTP API 已使用稳定 `error_code`。
 - `state_data.data` 与 `state_data.clues` 是 JSON 字符串，这是历史格式。
 - `continue`、`load` 与 `save.manual` 属于兼容接口；桌面前端使用 `save_load`、`save_create` 和 `save(manual:false)`。
 - 前端仍包含对 `save_available` 的兼容处理，但当前服务端不会发送该事件。
 - `settle_case` 后的服务端 `state` 只是刷新标记，不包含状态数据。
 - 不同 `world_id` 的状态和存档互相隔离；但同一 `world_id` 的多条连接仍各自拥有独立 GM 消息历史，尚不能用作共享多人房间。
+- 单机完成回合已有持久 TurnRecord 和公开事件重放；仍没有多人所需的共享事件日志、逐连接 ack 与按 `event_id` 增量补发。
 - HTTP 切换模组不会广播；优先使用 WebSocket `switch_module`。
 - API 没有鉴权。开发远程客户端前必须先增加身份、共享房间运行时和权限边界。

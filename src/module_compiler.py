@@ -235,6 +235,7 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
             "turn_sequence": 0,
             "recent_lore": [],
         },
+        "encounter_history": {},
         "asset_map": {
             "npcs": _runtime_asset_map(
                 module.assets.npcs, module.npcs, "npc_revealed"

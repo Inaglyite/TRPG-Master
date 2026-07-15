@@ -439,12 +439,23 @@ def apply_turn_commit(
             args["clue_id"] = clue_id
         elif asset_id:
             args["asset_id"] = asset_id
-        output = engine._execute_tool("state_add_clue", args)
+        execute_model_tool = getattr(engine, "_execute_model_tool", None)
+        if execute_model_tool:
+            output = execute_model_tool(
+                "state_add_clue",
+                args,
+                player_action=player_action,
+            )
+        else:
+            output = engine._execute_tool("state_add_clue", args)
         try:
-            duplicate = bool(json.loads(output).get("duplicate"))
+            clue_result = json.loads(output)
         except (TypeError, json.JSONDecodeError, AttributeError):
-            duplicate = False
-        if not duplicate:
+            clue_result = {}
+        if clue_result.get("ok") is False:
+            skipped.append(f"clue:{clue_id or text[:24]}")
+            continue
+        if not clue_result.get("duplicate"):
             applied.append(f"clue:{clue_id or text[:24]}")
 
     npcs = {
@@ -493,11 +504,24 @@ def apply_turn_commit(
             skipped.append(f"flag:{key}")
             continue
         if flags.get(key) != value:
-            engine._execute_tool("state_set", {
+            args = {
                 "path": f"flags.{key}",
                 "value": json.dumps(value, ensure_ascii=False),
-            })
-            applied.append(f"flag:{key}={value!r}")
+            }
+            execute_model_tool = getattr(engine, "_execute_model_tool", None)
+            output = (
+                execute_model_tool("state_set", args, player_action=player_action)
+                if execute_model_tool
+                else engine._execute_tool("state_set", args)
+            )
+            try:
+                flag_result = json.loads(output)
+            except (TypeError, json.JSONDecodeError, AttributeError):
+                flag_result = {}
+            if flag_result.get("ok") is False:
+                skipped.append(f"flag:{key}")
+            else:
+                applied.append(f"flag:{key}={value!r}")
 
     if not ({"sanity_event", "sanity_trigger", "sanity_loss"} & already_executed):
         events = commit.get("sanity_events", [])
@@ -507,29 +531,41 @@ def apply_turn_commit(
             description = _clip(event.get("description"), 500).strip()
             allowed = {"trivial", "minor", "moderate", "major", "catastrophic"}
             if severity in allowed and description:
-                output = engine._execute_tool("sanity_event", {
+                args = {
                     "description": description,
                     "severity": severity,
-                })
+                }
+                execute_model_tool = getattr(engine, "_execute_model_tool", None)
+                output = (
+                    execute_model_tool("sanity_event", args, player_action=player_action)
+                    if execute_model_tool
+                    else engine._execute_tool("sanity_event", args)
+                )
+                blocked = False
                 try:
                     result = json.loads(output)
-                    roll = int(result["san_roll"])
-                    success = bool(result["san_check_success"])
-                    loss = int(result["actual_loss"])
-                    engine.cb.on_dice(
-                        f"理智检定 {roll}，{'成功' if success else '失败'}，SAN -{loss}",
-                        {
-                            "spec": "d100",
-                            "sides": 100,
-                            "count": 1,
-                            "rolls": [roll],
-                            "total": roll,
-                            "sanity": True,
-                        },
-                    )
+                    if result.get("ok") is False:
+                        skipped.append(f"sanity:{severity}")
+                        blocked = True
+                    else:
+                        roll = int(result["san_roll"])
+                        success = bool(result["san_check_success"])
+                        loss = int(result["actual_loss"])
+                        engine.cb.on_dice(
+                            f"理智检定 {roll}，{'成功' if success else '失败'}，SAN -{loss}",
+                            {
+                                "spec": "d100",
+                                "sides": 100,
+                                "count": 1,
+                                "rolls": [roll],
+                                "total": roll,
+                                "sanity": True,
+                            },
+                        )
                 except (TypeError, ValueError, KeyError, json.JSONDecodeError):
                     pass
-                applied.append(f"sanity:{severity}")
+                if not blocked:
+                    applied.append(f"sanity:{severity}")
 
     ending_id = str(commit.get("ending_id") or "").strip()
     if ending_id and not state.get("game_over"):
@@ -591,6 +627,8 @@ def reconcile_turn(
         "只提交可见叙事正文中已经明确完成的事实；玩家输入只是意图，选项不算发生。\n"
         "不要补写故事，不要推测隐藏事实，不要重复 already_executed_tools 已完成的效果。\n"
         "scene_id、clue_id、npc_id、ending_id 只能使用 authoritative_world 中已有 ID。\n"
+        "NPC只提到某证物存在、存放地点或传闻，不等于玩家已经亲眼发现该证物；"
+        "这类口述可记普通线索，但不得填写对应 clue_id 或 asset_id。\n"
         "只有明确拿在身上/收进口袋的物品才加入背包；留在现场的证物不加入。\n"
         "只有正文明确遭遇了 module_rules 所列恐怖源时才提交一次 sanity_event。\n"
         "结局必须已在正文中真正完成，而且配置的 required_flags 已满足；否则 ending_id 为空。\n"

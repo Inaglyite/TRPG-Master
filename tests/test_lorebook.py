@@ -118,6 +118,22 @@ class LorebookRetrievalTests(unittest.TestCase):
         revealed = select_lore(book, state, [], "我再检查这张纸片")
         self.assertIn("fragment-after-discovery", revealed.entry_ids)
 
+        hidden_trace = {
+            item.entry_id: item.reason for item in hidden.trace
+        }
+        revealed_trace = {
+            item.entry_id: item.reason for item in revealed.trace
+        }
+        self.assertEqual(
+            "required_clue_gate",
+            hidden_trace["fragment-after-discovery"],
+        )
+        self.assertEqual("selected", revealed_trace["fragment-after-discovery"])
+        self.assertEqual(
+            len(book.data.entries),
+            sum(hidden.diagnostics["reason_counts"].values()),
+        )
+
     def test_injected_authority_and_lore_are_not_scanned_recursively(self):
         raw = json.loads((TEMPLATE / "lorebook.json").read_text(encoding="utf-8"))
         raw["data"]["entries"].append({
@@ -175,6 +191,7 @@ class LorebookRetrievalTests(unittest.TestCase):
 
         self.assertEqual(selection.entries, ())
         self.assertEqual(selection.token_estimate, 0)
+        self.assertEqual("token_budget", selection.trace[0].reason)
 
     def test_engine_retrieval_and_cooldown_memory_use_world_store(self):
         with tempfile.TemporaryDirectory() as temp_dir:

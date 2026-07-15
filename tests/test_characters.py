@@ -30,6 +30,7 @@ class CharacterListTests(unittest.TestCase):
             self.assertIn("笔记本与钢笔", character["inventory"])
             self.assertIn("行动是最好的回击", character["backstory"]["beliefs"])
             self.assertTrue(character["top_skills"])
+            self.assertEqual(character["source_label"], "默认调查员")
 
     def test_new_game_applies_selected_character_before_opening_prompt(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -53,6 +54,14 @@ class CharacterListTests(unittest.TestCase):
             self.assertEqual(selected["name"], "黄千陆")
             self.assertEqual(context.world_store.load()["pc"]["name"], "黄千陆")
             self.assertIn('"name": "黄千陆"', engine.messages[-1]["content"])
+            self.assertIn(
+                "module_opening 是开场演出脚本",
+                engine.messages[-1]["content"],
+            )
+            self.assertIn(
+                "以“**你可以——**”开头",
+                engine.messages[-1]["content"],
+            )
 
     def test_module_starting_items_are_merged_with_selected_character(self):
         with tempfile.TemporaryDirectory() as temp_dir:

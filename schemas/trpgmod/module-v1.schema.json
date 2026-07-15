@@ -297,6 +297,12 @@
           "title": "Targets",
           "type": "array"
         },
+        "approach_text": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Approach Text",
+          "type": "string"
+        },
         "skill": {
           "anyOf": [
             {
@@ -310,6 +316,32 @@
           ],
           "default": null,
           "title": "Skill"
+        },
+        "check_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "skill",
+                "luck"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Type"
+        },
+        "difficulty": {
+          "default": "regular",
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
         },
         "requires_success": {
           "default": false,
@@ -346,6 +378,101 @@
         "targets"
       ],
       "title": "DiscoveryRuleDefinition",
+      "type": "object"
+    },
+    "EncounterDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "npc_id": {
+          "title": "Npc Id",
+          "type": "string"
+        },
+        "availability": {
+          "default": "guaranteed",
+          "enum": [
+            "guaranteed",
+            "conditional",
+            "luck",
+            "unavailable"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "required_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Required Flags",
+          "type": "object"
+        },
+        "forbidden_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Forbidden Flags",
+          "type": "object"
+        },
+        "luck_difficulty": {
+          "default": "regular",
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Luck Difficulty",
+          "type": "string"
+        },
+        "repeat": {
+          "default": "once",
+          "enum": [
+            "once",
+            "always"
+          ],
+          "title": "Repeat",
+          "type": "string"
+        },
+        "on_present_text": {
+          "default": "",
+          "maxLength": 500,
+          "title": "On Present Text",
+          "type": "string"
+        },
+        "on_absent_text": {
+          "default": "",
+          "maxLength": 500,
+          "title": "On Absent Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "npc_id"
+      ],
+      "title": "EncounterDefinition",
       "type": "object"
     },
     "EndingDefinition": {
@@ -717,6 +844,13 @@
           "title": "Name",
           "type": "string"
         },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
         "description": {
           "minLength": 1,
           "title": "Description",
@@ -734,6 +868,13 @@
             "type": "string"
           },
           "title": "Npcs Present",
+          "type": "array"
+        },
+        "encounters": {
+          "items": {
+            "$ref": "#/$defs/EncounterDefinition"
+          },
+          "title": "Encounters",
           "type": "array"
         },
         "tags": {

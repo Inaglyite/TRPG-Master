@@ -151,7 +151,7 @@ flowchart TD
 - [ ] 实现 `RoomManager`，按 `room_id` 创建、获取、休眠和销毁 `GameRoom`。
 - [ ] 每个 `GameRoom` 只创建一个共享 `GameEngine`，不再为每个 WebSocket 创建独立 GM 历史。
 - [ ] 建立房间级 `action_queue` 和 `room_lock`，所有改变世界的动作串行执行。
-- [ ] 为事件增加单调递增 `event_id`，支持断线后补发。
+- [ ] 在现有单机 `TurnJournal + turn_id/seq` 基础上增加房间级 `event_id`、逐玩家 ack 与增量补发。
 - [ ] WebSocket 握手加入 `protocol_version`、`room_id`、`player_id` 和 `join_token`。
 - [ ] 为请求增加 `request_id`，错误使用稳定的结构化 `error_code`。
 - [ ] 实现房间广播以及 `public`、`player:<id>`、`keeper` 三类可见性。
@@ -306,6 +306,7 @@ flowchart TD
 
 - [ ] 建立 10–20 个脚本化冒险回归场景和结果报告。
 - [ ] 为 WebSocket 完整回合、读档和重连增加集成测试。
+  已覆盖连接内重复 action 拒绝、事件流 active turn 不可覆盖和自动存档恢复入口；仍缺浏览器断网、服务重启与持久事件补发的端到端测试。
 - [x] 为模组格式增加 schema 校验和清晰的导入错误。
 - [ ] 给世界状态、存档和协议建立版本号及迁移测试。
 - [ ] 记录 P50/P95 首 token 延迟、完整回合耗时和模型错误率。

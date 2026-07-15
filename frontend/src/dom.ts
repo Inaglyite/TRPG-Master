@@ -13,8 +13,12 @@ export const btnLoad = document.getElementById("btn-load") as HTMLButtonElement;
 export const btnNew = document.getElementById("btn-new")!;
 export const btnPanel = document.getElementById("btn-panel")!;
 export const btnModelSettings = document.getElementById("btn-model-settings") as HTMLButtonElement;
+export const btnNotes = document.getElementById("btn-notes") as HTMLButtonElement;
 export const charPanel = document.getElementById("char-panel")!;
 export const connStatus = document.getElementById("conn-status")!;
+export const connectionNotice = document.getElementById("connection-notice")!;
+export const connectionNoticeText = document.getElementById("connection-notice-text")!;
+export const connectionRecover = document.getElementById("connection-recover") as HTMLButtonElement;
 
 let connState: "connecting" | "connected" | "disconnected" = "connecting";
 
@@ -40,6 +44,8 @@ export const savePanelTitle = document.getElementById("save-panel-title")!;
 export const savePanelClose = document.getElementById("save-panel-close")!;
 export const savePanelNew = document.getElementById("save-panel-new")!;
 export const savePanelList = document.getElementById("save-panel-list")!;
+export const worldPanelSection = document.getElementById("world-panel-section")!;
+export const worldPanelList = document.getElementById("world-panel-list")!;
 
 export const modalOverlay = document.getElementById("modal-overlay")!;
 export const modalText = document.getElementById("modal-text")!;
@@ -81,3 +87,13 @@ export const judgementModelInput = document.getElementById("judgement-model-inpu
 export const modelIdOptions = document.getElementById("model-id-options") as HTMLDataListElement;
 export const modelPresetControl = document.getElementById("model-preset-control")!;
 export const modelSettingsStatus = document.getElementById("model-settings-status")!;
+export const turnDiagnosticsRefresh = document.getElementById("turn-diagnostics-refresh") as HTMLButtonElement;
+export const turnDiagnosticsStatus = document.getElementById("turn-diagnostics-status")!;
+export const turnDiagnosticsContent = document.getElementById("turn-diagnostics-content")!;
+export const utilityOverlay = document.getElementById("utility-overlay")!;
+export const utilityClose = document.getElementById("utility-close") as HTMLButtonElement;
+export const quickActions = document.getElementById("quick-actions")!;
+export const playerNotesInput = document.getElementById("player-notes-input") as HTMLTextAreaElement;
+export const playerNotesStatus = document.getElementById("player-notes-status")!;
+export const playerNotesCancel = document.getElementById("player-notes-cancel") as HTMLButtonElement;
+export const playerNotesSave = document.getElementById("player-notes-save") as HTMLButtonElement;

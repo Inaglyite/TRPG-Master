@@ -16,6 +16,175 @@ marked.setOptions({ breaks: true, gfm: true, renderer });
 
 // ---- 流式输出目标 ----
 let streamTarget: HTMLElement | null = null;
+let displayTurnId: string | null = null;
+let narrativeReplacement: {
+  sourceTurnId: string;
+  sourceElements: HTMLElement[];
+  target: HTMLElement;
+} | null = null;
+
+function tagTurnElement(element: HTMLElement) {
+  if (displayTurnId) element.dataset.turnId = displayTurnId;
+}
+
+export function setDisplayTurnId(turnId: string | null) {
+  displayTurnId = turnId;
+}
+
+export function removeTurnMessages(turnId: string) {
+  Array.from(messagesEl.children).forEach((child) => {
+    if ((child as HTMLElement).dataset.turnId === turnId) child.remove();
+  });
+  if (streamTarget && !streamTarget.isConnected) {
+    streamTarget = null;
+    streamBuffer = "";
+    pendingStreamText = "";
+  }
+}
+
+export function tagPendingPlayerMessage(turnId: string) {
+  const players = Array.from(messagesEl.querySelectorAll<HTMLElement>(".msg.player"));
+  const pending = players.reverse().find((element) => !element.dataset.turnId);
+  if (pending) pending.dataset.turnId = turnId;
+}
+
+export function beginNarrativeReplacement(sourceTurnId: string) {
+  flushNarrativeStream();
+  const sourceElements = Array.from(messagesEl.children).filter((child) => {
+    const element = child as HTMLElement;
+    return element.dataset.turnId === sourceTurnId && element.classList.contains("gm");
+  }) as HTMLElement[];
+  sourceElements.forEach((element) => element.classList.add("rewrite-source-hidden"));
+
+  const target = document.createElement("div");
+  target.className = "msg gm streaming-cursor rewrite-target";
+  target.id = `msg-${++msgIdCounter}`;
+  tagTurnElement(target);
+  const anchor = sourceElements[sourceElements.length - 1];
+  if (anchor) anchor.before(target);
+  else messagesEl.appendChild(target);
+
+  streamTarget = target;
+  streamBuffer = "";
+  pendingStreamText = "";
+  narrativeReplacement = { sourceTurnId, sourceElements, target };
+  scrollDown(true);
+}
+
+export function completeNarrativeReplacement(sourceTurnId: string) {
+  flushNarrativeStream();
+  if (!narrativeReplacement || narrativeReplacement.sourceTurnId !== sourceTurnId) return;
+  narrativeReplacement.sourceElements.forEach((element) => element.remove());
+  narrativeReplacement.target.dataset.turnId = sourceTurnId;
+  narrativeReplacement.target.classList.remove("streaming-cursor", "rewrite-target");
+  streamTarget = null;
+  streamBuffer = "";
+  pendingStreamText = "";
+  narrativeReplacement = null;
+}
+
+export function cancelNarrativeReplacement(sourceTurnId: string) {
+  if (!narrativeReplacement || narrativeReplacement.sourceTurnId !== sourceTurnId) return;
+  narrativeReplacement.target.remove();
+  narrativeReplacement.sourceElements.forEach((element) => {
+    element.classList.remove("rewrite-source-hidden");
+  });
+  streamTarget = null;
+  streamBuffer = "";
+  pendingStreamText = "";
+  narrativeReplacement = null;
+  removeLoading();
+}
+
+export function attachTurnRewriteAction(turnId: string, onRewrite: () => void) {
+  messagesEl.querySelectorAll(".turn-rewrite-button").forEach((element) => element.remove());
+  messagesEl.querySelectorAll(".turn-message-actions:empty").forEach((element) => element.remove());
+  const targets = Array.from(messagesEl.children).filter((child) => {
+    const element = child as HTMLElement;
+    return element.dataset.turnId === turnId && element.classList.contains("gm");
+  }) as HTMLElement[];
+  const target = targets[targets.length - 1];
+  if (!target) return;
+  const actions = getTurnActions(target);
+  const rewrite = document.createElement("button");
+  rewrite.type = "button";
+  rewrite.className = "turn-rewrite-button";
+  rewrite.textContent = "↻";
+  rewrite.title = "重新叙述（不重新判定）";
+  rewrite.setAttribute("aria-label", "重新叙述本回合，不改变判定结果");
+  rewrite.onclick = () => {
+    rewrite.disabled = true;
+    onRewrite();
+  };
+  actions.appendChild(rewrite);
+}
+
+export function attachTurnBranchAction(turnId: string, onBranch: () => void) {
+  const targets = Array.from(messagesEl.children).filter((child) => {
+    const element = child as HTMLElement;
+    return element.dataset.turnId === turnId && element.classList.contains("gm");
+  }) as HTMLElement[];
+  const target = targets[targets.length - 1];
+  if (!target || target.querySelector(".turn-branch-button")) return;
+  const actions = getTurnActions(target);
+  const branch = document.createElement("button");
+  branch.type = "button";
+  branch.className = "turn-branch-button";
+  branch.textContent = "⑂";
+  branch.title = "从此回合创建时间线分支";
+  branch.setAttribute("aria-label", "从此回合创建独立时间线分支");
+  branch.onclick = () => {
+    branch.disabled = true;
+    onBranch();
+  };
+  actions.appendChild(branch);
+}
+
+export function resetTurnActionButtons() {
+  messagesEl.querySelectorAll<HTMLButtonElement>(
+    ".turn-rewrite-button, .turn-branch-button",
+  ).forEach((button) => {
+    button.disabled = false;
+  });
+}
+
+function getTurnActions(target: HTMLElement): HTMLElement {
+  const existing = target.querySelector<HTMLElement>(":scope > .turn-message-actions");
+  if (existing) return existing;
+  const actions = document.createElement("div");
+  actions.className = "turn-message-actions";
+  target.appendChild(actions);
+  return actions;
+}
+
+export type TurnHistoryItem = {
+  turn_id?: string;
+  player_input?: string | null;
+  narrative?: string;
+  choices?: Array<{ label: string; isFree: boolean }>;
+};
+
+export function renderTurnHistory(history: TurnHistoryItem[]): TurnHistoryItem | null {
+  flushNarrativeStream();
+  removeLoading();
+  messagesEl.replaceChildren();
+  streamTarget = null;
+  streamBuffer = "";
+  pendingStreamText = "";
+  narrativeReplacement = null;
+  displayTurnId = null;
+
+  history.forEach((turn) => {
+    const turnId = String(turn.turn_id || "");
+    if (!turnId) return;
+    displayTurnId = turnId;
+    if (turn.player_input) addMsg("player", String(turn.player_input));
+    if (turn.narrative) addMsg("gm", String(turn.narrative));
+  });
+  displayTurnId = null;
+  scrollDown(true);
+  return history.length > 0 ? history[history.length - 1] : null;
+}
 
 export function getStreamTarget(): HTMLElement | null {
   return streamTarget;
@@ -54,6 +223,7 @@ export function addMsg(kind: string, text: string, forceScroll = false): HTMLEle
   el.className = `msg ${kind}`;
   el.id = `msg-${++msgIdCounter}`;
   el.innerHTML = marked.parse(text) as string;
+  tagTurnElement(el);
   messagesEl.appendChild(el);
   scrollDown(forceScroll);  // forceScroll=true 强制滚；否则按 pinnedToBottom（fire 时复检）
   return el;
@@ -85,21 +255,41 @@ export function scrollDown(force = false) {
 }
 
 // ---- 移除"守秘人思考中"指示 ----
+let loadingTimer: number | null = null;
+
 export function removeLoading() {
+  if (loadingTimer !== null) {
+    window.clearTimeout(loadingTimer);
+    loadingTimer = null;
+  }
   const dots = document.getElementById("loading-dots");
   if (dots) dots.remove();
 }
 
 // ---- 显示"守秘人思考中" ----
-export function showGmThinking() {
+export function showGmThinking(label = "守秘人正在叙述……") {
   removeLoading();
   const dots = document.createElement("div");
   dots.className = "msg system";
   dots.id = "loading-dots";
-  dots.innerHTML =
-    '<div class="typing-dots"><span></span><span></span><span></span></div><span style="margin-left:8px;font-size:13px">守秘人正在叙述……</span>';
+  const animation = document.createElement("div");
+  animation.className = "typing-dots";
+  animation.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+  const text = document.createElement("span");
+  text.className = "loading-label";
+  text.textContent = label;
+  dots.append(animation, text);
+  tagTurnElement(dots);
   messagesEl.appendChild(dots);
   scrollDown();
+  const startedAt = Date.now();
+  const refreshElapsed = () => {
+    if (!dots.isConnected) return;
+    const seconds = Math.max(8, Math.round((Date.now() - startedAt) / 1000));
+    text.textContent = `${label}（已等待 ${seconds} 秒）`;
+    loadingTimer = window.setTimeout(refreshElapsed, 5000);
+  };
+  loadingTimer = window.setTimeout(refreshElapsed, 8000);
 }
 
 export function showRollPending() {
@@ -118,6 +308,7 @@ export function showRollPending() {
     </div>
     <div class="dice-result">守秘人正在结算检定……</div>
   `;
+  tagTurnElement(el);
   messagesEl.appendChild(el);
   scrollDown();
 }
@@ -141,7 +332,11 @@ export function flushNarrativeStream() {
 
   const wasAtBottom = isNearBottom();
   removeLoading();
-  if (!streamTarget || streamTarget.className !== "msg gm streaming-cursor") {
+  if (
+    !streamTarget
+    || !streamTarget.classList.contains("gm")
+    || !streamTarget.classList.contains("streaming-cursor")
+  ) {
     streamTarget = addMsg("gm", "");
     streamTarget.classList.add("streaming-cursor");
     streamBuffer = "";
@@ -190,6 +385,7 @@ export function onDice(text: string, rollData?: DiceRollData) {
   const el = document.createElement("div");
   el.className = "msg dice rolling";
   el.id = `msg-${++msgIdCounter}`;
+  tagTurnElement(el);
 
   const title = document.createElement("div");
   title.className = "dice-title";

@@ -120,7 +120,28 @@ def analyze_module(
             if definition.asset_id
         }
         for asset_id, asset in getattr(module.assets, group_name).items():
-            if asset_id not in referenced and not asset.reveal_on:
+            exact_triggers = [
+                trigger
+                for trigger in asset.reveal_on
+                if trigger.entity_id
+            ]
+            for index, trigger in enumerate(asset.reveal_on):
+                if trigger.entity_id:
+                    continue
+                diagnostics.append(ModuleDiagnostic(
+                    phase="content_advice",
+                    level="warning",
+                    code="text_handout_trigger_ignored",
+                    path=(
+                        f"module.assets.{group_name}.{asset_id}."
+                        f"reveal_on[{index}]"
+                    ),
+                    message=(
+                        "文本匹配不能授权素材展示；请用实体 asset_id 绑定，"
+                        "或为 reveal_on 提供稳定 entity_id"
+                    ),
+                ))
+            if asset_id not in referenced and not exact_triggers:
                 diagnostics.append(ModuleDiagnostic(
                     phase="content_advice",
                     level="warning",

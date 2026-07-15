@@ -94,7 +94,7 @@ _DISCUSSED_ACTION = re.compile(
 )
 
 _MOVE_ACTION = re.compile(
-    r"(?:^|[，。；！？\s])(?:我)?(?:立刻|马上|直接|先|现在)?"
+    r"(?:^|[，。；！？\s])(?:我)?(?:立刻|马上|直接|先|现在|接下来|随后)?"
     r"(?:前往|去往|去|来到|进入|走进|赶到|返回|回到)"
 )
 _NEGATED_MOVE = re.compile(
@@ -107,6 +107,8 @@ _DISCUSSED_MOVE = re.compile(
 _LOCATION_NOUNS = (
     "停尸房",
     "医学院",
+    "历史系",
+    "自习室",
     "办公室",
     "小屋",
     "酒馆",
@@ -144,6 +146,9 @@ def _scene_aliases(scene: dict) -> set[str]:
     name = str(scene.get("name") or "").strip()
     description = str(scene.get("description") or "")
     aliases = {name, name.replace("的", "")}
+    configured = scene.get("aliases", [])
+    if isinstance(configured, list):
+        aliases.update(str(alias).strip() for alias in configured)
     for noun in _LOCATION_NOUNS:
         if noun in name or noun in description:
             aliases.add(noun)
@@ -172,6 +177,34 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
         ]
         if matched_aliases:
             matches.append((max(map(len, matched_aliases)), str(scene_id)))
+    # "去找考特/洛奇" is also an explicit destination when the module gives
+    # that NPC one stable current_location.  This keeps navigation declarative
+    # without teaching the language matcher every room name in every module.
+    for npc in world.get("npcs", []):
+        if not isinstance(npc, dict):
+            continue
+        name = str(npc.get("name") or "").strip()
+        aliases = {name}
+        aliases.update(
+            part for part in name.replace("・", "·").split("·")
+            if len(part) >= 2
+        )
+        matched_aliases = [alias for alias in aliases if alias in destination_text]
+        if matched_aliases:
+            npc_id = str(npc.get("id") or "")
+            authored_locations = [
+                str(scene_id)
+                for scene_id, scene in scenes.items()
+                if isinstance(scene, dict)
+                and npc_id in scene.get("npcs_present", [])
+            ]
+            location = (
+                authored_locations[0]
+                if len(authored_locations) == 1
+                else str(npc.get("current_location") or "")
+            )
+            if location in scenes:
+                matches.append((max(map(len, matched_aliases)), location))
     if not matches:
         return None
     best_length = max(length for length, _scene_id in matches)

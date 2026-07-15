@@ -70,6 +70,12 @@ def _module_prompt_content(content: str) -> str:
 
 
 _PROMPT_SPINE_MARKER = "trpg-master:prompt-role=spine"
+_OPENING_SKILL_LOAD_ORDER = (
+    "core/trpg_master.skill",
+    "core/no_spoiler.skill",
+    "keeper/keeper_atmosphere.skill",
+    "keeper/keeper_npc.skill",
+)
 
 
 def load_system_prompt(
@@ -79,16 +85,25 @@ def load_system_prompt(
 ) -> str:
     context = _runtime_context(context)
     profile = (profile or PROMPT_PROFILE).lower()
-    if profile not in {"full", "hybrid"}:
+    if profile not in {"full", "hybrid", "opening"}:
         profile = "full"
     parts = []
     # 核心 skill
-    for name in SKILL_LOAD_ORDER:
+    skill_order = (
+        _OPENING_SKILL_LOAD_ORDER
+        if profile == "opening"
+        else SKILL_LOAD_ORDER
+    )
+    for name in skill_order:
         path = context.project_root / "skills" / name
         if path.exists():
             content = path.read_text(encoding="utf-8").strip()
             if content:
                 parts.append(content)
+    # 结构化开场的公开剧情由本轮权威快照提供。这里不加载 module.md、
+    # 模组 skill 或无关规则，避免私有时间线泄露并缩短首轮输入。
+    if profile == "opening":
+        return "\n\n---\n\n".join(parts)
     # hybrid 只在模组明确提供足量剧情脊柱时生效；否则无声回退 full。
     mod_skills_dir = context.module_dir / "skills"
     mod_skill_contents: list[str] = []

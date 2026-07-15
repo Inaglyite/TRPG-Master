@@ -111,6 +111,22 @@ let moduleSwitchPending = false;
 let activeModule = "";
 let activeModuleTitle = "当前模组";
 let saveHintText = "正在读取存档…";
+let startRetryTimer: number | null = null;
+let startRetryAttempt = 0;
+
+const START_RETRY_DELAYS = [400, 700, 1000, 1500, 2200, 3000];
+
+function clearStartRetry() {
+  if (startRetryTimer !== null) {
+    window.clearTimeout(startRetryTimer);
+    startRetryTimer = null;
+  }
+}
+
+function sendStartRequest() {
+  if (!gameStarting || !selectedCharacterRef) return;
+  safeSend(JSON.stringify({ type: "start", character_ref: selectedCharacterRef }));
+}
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -157,6 +173,9 @@ export function getGameStarting(): boolean {
 
 export function onGmTurnStart() {
   if (!gameStarted) {
+    clearStartRetry();
+    startRetryAttempt = 0;
+    gameStarting = false;
     gameStarted = true;
     startOverlay.classList.add("hidden");
   }
@@ -165,6 +184,8 @@ export function onGmTurnStart() {
 }
 
 export function resetStartButton() {
+  clearStartRetry();
+  startRetryAttempt = 0;
   gameStarting = false;
   moduleSwitchPending = false;
   const moduleSelect = document.getElementById("module-select") as HTMLSelectElement | null;
@@ -188,13 +209,34 @@ function openCharacterSelection() {
 
 export function startGame() {
   if (gameStarting || !selectedCharacterRef) return;
+  clearStartRetry();
+  startRetryAttempt = 0;
   gameStarting = true;
   btnStart.disabled = true;
   btnContinue.disabled = true;
   btnCharacterBack.disabled = true;
   btnCharacterConfirm.disabled = true;
   btnCharacterConfirm.textContent = "守秘人正在布景…";
-  safeSend(JSON.stringify({ type: "start", character_ref: selectedCharacterRef }));
+  sendStartRequest();
+}
+
+export function onStartTurnRejected(message: string, retryable: boolean): boolean {
+  if (!gameStarting) return false;
+  clearStartRetry();
+  const hint = document.getElementById("start-hint")!;
+  if (retryable && startRetryAttempt < START_RETRY_DELAYS.length) {
+    const delay = START_RETRY_DELAYS[startRetryAttempt++];
+    hint.textContent = `${message} 正在自动重试……`;
+    btnCharacterConfirm.textContent = "正在结束上一局…";
+    startRetryTimer = window.setTimeout(() => {
+      startRetryTimer = null;
+      sendStartRequest();
+    }, delay);
+    return true;
+  }
+  resetStartButton();
+  hint.textContent = message;
+  return true;
 }
 
 export function continueGame() {
@@ -310,6 +352,11 @@ function renderCharacterList(groups: CharacterGroup[]) {
       card.appendChild(createElement("span", "character-card-name", character.name));
       card.appendChild(createElement(
         "span",
+        "character-card-source",
+        character.source_label,
+      ));
+      card.appendChild(createElement(
+        "span",
         "character-card-meta",
         character.occupation || "调查员",
       ));
@@ -337,7 +384,7 @@ function selectCharacter(character: CharacterOption) {
     card.classList.toggle("selected", selected);
     card.setAttribute("aria-pressed", String(selected));
   });
-  characterSelectedSummary.textContent = `${character.name} · ${character.occupation || "调查员"}`;
+  characterSelectedSummary.textContent = `${character.name} · ${character.occupation || "调查员"} · ${character.source_label}`;
   btnCharacterConfirm.disabled = gameStarting;
   renderCharacterDetail(character);
 }

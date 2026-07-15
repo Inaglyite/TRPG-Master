@@ -31,6 +31,12 @@ import { safeSend } from "./ws";
 import { escapeHtml } from "./text";
 
 let activeDecisionId: string | null = null;
+let inputEnabledBeforeDisconnect = false;
+
+export type ActionChoice = {
+  label: string;
+  isFree: boolean;
+};
 
 // ---- 建议检定弹窗 ----
 export function onSuggest(data: any) {
@@ -81,7 +87,7 @@ export function onDecision(data: any) {
 }
 
 // ---- GM 叙述结束，解析选项 ----
-export function onDone() {
+export function onDone(structuredChoices?: ActionChoice[]) {
   flushNarrativeStream();
   removeLoading();
   removeRollPending();
@@ -91,9 +97,11 @@ export function onDone() {
     setStreamTarget(null);
   }
   // 解析选项：从最近的 GM 消息中提取（跳过骰子、摘要等非叙事消息）
-  const opts: { label: string; isFree: boolean }[] = [];
+  const opts: ActionChoice[] = Array.isArray(structuredChoices)
+    ? structuredChoices.filter((choice) => choice && typeof choice.label === "string" && choice.label.trim())
+    : [];
   const children = messagesEl.children;
-  for (let i = children.length - 1; i >= 0; i--) {
+  for (let i = children.length - 1; opts.length === 0 && i >= 0; i--) {
     const el = children[i];
     if (!el.classList.contains("gm")) continue;
 
@@ -116,17 +124,17 @@ export function onDone() {
           break;
         }
       }
-      // 如果没找到"你可以"之后的 <ol>，就用最后一个
-      if (!targetOl) targetOl = olElements[olElements.length - 1];
-
-      const liElements = targetOl.querySelectorAll("li");
-      liElements.forEach((li) => {
-        const label = (li.textContent || "").trim();
-        if (label) {
-          const isFree = label.includes("自由行动") || label.includes("你决定做什么");
-          opts.push({ label, isFree });
-        }
-      });
+      // 兼容旧服务端时只接受明确标记之后的列表，避免把证据编号误当成按钮。
+      if (targetOl && markerIdx >= 0) {
+        const liElements = targetOl.querySelectorAll("li");
+        liElements.forEach((li) => {
+          const label = (li.textContent || "").trim();
+          if (label) {
+            const isFree = label.includes("自由行动") || label.includes("你决定做什么");
+            opts.push({ label, isFree });
+          }
+        });
+      }
     }
 
     // 降级：<br> 分隔的纯文本格式
@@ -181,6 +189,39 @@ export function enableInput(on: boolean) {
   btnSend.disabled = !on;
   userInput.placeholder = on ? "你决定做什么？" : "守秘人正在叙述……";
   if (on) userInput.focus();
+}
+
+export function onTurnPhase(label: string) {
+  if (!userInput.disabled) return;
+  userInput.placeholder = label || "守秘人正在处理本轮行动……";
+  showGmThinking(label || "守秘人正在处理本轮行动……");
+}
+
+export function onConnectionLost(turnInterrupted: boolean) {
+  inputEnabledBeforeDisconnect = !userInput.disabled;
+  flushNarrativeStream();
+  removeLoading();
+  removeRollPending();
+  modalOverlay.classList.add("hidden");
+  activeDecisionId = null;
+  if (getStreamTarget()) {
+    getStreamTarget()!.classList.remove("streaming-cursor");
+    setStreamTarget(null);
+  }
+  if (turnInterrupted) optionsBar.replaceChildren();
+  enableInput(false);
+  userInput.placeholder = turnInterrupted
+    ? "本轮连接中断，重连后可恢复进度"
+    : "连接已断开，正在重试……";
+}
+
+export function onConnectionRestored(recoveryRequired: boolean) {
+  if (recoveryRequired) {
+    enableInput(false);
+    userInput.placeholder = "请选择恢复最近自动存档";
+    return;
+  }
+  enableInput(inputEnabledBeforeDisconnect);
 }
 
 // ---- 发送行动 ----

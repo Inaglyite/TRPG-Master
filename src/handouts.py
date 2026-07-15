@@ -1,11 +1,8 @@
-"""Deterministic handout matching and save-state reconciliation."""
+"""Deterministic handout resolution and save-state reconciliation."""
 
 from __future__ import annotations
 
 import copy
-import re
-import unicodedata
-from typing import Any
 
 
 ASSET_GROUPS = ("npcs", "scenes", "clues")
@@ -16,32 +13,23 @@ EVENT_BY_ENTITY_TYPE = {
 }
 
 
-def _normalized_text(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
-    return re.sub(r"\s+", "", text)
-
-
 def _trigger_matches(
     trigger: dict,
     event: str,
     *,
     entity_id: str,
-    text: str,
 ) -> bool:
+    """Match only authoritative engine entity IDs.
+
+    Older module packages may still contain ``match_all`` / ``match_any``
+    metadata.  Free text is useful for lore retrieval, but it must never
+    authorize a stateful handout because mentions and observations are not the
+    same event.
+    """
     if trigger.get("event") != event:
         return False
     expected_entity = str(trigger.get("entity_id") or "")
-    if expected_entity and expected_entity != entity_id:
-        return False
-
-    haystack = _normalized_text(text)
-    match_all = [_normalized_text(term) for term in trigger.get("match_all", [])]
-    match_any = [_normalized_text(term) for term in trigger.get("match_any", [])]
-    if match_all and not all(term in haystack for term in match_all):
-        return False
-    if match_any and not any(term in haystack for term in match_any):
-        return False
-    return bool(expected_entity or match_all or match_any)
+    return bool(expected_entity and entity_id and expected_entity == entity_id)
 
 
 def matching_handouts(
@@ -53,7 +41,11 @@ def matching_handouts(
     entity_type: str | None = None,
     include_seen: bool = False,
 ) -> list[dict[str, str]]:
-    """Return handouts whose declarative trigger matches one engine event."""
+    """Return handouts bound to one authoritative engine entity event.
+
+    ``text`` remains in the public signature so older callers and packages can
+    be loaded, but it is deliberately not used as display authorization.
+    """
     asset_map = state.get("asset_map", {})
     if not isinstance(asset_map, dict):
         return []
@@ -83,17 +75,23 @@ def matching_handouts(
                 continue
             triggers = asset.get("reveal_on", [])
             if not isinstance(triggers, list):
-                continue
-            if any(
+                triggers = []
+            explicit_match = any(
                 isinstance(trigger, dict)
                 and _trigger_matches(
                     trigger,
                     event,
                     entity_id=entity_id,
-                    text=text,
                 )
                 for trigger in triggers
-            ):
+            )
+            implicit_legacy_match = (
+                not triggers
+                and bool(entity_id)
+                and str(asset_id) == entity_id
+                and EVENT_BY_ENTITY_TYPE.get(group[:-1]) == event
+            )
+            if explicit_match or implicit_legacy_match:
                 matches.append({
                     "entity_type": group[:-1],
                     "entity_id": entity_id or asset_id,
@@ -153,7 +151,7 @@ def asset_reference(asset_id: str, entry: dict, fallback_label: str = "") -> dic
 
 
 def matching_clue_asset(state: dict, clue: dict) -> tuple[str, dict] | None:
-    """Resolve an authored clue asset, falling back to declarative text triggers."""
+    """Resolve an authored clue asset by stable catalog ID only."""
     catalog = state.get("clue_catalog", {})
     catalog_id = clue.get("catalog_id") or clue.get("id")
     catalog_entry = catalog.get(catalog_id) if isinstance(catalog, dict) else None
@@ -163,20 +161,7 @@ def matching_clue_asset(state: dict, clue: dict) -> tuple[str, dict] | None:
         mapped = state.get("asset_map", {}).get("clues", {}).get(asset_id)
         if isinstance(mapped, dict) and mapped.get("file"):
             return asset_id, mapped
-
-    matches = matching_handouts(
-        state,
-        "clue_discovered",
-        entity_id=str(catalog_id or ""),
-        text=str(clue.get("text") or ""),
-        entity_type="clue",
-        include_seen=True,
-    )
-    if not matches:
-        return None
-    asset_id = matches[0]["asset_id"]
-    entry = state.get("asset_map", {}).get("clues", {}).get(asset_id)
-    return (asset_id, entry) if isinstance(entry, dict) else None
+    return None
 
 
 def attach_matching_clue_asset(

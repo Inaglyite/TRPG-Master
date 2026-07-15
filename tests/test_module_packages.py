@@ -116,6 +116,7 @@ class ModuleFormatTests(unittest.TestCase):
 
         rules = world["clue_catalog"]["well_paper_fragment"]["discovery_rules"]
         self.assertEqual(rules[0]["intent"], "search")
+        self.assertIn("旧井边", rules[0]["approach_text"])
         self.assertEqual(rules[0]["skill"], "spot_hidden")
         self.assertTrue(rules[0]["requires_success"])
 

@@ -129,6 +129,7 @@ class StoryStreamingTests(unittest.TestCase):
         engine = SimpleNamespace(
             current_model="old-model",
             _has_pending_control_instruction=lambda: False,
+            _has_pending_new_game_opening=lambda: False,
         )
 
         with patch("src.agent_graph.NARRATIVE_MODEL", "story-model"):
@@ -136,6 +137,7 @@ class StoryStreamingTests(unittest.TestCase):
 
         self.assertEqual(engine.current_model, "story-model")
         self.assertFalse(result["turn_had_check"])
+        self.assertFalse(result["opening_turn"])
 
     def test_control_turn_does_not_buffer_normal_opening_narrative(self):
         calls = []
@@ -154,6 +156,33 @@ class StoryStreamingTests(unittest.TestCase):
 
         self.assertEqual(result, {"text": "开场。", "tool_calls": []})
         self.assertFalse(calls[0][1]["buffer_if_tools"])
+
+    def test_structured_opening_uses_public_prompt_without_tools(self):
+        calls = []
+
+        def stream(model, **kwargs):
+            calls.append((model, kwargs))
+            return "完整开场。", []
+
+        engine = SimpleNamespace(
+            current_model="story-model",
+            _stream_llm=stream,
+            _opening_system_prompt=lambda: "public-opening-system",
+        )
+
+        result = _call_story_agent({
+            "engine": engine,
+            "opening_turn": True,
+        })
+
+        self.assertEqual(result["text"], "完整开场。")
+        self.assertEqual(
+            calls[0][1]["system_prompt_override"],
+            "public-opening-system",
+        )
+        self.assertFalse(calls[0][1]["enable_tools"])
+        self.assertEqual(calls[0][1]["prompt_profile"], "opening")
+        self.assertEqual(calls[0][1]["temperature"], 0.65)
 
     def test_combat_agent_uses_judgement_model(self):
         calls = []
@@ -358,6 +387,27 @@ class TurnCommitTests(unittest.TestCase):
             )
             self.assertEqual(store.load()["current_scene"]["id"], "office")
 
+    def test_narrative_flavor_is_never_promoted_to_a_clue(self):
+        world = resolution_world()
+        world["current_scene"] = dict(world["scene_catalog"]["office"])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = WorldStore(Path(temp_dir) / "world")
+            store.initialize(world)
+            engine = FakeCommitEngine(store)
+
+            reconcile_narrative_entities(
+                engine,
+                "布莱斯·法伦随口说莱特从没请过病假，窗外雨声渐密。",
+            )
+
+            self.assertFalse(any(
+                name == "state_add_clue" for name, _args in engine.calls
+            ))
+            self.assertEqual(
+                store.load()["clues_found"],
+                world["clues_found"],
+            )
+
     def test_scene_sync_prefers_longest_nested_scene_name(self):
         world = resolution_world()
         world["scene_catalog"].update({
@@ -382,6 +432,39 @@ class TurnCommitTests(unittest.TestCase):
 
 
 class FinalizeTurnTests(unittest.TestCase):
+    def test_explicit_action_menu_is_emitted_before_done(self):
+        events: list[object] = []
+        engine = SimpleNamespace(
+            messages=[],
+            cb=SimpleNamespace(
+                on_error=lambda _message: events.append("error"),
+                on_choices=lambda choices: events.append(("choices", choices)),
+                on_done=lambda: events.append("done"),
+            ),
+            _reconcile_narrative_entities=lambda _text: None,
+            _turn_needs_model_audit=lambda _tools, **_kwargs: False,
+            _reconcile_turn=lambda *_args: None,
+            _dispatch_narrative_handouts=lambda _text: None,
+            save=lambda _slot: events.append("save"),
+            _last_turn_high_risk=False,
+            _round_count=0,
+            _maybe_summarize_after_turn=lambda: None,
+        )
+
+        _finalize_turn({
+            "engine": engine,
+            "narrative": "你看见两件编号证物。\n\n你可以——\n1. 检查门锁\n2. [自由行动] 你决定做什么？",
+            "text": "",
+            "tool_calls": [],
+            "executed_tools": [],
+            "turn_had_check": False,
+        })
+
+        self.assertEqual(events[0], "save")
+        self.assertEqual(events[1][0], "choices")
+        self.assertEqual(events[1][1][0]["label"], "检查门锁")
+        self.assertEqual(events[2], "done")
+
     def test_final_text_is_appended_after_tool_round_narrative(self):
         events: list[str] = []
         engine = SimpleNamespace(
@@ -416,6 +499,38 @@ class FinalizeTurnTests(unittest.TestCase):
             events,
             ["entities", "handouts", "save", "done", "summary"],
         )
+
+    def test_opening_prose_never_runs_the_state_auditor(self):
+        events: list[str] = []
+        engine = SimpleNamespace(
+            messages=[],
+            cb=SimpleNamespace(
+                on_error=lambda _message: events.append("error"),
+                on_done=lambda: events.append("done"),
+            ),
+            _reconcile_narrative_entities=lambda _text: events.append("entities"),
+            _turn_needs_model_audit=lambda _tools, **_kwargs: events.append("audit") or True,
+            _reconcile_turn=lambda *_args: events.append("reconcile"),
+            _dispatch_narrative_handouts=lambda _text: events.append("handouts"),
+            save=lambda _slot: events.append("save"),
+            _last_turn_high_risk=False,
+            _round_count=0,
+            _maybe_summarize_after_turn=lambda: events.append("summary"),
+        )
+
+        with patch("src.agent_graph.ENABLE_TURN_AUDIT", True):
+            _finalize_turn({
+                "engine": engine,
+                "user_content": None,
+                "narrative": "法伦随口说了几句模组未定义的往事。",
+                "text": "",
+                "tool_calls": [],
+                "executed_tools": [],
+                "turn_had_check": False,
+            })
+
+        self.assertNotIn("audit", events)
+        self.assertNotIn("reconcile", events)
 
 
 class ToolExecutionSafetyTests(unittest.TestCase):

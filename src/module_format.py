@@ -234,11 +234,42 @@ class NpcDefinition(StrictModel):
         return None if value is None else _validate_entity_id(value)
 
 
+class EncounterDefinition(StrictModel):
+    id: str
+    npc_id: str
+    availability: Literal["guaranteed", "conditional", "luck", "unavailable"] = (
+        "guaranteed"
+    )
+    required_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    forbidden_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    luck_difficulty: Literal["regular", "hard", "extreme"] = "regular"
+    repeat: Literal["once", "always"] = "once"
+    on_present_text: str = Field(default="", max_length=500)
+    on_absent_text: str = Field(default="", max_length=500)
+
+    @field_validator("id", "npc_id")
+    @classmethod
+    def validate_npc_id(cls, value: str) -> str:
+        return _validate_entity_id(value, "遭遇/NPC ID")
+
+    @model_validator(mode="after")
+    def validate_conditional_flags(self) -> "EncounterDefinition":
+        if (
+            self.availability == "conditional"
+            and not self.required_flags
+            and not self.forbidden_flags
+        ):
+            raise ValueError("conditional 遭遇必须指定 required_flags 或 forbidden_flags")
+        return self
+
+
 class SceneDefinition(StrictModel):
     name: str = Field(min_length=1, max_length=160)
+    aliases: list[str] = Field(default_factory=list)
     description: str = Field(min_length=1)
     exits: list[str] = Field(default_factory=list)
     npcs_present: list[str] = Field(default_factory=list)
+    encounters: list[EncounterDefinition] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     document: str | None = None
     asset_id: str | None = None
@@ -248,6 +279,14 @@ class SceneDefinition(StrictModel):
     @classmethod
     def validate_id_list(cls, values: list[str]) -> list[str]:
         return [_validate_entity_id(value) for value in values]
+
+    @field_validator("aliases")
+    @classmethod
+    def validate_aliases(cls, values: list[str]) -> list[str]:
+        aliases = [str(value).strip() for value in values]
+        if any(len(value) < 2 for value in aliases):
+            raise ValueError("场景别名至少需要两个字符")
+        return list(dict.fromkeys(aliases))
 
     @field_validator("asset_id")
     @classmethod
@@ -279,7 +318,10 @@ class NpcRevealEffectDefinition(StrictModel):
 class DiscoveryRuleDefinition(StrictModel):
     intent: Literal["examine", "search", "read", "take", "talk", "enter", "use"]
     targets: list[str] = Field(min_length=1)
+    approach_text: str = Field(default="", max_length=500)
     skill: str | None = Field(default=None, min_length=1, max_length=100)
+    check_type: Literal["skill", "luck"] | None = None
+    difficulty: Literal["regular", "hard", "extreme"] = "regular"
     requires_success: bool = False
     sanity_severity: Literal["minor", "moderate", "major"] | None = None
     npc_reveals: list[NpcRevealEffectDefinition] = Field(default_factory=list)
@@ -294,8 +336,12 @@ class DiscoveryRuleDefinition(StrictModel):
 
     @model_validator(mode="after")
     def validate_required_skill(self) -> "DiscoveryRuleDefinition":
-        if self.requires_success and not self.skill:
+        if self.check_type == "luck" and self.skill:
+            raise ValueError("幸运发现规则不能同时指定 skill")
+        if self.requires_success and self.check_type != "luck" and not self.skill:
             raise ValueError("requires_success=true 时必须指定 skill")
+        if self.check_type == "luck" and not self.requires_success:
+            raise ValueError("check_type=luck 时 requires_success 必须为 true")
         return self
 
 
@@ -454,6 +500,28 @@ class ModuleDefinition(StrictModel):
                 raise ValueError(f"场景 {scene_id} 引用了不存在的出口: {missing_exits}")
             if missing_npcs:
                 raise ValueError(f"场景 {scene_id} 引用了不存在的 NPC: {missing_npcs}")
+            missing_encounter_npcs = sorted({
+                encounter.npc_id
+                for encounter in scene.encounters
+                if encounter.npc_id not in npc_ids
+            })
+            if missing_encounter_npcs:
+                raise ValueError(
+                    f"场景 {scene_id} 的遭遇引用了不存在的 NPC: "
+                    f"{missing_encounter_npcs}"
+                )
+            encounter_ids = [encounter.id for encounter in scene.encounters]
+            if len(encounter_ids) != len(set(encounter_ids)):
+                raise ValueError(f"场景 {scene_id} 的遭遇 ID 重复")
+            for encounter in scene.encounters:
+                missing_flags = sorted(
+                    (set(encounter.required_flags) | set(encounter.forbidden_flags))
+                    - set(self.initial_state.flags)
+                )
+                if missing_flags:
+                    raise ValueError(
+                        f"场景 {scene_id} 的遭遇引用了不存在的 flag: {missing_flags}"
+                    )
             if scene.asset_id and scene.asset_id not in self.assets.scenes:
                 raise ValueError(f"场景 {scene_id} 的素材不存在: {scene.asset_id}")
 

@@ -107,3 +107,13 @@ def preferred_check_skill(matches: list[DiscoveryMatch], world: dict) -> str | N
     skill = skills.pop()
     pc_skills = (world.get("pc") or {}).get("skills", {})
     return skill if isinstance(pc_skills, dict) and skill in pc_skills else None
+
+
+def preferred_luck_difficulty(matches: list[DiscoveryMatch]) -> str | None:
+    """Return one declared luck difficulty, or None for non-luck discoveries."""
+    difficulties = {
+        str(match.rule.get("difficulty") or "regular")
+        for match in matches
+        if match.rule.get("check_type") == "luck"
+    }
+    return difficulties.pop() if len(difficulties) == 1 else None

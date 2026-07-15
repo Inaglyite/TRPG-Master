@@ -77,6 +77,10 @@ class RuntimeContext:
         return self.world_dir / "saves"
 
     @property
+    def turns_dir(self) -> Path:
+        return self.world_dir / "turns"
+
+    @property
     def theme_file(self) -> Path:
         return self.module_dir / "theme.json"
 

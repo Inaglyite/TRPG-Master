@@ -16,6 +16,11 @@
 - 模组切换、调查员选择、长期角色履历和按世界实例隔离的多槽位存档。
 - `.trpgmod` 模组包预检、一键导入、版本并存、JSON Schema 与安全安装。
 - Character Card V3 Lorebook：按场景、人物、已知线索和 flags 本地检索叙事素材，带预算、分组与跨存档冷却。
+- 持久回合日志：把最终叙事、结构化选项、可重放事件、消息和世界快照绑定到同一个 `turn_id`，断线后可确认并恢复完整回合。
+- 回合级上下文诊断：查看模型首 token/总耗时、prompt 分区估算、工具名和 Lorebook 逐条筛选原因，不暴露私有提示正文。
+- 无副作用重新叙述：只替换最后一轮文字表达，不重跑工具、骰子、判定、线索或资源变化。
+- 时间线分支：可从任一已提交回合复制独立 `world_id`，并在存档页切换主时间线与分支。
+- 私人调查笔记与快捷行动：笔记按世界原子保存且不注入模型；快捷行动仍走普通可见玩家行动协议。
 - `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
 - 模组声明式发现规则，在叙事前可靠结算线索、SAN、人物揭示、图片与旗标效果。
@@ -181,6 +186,10 @@ trpg-master/
 │   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
 │   ├── module_format.py      # v1 模组领域模型、引用校验与 Schema
 │   ├── lorebook.py           # Lorebook v3 模型、门槛、检索与冷却记忆
+│   ├── turn_journal.py        # 持久回合提交、恢复、诊断与叙事变体
+│   ├── world_branches.py      # 世界快照分支、时间线发现与切换上下文
+│   ├── player_notes.py        # 不进入 prompt 的玩家笔记与 revision
+│   ├── event_stream.py        # 有序 turn_id/seq WebSocket 事件流
 │   ├── module_compiler.py    # 无副作用编译、编译产物与字段来源追踪
 │   ├── module_diagnostics.py # 结构化错误、警告与作者建议
 │   ├── module_registry.py    # 内置/用户模组发现及安全包安装
@@ -197,7 +206,7 @@ trpg-master/
 ├── examples/module-template/ # v1 模组工程模板
 ├── characters/               # 默认与自定义调查员
 ├── profiles/                 # 长期角色履历（运行时生成）
-├── worlds/<world_id>/        # 当前世界、备份、元数据和存档（运行时生成）
+├── worlds/<world_id>/        # 当前世界、回合日志、笔记、时间线元数据和存档（运行时生成）
 ├── frontend/
 │   ├── electron/main.cjs     # Electron 主进程与打包后端托管
 │   ├── src/                  # TypeScript UI

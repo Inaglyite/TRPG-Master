@@ -10,7 +10,9 @@ import base64
 import copy
 import mimetypes
 import runpy
+import secrets
 import tempfile
+import threading
 from urllib.parse import quote
 from pathlib import Path
 
@@ -84,6 +86,7 @@ if _ENV_FILE.exists():
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
 from src.engine import GameEngine, EngineCallbacks
+from src.event_stream import OrderedTurnEventStream
 from src.config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
@@ -95,7 +98,8 @@ from src.config import (
     RUNTIME_ROOT,
 )
 from src.model_settings import ModelSettings, persist_model_settings
-from src.persistence import delete_save
+from src.player_notes import PlayerNotesConflict, PlayerNotesStore
+from src.persistence import delete_save, load_game
 from src.characters import list_character_options
 from src.module_compiler import compile_payload
 from src.module_format import manifest_json_schema, module_json_schema
@@ -108,7 +112,9 @@ from src.module_registry import (
     inspect_package,
 )
 from src.runtime import RuntimeContext
+from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
+from src.ws_session import PendingReply, SessionTurnGate, TurnLease, TurnRejection
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,10 +130,19 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Module-Filename"],
 )
 MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
+WORLD_BRANCHES = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 _active_model_settings = ModelSettings.validated(
     NARRATIVE_MODEL, JUDGEMENT_MODEL
 )
+_world_turn_locks: dict[str, threading.Lock] = {}
+_world_turn_locks_guard = threading.Lock()
+
+
+def _world_turn_lock(context: RuntimeContext) -> threading.Lock:
+    key = f"{context.runtime_root.resolve()}::{context.world_id}"
+    with _world_turn_locks_guard:
+        return _world_turn_locks.setdefault(key, threading.Lock())
 
 
 def _set_active_context(context: RuntimeContext) -> None:
@@ -276,50 +291,153 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
     线程模型：GameEngine.handle_action 是同步阻塞的，通过 run_in_executor
     跑在线程池线程里。引擎从该线程同步调用下面这些回调，因此回调必须是
-    普通同步函数；它们用 run_coroutine_threadsafe 把 ws.send_json 安全地
-    调度到主事件循环（FastAPI/uvicorn 所在的 loop）。
+    普通同步函数；所有输出进入同一个 FIFO sender，避免跨线程 send_json
+    任务与主循环响应互相抢序。
     """
     global _active_model_settings
 
-    import threading
-
     loop = asyncio.get_running_loop()
-    # suggest_check 的跨线程握手：工作线程发事件并阻塞，主循环收到回复后置位
-    suggest_box: dict = {"event": threading.Event(), "result": False}
-    suggest_lock = threading.Lock()
-    suggest_active = [False]  # 当前是否有待回复的 suggest
-    # 通用多选决定握手。战斗状态机用它确认闪避、反击、寻找掩体等选择。
-    decision_box: dict = {"event": threading.Event(), "result": None, "id": None}
-    decision_lock = threading.Lock()
-    decision_active = [False]
-    # 回合锁：保证同一时间只有一个 handle_action 在跑，避免并发修改 messages
-    turn_lock = threading.Lock()
+    outbound = OrderedTurnEventStream(ws, loop)
+    suggest_reply = PendingReply(False)
+    decision_reply: PendingReply[str | None] = PendingReply(None)
+    turn_gate = SessionTurnGate(_world_turn_lock(engine.context))
+    active_lease: list[TurnLease | None] = [None]
 
-    def run_turn(coro_fn, *args):
-        """在 executor 里跑一个回合，用 turn_lock 串行化。fire-and-forget。"""
+    async def reserve_turn() -> bool:
+        """Reserve the session before a lifecycle id can be created."""
+        lease, rejection = turn_gate.try_acquire()
+        if rejection is TurnRejection.SESSION_BUSY:
+            finishing = not outbound.has_active_turn
+            await outbound.send({
+                "type": "turn_rejected",
+                "reason": "turn_finalizing" if finishing else "turn_in_progress",
+                "message": (
+                    "上一回合正在收尾，请稍后重试刚才的行动。"
+                    if finishing
+                    else "上一回合尚未结束，请等待守秘人完成叙述。"
+                ),
+            })
+            return False
+        if rejection is TurnRejection.WORLD_BUSY:
+            await outbound.send({
+                "type": "turn_rejected",
+                "reason": "world_turn_in_progress",
+                "message": "这个世界的上一回合仍在后台收尾，请稍后再恢复或行动。",
+            })
+            return False
+        active_lease[0] = lease
+        return True
+
+    def turn_state_busy() -> bool:
+        return turn_gate.busy
+
+    def release_turn() -> None:
+        lease = active_lease[0]
+        if lease is not None:
+            active_lease[0] = None
+            lease.release()
+
+    def run_reserved_turn(coro_fn, *args):
+        """Run a previously reserved turn in the executor."""
         def _wrapped():
-            with turn_lock:
-                try:
-                    coro_fn(*args)
-                except Exception as e:
-                    import traceback
-                    print(f"[ws] 回合异常: {e}", file=sys.stderr)
-                    traceback.print_exc(file=sys.stderr)
-                    emit({
-                        "type": "error",
-                        "message": "本轮处理失败，请重新发送刚才的行动。",
-                    })
-                    emit({"type": "done"})
+            try:
+                coro_fn(*args)
+            except Exception as e:
+                engine.finish_turn_record(
+                    status="failed",
+                    error=f"{type(e).__name__}: {e}",
+                )
+                import traceback
+                print(f"[ws] 回合异常: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                emit({
+                    "type": "error",
+                    "message": "本轮处理失败，请重新发送刚才的行动。",
+                })
+                if outbound.has_active_turn:
+                    outbound.end_turn()
+            finally:
+                if engine.active_turn_id is not None:
+                    engine.finish_turn_record(
+                        status="failed",
+                        error="回合执行结束但没有产生完整提交记录",
+                    )
+                release_turn()
         loop.run_in_executor(None, _wrapped)
 
-    def emit(payload: dict):
-        """线程安全地把一条消息发到主循环。"""
+    async def launch_reserved_turn(
+        coro_fn,
+        *args,
+        turn_kind: str,
+        player_input: str | None = None,
+    ) -> None:
+        """Create the lifecycle only after the session reservation succeeded."""
         try:
-            asyncio.run_coroutine_threadsafe(
-                ws.send_json(payload), loop
+            turn_id = engine.begin_turn_record(
+                kind=turn_kind,
+                player_input=player_input,
             )
-        except Exception as e:
-            print(f"[ws] emit 失败: {e}", file=sys.stderr)
+            await outbound.begin_turn(turn_id)
+        except Exception:
+            engine.finish_turn_record(
+                status="failed",
+                error="回合生命周期启动失败",
+            )
+            release_turn()
+            raise
+        run_reserved_turn(coro_fn, *args)
+
+    async def launch_rewrite(turn_id: str) -> None:
+        operation_id = f"rewrite:{secrets.token_hex(8)}"
+        try:
+            await outbound.begin_turn(
+                operation_id,
+                turn_kind="rewrite",
+                metadata={"source_turn_id": turn_id},
+            )
+        except Exception:
+            release_turn()
+            raise
+
+        def _rewrite_worker():
+            try:
+                result = engine.rewrite_turn(turn_id)
+                result["source_turn_id"] = result.pop("turn_id")
+                outbound.end_turn({"type": "turn_rewritten", **result})
+            except Exception as exc:
+                log_message = f"{type(exc).__name__}: {exc}"
+                print(f"[ws] 重新叙述失败: {log_message}", file=sys.stderr)
+                outbound.end_turn({
+                    "type": "turn_rewrite_failed",
+                    "source_turn_id": turn_id,
+                    "message": str(exc) or "重新叙述失败",
+                })
+            finally:
+                release_turn()
+
+        loop.run_in_executor(None, _rewrite_worker)
+
+    def emit(payload: dict):
+        """线程安全地把一条消息加入有序发送流。"""
+        engine.record_turn_event(payload)
+        outbound.emit(payload)
+
+    def world_context_payload() -> dict:
+        return {
+            "type": "world_context",
+            "world_id": engine.context.world_id,
+            "module_name": engine.context.module_name,
+        }
+
+    def world_list_payload() -> dict:
+        return {
+            "type": "world_list",
+            "active_world_id": engine.context.world_id,
+            "worlds": WORLD_BRANCHES.list_worlds(
+                engine.context.module_name,
+                active_world_id=engine.context.world_id,
+            ),
+        }
 
     async def send_character_state():
         """在进入叙述前同步角色栏，不提前发送线索。"""
@@ -327,10 +445,28 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             pc_data = engine.context.world_store.load().get("pc", {})
         except Exception:
             pc_data = {}
-        await ws.send_json({
+        await outbound.send({
             "type": "character_state",
             "data": json.dumps(pc_data, ensure_ascii=False),
         })
+
+    def turn_recovery_payload(requested_turn_id: str | None = None) -> dict:
+        payload = engine.turn_recovery_status(requested_turn_id)
+        for key in ("requested", "active", "latest_completed"):
+            record = payload.get(key)
+            if not isinstance(record, dict):
+                continue
+            events = record.get("events")
+            if not isinstance(events, list):
+                continue
+            for event in events:
+                if (
+                    isinstance(event, dict)
+                    and event.get("type") == "handout"
+                    and event.get("file")
+                ):
+                    event.update(_asset_payload(event["file"], engine.context))
+        return {"type": "turn_recovery", **payload}
 
     # ---- 同步回调（被引擎在工作线程里同步调用）----
     def on_narrative(text: str):
@@ -351,32 +487,13 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         用 threading.Event 做跨线程握手，避免 asyncio.Future 跨线程的复杂性：
         工作线程在这里阻塞等 event，主循环的 suggest_reply 处理器置位 event。
         """
-        ev = threading.Event()
-        with suggest_lock:
-            suggest_box["event"] = ev
-            suggest_box["result"] = False
-            suggest_active[0] = True
         emit({"type": "suggest_check", **info})
-        # 阻塞工作线程，直到 suggest_reply 处理器 ev.set()
-        ev.wait(timeout=120)
-        with suggest_lock:
-            suggest_active[0] = False
-            return suggest_box["result"]
+        return suggest_reply.wait(timeout=120)
 
     def on_decision(info: dict) -> str | None:
-        ev = threading.Event()
         decision_id = info.get("id")
-        with decision_lock:
-            decision_box["event"] = ev
-            decision_box["result"] = None
-            decision_box["id"] = decision_id
-            decision_active[0] = True
         emit({"type": "decision_request", **info})
-        ev.wait(timeout=120)
-        with decision_lock:
-            decision_active[0] = False
-            result = decision_box["result"]
-            decision_box["id"] = None
+        result = decision_reply.wait(request_id=decision_id, timeout=120)
         selected = result or info.get("default_option")
         emit({
             "type": "decision_resolved",
@@ -386,8 +503,14 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         })
         return selected
 
+    def on_phase(phase: str, label: str):
+        emit({"type": "turn_phase", "phase": phase, "label": label})
+
+    def on_choices(choices: list[dict]):
+        emit({"type": "choices", "choices": choices})
+
     def on_done():
-        emit({"type": "done"})
+        outbound.end_turn()
 
     def on_game_over(ending_type: str, title: str, summary: str):
         emit({"type": "game_over", "ending_type": ending_type, "title": title, "summary": summary})
@@ -403,27 +526,29 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     def on_error(msg: str):
         emit({"type": "error", "message": msg})
 
-    # 通知前端模组列表 + 角色列表 + 存档列表 + 当前主题
-    await ws.send_json({
+    # 保持首连的五条初始化消息稳定；世界身份随 module_list 一并下发。
+    await outbound.send({
         "type": "module_list",
         "modules": _list_mods(),
         "active": engine.context.module_name,
+        "world_id": engine.context.world_id,
+        "module_name": engine.context.module_name,
     })
-    await ws.send_json({
+    await outbound.send({
         "type": "character_list",
         **list_character_options(engine.context.module_name, context=engine.context),
     })
 
     # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
     # 故主题也走 WS 下发）
-    await ws.send_json({"type": "theme", "theme": _load_theme(engine.context)})
-    await ws.send_json(_model_settings_payload(ModelSettings.validated(
+    await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
+    await outbound.send(_model_settings_payload(ModelSettings.validated(
         engine.narrative_model,
         engine.judgement_model,
     )))
 
     saves = engine.list_saves()
-    await ws.send_json({"type": "save_list", "saves": saves})
+    await outbound.send({"type": "save_list", "saves": saves})
 
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
@@ -432,6 +557,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         on_glm_summary=on_glm_summary,
         on_suggest=on_suggest,
         on_decision=on_decision,
+        on_phase=on_phase,
+        on_choices=on_choices,
         on_done=on_done,
         on_game_over=on_game_over,
         on_handout=on_handout,
@@ -450,17 +577,158 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             msg_type = data.get("type", "")
 
             if msg_type == "ping":
-                await ws.send_json({"type": "pong"})
+                await outbound.send({"type": "pong"})
+
+            elif msg_type == "turn_recovery_get":
+                await outbound.send(turn_recovery_payload(data.get("turn_id")))
+
+            elif msg_type == "turn_diagnostics_get":
+                await outbound.send({
+                    "type": "turn_diagnostics",
+                    "diagnostics": engine.turn_diagnostics(data.get("turn_id")),
+                })
+
+            elif msg_type == "world_list":
+                await outbound.send(world_list_payload())
+
+            elif msg_type == "player_notes_get":
+                notes = PlayerNotesStore(engine.context.world_dir).load()
+                await outbound.send({"type": "player_notes", **notes})
+
+            elif msg_type == "player_notes_update":
+                try:
+                    notes = PlayerNotesStore(engine.context.world_dir).save(
+                        data.get("text", ""),
+                        expected_revision=(
+                            int(data["revision"])
+                            if data.get("revision") is not None
+                            else None
+                        ),
+                    )
+                    await outbound.send({"type": "player_notes", "saved": True, **notes})
+                except PlayerNotesConflict as exc:
+                    current = PlayerNotesStore(engine.context.world_dir).load()
+                    await outbound.send({
+                        "type": "player_notes_conflict",
+                        "message": str(exc),
+                        **current,
+                    })
+                except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                    await outbound.send({
+                        "type": "player_notes_error",
+                        "message": str(exc) or "玩家笔记保存失败",
+                    })
+
+            elif msg_type == "turn_branch_create":
+                if not await reserve_turn():
+                    continue
+                turn_id = str(data.get("turn_id") or "")
+                if not turn_id:
+                    release_turn()
+                    await outbound.send({
+                        "type": "turn_branch_failed",
+                        "message": "缺少分支回合 ID",
+                    })
+                    continue
+                try:
+                    branch = await asyncio.to_thread(
+                        WORLD_BRANCHES.create,
+                        engine.context,
+                        engine.turn_journal,
+                        turn_id,
+                        label=data.get("label", ""),
+                    )
+                    engine.switch_context(branch.context)
+                    engine.adopt_message_history(branch.messages)
+                    turn_gate.rebind_world(_world_turn_lock(branch.context))
+                    _set_active_context(branch.context)
+                    history = engine.turn_journal.public_history()
+                except Exception as exc:
+                    release_turn()
+                    await outbound.send({
+                        "type": "turn_branch_failed",
+                        "source_turn_id": turn_id,
+                        "message": str(exc) or "创建时间线分支失败",
+                    })
+                    continue
+                release_turn()
+                await outbound.send({
+                    "type": "turn_branched",
+                    "source_turn_id": turn_id,
+                    "world_id": branch.context.world_id,
+                    "module_name": branch.context.module_name,
+                    "label": branch.label,
+                    "history": history,
+                })
+                await outbound.send(world_context_payload())
+                await outbound.send(world_list_payload())
+                await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+                await send_character_state()
+
+            elif msg_type == "world_switch":
+                if not turn_gate.try_acquire_session():
+                    await outbound.send({
+                        "type": "world_switch_failed",
+                        "message": "当前回合尚未结束，暂时不能切换时间线。",
+                    })
+                    continue
+                target_lock: threading.Lock | None = None
+                try:
+                    context = WORLD_BRANCHES.open(str(data.get("world_id") or ""))
+                    target_lock = _world_turn_lock(context)
+                    if not target_lock.acquire(blocking=False):
+                        raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
+                    messages, _snapshot = load_game("slot_000", context=context)
+                    engine.switch_context(context)
+                    if messages is not None:
+                        engine.adopt_message_history(messages)
+                    turn_gate.rebind_world(target_lock)
+                    _set_active_context(context)
+                    history = engine.turn_journal.public_history()
+                except Exception as exc:
+                    await outbound.send({
+                        "type": "world_switch_failed",
+                        "message": str(exc) or "切换时间线失败",
+                    })
+                    continue
+                finally:
+                    if target_lock is not None and target_lock.locked():
+                        target_lock.release()
+                    turn_gate.release_session()
+                await outbound.send({
+                    "type": "world_switched",
+                    "world_id": engine.context.world_id,
+                    "module_name": engine.context.module_name,
+                    "history": history,
+                })
+                await outbound.send(world_context_payload())
+                await outbound.send(world_list_payload())
+                await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
+                await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+                await send_character_state()
+
+            elif msg_type == "turn_rewrite":
+                if not await reserve_turn():
+                    continue
+                turn_id = str(data.get("turn_id") or "")
+                if not turn_id:
+                    release_turn()
+                    await outbound.send({
+                        "type": "turn_rewrite_failed",
+                        "message": "缺少需要重新叙述的回合 ID",
+                    })
+                    continue
+                await launch_rewrite(turn_id)
 
             elif msg_type == "model_settings_get":
-                await ws.send_json(_model_settings_payload(ModelSettings.validated(
+                await outbound.send(_model_settings_payload(ModelSettings.validated(
                     engine.narrative_model,
                     engine.judgement_model,
                 )))
 
             elif msg_type == "model_settings_update":
-                if not turn_lock.acquire(blocking=False):
-                    await ws.send_json({
+                if not turn_gate.try_acquire_session():
+                    await outbound.send({
                         "type": "model_settings_error",
                         "message": "当前回合尚未结束，请在本轮叙述完成后重试。",
                     })
@@ -476,20 +744,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                         settings.judgement_model,
                     )
                     _active_model_settings = settings
-                    await ws.send_json({
+                    await outbound.send({
                         **_model_settings_payload(settings),
                         "saved": True,
                     })
                 except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
-                    await ws.send_json({
+                    await outbound.send({
                         "type": "model_settings_error",
                         "message": f"模型设置保存失败：{exc}",
                     })
                 finally:
-                    turn_lock.release()
+                    turn_gate.release_session()
 
             elif msg_type == "module_list":
-                await ws.send_json({
+                await outbound.send({
                     "type": "module_list",
                     "modules": _list_mods(),
                     "active": engine.context.module_name,
@@ -501,10 +769,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 try:
                     MODULE_REGISTRY.resolve(name)
                 except FileNotFoundError:
-                    await ws.send_json({"type": "error", "message": f"模组'{name}'不存在"})
+                    await outbound.send({"type": "error", "message": f"模组'{name}'不存在"})
                     continue
-                if not turn_lock.acquire(blocking=False):
-                    await ws.send_json({
+                if not turn_gate.try_acquire_session():
+                    await outbound.send({
                         "type": "error",
                         "message": "当前回合尚未结束，暂时不能切换模组。",
                     })
@@ -516,43 +784,66 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                             runtime_root=RUNTIME_ROOT,
                         )
                         engine.switch_context(context)
+                        turn_gate.rebind_world(_world_turn_lock(context))
                         _set_active_context(context)
                         # 下发新主题 + 新存档列表
-                        await ws.send_json({"type": "theme", "theme": _load_theme(context)})
-                        await ws.send_json({
+                        await outbound.send(world_context_payload())
+                        await outbound.send(world_list_payload())
+                        await outbound.send({"type": "theme", "theme": _load_theme(context)})
+                        await outbound.send({
                             "type": "module_list",
                             "modules": _list_mods(),
                             "active": name,
                         })
-                        await ws.send_json({
+                        await outbound.send({
                             "type": "character_list",
                             **list_character_options(name, context=context),
                         })
-                        await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
+                        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
                     finally:
-                        turn_lock.release()
+                        turn_gate.release_session()
 
             elif msg_type == "start":
                 # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
+                if not await reserve_turn():
+                    continue
                 try:
                     engine.reset(data.get("character_ref"))
                 except ValueError as exc:
-                    await ws.send_json({"type": "error", "message": str(exc)})
+                    release_turn()
+                    await outbound.send({"type": "error", "message": str(exc)})
                     continue
-                await send_character_state()
-                await ws.send_json({"type": "gm_turn_start"})
-                run_turn(engine.handle_action, None)
+                except Exception:
+                    release_turn()
+                    raise
+                try:
+                    await send_character_state()
+                except Exception:
+                    release_turn()
+                    raise
+                await launch_reserved_turn(
+                    engine.handle_action,
+                    None,
+                    turn_kind="opening",
+                )
 
             elif msg_type == "continue":
                 # 继续游戏：读档 + 恢复快照 + 续写 prompt
+                if not await reserve_turn():
+                    continue
                 slot = data.get("slot_id")  # 可选：指定槽位
                 try:
                     count = engine.load(slot)
                 except StaleRevisionError as exc:
-                    await ws.send_json({"type": "error", "message": str(exc)})
+                    release_turn()
+                    await outbound.send({"type": "error", "message": str(exc)})
                     continue
+                except Exception:
+                    release_turn()
+                    raise
                 if count is None:
-                    await ws.send_json({"type": "error", "message": "未找到存档，请开始新游戏。"})
+                    release_turn()
+                    await outbound.send({"type": "error", "message": "未找到存档，请开始新游戏。"})
                 else:
                     engine.append_control_instruction(
                         "继续游戏。之前的存档和世界状态已经恢复。"
@@ -560,39 +851,57 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                         "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
                         "不要从头开场，不要重新介绍世界观。"
                     )
-                    await send_character_state()
-                    await ws.send_json({"type": "gm_turn_start"})
-                    run_turn(engine.handle_action, None)
+                    try:
+                        await send_character_state()
+                    except Exception:
+                        release_turn()
+                        raise
+                    await launch_reserved_turn(
+                        engine.handle_action,
+                        None,
+                        turn_kind="resume",
+                    )
 
             elif msg_type == "action":
                 # 同上：不 await，避免 on_suggest 阻塞时主循环死锁
-                await ws.send_json({"type": "gm_turn_start"})
-                run_turn(engine.handle_action, data.get("content", ""))
+                if not await reserve_turn():
+                    continue
+                await launch_reserved_turn(
+                    engine.handle_action,
+                    data.get("content", ""),
+                    turn_kind="action",
+                    player_input=data.get("content", ""),
+                )
 
             elif msg_type == "suggest_reply":
-                with suggest_lock:
-                    if suggest_active[0]:
-                        suggest_box["result"] = data.get("confirmed", False)
-                        suggest_box["event"].set()
+                suggest_reply.resolve(bool(data.get("confirmed", False)))
 
             elif msg_type == "decision_reply":
-                with decision_lock:
-                    if decision_active[0] and data.get("decision_id") == decision_box["id"]:
-                        decision_box["result"] = data.get("option_id")
-                        decision_box["event"].set()
+                decision_reply.resolve(
+                    data.get("option_id"),
+                    request_id=data.get("decision_id"),
+                )
 
             elif msg_type == "save":
                 is_manual = data.get("manual", False)
                 slot_id = None if is_manual else AUTO_SAVE_SLOT
+                if turn_state_busy():
+                    await outbound.send({
+                        "type": "saved",
+                        "ok": False,
+                        "slot_id": slot_id or "",
+                        "reason": "turn_in_progress",
+                    })
+                    continue
                 sid = engine.save(slot_id)
-                await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
+                await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
 
             elif msg_type == "save_list":
                 saves = engine.list_saves()
-                await ws.send_json({"type": "save_list", "saves": saves})
+                await outbound.send({"type": "save_list", "saves": saves})
 
             elif msg_type == "character_list":
-                await ws.send_json({
+                await outbound.send({
                     "type": "character_list",
                     **list_character_options(
                         engine.context.module_name, context=engine.context
@@ -600,35 +909,62 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 })
 
             elif msg_type == "save_load":
+                if not await reserve_turn():
+                    continue
                 slot_id = data.get("slot_id", "")
                 try:
                     cnt = engine.load(slot_id)
                 except StaleRevisionError as exc:
-                    await ws.send_json({"type": "error", "message": str(exc)})
+                    release_turn()
+                    await outbound.send({"type": "error", "message": str(exc)})
                     continue
+                except Exception:
+                    release_turn()
+                    raise
                 if cnt is not None:
-                    engine.append_control_instruction(
-                        "继续游戏。之前的存档和世界状态已经恢复。"
-                        "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-                        "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-                        "不要从头开场，不要重新介绍世界观。"
+                    try:
+                        engine.append_control_instruction(
+                            "继续游戏。之前的存档和世界状态已经恢复。"
+                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+                            "不要从头开场，不要重新介绍世界观。"
+                        )
+                        await outbound.send({
+                            "type": "loaded",
+                            "ok": True,
+                            "slot_id": slot_id,
+                            "count": cnt,
+                        })
+                        await send_character_state()
+                    except Exception:
+                        release_turn()
+                        raise
+                    await launch_reserved_turn(
+                        engine.handle_action,
+                        None,
+                        turn_kind="resume",
                     )
-                    await ws.send_json({"type": "loaded", "ok": True, "slot_id": slot_id, "count": cnt})
-                    await send_character_state()
-                    await ws.send_json({"type": "gm_turn_start"})
-                    run_turn(engine.handle_action, None)
                 else:
-                    await ws.send_json({"type": "error", "message": "未找到存档。"})
+                    release_turn()
+                    await outbound.send({"type": "error", "message": "未找到存档。"})
 
             elif msg_type == "save_delete":
                 slot_id = data.get("slot_id", "")
                 if slot_id == AUTO_SAVE_SLOT:
-                    await ws.send_json({"type": "error", "message": "自动存档不可手动删除。"})
+                    await outbound.send({"type": "error", "message": "自动存档不可手动删除。"})
                 else:
                     delete_save(slot_id, context=engine.context)
-                    await ws.send_json({"type": "save_deleted", "slot_id": slot_id})
+                    await outbound.send({"type": "save_deleted", "slot_id": slot_id})
 
             elif msg_type == "save_create":
+                if turn_state_busy():
+                    await outbound.send({
+                        "type": "saved",
+                        "ok": False,
+                        "slot_id": "",
+                        "reason": "turn_in_progress",
+                    })
+                    continue
                 existing = engine.list_saves()
                 used = set()
                 for s in existing:
@@ -642,42 +978,54 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     n += 1
                 slot_id = f"slot_{n:03d}"
                 sid = engine.save(slot_id)
-                await ws.send_json({"type": "saved", "ok": True, "slot_id": sid})
+                await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
 
             elif msg_type == "save_rename":
                 slot_id = data.get("slot_id", "")
                 label = data.get("label", "")
                 from src.persistence import rename_save
                 ok = rename_save(slot_id, label, context=engine.context)
-                await ws.send_json({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
+                await outbound.send({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
 
             elif msg_type == "settle_case":
+                if turn_state_busy():
+                    await outbound.send({
+                        "type": "error",
+                        "message": "当前回合尚未结束，暂时不能结算案件。",
+                    })
+                    continue
                 result = engine.settle_case(
                     data.get("ending_type", "neutral"),
                     data.get("title", "故事结束"),
                     data.get("summary", ""),
                 )
-                await ws.send_json({"type": "case_settled", **result})
-                await ws.send_json({
+                await outbound.send({"type": "case_settled", **result})
+                await outbound.send({
                     "type": "character_list",
                     **list_character_options(
                         engine.context.module_name, context=engine.context
                     ),
                 })
-                await ws.send_json({"type": "state"})
+                await outbound.send({"type": "state"})
 
             elif msg_type == "quit":
                 engine.save("slot_000")  # 退出时存档
-                await ws.send_json({"type": "quit_ok"})
+                await outbound.send({"type": "quit_ok"})
                 break  # 退出消息循环
 
             elif msg_type == "load":
+                if turn_state_busy():
+                    await outbound.send({
+                        "type": "error",
+                        "message": "当前回合尚未结束，暂时不能读档。",
+                    })
+                    continue
                 try:
                     count = engine.load()
                 except StaleRevisionError as exc:
-                    await ws.send_json({"type": "error", "message": str(exc)})
+                    await outbound.send({"type": "error", "message": str(exc)})
                     continue
-                await ws.send_json({"type": "loaded", "ok": count is not None, "count": count or 0})
+                await outbound.send({"type": "loaded", "ok": count is not None, "count": count or 0})
 
             elif msg_type == "state":
                 try:
@@ -688,7 +1036,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     )
                 except Exception:
                     pc_data, clues_data = {}, {}
-                await ws.send_json({
+                await outbound.send({
                     "type": "state_data",
                     "data": json.dumps(pc_data, ensure_ascii=False),
                     "clues": json.dumps(clues_data, ensure_ascii=False)
@@ -699,6 +1047,16 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     except RuntimeError:
         # 连接已断开（客户端关闭窗口等），收尾即可
         pass
+    finally:
+        # Reloading/closing the client must stop the old streaming request;
+        # otherwise it keeps the world lock while the new-game screen waits.
+        engine.cancel_active_turn()
+        # A disconnected browser can no longer answer modal handshakes. Wake
+        # the worker immediately so it can take the safe default and release
+        # the world-level turn lock instead of waiting the full timeout.
+        suggest_reply.cancel()
+        decision_reply.cancel()
+        await outbound.close()
 
 
 @app.get("/api/theme")

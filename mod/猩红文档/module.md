@@ -270,11 +270,17 @@ name: 密斯卡托尼克大学
 description: 新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。校园中充斥着学术氛围，但近来因查尔斯·莱特教授的离奇死亡而笼罩在不安的谣言之中。法伦主任的办公室位于行政楼二层，铺着深色地毯，书架上整齐排列着皮革装订的典籍。
 exits:
   - wright_office
+  - wright_cottage
   - miskatonic_medical
+  - miskatonic_history
+  - miskatonic_lodge_office
+  - miskatonic_student_commons
+  - sheb_tavern
+  - trivial_pursuits
+  - hobhouse_mansion
+  - arkham_sanatorium
 npcs_present:
   - bryce_fallon
-  - emilia_court
-  - harland_lodge
 ```
 
 ## wright_office
@@ -283,6 +289,7 @@ name: 莱特的办公室
 description: 一间狭小的教职办公室，只有一张书桌、几个文件柜和一个壁炉。墙上挂着一面裂开的镜子——仔细观察会发现它有一部分熔化了。这就是莱特死亡当晚凝视的那面镜子，他看到了恐怖的怪物，怪物燃尽了他的灵魂。隔壁有一间小房间，是艾米莉亚·考特作为助手工作的地方。壁炉里有很多匆忙焚烧的文件残骸。
 exits:
   - miskatonic_university
+  - miskatonic_history
 npcs_present: []
 ```
 
@@ -291,7 +298,8 @@ npcs_present: []
 name: 莱特的小屋
 description: 校园附近一座面积不大、家具齐全的两层小屋。正门位于南侧面向街道，无后门。一楼为公共功能区（会客/起居/阅读/餐厅/厨房/储藏），二楼为私人空间（卧室/客房/卫生间/楼梯厅）。屋内处于整理到一半的混乱状态——莱特当时正在收拾行李准备离开。休息室壁炉里有匆忙焚烧的文件残骸，桌上堆满各种文件。详细构造见 scenes/莱特小屋构造.md。
 detail_file: scenes/莱特小屋构造.md
-exits: []
+exits:
+  - miskatonic_university
 npcs_present: []
 ```
 
@@ -301,15 +309,57 @@ name: 密斯卡托尼克大学医学院
 description: 医学院地下深处冰冷的停尸房。莱特的尸体锁在冷柜中，等待被安静体面地火化。仅仅待在尸体附近就会产生莫名的紧张感，仿佛被监视。聆听成功会听到隔壁空房间里的怪异声响。
 exits:
   - miskatonic_university
+  - miskatonic_history
 npcs_present:
   - john_whitcroft
+```
+
+## miskatonic_history
+```yaml
+name: 密斯卡托尼克大学历史系研究生自习室
+aliases: [历史系, 研究生自习室, 主楼西翼三层]
+description: 主楼西翼三层靠近楼梯的研究生自习室，旧书、论文和地板蜡的气味混在一起。艾米莉亚·考特通常在靠窗书桌前工作。
+exits:
+  - miskatonic_university
+  - wright_office
+  - miskatonic_medical
+  - miskatonic_lodge_office
+  - miskatonic_student_commons
+npcs_present:
+  - emilia_court
+```
+
+## miskatonic_lodge_office
+```yaml
+name: 哈兰德·洛奇的历史系办公室
+aliases: [洛奇办公室, 历史系教师办公室, 东翼二层]
+description: 历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。
+exits:
+  - miskatonic_university
+  - miskatonic_history
+npcs_present:
+  - harland_lodge
+```
+
+## miskatonic_student_commons
+```yaml
+name: 密斯卡托尼克大学学生公共休息区
+aliases: [学生公共休息区, 学生休息室, 主楼一层阅览室]
+description: 主楼一层连接阅览室的学生公共区域，本科生常在课间聚集。安东尼·弗林德斯经常独自在角落查阅宗教与历史资料。
+exits:
+  - miskatonic_university
+  - miskatonic_history
+npcs_present:
+  - anthony_flinders
 ```
 
 ## sheb_tavern
 ```yaml
 name: 希布酒馆
 description: 阿卡姆镇郊一个喧闹但相当高档的场所，以满足镇民的非法饮酒需求而存在。分为两部分：提供软饮料和咖啡的小餐馆（用来掩护），以及提供非法酒水的后屋。露西·斯通在这里做服务员。大西洋城黑帮偶尔在此出没。
-exits: []
+exits:
+  - miskatonic_university
+  - trivial_pursuits
 npcs_present:
   - lucy_stone
   - ox_and_shanassy
@@ -320,7 +370,9 @@ npcs_present:
 name: 轻率琐事古董店
 description: 阿卡姆商业区上等地段一条巷子里的小古董店，外表体面受人尊敬。南侧面向商业街，店面后部为储藏室和办公室，通过后门连接小巷。地下部分从储藏室楼梯向下通往大型储物地下室（旧锅炉/包装箱/废弃家具），再经由隐蔽活板门深入错综复杂的地下隧道网络。深处有食尸鬼窝点、人骨工具和通往地底的砖砌竖井。详细构造见 scenes/维克小店构造.md。
 detail_file: scenes/维克小店构造.md
-exits: []
+exits:
+  - miskatonic_university
+  - sheb_tavern
 npcs_present:
   - abner_wick
   - hector_kara_feldman
@@ -330,7 +382,8 @@ npcs_present:
 ```yaml
 name: 霍布豪斯宅邸
 description: 一栋殖民地晚期风格的三层建筑，摇摇欲坠，孤独地矗立在杂草丛生的空地上，距离阿卡姆市区约半小时车程。宅邸覆满灰尘，空无一人。附近的乡间林地极为阴郁荒芜。这里是约书亚·霍布豪斯生前隐居的地方，也是阿卡姆女巫审判文档最初的来源。
-exits: []
+exits:
+  - miskatonic_university
 npcs_present: []
 ```
 
@@ -338,7 +391,8 @@ npcs_present: []
 ```yaml
 name: 阿卡姆疗养院
 description: 一座阴郁的医疗设施，收治精神疾病患者。塞西尔·亨特被关押在这里的住院病房中，穿着紧身衣，受到密切观察。他有时能清醒思考，有时只能病态地呢喃。调查员可以通过特定关键词触发他对真相的碎片化描述。隔壁的软壁病房昨晚还有病人，但今早已经搬空。
-exits: []
+exits:
+  - miskatonic_university
 npcs_present:
   - cecil_hunter
 ```
@@ -353,9 +407,10 @@ npcs_present:
   text: 莱特生前正在评估霍布豪斯家族捐赠的阿卡姆女巫审判文档；他死后，这份文档下落不明。
 - category: task
   text: 法伦主任愿意借出莱特办公室和住处的钥匙；初步调查可以从办公室、莱特的小屋，或参与文档评估工作的人员开始。
-- category: npc
-  text: 哈兰德·洛奇和艾米莉亚·考特曾接触过莱特的文档评估工作，可作为后续询问对象。
 ```
+
+洛奇和艾米莉亚不是初始已知线索。调查员向法伦追问参与文档评估的其他人员后，才应记录
+二人曾接触相关工作的 NPC 线索。
 
 # 标志 Flags
 

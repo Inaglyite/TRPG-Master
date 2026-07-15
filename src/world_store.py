@@ -87,7 +87,7 @@ def atomic_write_json(path: Path, data: Any) -> None:
 
 
 @contextmanager
-def _file_lock(path: Path) -> Iterator[None]:
+def file_lock(path: Path) -> Iterator[None]:
     """跨进程独占锁；Unix/Windows 均只依赖标准库。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+b")
@@ -136,7 +136,7 @@ class WorldStore:
     @contextmanager
     def locked(self) -> Iterator[None]:
         with self._thread_lock:
-            with _file_lock(self.lock_path):
+            with file_lock(self.lock_path):
                 yield
 
     def _read_json(self, path: Path) -> dict:
@@ -273,3 +273,25 @@ class WorldStore:
             restored["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
             self._commit_unlocked(restored)
             return WorldSnapshot(copy.deepcopy(restored), restored["revision"])
+
+    def seed_from_snapshot(
+        self,
+        snapshot: WorldSnapshot | dict,
+        *,
+        expected_revision: int = 0,
+    ) -> WorldSnapshot:
+        """Initialize a freshly-created branch while preserving its fork revision."""
+        source = snapshot.state if isinstance(snapshot, WorldSnapshot) else snapshot
+        if not isinstance(source, dict):
+            raise TypeError("snapshot 必须是 WorldSnapshot 或 dict")
+
+        with self.locked():
+            current = self._load_unlocked()
+            actual = int(current.get("revision", 0))
+            if actual != expected_revision:
+                raise StaleRevisionError(expected_revision, actual)
+            seeded, _ = migrate_world_state(copy.deepcopy(source))
+            seeded["revision"] = max(0, int(source.get("revision", 0)))
+            seeded["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
+            self._commit_unlocked(seeded)
+            return WorldSnapshot(copy.deepcopy(seeded), seeded["revision"])

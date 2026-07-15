@@ -10,6 +10,7 @@
     "era": "1920s",
     "language": "zh-CN"
   },
+  "module_opening": "将以下内容演成完整可玩的开场，不要压缩为任务摘要。时间是1920年代中期的10月，镜头从秋雨中的密斯卡托尼克大学与调查员抵达行政楼开始，再进入布莱斯·法伦的办公室。房间里实际在场的委托人只有法伦；本幕不要主动说出哈兰德·洛奇或艾米莉亚·考特的姓名，参与文档评估的其他人员要等调查员追问后再由法伦介绍。法伦先维持老练、文雅而谨慎的行政人员姿态，再说明查尔斯·莱特教授死在紧锁的校内办公室，校方公开定性为严重突发心力衰竭，但他并不相信事情如此简单。随后说明莱特负责评估的阿卡姆女巫审判文档已经失踪，柯布家族正持续施压，校园流言会伤害大学声誉；他要求调查员尽快、低调地查明死亡真相并找回文档。让法伦把莱特办公室和住处的两把黄铜钥匙交给调查员，并用一句有分量但不泄露秘密的对白结束委托。正文建议800至1100个中文字、6至8个短段落，至少包含抵达感、室内感官细节、法伦的动作与多轮对白。最后必须另起一个以“**你可以——**”开头的正文块，依次列出前往莱特办公室、调查莱特小屋、继续追问法伦和自由行动这4个编号选项。未列出的非核心细节可以作为叙事点缀即兴发挥，但不得把它们记录成线索或持久状态；不得公开尸体异常、伪造文档、怪物、法伦私心或任何九月时间线秘密。",
   "current_scene": {
     "id": "miskatonic_university",
     "name": "密斯卡托尼克大学",
@@ -19,9 +20,7 @@
       "miskatonic_medical"
     ],
     "npcs_present": [
-      "bryce_fallon",
-      "emilia_court",
-      "harland_lodge"
+      "bryce_fallon"
     ]
   },
   "pc": {
@@ -108,7 +107,7 @@
       "secret": "考特出身于普罗维登斯的古老富人家族，但向所有人隐瞒了这一点。她希望凭借自身才干获得教授职位。她发现了莱特的造假行为但未声张。如果守秘人选择她作为真凶，她的真实动机可能更加黑暗——她可能发现了文档的超自然本质，故意迫使亨特面对怪物以占有文档，甚至可能是一名拥有法术的女巫或被祖先精神交换术夺取了身份。",
       "hp": 12,
       "disposition": "guarded",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_history",
       "skills": {
         "历史": 80,
         "图书馆使用": 50,
@@ -133,7 +132,7 @@
       "secret": "洛奇在莱特死后检查文档时发现了莱特造假的一手证据，但他私自藏起了这些证据，希望日后能设法从中牟利。他心胸狭窄、满怀恶意和野心，暗地里惧怕法伦主任。如果有利可图，他可能会尾随调查员偷走文档或敲诈勒索。他知道丢失文档的历史与金钱价值，但不了解实际有多危险。",
       "hp": 12,
       "disposition": "jealous",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_lodge_office",
       "skills": {
         "历史": 85,
         "图书馆使用": 40,
@@ -158,7 +157,7 @@
       "secret": "弗林德斯是一个自学成才的撒旦信徒，狂热信仰来自于对宗教和历史资料的曲解。他相信女巫审判文档中有着\"真正的魔法图示\"，能让他签订浮士德式的契约。他于9月11日闯入莱特的房子寻找文档但未找到。他断断续续跟踪观察过莱特，可能知道莱特的联系人。如果被选作真凶，他跟踪莱特来到亨特的公寓，发现亨特发疯后将文档据为己有，如今正被怪异的 events 困扰，几近崩溃。",
       "hp": 12,
       "disposition": "obsessive",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_student_commons",
       "skills": {
         "恐吓": 75,
         "神秘学": 40,
@@ -383,24 +382,7 @@
         "asset": null
       }
     ],
-    "npc": [
-      {
-        "id": "clue_004",
-        "text": "哈兰德·洛奇和艾米莉亚·考特曾接触过莱特的文档评估工作，可作为后续询问对象。",
-        "type": "obvious",
-        "tier": 0,
-        "source": "bryce_fallon_briefing",
-        "related_npcs": [
-          "harland_lodge",
-          "emilia_court"
-        ],
-        "related_scenes": [
-          "miskatonic_university"
-        ],
-        "discovered_at": null,
-        "asset": null
-      }
-    ]
+    "npc": []
   },
   "flags": {
     "cottage_searched": false,
@@ -427,6 +409,9 @@
     "wright_office": "一间狭小的教职办公室，只有一张书桌、几个文件柜和一个壁炉。墙上挂着一面裂开的镜子——仔细观察会发现它有一部分熔化了。这就是莱特死亡当晚凝视的那面镜子，他看到了恐怖的怪物，怪物燃尽了他的灵魂。隔壁有一间小房间，是艾米莉亚·考特作为助手工作的地方。壁炉里有很多匆忙焚烧的文件残骸。",
     "wright_cottage": "校园附近一座面积不大、家具齐全的小屋，密斯卡托尼克大学有很多这样的房子出租给教职员工。屋子后门的锁最近刚刚换过，门和窗户上新添了插销。屋内处于整理到一半的混乱状态——莱特当时正在收拾行李准备离开。休息室壁炉里有匆忙焚烧的文件残骸，桌上堆满各种文件。门口地垫上放着一封未拆开的来自疗养院的信。",
     "miskatonic_medical": "医学院地下深处冰冷的停尸房。莱特的尸体锁在冷柜中，等待被安静体面地火化。仅仅待在尸体附近就会产生莫名的紧张感，仿佛被监视。聆听成功会听到隔壁空房间里的怪异声响。",
+    "miskatonic_history": "密斯卡托尼克大学主楼西翼三层的历史系研究生自习室。旧书、论文和地板蜡的气味混在一起，艾米莉亚·考特通常在靠窗书桌前工作。",
+    "miskatonic_lodge_office": "历史系教师走廊里的哈兰德·洛奇办公室。书籍、未归档论文和私人文件挤满桌面与书架。",
+    "miskatonic_student_commons": "大学主楼一层的学生公共休息区与相邻阅览室，本科生常在课间聚集，安东尼·弗林德斯经常独自在角落查阅宗教与历史资料。",
     "sheb_tavern": "阿卡姆镇郊一个喧闹但相当高档的场所，以满足镇民的非法饮酒需求而存在。分为两部分：提供软饮料和咖啡的小餐馆（用来掩护），以及提供非法酒水的后屋。露西·斯通在这里做服务员。大西洋城黑帮偶尔在此出没。",
     "trivial_pursuits": "阿卡姆商业区上等地段一条巷子里的小古董店，外表体面受人尊敬。楼上有一间办公室，店后面是储藏室和装卸场。储藏室里有一扇门通向宽敞地下室，堆满包装箱和一台破旧锅炉。地下室隐藏着一扇半掩的活板门，通往迷宫般的深层地下室——那里堆满旧包装盒、大箱子、破棺材和大量人骨，有些骨头被制成工具。中央房间有一口砖砌井，通往食尸鬼居住的黑暗深处。",
     "hobhouse_mansion": "一栋殖民地晚期风格的三层建筑，摇摇欲坠，孤独地矗立在杂草丛生的空地上，距离阿卡姆市区约半小时车程。宅邸覆满灰尘，空无一人。附近的乡间林地极为阴郁荒芜。这里是约书亚·霍布豪斯生前隐居的地方，也是阿卡姆女巫审判文档最初的来源。",
@@ -437,60 +422,105 @@
       "id": "miskatonic_university",
       "name": "密斯卡托尼克大学",
       "description": "新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。法伦主任的办公室位于行政楼二层。",
-      "exits": ["wright_office", "miskatonic_medical"],
-      "npcs_present": ["bryce_fallon", "emilia_court", "harland_lodge"]
+      "exits": ["wright_office", "wright_cottage", "miskatonic_medical", "miskatonic_history", "miskatonic_lodge_office", "miskatonic_student_commons", "sheb_tavern", "trivial_pursuits", "hobhouse_mansion", "arkham_sanatorium"],
+      "npcs_present": ["bryce_fallon"]
     },
     "wright_office": {
       "id": "wright_office",
       "name": "莱特的办公室",
       "description": "狭小的教职办公室，书桌、文件柜、壁炉和一面部分熔化的裂镜构成了主要现场。",
-      "exits": ["miskatonic_university"],
+      "exits": ["miskatonic_university", "miskatonic_history"],
       "npcs_present": []
     },
     "wright_cottage": {
       "id": "wright_cottage",
       "name": "莱特的小屋",
       "description": "校园附近一座整理到一半的两层教职员住宅，莱特似乎原本准备匆忙离开。",
-      "exits": [],
+      "exits": ["miskatonic_university"],
       "npcs_present": []
     },
     "miskatonic_medical": {
       "id": "miskatonic_medical",
       "name": "密斯卡托尼克大学医学院",
       "description": "医学院地下的冰冷停尸房，莱特的遗体被锁在冷柜中。",
-      "exits": ["miskatonic_university"],
+      "exits": ["miskatonic_university", "miskatonic_history"],
       "npcs_present": ["john_whitcroft"]
+    },
+    "miskatonic_history": {
+      "id": "miskatonic_history",
+      "name": "密斯卡托尼克大学历史系研究生自习室",
+      "aliases": ["历史系", "研究生自习室", "主楼西翼三层"],
+      "description": "主楼西翼三层靠近楼梯的研究生自习室，旧书、论文和地板蜡的气味混在一起。艾米莉亚·考特通常在靠窗书桌前工作。",
+      "exits": ["miskatonic_university", "wright_office", "miskatonic_medical", "miskatonic_lodge_office", "miskatonic_student_commons"],
+      "npcs_present": ["emilia_court"]
+    },
+    "miskatonic_lodge_office": {
+      "id": "miskatonic_lodge_office",
+      "name": "哈兰德·洛奇的历史系办公室",
+      "aliases": ["洛奇办公室", "历史系教师办公室", "东翼二层"],
+      "description": "历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。",
+      "exits": ["miskatonic_university", "miskatonic_history"],
+      "npcs_present": ["harland_lodge"]
+    },
+    "miskatonic_student_commons": {
+      "id": "miskatonic_student_commons",
+      "name": "密斯卡托尼克大学学生公共休息区",
+      "aliases": ["学生公共休息区", "学生休息室", "主楼一层阅览室"],
+      "description": "主楼一层连接阅览室的学生公共区域，本科生常在课间聚集。安东尼·弗林德斯经常独自在角落查阅宗教与历史资料。",
+      "exits": ["miskatonic_university", "miskatonic_history"],
+      "npcs_present": ["anthony_flinders"]
     },
     "sheb_tavern": {
       "id": "sheb_tavern",
       "name": "希布酒馆",
       "description": "镇郊一处以餐馆掩护非法酒水生意的高档场所。",
-      "exits": [],
+      "exits": ["miskatonic_university", "trivial_pursuits"],
       "npcs_present": ["lucy_stone", "ox_and_shanassy"]
     },
     "trivial_pursuits": {
       "id": "trivial_pursuits",
       "name": "轻率琐事古董店",
       "description": "阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。",
-      "exits": [],
+      "exits": ["miskatonic_university", "sheb_tavern"],
       "npcs_present": ["abner_wick", "hector_kara_feldman"]
     },
     "hobhouse_mansion": {
       "id": "hobhouse_mansion",
       "name": "霍布豪斯宅邸",
       "description": "距离阿卡姆约半小时车程的荒废殖民地晚期宅邸，是女巫审判文档最初的来源。",
-      "exits": [],
+      "exits": ["miskatonic_university"],
       "npcs_present": []
     },
     "arkham_sanatorium": {
       "id": "arkham_sanatorium",
       "name": "阿卡姆疗养院",
       "description": "收治塞西尔·亨特的阴郁医疗设施。",
-      "exits": [],
+      "exits": ["miskatonic_university"],
       "npcs_present": ["cecil_hunter"]
     }
   },
   "clue_catalog": {
+    "fallon_document_contacts": {
+      "id": "fallon_document_contacts",
+      "text": "法伦主任告知：哈兰德·洛奇和艾米莉亚·考特曾接触过莱特的文档评估工作，可作为后续询问对象。",
+      "category": "npc",
+      "type": "obvious",
+      "tier": 1,
+      "source": "miskatonic_university",
+      "related_npcs": ["bryce_fallon", "harland_lodge", "emilia_court"],
+      "related_scenes": ["miskatonic_university"],
+      "flag_effects": {},
+      "discovery_rules": [
+        {
+          "intent": "talk",
+          "targets": ["还有谁参与文档评估", "其他参与文档评估的人", "文档评估人员", "谁接触过文档", "其他知情人"],
+          "requires_success": false
+        }
+      ],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "调查员向法伦追问参与文档评估的其他人员后获知。"
+    },
     "wright_body_evidence": {
       "id": "wright_body_evidence",
       "text": "莱特教授的遗体呈现无法由普通心脏病解释的眼部热损伤与全身器官衰竭。",
@@ -505,6 +535,7 @@
         {
           "intent": "examine",
           "targets": ["莱特教授的遗体", "莱特教授遗体", "莱特遗体", "莱特的尸体"],
+          "approach_text": "惠特克罗夫特医生带你进入地下停尸房，拉开冰冷的金属冷柜。白布掀起，莱特教授的遗体显露在冷白灯光下。",
           "requires_success": false,
           "sanity_severity": "minor",
           "npc_reveals": [
@@ -710,25 +741,8 @@
         "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫",
         "reveal_on": [
           {
-            "event": "sanity_triggered",
-            "match_any": [
-              "莱特教授的遗体",
-              "莱特教授的尸体",
-              "莱特的遗体",
-              "莱特的尸体"
-            ]
-          },
-          {
             "event": "clue_discovered",
-            "match_all": [
-              "莱特"
-            ],
-            "match_any": [
-              "尸体",
-              "遗体",
-              "眼球",
-              "眼部热损伤"
-            ]
+            "entity_id": "wright_body_evidence"
           }
         ]
       },

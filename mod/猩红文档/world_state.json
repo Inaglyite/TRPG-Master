@@ -1,5 +1,6 @@
 {
   "module": "猩红文档",
+  "module_opening": "将以下内容演成完整可玩的开场，不要压缩为任务摘要。时间是1920年代中期的10月，镜头从秋雨中的密斯卡托尼克大学与调查员抵达行政楼开始，再进入布莱斯·法伦的办公室。房间里实际在场的委托人只有法伦；本幕不要主动说出哈兰德·洛奇或艾米莉亚·考特的姓名，参与文档评估的其他人员要等调查员追问后再由法伦介绍。法伦先维持老练、文雅而谨慎的行政人员姿态，再说明查尔斯·莱特教授死在紧锁的校内办公室，校方公开定性为严重突发心力衰竭，但他并不相信事情如此简单。随后说明莱特负责评估的阿卡姆女巫审判文档已经失踪，柯布家族正持续施压，校园流言会伤害大学声誉；他要求调查员尽快、低调地查明死亡真相并找回文档。让法伦把莱特办公室和住处的两把黄铜钥匙交给调查员，并用一句有分量但不泄露秘密的对白结束委托。正文建议800至1100个中文字、6至8个短段落，至少包含抵达感、室内感官细节、法伦的动作与多轮对白。最后必须另起一个以“**你可以——**”开头的正文块，依次列出前往莱特办公室、调查莱特小屋、继续追问法伦和自由行动这4个编号选项。未列出的非核心细节可以作为叙事点缀即兴发挥，但不得把它们记录成线索或持久状态；不得公开尸体异常、伪造文档、怪物、法伦私心或任何九月时间线秘密。",
   "current_scene": {
     "id": "miskatonic_university",
     "name": "密斯卡托尼克大学",
@@ -9,9 +10,7 @@
       "miskatonic_medical"
     ],
     "npcs_present": [
-      "bryce_fallon",
-      "emilia_court",
-      "harland_lodge"
+      "bryce_fallon"
     ]
   },
   "pc": {
@@ -187,7 +186,7 @@
       "secret": "考特出身于普罗维登斯的古老富人家族，但向所有人隐瞒了这一点。她希望凭借自身才干获得教授职位。她发现了莱特的造假行为但未声张。如果守秘人选择她作为真凶，她的真实动机可能更加黑暗——她可能发现了文档的超自然本质，故意迫使亨特面对怪物以占有文档，甚至可能是一名拥有法术的女巫或被祖先精神交换术夺取了身份。",
       "hp": 12,
       "disposition": "guarded",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_history",
       "skills": {
         "历史": 80,
         "图书馆使用": 50,
@@ -212,7 +211,7 @@
       "secret": "洛奇在莱特死后检查文档时发现了莱特造假的一手证据，但他私自藏起了这些证据，希望日后能设法从中牟利。他心胸狭窄、满怀恶意和野心，暗地里惧怕法伦主任。如果有利可图，他可能会尾随调查员偷走文档或敲诈勒索。他知道丢失文档的历史与金钱价值，但不了解实际有多危险。",
       "hp": 12,
       "disposition": "jealous",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_lodge_office",
       "skills": {
         "历史": 85,
         "图书馆使用": 40,
@@ -237,7 +236,7 @@
       "secret": "弗林德斯是一个自学成才的撒旦信徒，狂热信仰来自于对宗教和历史资料的曲解。他相信女巫审判文档中有着\"真正的魔法图示\"，能让他签订浮士德式的契约。他于9月11日闯入莱特的房子寻找文档但未找到。他断断续续跟踪观察过莱特，可能知道莱特的联系人。如果被选作真凶，他跟踪莱特来到亨特的公寓，发现亨特发疯后将文档据为己有，如今正被怪异的 events 困扰，几近崩溃。",
       "hp": 12,
       "disposition": "obsessive",
-      "current_location": "miskatonic_university",
+      "current_location": "miskatonic_student_commons",
       "skills": {
         "恐吓": 75,
         "神秘学": 40,
@@ -462,24 +461,7 @@
         "asset": null
       }
     ],
-    "npc": [
-      {
-        "id": "clue_004",
-        "text": "哈兰德·洛奇和艾米莉亚·考特曾接触过莱特的文档评估工作，可作为后续询问对象。",
-        "type": "obvious",
-        "tier": 0,
-        "source": "bryce_fallon_briefing",
-        "related_npcs": [
-          "harland_lodge",
-          "emilia_court"
-        ],
-        "related_scenes": [
-          "miskatonic_university"
-        ],
-        "discovered_at": null,
-        "asset": null
-      }
-    ]
+    "npc": []
   },
   "flags": {
     "cottage_searched": false,
@@ -603,25 +585,8 @@
         "label": "莱特教授尸体——眼部严重热损伤，面部凝固恐惧尖叫",
         "reveal_on": [
           {
-            "event": "sanity_triggered",
-            "match_any": [
-              "莱特教授的遗体",
-              "莱特教授的尸体",
-              "莱特的遗体",
-              "莱特的尸体"
-            ]
-          },
-          {
             "event": "clue_discovered",
-            "match_all": [
-              "莱特"
-            ],
-            "match_any": [
-              "尸体",
-              "遗体",
-              "眼球",
-              "眼部热损伤"
-            ]
+            "entity_id": "wright_body_evidence"
           }
         ]
       },

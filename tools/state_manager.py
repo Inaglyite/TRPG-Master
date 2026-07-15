@@ -9,10 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.runtime import RuntimeContext  # noqa: E402
-from src.handouts import (  # noqa: E402
-    attach_matching_clue_asset,
-    resolve_handout_asset,
-)
+from src.handouts import resolve_handout_asset  # noqa: E402
 
 
 CONTEXT = RuntimeContext.from_env()
@@ -217,6 +214,38 @@ def _find_clue_by_asset(data: dict, *, asset_id: str | None = None,
     return None
 
 
+def _clue_handout_is_discovered(data: dict, asset_id: str | None) -> bool:
+    """A clue image is displayable only after its clue has been recorded."""
+    catalog = data.get("clue_catalog", {})
+    bound_catalog_ids = set()
+    if isinstance(catalog, dict):
+        bound_catalog_ids = {
+            str(clue_id)
+            for clue_id, clue in catalog.items()
+            if isinstance(clue, dict)
+            and str((clue.get("asset") or {}).get("id") or "") == asset_id
+        }
+    for category in CLUE_CATEGORIES:
+        for clue in data.get("clues_found", {}).get(category, []):
+            if not isinstance(clue, dict):
+                continue
+            clue_ids = {
+                str(clue.get("id") or ""),
+                str(clue.get("catalog_id") or ""),
+            }
+            clue_asset = clue.get("asset") or {}
+            clue_asset_id = (
+                str(clue_asset.get("id") or "")
+                if isinstance(clue_asset, dict)
+                else ""
+            )
+            if asset_id and clue_asset_id == asset_id:
+                return True
+            if bound_catalog_ids.intersection(clue_ids):
+                return True
+    return False
+
+
 def _find_clue_by_id(data: dict, clue_id: str):
     for cat in CLUE_CATEGORIES:
         for item in data.get("clues_found", {}).get(cat, []):
@@ -359,17 +388,6 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
     }
     if clue_id:
         clue["catalog_id"] = clue_id
-    if asset is None and not skipped_asset:
-        matched_asset_id = attach_matching_clue_asset(data, clue)
-        if matched_asset_id:
-            existing = _find_clue_by_asset(data, asset_id=matched_asset_id)
-            if existing:
-                clue["asset"] = None
-                skipped_asset = {
-                    "id": matched_asset_id,
-                    "reason": "asset_already_attached",
-                    "existing_clue_id": existing.get("id"),
-                }
     data["clues_found"][category].append(clue)
     granted_item = (
         catalog_entry.get("granted_item")
@@ -456,6 +474,23 @@ def cmd_show_handout(entity_type, entity_id, asset_id=None):
         entity_id,
         asset_id=asset_id,
     )
+    if (
+        entry
+        and entity_type == "clue"
+        and not _clue_handout_is_discovered(
+            data,
+            str(resolved_asset_id or ""),
+        )
+    ):
+        print(json.dumps({
+            "found": False,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "asset_id": resolved_asset_id,
+            "reason": "clue_not_discovered",
+            "hint": "线索尚未进入已发现清单，拒绝提前展示素材",
+        }, ensure_ascii=False))
+        return
     if entry:
         seen = data.setdefault("seen_handouts", {})
         seen_key = entity_type + "s"

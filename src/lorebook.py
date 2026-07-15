@@ -145,10 +145,22 @@ class SelectedLoreEntry:
 
 
 @dataclass(frozen=True)
+class LoreTraceEntry:
+    entry_id: str
+    name: str | None
+    kind: str
+    group: str | None
+    reason: str
+    token_estimate: int
+    matched_keys: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class LoreSelection:
     entries: tuple[SelectedLoreEntry, ...]
     sequence: int
     token_estimate: int
+    trace: tuple[LoreTraceEntry, ...] = ()
 
     @property
     def entry_ids(self) -> tuple[str, ...]:
@@ -177,6 +189,39 @@ class LoreSelection:
             "sensory_palette/style 只控制表达，不得创造新事实；fact 仍须服从上方"
             "引擎权威状态与已揭示信息，冲突时丢弃本素材。"
         )
+
+    @property
+    def diagnostics(self) -> dict[str, Any]:
+        reason_counts: dict[str, int] = {}
+        for item in self.trace:
+            reason_counts[item.reason] = reason_counts.get(item.reason, 0) + 1
+        return {
+            "sequence": self.sequence,
+            "token_estimate": self.token_estimate,
+            "selected": [
+                {
+                    "entry_id": entry.entry_id,
+                    "kind": entry.kind,
+                    "priority": entry.priority,
+                    "insertion_order": entry.insertion_order,
+                    "token_estimate": estimate_text_tokens(entry.content),
+                }
+                for entry in self.entries
+            ],
+            "reason_counts": reason_counts,
+            "trace": [
+                {
+                    "entry_id": item.entry_id,
+                    "name": item.name,
+                    "kind": item.kind,
+                    "group": item.group,
+                    "reason": item.reason,
+                    "token_estimate": item.token_estimate,
+                    "matched_keys": list(item.matched_keys),
+                }
+                for item in self.trace
+            ],
+        }
 
 
 def lorebook_json_schema() -> dict[str, Any]:
@@ -301,29 +346,29 @@ def _scan_text(messages: list[dict], player_action: str, depth: int) -> str:
     return "\n".join(recent)
 
 
-def _extension_allows(
+def _extension_block_reason(
     extension: TrpgLoreExtension,
     world: dict[str, Any],
     known_clues: set[str],
-) -> bool:
+) -> str | None:
     scene = world.get("current_scene") or {}
     scene_id = str(scene.get("id") or "")
     if extension.scene_ids and scene_id not in extension.scene_ids:
-        return False
+        return "scene_gate"
 
     if extension.npc_ids:
         present = {str(value) for value in scene.get("npcs_present", [])}
         if not present.intersection(extension.npc_ids):
-            return False
+            return "npc_gate"
 
     flags = world.get("flags") or {}
     if any(_nested_value(flags, key) != value for key, value in extension.required_flags.items()):
-        return False
+        return "required_flag_gate"
     if any(_nested_value(flags, key) == value for key, value in extension.forbidden_flags.items()):
-        return False
+        return "forbidden_flag_gate"
     if not set(extension.required_clue_ids).issubset(known_clues):
-        return False
-    return True
+        return "required_clue_gate"
+    return None
 
 
 def _recent_usage(world: dict[str, Any]) -> tuple[int, dict[str, int]]:
@@ -379,12 +424,41 @@ def select_lore(
     next_sequence = sequence + 1
     known_clues = _known_clue_ids(world)
     candidates: list[tuple[LorebookEntry, int, str, TrpgLoreExtension]] = []
+    trace_by_id: dict[str, LoreTraceEntry] = {}
+    trace_order: list[str] = []
+
+    def trace(
+        entry: LorebookEntry,
+        index: int,
+        extension: TrpgLoreExtension,
+        reason: str,
+        *,
+        matched_keys: tuple[str, ...] = (),
+    ) -> None:
+        entry_id = _entry_id(entry, index)
+        if entry_id not in trace_by_id:
+            trace_order.append(entry_id)
+        trace_by_id[entry_id] = LoreTraceEntry(
+            entry_id=entry_id,
+            name=entry.name,
+            kind=extension.kind,
+            group=extension.group,
+            reason=reason,
+            token_estimate=estimate_text_tokens(entry.content),
+            matched_keys=matched_keys,
+        )
 
     for index, entry in enumerate(data.entries):
-        if not entry.enabled or entry.use_regex:
-            continue
         extension = entry.trpg_extension()
-        if not _extension_allows(extension, world, known_clues):
+        if not entry.enabled:
+            trace(entry, index, extension, "disabled")
+            continue
+        if entry.use_regex:
+            trace(entry, index, extension, "regex_unsupported")
+            continue
+        block_reason = _extension_block_reason(extension, world, known_clues)
+        if block_reason:
+            trace(entry, index, extension, block_reason)
             continue
         entry_id = _entry_id(entry, index)
         last_turn = recent_usage.get(entry_id)
@@ -393,17 +467,36 @@ def select_lore(
             and extension.cooldown_turns > 0
             and next_sequence - last_turn <= extension.cooldown_turns
         ):
+            trace(entry, index, extension, "cooldown")
             continue
-        primary_match = entry.constant or any(
-            _matches_term(text, key, entry.case_sensitive) for key in entry.keys
+        matched_primary = tuple(
+            key for key in entry.keys
+            if _matches_term(text, key, entry.case_sensitive)
         )
+        primary_match = entry.constant or bool(matched_primary)
         if not primary_match:
+            trace(entry, index, extension, "primary_key_miss")
             continue
-        if entry.selective and not any(
-            _matches_term(text, key, entry.case_sensitive)
-            for key in entry.secondary_keys
-        ):
+        matched_secondary = tuple(
+            key for key in entry.secondary_keys
+            if _matches_term(text, key, entry.case_sensitive)
+        )
+        if entry.selective and not matched_secondary:
+            trace(
+                entry,
+                index,
+                extension,
+                "secondary_key_miss",
+                matched_keys=matched_primary,
+            )
             continue
+        trace(
+            entry,
+            index,
+            extension,
+            "candidate",
+            matched_keys=matched_primary + matched_secondary,
+        )
         candidates.append((entry, index, entry_id, extension))
 
     grouped: dict[str, list[tuple[LorebookEntry, int, str, TrpgLoreExtension]]] = {}
@@ -415,9 +508,20 @@ def select_lore(
         else:
             ungrouped.append(candidate)
     for group, group_candidates in grouped.items():
-        ungrouped.append(
-            _weighted_group_pick(group_candidates, group, next_sequence, world)
-        )
+        winner = _weighted_group_pick(group_candidates, group, next_sequence, world)
+        ungrouped.append(winner)
+        for candidate in group_candidates:
+            if candidate is winner:
+                continue
+            entry, index, _, extension = candidate
+            previous = trace_by_id[_entry_id(entry, index)]
+            trace(
+                entry,
+                index,
+                extension,
+                "group_not_selected",
+                matched_keys=previous.matched_keys,
+            )
 
     ungrouped.sort(key=lambda item: (
         -(item[0].priority if item[0].priority is not None else 100),
@@ -429,7 +533,24 @@ def select_lore(
     token_total = 0
     for entry, _, entry_id, extension in ungrouped:
         estimate = estimate_text_tokens(entry.content)
+        previous = trace_by_id[entry_id]
+        if len(chosen) >= max_entries:
+            trace(
+                entry,
+                _,
+                extension,
+                "entry_limit",
+                matched_keys=previous.matched_keys,
+            )
+            continue
         if token_total + estimate > budget:
+            trace(
+                entry,
+                _,
+                extension,
+                "token_budget",
+                matched_keys=previous.matched_keys,
+            )
             continue
         chosen.append(SelectedLoreEntry(
             entry_id=entry_id,
@@ -439,11 +560,21 @@ def select_lore(
             priority=entry.priority if entry.priority is not None else 100,
             insertion_order=entry.insertion_order,
         ))
+        trace(
+            entry,
+            _,
+            extension,
+            "selected",
+            matched_keys=previous.matched_keys,
+        )
         token_total += estimate
-        if len(chosen) >= max_entries:
-            break
     chosen.sort(key=lambda item: (item.insertion_order, -item.priority, item.entry_id))
-    return LoreSelection(tuple(chosen), next_sequence, token_total)
+    return LoreSelection(
+        tuple(chosen),
+        next_sequence,
+        token_total,
+        tuple(trace_by_id[entry_id] for entry_id in trace_order),
+    )
 
 
 def record_lore_usage(world: dict[str, Any], entry_ids: tuple[str, ...]) -> None:

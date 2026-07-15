@@ -14,6 +14,8 @@ import {
   savePanelClose,
   savePanelNew,
   savePanelList,
+  worldPanelList,
+  worldPanelSection,
   startOverlay,
   btnSave,
   btnLoad,
@@ -335,6 +337,12 @@ export function showHandout(data: { file: string; label: string; asset_data_uri:
   setTimeout(() => dismissHandout(card), 10000);
 }
 
+export function clearTransientHandouts() {
+  document.getElementById("handout-container")?.replaceChildren();
+  document.querySelectorAll(".handout-overlay").forEach((overlay) => overlay.remove());
+  document.getElementById("toast-stack")?.remove();
+}
+
 // ---- 结局展示 ----
 export function showEnding(data: any) {
   removeLoading();
@@ -388,6 +396,7 @@ export function openSavePanel(mode: "load" | "manage" = "manage") {
   savePanelNew.classList.toggle("hidden", mode === "load");
   savePanelOverlay.classList.remove("hidden");
   safeSend(JSON.stringify({ type: "save_list" }));
+  safeSend(JSON.stringify({ type: "world_list" }));
 }
 
 export function closeSavePanel() {
@@ -481,6 +490,48 @@ export function renderSavePanel(saves: any[]) {
       const slot = (btn as HTMLElement).getAttribute("data-slot") || "";
       safeSend(JSON.stringify({ type: "save_delete", slot_id: slot }));
     });
+  });
+}
+
+export function renderWorldPanel(worlds: any[], activeWorldId: string) {
+  if (!Array.isArray(worlds) || worlds.length === 0) {
+    worldPanelSection.classList.add("hidden");
+    worldPanelList.replaceChildren();
+    return;
+  }
+  worldPanelSection.classList.remove("hidden");
+  worldPanelList.replaceChildren();
+
+  worlds.forEach((world) => {
+    const worldId = String(world.world_id || "");
+    if (!worldId) return;
+    const active = Boolean(world.active) || worldId === activeWorldId;
+    const entry = document.createElement("div");
+    entry.className = `world-entry${active ? " active" : ""}`;
+
+    const info = document.createElement("div");
+    info.className = "world-entry-info";
+    const title = document.createElement("div");
+    title.className = "world-entry-title";
+    title.textContent = String(world.label || (world.is_branch ? "时间线分支" : "主时间线"));
+    const meta = document.createElement("div");
+    meta.className = "world-entry-meta";
+    meta.textContent = `${world.scene_name || "未知场景"} · ${world.character_name || "未知调查员"}`;
+    info.append(title, meta);
+
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "world-switch-button";
+    action.textContent = active ? "当前" : "↪";
+    action.title = active ? "当前时间线" : "切换到此时间线";
+    action.setAttribute("aria-label", active ? "当前时间线" : `切换到${title.textContent}`);
+    action.disabled = active;
+    action.onclick = () => {
+      action.disabled = true;
+      safeSend(JSON.stringify({ type: "world_switch", world_id: worldId }));
+    };
+    entry.append(info, action);
+    worldPanelList.appendChild(entry);
   });
 }
 

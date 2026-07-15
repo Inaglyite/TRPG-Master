@@ -2,7 +2,7 @@
   "$schema": "https://trpg-master.local/schemas/module-v1.json",
   "format_version": "1.0",
   "entry_scene_id": "archive_study",
-  "opening_prompt": "调查员应邀来到一座即将闭馆的私人档案馆。馆长刚刚说明委托，但尚未展示失踪手稿的保管记录。",
+  "opening_prompt": "将开场演成完整可玩的场景而非任务摘要：调查员在闭馆前的雨夜抵达私人档案馆，林馆长是唯一在场 NPC。他说明一份手稿从上锁库房失踪并委托调查，但尚未展示保管记录，也不得透露自己听见手稿低语。用5至7个短段落呈现抵达、环境和至少两轮对话；最后必须另起一个以“**你可以——**”开头的正文块，列出检查库房、追问馆长、观察阅览室和自由行动这4个编号选项。",
   "npcs": {
     "archivist_lin": {
       "name": "林馆长",
@@ -20,15 +20,28 @@
   "scenes": {
     "archive_study": {
       "name": "档案馆书房",
+      "aliases": ["私人档案馆", "馆长书房"],
       "description": "窄窗外的雨水拍打玻璃，成排索引柜一直延伸到没有点灯的后室。",
       "exits": ["archive_courtyard"],
       "npcs_present": ["archivist_lin"]
     },
     "archive_courtyard": {
       "name": "档案馆内院",
+      "aliases": ["内院", "旧井院子"],
       "description": "湿透的石板围住一口封死的旧井，排水沟里卡着几片发黑的纸。",
       "exits": ["archive_study"],
-      "npcs_present": []
+      "npcs_present": [],
+      "encounters": [
+        {
+          "id": "lin_crosses_courtyard",
+          "npc_id": "archivist_lin",
+          "availability": "luck",
+          "luck_difficulty": "regular",
+          "repeat": "once",
+          "on_present_text": "林馆长恰好撑伞经过内院。",
+          "on_absent_text": "内院里没有其他人，只有雨水敲打石板。"
+        }
+      ]
     }
   },
   "clues": {
@@ -55,7 +68,16 @@
         {
           "intent": "search",
           "targets": ["排水沟", "旧井"],
+          "approach_text": "你蹲下身，借着风灯检查旧井边潮湿的排水沟。",
           "skill": "spot_hidden",
+          "requires_success": true
+        },
+        {
+          "intent": "examine",
+          "targets": ["松动的井盖"],
+          "approach_text": "你绕到旧井背风的一侧检查松动的井盖。",
+          "check_type": "luck",
+          "difficulty": "hard",
           "requires_success": true
         }
       ],

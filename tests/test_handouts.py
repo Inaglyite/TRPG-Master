@@ -24,7 +24,7 @@ TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 
 
 class HandoutContractTests(unittest.TestCase):
-    def test_compiler_generates_exact_triggers_and_preserves_fallback(self):
+    def test_compiler_generates_exact_triggers_and_preserves_legacy_metadata(self):
         manifest = ModuleManifest.model_validate_json(
             (TEMPLATE / "manifest.json").read_text(encoding="utf-8")
         )
@@ -67,6 +67,13 @@ class HandoutContractTests(unittest.TestCase):
             "match_any": [],
         }, clue_triggers)
 
+        self.assertEqual(matching_handouts(
+            world,
+            "clue_discovered",
+            text="纸片与手稿使用同一种纤维。",
+            entity_type="clue",
+        ), [])
+
     def test_trigger_rejects_unknown_entity_reference(self):
         raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
         raw["assets"]["clues"]["fragment_photo"] = {
@@ -99,6 +106,26 @@ class HandoutContractTests(unittest.TestCase):
             {diagnostic.code for diagnostic in result.diagnostics},
         )
 
+    def test_compiler_warns_that_text_trigger_cannot_reveal_asset(self):
+        manifest = ModuleManifest.model_validate_json(
+            (TEMPLATE / "manifest.json").read_text(encoding="utf-8")
+        )
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        raw["assets"]["clues"]["unsafe_photo"] = {
+            "file": "assets/unsafe.png",
+            "reveal_on": [{
+                "event": "clue_discovered",
+                "match_any": ["尸体", "遗体"],
+            }],
+        }
+        module = ModuleDefinition.model_validate(raw)
+
+        result = compile_module(manifest, module)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+
+        self.assertIn("text_handout_trigger_ignored", codes)
+        self.assertIn("asset_without_reveal_path", codes)
+
     def test_entity_id_resolves_differently_named_asset(self):
         state = {
             "asset_map": {
@@ -119,18 +146,59 @@ class HandoutContractTests(unittest.TestCase):
         self.assertEqual(asset_id, "portrait_001")
         self.assertEqual(asset["file"], "lin.png")
 
+    def test_legacy_direct_npc_asset_has_implicit_reveal_trigger(self):
+        state = {
+            "asset_map": {
+                "npcs": {
+                    "john_whitcroft": {
+                        "file": "doctor.png",
+                        "label": "惠特克罗夫特医生",
+                    },
+                },
+                "scenes": {},
+                "clues": {},
+            },
+        }
+
+        matches = matching_handouts(
+            state,
+            "npc_revealed",
+            entity_id="john_whitcroft",
+        )
+
+        self.assertEqual(matches, [{
+            "entity_type": "npc",
+            "entity_id": "john_whitcroft",
+            "asset_id": "john_whitcroft",
+        }])
+
     def test_reconciliation_repairs_assetless_clue_from_updated_template(self):
         state = {
             "clues_found": {
                 "investigation": [{
                     "id": "clue_005",
+                    "catalog_id": "wright_body_evidence",
                     "text": "莱特眼球内部有暗红色网状破裂纹路。",
                     "asset": None,
-                }]
+                }, {
+                    "id": "clue_006",
+                    "text": "莱特眼球内部有暗红色网状破裂纹路。",
+                    "asset": None,
+                }],
             },
             "asset_map": {"npcs": {}, "scenes": {}, "clues": {}},
         }
         template = {
+            "clue_catalog": {
+                "wright_body_evidence": {
+                    "id": "wright_body_evidence",
+                    "asset": {
+                        "id": "wright_body",
+                        "file": "莱特教授的尸体.png",
+                        "label": "莱特教授尸体",
+                    },
+                },
+            },
             "asset_map": {
                 "npcs": {},
                 "scenes": {},
@@ -140,7 +208,7 @@ class HandoutContractTests(unittest.TestCase):
                         "label": "莱特教授尸体",
                         "reveal_on": [{
                             "event": "clue_discovered",
-                            "match_all": ["莱特", "眼"],
+                            "entity_id": "wright_body_evidence",
                         }],
                     }
                 },
@@ -152,6 +220,34 @@ class HandoutContractTests(unittest.TestCase):
         clue = state["clues_found"]["investigation"][0]
         self.assertEqual(clue["asset"]["id"], "wright_body")
         self.assertEqual(repaired[0]["entity_id"], "clue_005")
+        self.assertIsNone(state["clues_found"]["investigation"][1]["asset"])
+
+    def test_text_only_trigger_cannot_authorize_clue_handout(self):
+        state = {
+            "asset_map": {
+                "npcs": {},
+                "scenes": {},
+                "clues": {
+                    "wright_body": {
+                        "file": "body.png",
+                        "reveal_on": [{
+                            "event": "clue_discovered",
+                            "match_all": ["莱特"],
+                            "match_any": ["尸体", "遗体"],
+                        }],
+                    },
+                },
+            },
+        }
+
+        matches = matching_handouts(
+            state,
+            "clue_discovered",
+            text="医生说莱特的遗体仍在停尸间。",
+            entity_type="clue",
+        )
+
+        self.assertEqual(matches, [])
 
     def test_seen_asset_is_not_matched_twice(self):
         state = {
@@ -162,8 +258,8 @@ class HandoutContractTests(unittest.TestCase):
                     "wright_body": {
                         "file": "body.png",
                         "reveal_on": [{
-                            "event": "sanity_triggered",
-                            "match_any": ["莱特教授的遗体"],
+                            "event": "clue_discovered",
+                            "entity_id": "wright_body_evidence",
                         }],
                     }
                 },
@@ -173,8 +269,8 @@ class HandoutContractTests(unittest.TestCase):
 
         matches = matching_handouts(
             state,
-            "sanity_triggered",
-            text="调查员亲眼看见莱特教授的遗体。",
+            "clue_discovered",
+            entity_id="wright_body_evidence",
         )
 
         self.assertEqual(matches, [])
@@ -194,7 +290,7 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
         engine.cb = EngineCallbacks(on_handout=events.append)
         return engine, events
 
-    def test_body_sanity_event_distributes_image_once(self):
+    def test_sanity_advice_cannot_discover_or_show_body(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine, events = self._engine(Path(temp_dir))
             args = {
@@ -208,14 +304,16 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
                 event for event in events
                 if event.get("asset_id") == "wright_body"
             ]
-            self.assertEqual(len(body_events), 1)
-            self.assertTrue(events[0]["asset_data_uri"].startswith("data:image/"))
+            self.assertEqual(body_events, [])
             clue_ids = {
                 clue.get("catalog_id") or clue.get("id")
                 for clues in engine.context.world_store.load()["clues_found"].values()
                 for clue in clues
             }
-            self.assertIn("wright_body_evidence", clue_ids)
+            self.assertNotIn("wright_body_evidence", clue_ids)
+            self.assertFalse(
+                engine.context.world_store.load()["flags"]["body_examined"]
+            )
 
     def test_combined_sanity_event_resolves_loss_and_handout_once(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -264,11 +362,38 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             engine, events = self._engine(Path(temp_dir))
             args = {"entity_type": "clue", "entity_id": "wright_body"}
 
+            blocked = json.loads(engine._execute_tool("show_handout", args))
+            self.assertFalse(blocked["found"])
+            self.assertEqual(blocked["reason"], "clue_not_discovered")
+
+            engine._execute_tool("state_add_clue", {
+                "text": "",
+                "category": "investigation",
+                "clue_id": "wright_body_evidence",
+            })
             engine._execute_tool("show_handout", args)
             engine._execute_tool("show_handout", args)
 
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["asset_id"], "wright_body")
+
+    def test_asset_name_as_free_clue_id_cannot_bypass_handout_gate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, events = self._engine(Path(temp_dir))
+
+            engine._execute_tool("state_add_clue", {
+                "text": "一条与尸检证据无关的普通记录。",
+                "category": "task",
+                "clue_id": "wright_body",
+            })
+            result = json.loads(engine._execute_tool("show_handout", {
+                "entity_type": "clue",
+                "entity_id": "wright_body",
+            }))
+
+            self.assertFalse(result["found"])
+            self.assertEqual(result["reason"], "clue_not_discovered")
+            self.assertEqual(events, [])
 
     def test_doctor_warning_does_not_reveal_body_handout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -288,7 +413,41 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             }
             self.assertNotIn("wright_body_evidence", clue_ids)
 
-    def test_assetless_clue_call_is_matched_attached_and_distributed(self):
+    def test_offscene_npc_references_do_not_reveal_portraits(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, events = self._engine(Path(temp_dir))
+
+            engine._dispatch_narrative_handouts(
+                "法伦建议你之后去找惠特克罗夫特医生、艾米莉亚·考特和哈兰德·洛奇。"
+            )
+
+            self.assertEqual(
+                {event.get("asset_id") for event in events},
+                {"bryce_fallon"},
+            )
+
+    def test_present_npc_can_reveal_after_scene_transition(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, events = self._engine(Path(temp_dir))
+            engine._execute_tool("state_set", {
+                "path": "current_scene.id",
+                "value": json.dumps("miskatonic_medical"),
+            })
+
+            engine._dispatch_narrative_handouts(
+                "惠特克罗夫特医生站在医学院走廊尽头等你，法伦并不在这里。"
+            )
+
+            self.assertIn(
+                "john_whitcroft",
+                {event.get("asset_id") for event in events},
+            )
+            self.assertNotIn(
+                "bryce_fallon",
+                {event.get("asset_id") for event in events},
+            )
+
+    def test_free_text_clue_cannot_guess_an_asset(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine, events = self._engine(Path(temp_dir))
 
@@ -298,9 +457,67 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             })
 
             clue = json.loads(output)["clue"]
-            self.assertEqual(clue["asset"]["id"], "wright_body")
-            self.assertEqual(len(events), 1)
-            self.assertEqual(events[0]["asset_id"], "wright_body")
+            self.assertIsNone(clue["asset"])
+            self.assertEqual(events, [])
+            self.assertFalse(
+                engine.context.world_store.load()["flags"]["body_examined"]
+            )
+
+    def test_morgue_location_clue_does_not_reveal_body_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, events = self._engine(Path(temp_dir))
+
+            output = engine._execute_tool("state_add_clue", {
+                "text": (
+                    "莱特的死亡证明由约翰·惠特克罗夫特医生签署；"
+                    "遗体目前仍在密斯卡托尼克大学医学院停尸间。"
+                ),
+                "category": "task",
+            })
+
+            clue = json.loads(output)["clue"]
+            world = engine.context.world_store.load()
+            known_ids = {
+                known.get("catalog_id") or known.get("id")
+                for clues in world["clues_found"].values()
+                for known in clues
+            }
+            self.assertIsNone(clue["asset"])
+            self.assertEqual(events, [])
+            self.assertNotIn("wright_body_evidence", known_ids)
+            self.assertFalse(world["flags"]["body_examined"])
+            self.assertNotIn(
+                "wright_body",
+                world.get("seen_handout_assets", {}).get("clues", []),
+            )
+
+    def test_model_cannot_bypass_authored_body_discovery_rule(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, events = self._engine(Path(temp_dir))
+
+            for authored_reference in (
+                {"clue_id": "wright_body_evidence"},
+                {"asset_id": "wright_body"},
+            ):
+                with self.subTest(authored_reference=authored_reference):
+                    result = json.loads(engine._execute_model_tool(
+                        "state_add_clue",
+                        {
+                            "text": "法伦说遗体目前仍在停尸间。",
+                            "category": "task",
+                            **authored_reference,
+                        },
+                        player_action="我留在办公室继续追问法伦。",
+                    ))
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(
+                        result["error"],
+                        "catalog_clue_not_authorized",
+                    )
+
+            world = engine.context.world_store.load()
+            self.assertEqual(events, [])
+            self.assertFalse(world["flags"]["body_examined"])
 
     def test_scene_id_write_is_promoted_to_full_catalog_scene(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -373,6 +590,7 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             def add_old_clue(state: dict) -> None:
                 state["clues_found"]["investigation"].append({
                     "id": "clue_005",
+                    "catalog_id": "wright_body_evidence",
                     "text": "莱特眼球内部有暗红色网状破裂纹路。",
                     "asset": None,
                 })
