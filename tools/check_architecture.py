@@ -19,7 +19,8 @@ DOMAIN_MODULES = (
 )
 FORBIDDEN_DOMAIN_IMPORTS = {"fastapi", "openai", "server", "src.engine"}
 LINE_RATCHETS = {
-    "src/engine.py": 2300,
+    "src/engine.py": 2000,
+    "src/model_streamer.py": 350,
     "server.py": 1320,
     "src/tools.py": 1170,
     "tools/state_manager.py": 800,

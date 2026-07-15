@@ -4,7 +4,6 @@
 
 import copy
 import json
-import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,13 +44,17 @@ from .logger import model_call as log_model_call
 from .logger import tier_inject as log_tier
 from .lorebook import (
     LoreSelection,
-    estimate_text_tokens,
     load_lorebook,
     record_lore_usage,
     select_lore,
 )
 from .model_session import ModelSession
 from .model_settings import ModelSettings
+from .model_streamer import (
+    ModelStreamer,
+    StreamPolicy,
+    sanitize_visible_narrative,
+)
 from .persistence import (
     has_save,
     list_saves,
@@ -63,10 +66,8 @@ from .persistence import (
 )
 from .runtime import RuntimeContext
 from .tools import (
-    MODEL_TOOLS,
     dice_summary,
     execute_function,
-    model_tools_for,
 )
 from .turn_journal import TurnJournal
 from .turn_reconciler import (
@@ -74,21 +75,6 @@ from .turn_reconciler import (
     reconcile_narrative_entities,
     reconcile_turn,
     turn_needs_model_audit,
-)
-
-_INTERNAL_NARRATIVE_PATTERNS = (
-    re.compile(r"(?:让我|我)?先确认(?:一下)?当前(?:的)?信息边界[。.!！]?\s*"),
-    re.compile(r"按玩家(?:的)?明确意图[^。！？\n]*[。！？]?\s*"),
-    re.compile(
-        r"需要(?:确认|记录|写入)[^。！？\n]*(?:world_state|世界状态)"
-        r"[^。！？\n]*[。！？]?\s*",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"当前\s*SAN\s*=\s*\d+\s*[？?][^。！？\n]*(?:应该|不对)"
-        r"[^。！？\n]*[。！？]?\s*",
-        re.IGNORECASE,
-    ),
 )
 
 _OPENING_SYSTEM_CONTRACT = """# 新游戏公开开场模式
@@ -116,49 +102,7 @@ class TurnCancelledError(RuntimeError):
 
 
 def _sanitize_visible_narrative(text: str) -> str:
-    for pattern in _INTERNAL_NARRATIVE_PATTERNS:
-        text = pattern.sub("", text)
-    return re.sub(r"\n{3,}", "\n\n", text)
-
-
-def _take_complete_sentences(text: str) -> tuple[str, str]:
-    boundaries = list(re.finditer(r"[。！？!?\n]", text))
-    if not boundaries:
-        return "", text
-    cutoff = boundaries[-1].end()
-    return text[:cutoff], text[cutoff:]
-
-
-def _stream_usage_dict(usage: object) -> dict:
-    if usage is None:
-        return {}
-    if isinstance(usage, dict):
-        raw = usage
-    elif hasattr(usage, "model_dump"):
-        raw = usage.model_dump()
-    else:
-        raw = {
-            key: getattr(usage, key, None)
-            for key in (
-                "prompt_tokens",
-                "completion_tokens",
-                "total_tokens",
-                "prompt_cache_hit_tokens",
-                "prompt_cache_miss_tokens",
-            )
-        }
-    return {
-        key: value
-        for key, value in raw.items()
-        if key in {
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-            "prompt_cache_hit_tokens",
-            "prompt_cache_miss_tokens",
-        }
-        and value is not None
-    }
+    return sanitize_visible_narrative(text)
 
 
 def _thinking_type_for_request(model: str, request_role: str) -> str | None:
@@ -210,6 +154,11 @@ class GameEngine:
             compactor = HistoryCompactor(self)
             self.__dict__["_history_compactor"] = compactor
         return compactor
+
+    @property
+    def turn_cancelled_error(self) -> type[TurnCancelledError]:
+        """Exception type exposed to provider-neutral streaming infrastructure."""
+        return TurnCancelledError
 
     @property
     def messages(self) -> list[dict]:
@@ -760,285 +709,31 @@ class GameEngine:
         messages_override: list[dict] | None = None,
         _retry_on_empty: bool = True,
     ) -> tuple[str, list]:
-        """流式调用；控制回合可缓冲并丢弃工具调用前的元确认语。"""
-        started_at = time.monotonic()
-        first_token_at: float | None = None
-        if messages_override is None:
-            self.messages = normalize_tool_message_history(self.messages)
-            messages = self.messages
-        else:
-            messages = normalize_tool_message_history(
-                [dict(message) for message in messages_override]
-            )
-        if system_prompt_override or system_overlay:
-            messages = [dict(message) for message in messages]
-            if system_prompt_override:
-                if messages and messages[0].get("role") == "system":
-                    messages[0]["content"] = system_prompt_override
-                else:
-                    messages.insert(0, {
-                        "role": "system",
-                        "content": system_prompt_override,
-                    })
-            if (
-                system_overlay
-                and messages
-                and messages[0].get("role") == "system"
-            ):
-                messages[0]["content"] = (
-                    f"{messages[0].get('content', '')}\n\n---\n\n{system_overlay}"
-                )
-            else:
-                if system_overlay:
-                    messages.insert(0, {
-                        "role": "system",
-                        "content": system_overlay,
-                    })
-        request_role = "combat" if system_overlay else "story"
-        request_tools = (
-            model_tools_for(request_role)
-            if enable_tools and ENABLE_DYNAMIC_TOOLS
-            else MODEL_TOOLS if enable_tools else []
+        """Stream one provider request through the isolated protocol adapter."""
+        streamer = ModelStreamer(
+            self,
+            log_error=log_error,
+            log_model_call=log_model_call,
+            sleep=time.sleep,
         )
-        role_chars: dict[str, int] = {}
-        role_tokens: dict[str, int] = {}
-        for message in messages:
-            role = str(message.get("role") or "unknown")
-            content = str(message.get("content") or "")
-            role_chars[role] = role_chars.get(role, 0) + len(content)
-            role_tokens[role] = role_tokens.get(role, 0) + estimate_text_tokens(content)
-        tool_schema_json = json.dumps(
-            request_tools,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        system_chars = role_chars.get("system", 0)
-        tool_schema_chars = len(tool_schema_json)
-        context_sections = {
-            "system": {
-                "chars": system_chars,
-                "estimated_tokens": role_tokens.get("system", 0),
-            },
-            "history": {
-                "chars": sum(
-                    value for role, value in role_chars.items() if role != "system"
-                ),
-                "estimated_tokens": sum(
-                    value for role, value in role_tokens.items() if role != "system"
-                ),
-            },
-            "tool_schema": {
-                "chars": tool_schema_chars,
-                "estimated_tokens": estimate_text_tokens(tool_schema_json),
-            },
-        }
-        kwargs = dict(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=4096,
-            stream=True,
-        )
-        if enable_tools:
-            kwargs["tools"] = request_tools
-            kwargs["tool_choice"] = "auto"
-        if ENABLE_STREAM_USAGE:
-            kwargs["stream_options"] = {"include_usage": True}
-        thinking_type = _thinking_type_for_request(model, request_role)
-        if thinking_type:
-            kwargs["extra_body"] = {"thinking": {"type": thinking_type}}
-        try:
-            stream = self.client.chat.completions.create(**kwargs)
-        except Exception as e:
-            if self.turn_cancellation_requested():
-                raise TurnCancelledError(
-                    "客户端已离开，模型请求已取消"
-                ) from e
-            self._append_model_diagnostic({
-                "model": model,
-                "role": request_role,
-                "status": "request_error",
-                "elapsed_ms": int((time.monotonic() - started_at) * 1000),
-                "first_token_ms": None,
-                "finish_reason": "request_error",
-                "tool_count": 0,
-                "message_count": len(messages),
-                "context_sections": context_sections,
-                "usage": {},
-                "prompt_profile": prompt_profile or PROMPT_PROFILE,
-                "thinking_mode": thinking_type or "provider",
-                "error_type": type(e).__name__,
-            })
-            if _retry_on_empty:
-                log_error(f"API 建立流失败，正在重试: {e}")
-                time.sleep(0.4)
-                return self._stream_llm(
-                    model,
-                    system_overlay=system_overlay,
-                    system_prompt_override=system_prompt_override,
-                    enable_tools=enable_tools,
-                    prompt_profile=prompt_profile,
-                    temperature=temperature,
-                    buffer_if_tools=buffer_if_tools,
-                    messages_override=messages_override,
-                    _retry_on_empty=False,
-                )
-            log_error(f"API: {e}")
-            self.cb.on_error(f"API 错误: {e}")
-            return "", []
-
-        full_text = ""
-        pending_visible = ""
-        initial_sentence_released = False
-        tool_calls_acc: dict[int, dict] = {}
-        finish_reason = None
-        usage_data: dict = {}
-
-        self._set_active_stream(stream)
-        try:
-            self.raise_if_turn_cancelled()
-            for chunk in stream:
-                self.raise_if_turn_cancelled()
-                chunk_usage = _stream_usage_dict(getattr(chunk, "usage", None))
-                if chunk_usage:
-                    usage_data = chunk_usage
-                if chunk.choices:
-                    choice = chunk.choices[0]
-                    if choice.finish_reason:
-                        finish_reason = choice.finish_reason
-                    delta = choice.delta
-                    if delta is None:
-                        continue
-                    if first_token_at is None and (delta.content or delta.tool_calls):
-                        first_token_at = time.monotonic()
-                    if delta.content:
-                        full_text += delta.content
-                        if not buffer_if_tools:
-                            if initial_sentence_released:
-                                visible = _sanitize_visible_narrative(delta.content)
-                                if visible:
-                                    self.cb.on_narrative(visible)
-                            else:
-                                pending_visible += delta.content
-                                complete, _remainder = _take_complete_sentences(
-                                    pending_visible
-                                )
-                                if complete:
-                                    visible = _sanitize_visible_narrative(
-                                        pending_visible
-                                    )
-                                    if visible:
-                                        self.cb.on_narrative(visible)
-                                    pending_visible = ""
-                                    initial_sentence_released = True
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tool_calls_acc:
-                                tool_calls_acc[idx] = {
-                                    "id": "", "type": "function",
-                                    "function": {"name": "", "arguments": ""}
-                                }
-                            acc = tool_calls_acc[idx]
-                            if tc.id:
-                                acc["id"] += tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    acc["function"]["name"] += tc.function.name
-                                if tc.function.arguments:
-                                    acc["function"]["arguments"] += tc.function.arguments
-            self.raise_if_turn_cancelled()
-        except TurnCancelledError:
-            raise
-        except Exception as e:
-            if self.turn_cancellation_requested():
-                raise TurnCancelledError(
-                    "客户端已离开，模型流已取消"
-                ) from e
-            if _retry_on_empty and not full_text and not tool_calls_acc:
-                log_error(f"API 空流中断，正在重试: {e}")
-                time.sleep(0.4)
-                return self._stream_llm(
-                    model,
-                    system_overlay=system_overlay,
-                    system_prompt_override=system_prompt_override,
-                    enable_tools=enable_tools,
-                    prompt_profile=prompt_profile,
-                    temperature=temperature,
-                    buffer_if_tools=buffer_if_tools,
-                    messages_override=messages_override,
-                    _retry_on_empty=False,
-                )
-            finish_reason = "transport_error"
-            log_error(f"API 流式响应中断: {e}")
-            self.cb.on_error("模型连接中断，已保留本轮收到的内容。")
-        finally:
-            self._clear_active_stream(stream)
-
-        full_text = _sanitize_visible_narrative(full_text)
-        if not buffer_if_tools and pending_visible:
-            visible = _sanitize_visible_narrative(pending_visible)
-            if visible:
-                self.cb.on_narrative(visible)
-
-        # 因 token 上限被截断时提示（叙述/选项可能不完整）
-        if finish_reason == "length" and not tool_calls_acc:
-            self.cb.on_error("（叙述过长被截断，请重试或继续）")
-
-        tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
-        if buffer_if_tools:
-            if tool_calls_list:
-                # 控制回合的首轮文本只是工具调用前导语，不应进入 UI 或存档叙事。
-                full_text = ""
-            elif full_text:
-                # 模型没有调用工具时仍保留其正文，避免异常情况下出现空白回合。
-                self.cb.on_narrative(full_text)
-        elapsed = time.monotonic() - started_at
-        first_token = (
-            first_token_at - started_at if first_token_at is not None else None
-        )
-        log_model_call(
+        return streamer.stream(
             model,
-            request_role,
-            elapsed,
-            first_token,
-            finish_reason,
-            len(tool_calls_list),
-            usage=usage_data,
-            system_chars=system_chars,
-            tool_schema_chars=tool_schema_chars,
-            prompt_profile=prompt_profile or PROMPT_PROFILE,
-            thinking_mode=thinking_type or "provider",
+            policy=StreamPolicy(
+                dynamic_tools=ENABLE_DYNAMIC_TOOLS,
+                stream_usage=ENABLE_STREAM_USAGE,
+                prompt_profile=prompt_profile or PROMPT_PROFILE,
+                thinking_type=_thinking_type_for_request(
+                    model, "combat" if system_overlay else "story"
+                ),
+            ),
+            system_overlay=system_overlay,
+            system_prompt_override=system_prompt_override,
+            enable_tools=enable_tools,
+            temperature=temperature,
+            buffer_if_tools=buffer_if_tools,
+            messages_override=messages_override,
+            retry_on_empty=_retry_on_empty,
         )
-        self._append_model_diagnostic({
-            "model": model,
-            "role": request_role,
-            "status": "completed" if finish_reason != "transport_error" else "transport_error",
-            "elapsed_ms": int(elapsed * 1000),
-            "first_token_ms": int(first_token * 1000) if first_token is not None else None,
-            "finish_reason": finish_reason,
-            "tool_count": len(tool_calls_list),
-            "message_count": len(messages),
-            "context_sections": context_sections,
-            "usage": dict(usage_data),
-            "prompt_profile": prompt_profile or PROMPT_PROFILE,
-            "thinking_mode": thinking_type or "provider",
-        })
-        if not full_text and not tool_calls_list and _retry_on_empty:
-            log_error("API 返回空响应，正在重试一次")
-            time.sleep(0.4)
-            return self._stream_llm(
-                model,
-                system_overlay=system_overlay,
-                system_prompt_override=system_prompt_override,
-                enable_tools=enable_tools,
-                prompt_profile=prompt_profile,
-                temperature=temperature,
-                buffer_if_tools=buffer_if_tools,
-                messages_override=messages_override,
-                _retry_on_empty=False,
-            )
-        return full_text, tool_calls_list
 
     def _combat_state(self) -> dict:
         """Read the authoritative combat state for graph routing and prompt overlay."""

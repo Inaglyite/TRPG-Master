@@ -126,7 +126,10 @@ Module package ──data/declared rules──> Domain
 - WebSocket 消息已全部注册式路由，消息循环不再包含业务分支；
 - ToolRuntime 已覆盖全部声明工具并消除中央字符串分发；
 - ModelSession 已接管历史、活动流、取消和诊断；
+- ModelStreamer 已隔离供应商请求、流式 chunk、usage、thinking 与重试协议；
 - GameApplication 已提取开始、继续、行动、改写与存档槽位用例；
 - 确定性领域层已包含行动阶段、遭遇、发现与后果分类；
 - 模组格式 v2 已提供主线可达性和失败保底证明，并有 v1→v2 迁移器；
 - 世界状态 v2 已提供领域所有权、迁移历史、迁移前备份与迁移报告。
+- GameEngine 已降至 1954 行的兼容 facade，并由 CI 的 2000 行门禁阻止回涨；
+- 239 项后端测试、全仓 Ruff、架构/schema 复现检查与前端生产构建均已通过。

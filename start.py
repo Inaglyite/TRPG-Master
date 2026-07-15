@@ -13,10 +13,10 @@
     TRPG_PRO_MODEL     Pro 模型名（默认 deepseek-v4-pro）
 """
 
-import os
-import sys
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
