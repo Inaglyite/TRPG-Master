@@ -7,7 +7,7 @@ import re
 import secrets
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .persistence import save_game
@@ -39,7 +39,7 @@ class WorldBranchService:
     def _new_world_id(self, parent_world_id: str) -> str:
         stem = re.sub(r"[^\w-]+", "-", parent_world_id, flags=re.UNICODE).strip("-_")
         stem = (stem or "world")[:48]
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         while True:
             world_id = f"{stem}-branch-{stamp}-{secrets.token_hex(2)}"
             if not (self.worlds_dir / world_id).exists():
@@ -93,7 +93,7 @@ class WorldBranchService:
                     "parent_world_id": source_context.world_id,
                     "source_turn_id": turn_id,
                     "source_world_revision": record.get("world_revision"),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                 },
             })
             atomic_write_json(target_context.metadata_file, metadata)

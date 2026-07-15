@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-
 WsPayload = dict[str, Any]
 WsHandler = Callable[[WsPayload], Awaitable[None]]
 

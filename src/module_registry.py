@@ -11,10 +11,10 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Callable
 
 from pydantic import ValidationError
 
@@ -29,7 +29,6 @@ from .module_format import (
     parse_module,
 )
 from .world_store import atomic_write_json
-
 
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
@@ -323,7 +322,7 @@ class ModuleRegistry:
             atomic_write_json(staging / "install.json", {
                 "module_key": inspection.module_key,
                 "package_sha256": inspection.package_sha256,
-                "installed_at": datetime.now(timezone.utc).isoformat(),
+                "installed_at": datetime.now(UTC).isoformat(),
                 "format_version": manifest.format_version,
                 "compiler_version": compiled.compiler_version,
             })

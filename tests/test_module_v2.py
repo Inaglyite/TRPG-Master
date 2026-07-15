@@ -17,7 +17,6 @@ from src.module_format import (
 )
 from src.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
 
-
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 
 

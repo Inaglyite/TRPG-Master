@@ -11,7 +11,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.runtime import RuntimeContext  # noqa: E402
 
-
 CONTEXT = RuntimeContext.from_env()
 STORE = CONTEXT.world_store
 _TRANSACTION_STATE = None

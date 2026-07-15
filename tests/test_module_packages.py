@@ -23,9 +23,11 @@ from src.module_compiler import (
 from src.module_format import (
     ModuleDefinition,
     ModuleManifest,
-    compile_world_state as legacy_compile_world_state,
     manifest_json_schema,
     module_json_schema,
+)
+from src.module_format import (
+    compile_world_state as legacy_compile_world_state,
 )
 from src.module_registry import (
     ModulePackageError,
@@ -34,7 +36,6 @@ from src.module_registry import (
     inspect_package,
 )
 from src.runtime import RuntimeContext
-
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

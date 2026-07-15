@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Generic, TypeVar
+from enum import StrEnum
+from typing import Any
 
 
-class TurnRejection(str, Enum):
+class TurnRejection(StrEnum):
     """Stable reasons why a new turn lease could not be acquired."""
 
     SESSION_BUSY = "session_busy"
@@ -89,10 +89,7 @@ class SessionTurnGate:
         return self._session_lock.locked() or world_lock.locked()
 
 
-T = TypeVar("T")
-
-
-class PendingReply(Generic[T]):
+class PendingReply[T]:
     """One synchronous worker-to-client request/reply handshake.
 
     Replies can optionally be correlated by request id.  Starting a second

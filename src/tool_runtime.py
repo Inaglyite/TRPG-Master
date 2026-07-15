@@ -10,7 +10,6 @@ from typing import Any
 
 from .runtime import RuntimeContext
 
-
 ToolHandler = Callable[[dict[str, Any], RuntimeContext], str]
 
 

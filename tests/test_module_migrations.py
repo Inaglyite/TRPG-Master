@@ -5,7 +5,6 @@ from src.config import PROJECT_ROOT
 from src.module_format import ModuleDefinitionV2, parse_module
 from src.module_migrations import migrate_v1_to_v2
 
-
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 
 

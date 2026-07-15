@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 AMMO_RE = re.compile(r"(?P<open>[（(])(?P<before>\s*)(?P<count>\d+)(?P<after>\s*发\s*)(?P<close>[）)])")
 STACK_RE = re.compile(
     r"(?P<open>[（(])(?P<before>\s*)(?P<count>\d+)"

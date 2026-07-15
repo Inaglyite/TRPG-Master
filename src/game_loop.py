@@ -1,11 +1,11 @@
 """终端版游戏循环 —— 使用 GameEngine + print/input 回调"""
 
-import sys
-import subprocess
 import os
+import subprocess
+import sys
 
 from .config import PROJECT_ROOT
-from .engine import GameEngine, EngineCallbacks
+from .engine import EngineCallbacks, GameEngine
 from .runtime import RuntimeContext
 
 

@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT
 from src.combat import combat_action, start_combat
+from src.config import PROJECT_ROOT
 from src.engine import EngineCallbacks, GameEngine
 from src.persistence import (
     load_game,
@@ -15,8 +15,8 @@ from src.persistence import (
 )
 from src.runtime import RuntimeContext
 from src.tools import execute_function
-from src.world_store import StaleRevisionError
 from src.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
+from src.world_store import StaleRevisionError
 
 
 def combat_world() -> dict:

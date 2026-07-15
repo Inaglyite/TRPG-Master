@@ -27,7 +27,6 @@ from .module_format import (
 )
 from .world_migrations import CURRENT_WORLD_SCHEMA_VERSION
 
-
 MODULE_COMPILER_VERSION = "1.0.0"
 
 

@@ -58,7 +58,7 @@ class ToolRuntimeTests(unittest.TestCase):
 
 class BuiltinToolContractTests(unittest.TestCase):
     def test_every_declared_model_tool_has_exactly_one_runtime_handler(self):
-        from src.tools import TOOLS, TOOL_RUNTIME
+        from src.tools import TOOL_RUNTIME, TOOLS
 
         declared = {tool["function"]["name"] for tool in TOOLS}
 

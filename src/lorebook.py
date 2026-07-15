@@ -12,7 +12,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 LOREBOOK_SPEC = "lorebook_v3"
 LOREBOOK_SCHEMA_URI = "https://trpg-master.local/schemas/lorebook-v3.json"
 DEFAULT_TOKEN_BUDGET = 600
@@ -56,7 +55,7 @@ class TrpgLoreExtension(CompatibleModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_gated_visibility(self) -> "TrpgLoreExtension":
+    def validate_gated_visibility(self) -> TrpgLoreExtension:
         if self.visibility == "gated" and not (
             self.required_flags or self.required_clue_ids
         ):
@@ -92,7 +91,7 @@ class LorebookEntry(CompatibleModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_activation(self) -> "LorebookEntry":
+    def validate_activation(self) -> LorebookEntry:
         if not self.constant and not self.keys:
             raise ValueError("非常驻 Lorebook 条目至少需要一个 keys 触发词")
         if self.selective and not self.secondary_keys:
@@ -118,7 +117,7 @@ class LorebookData(CompatibleModel):
     entries: list[LorebookEntry] = Field(max_length=MAX_LOREBOOK_ENTRIES)
 
     @model_validator(mode="after")
-    def validate_entry_ids(self) -> "LorebookData":
+    def validate_entry_ids(self) -> LorebookData:
         explicit_ids = [str(entry.id) for entry in self.entries if entry.id is not None]
         if len(explicit_ids) != len(set(explicit_ids)):
             raise ValueError("Lorebook entry id 不能重复")
@@ -396,7 +395,7 @@ def _weighted_group_pick(
     sequence: int,
     world: dict[str, Any],
 ) -> tuple[LorebookEntry, int, str, TrpgLoreExtension]:
-    seed = f"{world.get('module', '')}:{group}:{sequence}".encode("utf-8")
+    seed = f"{world.get('module', '')}:{group}:{sequence}".encode()
     number = int.from_bytes(hashlib.sha256(seed).digest()[:8], "big")
     total = sum(candidate[3].weight for candidate in candidates)
     target = number % total

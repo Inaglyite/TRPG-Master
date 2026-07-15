@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable
 
-
 CURRENT_WORLD_SCHEMA_VERSION = 2
 
 

@@ -1,17 +1,17 @@
 """Tool 定义（Function Calling Schema）+ 执行器 + 骰子摘要"""
 
-import json
-import sys
-import os
 import base64
+import json
 import mimetypes
+import os
 import subprocess
+import sys
 from pathlib import Path
 
+from .consequences import SanitySeverity, classify_sanity_consequence
 from .endings import validate_ending
 from .runtime import RuntimeContext
 from .tool_runtime import ToolRuntime, UnknownToolError
-from .consequences import SanitySeverity, classify_sanity_consequence
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

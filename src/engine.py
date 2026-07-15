@@ -6,18 +6,52 @@ import copy
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from openai import OpenAI
 
+from .action_checks import infer_action_check, infer_scene_transition
+from .action_resolution import ActionResolution, plan_player_action
+from .agent_graph import build_turn_graph
+from .characters import apply_character_to_state, default_character_ref
+from .characters import settle_case as settle_character_case
+from .combat import preview_player_escalation
+from .combat_agent import build_combat_overlay
 from .config import (
-    API_KEY, BASE_URL, JUDGEMENT_MODEL, MODEL_FLASH,
+    API_KEY,
+    BASE_URL,
+    ENABLE_DYNAMIC_TOOLS,
+    ENABLE_LOREBOOK,
+    ENABLE_STREAM_USAGE,
+    JUDGEMENT_MODEL,
+    MODEL_FLASH,
     NARRATIVE_MODEL,
-    ENABLE_DYNAMIC_TOOLS, ENABLE_LOREBOOK, ENABLE_STREAM_USAGE,
     OPTIONAL_SKILL_HINTS,
-    PROMPT_PROFILE, STORY_THINKING_MODE,
+    PROMPT_PROFILE,
+    STORY_THINKING_MODE,
 )
+from .discovery import (
+    DiscoveryMatch,
+    match_discovery_rules,
+    preferred_check_skill,
+)
+from .encounters import SceneEncounterResolution, resolve_scene_encounters
+from .handouts import matching_handouts
+from .history_compactor import HistoryCompactor, build_summary_input, parse_summary_json
+from .logger import error as log_error
+from .logger import game_event as log_game
+from .logger import model_call as log_model_call
+from .logger import tier_inject as log_tier
+from .lorebook import (
+    LoreSelection,
+    estimate_text_tokens,
+    load_lorebook,
+    record_lore_usage,
+    select_lore,
+)
+from .model_session import ModelSession
+from .model_settings import ModelSettings
 from .persistence import (
     has_save,
     list_saves,
@@ -27,42 +61,20 @@ from .persistence import (
     restore_snapshot,
     save_game,
 )
-from .characters import apply_character_to_state, default_character_ref, settle_case as settle_character_case
-from .action_checks import infer_action_check, infer_scene_transition
-from .action_resolution import ActionResolution, plan_player_action
-from .discovery import (
-    DiscoveryMatch,
-    match_discovery_rules,
-    preferred_check_skill,
-)
-from .encounters import SceneEncounterResolution, resolve_scene_encounters
-from .combat import preview_player_escalation
-from .combat_agent import build_combat_overlay
-from .handouts import matching_handouts
-from .lorebook import (
-    LoreSelection,
-    estimate_text_tokens,
-    load_lorebook,
-    record_lore_usage,
-    select_lore,
-)
+from .runtime import RuntimeContext
 from .tools import (
-    MODEL_TOOLS, dice_summary, execute_function, model_tools_for,
+    MODEL_TOOLS,
+    dice_summary,
+    execute_function,
+    model_tools_for,
 )
+from .turn_journal import TurnJournal
 from .turn_reconciler import (
     narrative_body,
     reconcile_narrative_entities,
     reconcile_turn,
     turn_needs_model_audit,
 )
-from .runtime import RuntimeContext
-from .agent_graph import build_turn_graph
-from .model_settings import ModelSettings
-from .model_session import ModelSession
-from .turn_journal import TurnJournal
-from .logger import error as log_error, summary_event as log_summary, \
-    tier_inject as log_tier, game_event as log_game, model_call as log_model_call
-
 
 _INTERNAL_NARRATIVE_PATTERNS = (
     re.compile(r"(?:让我|我)?先确认(?:一下)?当前(?:的)?信息边界[。.!！]?\s*"),
@@ -192,6 +204,13 @@ class GameEngine:
             self.__dict__["_model_session"] = session
         return session
 
+    def _ensure_history_compactor(self) -> HistoryCompactor:
+        compactor = self.__dict__.get("_history_compactor")
+        if compactor is None:
+            compactor = HistoryCompactor(self)
+            self.__dict__["_history_compactor"] = compactor
+        return compactor
+
     @property
     def messages(self) -> list[dict]:
         return self._ensure_model_session().messages
@@ -212,6 +231,7 @@ class GameEngine:
         self.context = context or RuntimeContext.local()
         self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
         self._model_session = ModelSession()
+        self._history_compactor = HistoryCompactor(self)
         self.narrative_model = NARRATIVE_MODEL
         self.judgement_model = JUDGEMENT_MODEL
         self.current_model = self.narrative_model
@@ -1964,269 +1984,32 @@ class GameEngine:
     # ---- 记忆管理 ----
 
     def _estimate_tokens(self) -> int:
-        """粗略估算消息列表的 token 数。中文约 1.5 字符/token，英文约 4 字符/token。"""
-        total = 0
-        for m in self.messages:
-            content = m.get("content", "") or ""
-            # 混合文本粗略估算
-            total += len(content) // 2  # 取中值 ~2 chars/token
-            if "tool_calls" in m:
-                total += len(json.dumps(m["tool_calls"])) // 2
-        self._summary_token_estimate = total
-        return total
+        return self._ensure_history_compactor().estimate_tokens()
 
     def _should_summarize(self) -> bool:
-        """是否到达玩家回合压缩周期。"""
-        return (
-            self._player_turn_count > 0
-            and self._player_turn_count - self._last_summary_player_turn >= self.SUMMARY_PLAYER_TURN_INTERVAL
-        )
+        return self._ensure_history_compactor().should_summarize()
 
-    def _maybe_summarize_after_turn(self):
-        """在本轮叙事和 done 事件之后静默压缩，尽量让玩家无感。"""
-        if not self._should_summarize():
-            return
-        current_turn = self._player_turn_count
-        changed = self._summarize_history(silent=True)
-        self._last_summary_player_turn = current_turn
-        if changed:
-            self.save("slot_000")
+    def _maybe_summarize_after_turn(self) -> None:
+        self._ensure_history_compactor().maybe_after_turn()
 
     def _summarize_history(self, silent: bool = False) -> bool:
-        """压缩旧消息。优先 GLM-4 Flash（免费快速），失败则 DeepSeek Pro（可靠），
-        都失败才降级为简单截断。
+        return self._ensure_history_compactor().summarize(silent=silent)
 
-        关键设计：
-        - 不因消息数少就跳过——只要 token 超标且有可压缩的旧消息就尝试。
-          （system prompt 本身很大时，即使对话少，token 仍可能超标，
-           此时仍应压缩对话部分以腾出空间。）
-        - JSON 解析失败时降级接受纯文本摘要，而非丢弃整段输出。
-        """
-        from .llm import _get_glm
-
-        KEEP_RECENT = self.SUMMARY_KEEP_RECENT_MESSAGES
-        # 只在"旧消息太少不值得压缩"时跳过：系统消息+开场prompt之后几乎没有对话
-        cutoff = len(self.messages) - KEEP_RECENT
-        while cutoff > 1 and self.messages[cutoff].get("role") != "user":
-            cutoff -= 1
-        if cutoff <= 1:
-            return False  # 没有足够的旧消息可压缩
-
-        old_messages = self.messages[1:cutoff]
-        recent_messages = self.messages[cutoff:]
-        system_msg = self.messages[0]
-        if len(old_messages) < 3:
-            return False  # 旧消息太少，压缩意义不大
-
-        # 构建旧消息文本（复用于各级摘要）
-        old_text = self._build_summary_input(old_messages)
-
-        # 第一级：GLM-4 Flash（免费）
-        glm = _get_glm()
-        if glm is not None:
-            summary = self._try_model_summary(glm, "glm-4-flash-250414", old_text)
-            if summary is not None:
-                self._apply_summary(system_msg, summary, recent_messages, "GLM-4 Flash", silent=silent)
-                return True
-
-        # 第二级：DeepSeek Pro（付费但可靠）
-        if not silent:
-            self.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
-        summary = self._try_model_summary(
-            self.client, self.judgement_model, old_text
+    def _apply_summary(
+        self, system_msg, summary, recent_messages, model_name, silent: bool = False
+    ) -> None:
+        self._ensure_history_compactor().apply(
+            system_msg, summary, recent_messages, model_name, silent
         )
-        if summary is not None:
-            self._apply_summary(system_msg, summary, recent_messages, "DeepSeek Pro", silent=silent)
-            return True
-
-        # 第三级：简单截断（最后手段）
-        dropped = len(old_messages)
-        note = {
-            "role": "user",
-            "content": (
-                f"（上下文压缩——摘要模型均不可用，已丢弃最早的 {dropped} 条消息。"
-                "当前世界状态保存在 world_state.json 中，"
-                "请调用 state_clues() 和 state_npcs() 查询线索和 NPC 揭示状态，然后继续。）"
-            )
-        }
-        self.messages = [system_msg, note] + recent_messages
-        self._summary_token_estimate = self._estimate_tokens()
-        if not silent:
-            self.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
-        return True
-
-    def _apply_summary(self, system_msg, summary, recent_messages, model_name, silent: bool = False):
-        """将摘要应用到消息列表。"""
-        summary_msg = {
-            "role": "user",
-            "content": (
-                "（会话摘要——此前冒险的关键记录已压缩如下。"
-                "技能检定、已发现线索、NPC互动记录均已保留。\n\n"
-                f"{summary}\n\n"
-                "——摘要结束。以下是最近的对话——）"
-            )
-        }
-        self.messages = [system_msg, summary_msg] + recent_messages
-        self._summary_token_estimate = self._estimate_tokens()
-        log_summary(model_name, "成功")
-        if not silent:
-            self.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
 
     def _build_summary_input(self, old_messages: list) -> str:
-        """从旧消息构建摘要输入文本。截断 tool 输出，保留 user/assistant 核心内容。"""
-        parts = []
-        for m in old_messages:
-            role = m.get("role", "?")
-            content = m.get("content", "") or ""
-            if not content.strip():
-                continue
-            if role == "tool":
-                content = content[:200] + "..." if len(content) > 200 else content
-            elif role in ("user", "assistant"):
-                content = content[:500] + "..." if len(content) > 500 else content
-            else:
-                continue
-            parts.append(f"[{role}]: {content}")
-
-        old_text = "\n".join(parts)
-        MAX_INPUT = 6000
-        if len(old_text) > MAX_INPUT:
-            half = MAX_INPUT // 2
-            old_text = old_text[:half] + "\n...(中间内容省略)...\n" + old_text[-half:]
-        return old_text
+        return build_summary_input(old_messages)
 
     def _try_model_summary(self, client, model: str, old_text: str) -> str | None:
-        """用指定模型生成摘要。返回摘要文本或 None。
-
-        尝试2次（API偶发网络错误时重试）。JSON 解析失败时降级接受纯文本摘要，
-        不再因格式问题丢弃整段输出。
-        """
-        prompt = (
-            "你是TRPG记录员。将以下对话历史压缩为结构化摘要。\n"
-            "要求: 按时间顺序列出关键事件(episodic)、PC已知信息(pc_knowledge)、"
-            "已发现线索(revealed_clues)、当前目标(current_objective)、"
-            "最后场景(last_scene)。保留技能检定和骰子结果，不编造信息。\n"
-            "优先输出JSON格式，但内容完整性比格式正确更重要。\n\n"
-            f"{old_text}"
-        )
-
-        for attempt in range(2):
-            try:
-                resp = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "你是TRPG记录员。尽量输出JSON，但务必保证内容完整。"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=3000,
-                )
-                raw = resp.choices[0].message.content.strip()
-            except Exception:
-                if attempt == 0:
-                    continue  # 重试一次
-                return None
-
-            # 优先解析为 JSON
-            parsed = self._parse_summary_json(raw)
-            if parsed is not None:
-                return parsed
-
-            # JSON 解析失败：降级接受纯文本摘要（只要有实质内容）
-            if len(raw) > 50 and attempt == 1:
-                # 第二次也失败，用纯文本兜底
-                return f"（纯文本摘要）\n{raw}"
-
-            if attempt == 0:
-                continue  # 第一次失败，重试
-
-        return None
+        return self._ensure_history_compactor().try_model(client, model, old_text)
 
     def _parse_summary_json(self, raw: str) -> str | None:
-        """从模型输出中提取并验证 JSON。支持多种格式，尽力容错。"""
-        import re
-        if not raw:
-            return None
-        # 尝试1: 直接解析
-        try:
-            json.loads(raw)
-            return raw
-        except (json.JSONDecodeError, ValueError):
-            pass
-        # 尝试2: 提取 markdown 代码块中的 JSON
-        m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw, re.DOTALL)
-        if m:
-            try:
-                json.loads(m.group(1))
-                return m.group(1)
-            except (json.JSONDecodeError, ValueError):
-                pass
-        # 尝试3: 找到第一个 { 和最后一个 }
-        start = raw.find('{')
-        end = raw.rfind('}')
-        if start >= 0 and end > start:
-            try:
-                candidate = raw[start:end+1]
-                json.loads(candidate)
-                return candidate
-            except (json.JSONDecodeError, ValueError):
-                pass
-        # 尝试4: 修复常见问题（尾部逗号、单引号、缺右括号）
-        if start >= 0 and end > start:
-            try:
-                candidate = raw[start:end+1]
-                candidate = re.sub(r',\s*}', '}', candidate)
-                candidate = re.sub(r',\s*]', ']', candidate)
-                # 补全缺失的右括号
-                depth = 0
-                for ch in candidate:
-                    if ch == '{':
-                        depth += 1
-                    elif ch == '}':
-                        depth -= 1
-                if depth > 0:
-                    candidate += '}' * depth
-                json.loads(candidate)
-                return candidate
-            except (json.JSONDecodeError, ValueError):
-                pass
-        # 尝试5: JSON 被截断——尝试补全（长对话输出接近 max_tokens 时常见）
-        if start >= 0:
-            candidate = raw[start:]
-            candidate = re.sub(r',\s*$', '', candidate)
-            # 统计未闭合的括号
-            depth_brace = 0
-            depth_bracket = 0
-            in_string = False
-            esc = False
-            for ch in candidate:
-                if esc:
-                    esc = False
-                    continue
-                if ch == '\\':
-                    esc = True
-                    continue
-                if ch == '"':
-                    in_string = not in_string
-                    continue
-                if in_string:
-                    continue
-                if ch == '{':
-                    depth_brace += 1
-                elif ch == '}':
-                    depth_brace -= 1
-                elif ch == '[':
-                    depth_bracket += 1
-                elif ch == ']':
-                    depth_bracket -= 1
-            candidate += ']' * max(depth_bracket, 0)
-            candidate += '}' * max(depth_brace, 0)
-            try:
-                json.loads(candidate)
-                return candidate
-            except (json.JSONDecodeError, ValueError):
-                pass
-        return None
+        return parse_summary_json(raw)
 
     # ---- TIER 规则滑动窗口 ----
 

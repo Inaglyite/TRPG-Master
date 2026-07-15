@@ -3,16 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.agent_graph import _prepare_turn
 from src.action_resolution import ActionPhase, plan_player_action
+from src.agent_graph import _prepare_turn
 from src.config import PROJECT_ROOT
 from src.discovery import (
     match_discovery_rules,
     preferred_check_skill,
     preferred_luck_difficulty,
 )
-from src.engine import EngineCallbacks, GameEngine
 from src.encounters import resolve_scene_encounters
+from src.engine import EngineCallbacks, GameEngine
 from src.runtime import RuntimeContext
 
 

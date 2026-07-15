@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from .module_format import ModuleDefinition, ModuleManifest, engine_supports
 
-
 DiagnosticLevel = Literal["error", "warning", "advice"]
 DiagnosticPhase = Literal[
     "manifest_validation",

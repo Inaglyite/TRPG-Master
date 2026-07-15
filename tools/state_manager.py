@@ -8,9 +8,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.runtime import RuntimeContext  # noqa: E402
 from src.handouts import resolve_handout_asset  # noqa: E402
-
+from src.runtime import RuntimeContext  # noqa: E402
 
 CONTEXT = RuntimeContext.from_env()
 STORE = CONTEXT.world_store
@@ -41,8 +40,8 @@ def _resolve_path(data, path):
             try:
                 idx = int(p)
                 current = current[idx]
-            except (ValueError, IndexError):
-                raise KeyError(f"列表索引 '{p}' 不存在于 {current}")
+            except (ValueError, IndexError) as exc:
+                raise KeyError(f"列表索引 '{p}' 不存在于 {current}") from exc
         elif isinstance(current, dict):
             if p not in current:
                 raise KeyError(f"键 '{p}' 不存在于 {list(current.keys())}")

@@ -18,13 +18,13 @@ from pathlib import Path
 from .config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
-    PROMPT_PROFILE,
     PROJECT_ROOT,
+    PROMPT_PROFILE,
     RUNTIME_ROOT,
     SKILL_LOAD_ORDER,
 )
-from .runtime import RuntimeContext, default_world_id
 from .handouts import refresh_static_handout_config
+from .runtime import RuntimeContext, default_world_id
 from .world_migrations import migrate_world_state
 from .world_store import atomic_write_json
 

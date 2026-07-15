@@ -2,19 +2,19 @@
 # ruff: noqa: E402
 """TRPG Agent WebSocket 服务器 —— GameEngine + FastAPI"""
 
-import json
-import sys
-import os
 import asyncio
 import base64
 import copy
+import json
 import mimetypes
+import os
 import runpy
 import secrets
+import sys
 import tempfile
 import threading
-from urllib.parse import quote
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -85,8 +85,12 @@ if _ENV_FILE.exists():
     except Exception as e:
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
-from src.engine import GameEngine, EngineCallbacks
-from src.event_stream import OrderedTurnEventStream
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from src.characters import list_character_options
 from src.config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
@@ -97,10 +101,16 @@ from src.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
+from src.engine import EngineCallbacks, GameEngine
+from src.event_stream import OrderedTurnEventStream
+from src.game_application import (
+    ApplicationUseCaseError,
+    GameApplication,
+    SaveNotFoundError,
+)
+from src.handouts import resolve_handout_asset
+from src.lorebook import lorebook_json_schema
 from src.model_settings import ModelSettings, persist_model_settings
-from src.player_notes import PlayerNotesConflict, PlayerNotesStore
-from src.persistence import delete_save, load_game
-from src.characters import list_character_options
 from src.module_compiler import compile_payload
 from src.module_format import (
     manifest_json_schema,
@@ -108,29 +118,19 @@ from src.module_format import (
     module_json_schema,
     module_v2_json_schema,
 )
-from src.lorebook import lorebook_json_schema
-from src.handouts import resolve_handout_asset
 from src.module_registry import (
     MAX_PACKAGE_BYTES,
     ModulePackageError,
     ModuleRegistry,
     inspect_package,
 )
+from src.persistence import delete_save, load_game
+from src.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.runtime import RuntimeContext
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
-from src.game_application import (
-    ApplicationUseCaseError,
-    GameApplication,
-    SaveNotFoundError,
-)
-from src.ws_session import SessionTurnGate, WsSessionContext
 from src.ws_router import WsMessageRouter
-
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from src.ws_session import SessionTurnGate, WsSessionContext
 
 app = FastAPI(title="TRPG Agent API")
 app.add_middleware(
@@ -1102,8 +1102,10 @@ async def _receive_module_upload(request: Request) -> Path:
         try:
             if int(content_length) > MAX_PACKAGE_BYTES:
                 raise ModulePackageError("package_too_large", "模组包超过 64 MiB 上限")
-        except ValueError:
-            raise ModulePackageError("invalid_length", "Content-Length 无效")
+        except ValueError as exc:
+            raise ModulePackageError(
+                "invalid_length", "Content-Length 无效"
+            ) from exc
 
     import_dir = RUNTIME_ROOT / ".module-imports"
     import_dir.mkdir(parents=True, exist_ok=True)

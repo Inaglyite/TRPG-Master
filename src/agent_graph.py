@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
 
+from .choices import extract_action_choices
 from .config import (
     ENABLE_TURN_AUDIT,
     JUDGEMENT_MODEL,
@@ -20,9 +21,9 @@ from .config import (
 )
 from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
-from .logger import error as log_error, tool as log_tool
+from .logger import error as log_error
+from .logger import tool as log_tool
 from .tools import COMPLEX_FUNCTIONS, dice_summary
-from .choices import extract_action_choices
 
 
 class TurnState(TypedDict, total=False):

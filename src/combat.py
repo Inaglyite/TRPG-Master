@@ -15,7 +15,6 @@ from typing import Any
 from .inventory import InventoryError, check_firearm_ammo, consume_firearm_ammo
 from .personality import investigator_roleplay_profile
 
-
 COMBAT_KEY = "combat_state"
 _DAMAGE_RE = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
 _SKILL_ALIASES = {

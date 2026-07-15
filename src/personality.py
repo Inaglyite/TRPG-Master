@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 VIOLENCE_STANCES = ("avoidant", "conditional", "unrestrained")
 _STANCE_ALIASES = {
     "avoidant": "avoidant",

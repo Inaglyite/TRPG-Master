@@ -72,7 +72,7 @@ def glm_quick_summary(tool_outputs: list[tuple[str, str]], model_context: str) -
     dice_info = ""
     sanity_info = ""
     damage_info = ""
-    for name, out in tool_outputs:
+    for _name, out in tool_outputs:
         try:
             data = json.loads(out)
         except json.JSONDecodeError:

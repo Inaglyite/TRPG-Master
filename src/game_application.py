@@ -146,7 +146,7 @@ class GameApplication:
         engine: GameEnginePort,
         *,
         auto_slot: str = "slot_000",
-    ) -> "GameApplication":
+    ) -> GameApplication:
         return cls(
             start_game=StartGame(engine),
             resume_game=ResumeGame(engine),

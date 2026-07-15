@@ -112,7 +112,7 @@ class RuntimeContext:
     def player_profile_file(self) -> Path:
         return self.profiles_dir / "player_profile.json"
 
-    def ensure_initialized(self, *, migrate_legacy: bool = False) -> "RuntimeContext":
+    def ensure_initialized(self, *, migrate_legacy: bool = False) -> RuntimeContext:
         if not self.module_dir.is_dir():
             raise FileNotFoundError(f"模组不存在: {self.module_dir}")
         self.world_dir.mkdir(parents=True, exist_ok=True)
@@ -224,7 +224,7 @@ class RuntimeContext:
         project_root: Path = PROJECT_ROOT,
         runtime_root: Path = RUNTIME_ROOT,
         migrate_legacy: bool = False,
-    ) -> "RuntimeContext":
+    ) -> RuntimeContext:
         context = cls(project_root, runtime_root, world_id, module_name)
         return context.ensure_initialized(migrate_legacy=migrate_legacy)
 
@@ -235,7 +235,7 @@ class RuntimeContext:
         *,
         project_root: Path = PROJECT_ROOT,
         runtime_root: Path = RUNTIME_ROOT,
-    ) -> "RuntimeContext":
+    ) -> RuntimeContext:
         return cls.create(
             default_world_id(module_name),
             module_name,
@@ -245,7 +245,7 @@ class RuntimeContext:
         )
 
     @classmethod
-    def from_env(cls) -> "RuntimeContext":
+    def from_env(cls) -> RuntimeContext:
         module_name = os.environ.get("TRPG_MODULE", DEFAULT_MODULE_NAME)
         world_id = os.environ.get("TRPG_WORLD_ID")
         project_root = Path(os.environ.get("TRPG_PROJECT_ROOT", PROJECT_ROOT))

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-
 COMBAT_AGENT_PROMPT = """
 你现在以“战斗专员”身份接管本回合。你仍是同一位守秘人，保持此前叙事口吻，
 但你的职责集中在敌人战术、战斗节奏和战斗结果的清晰呈现。

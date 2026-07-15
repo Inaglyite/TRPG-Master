@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .world_store import atomic_write_json, file_lock
-
 
 PLAYER_NOTES_SCHEMA_VERSION = 1
 MAX_PLAYER_NOTES_CHARS = 20_000
@@ -81,7 +80,7 @@ class PlayerNotesStore:
                 "schema_version": PLAYER_NOTES_SCHEMA_VERSION,
                 "revision": actual + 1,
                 "text": normalized,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
             atomic_write_json(self.path, payload)
             return payload

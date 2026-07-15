@@ -15,7 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.inventory import InventoryError, use_item
 from src.runtime import RuntimeContext
 
-
 CONTEXT = RuntimeContext.from_env()
 
 

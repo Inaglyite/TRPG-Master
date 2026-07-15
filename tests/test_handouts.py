@@ -19,7 +19,6 @@ from src.module_registry import ModuleRegistry, build_package
 from src.persistence import save_game
 from src.runtime import RuntimeContext
 
-
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 
 

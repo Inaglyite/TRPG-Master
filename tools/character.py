@@ -5,8 +5,8 @@
 import json
 import random
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -14,7 +14,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.personality import normalize_violence_stance
 from src.runtime import RuntimeContext
 from src.world_store import atomic_write_json
-
 
 CONTEXT = RuntimeContext.from_env()
 CHARS_DIR = CONTEXT.custom_characters_dir
@@ -355,7 +354,7 @@ def load_character(path: str) -> dict | None:
         full_path = CHARS_DIR / path
     if not full_path.exists():
         return None
-    with open(full_path, "r", encoding="utf-8") as f:
+    with open(full_path, encoding="utf-8") as f:
         return json.load(f)
 
 

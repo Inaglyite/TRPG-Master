@@ -15,9 +15,8 @@ from src.lorebook import (
     select_lore,
     validate_lorebook_references,
 )
-from src.world_store import WorldStore
 from src.world_migrations import migrate_world_state
-
+from src.world_store import WorldStore
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

@@ -8,8 +8,9 @@ import time
 from typing import Any
 
 from .config import JUDGEMENT_MODEL
-from .logger import error as log_error, game_event as log_game, model_call as log_model_call
-
+from .logger import error as log_error
+from .logger import game_event as log_game
+from .logger import model_call as log_model_call
 
 COMMIT_TURN_TOOL = {
     "type": "function",

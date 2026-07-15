@@ -17,13 +17,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.runtime import RuntimeContext  # noqa: E402
 
-
 CONTEXT = RuntimeContext.from_env()
 SCHEMA_PATH = CONTEXT.project_root / "rules" / "rule_schema.json"
 
 
 def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

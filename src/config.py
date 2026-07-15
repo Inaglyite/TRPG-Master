@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 
+
 # ---- 路径 ----
 def _resolve_project_root() -> Path:
     """定位项目根目录（含 mod/ 的目录）。

@@ -11,20 +11,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.module_compiler import compile_payload  # noqa: E402
 from src.lorebook import lorebook_json_schema  # noqa: E402
+from src.module_compiler import compile_payload  # noqa: E402
 from src.module_format import (  # noqa: E402
     manifest_json_schema,
     manifest_v2_json_schema,
     module_json_schema,
     module_v2_json_schema,
 )
+from src.module_migrations import migrate_v1_to_v2  # noqa: E402
 from src.module_registry import (  # noqa: E402
     ModulePackageError,
     build_package,
     inspect_package,
 )
-from src.module_migrations import migrate_v1_to_v2  # noqa: E402
 from src.world_store import atomic_write_json  # noqa: E402
 
 

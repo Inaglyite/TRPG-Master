@@ -13,12 +13,11 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .world_store import atomic_write_json, file_lock
-
 
 TURN_RECORD_SCHEMA_VERSION = 1
 PROCESS_INSTANCE_ID = secrets.token_hex(12)
@@ -57,11 +56,11 @@ def _journal_lock(path: Path) -> threading.RLock:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_turn_id() -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return f"turn_{stamp}_{secrets.token_hex(4)}"
 
 
@@ -390,7 +389,7 @@ class TurnJournal:
                 for record in self._lineage_unlocked(str(target_id))
             ]
 
-    def clone_lineage_to(self, target: "TurnJournal", through_turn_id: str) -> None:
+    def clone_lineage_to(self, target: TurnJournal, through_turn_id: str) -> None:
         """Clone committed artifacts through one turn into an empty world journal."""
         artifacts: list[tuple[dict, list[dict], dict]] = []
         with self._thread_lock, file_lock(self.lock_path):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 
-
 ASSET_GROUPS = ("npcs", "scenes", "clues")
 EVENT_BY_ENTITY_TYPE = {
     "npc": "npc_revealed",

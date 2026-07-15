@@ -180,7 +180,7 @@ class AssetRevealTrigger(StrictModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_match_condition(self) -> "AssetRevealTrigger":
+    def validate_match_condition(self) -> AssetRevealTrigger:
         if not self.entity_id and not self.match_all and not self.match_any:
             raise ValueError("素材触发规则必须指定 entity_id 或文本匹配条件")
         if self.event == "sanity_triggered" and not self.match_all and not self.match_any:
@@ -255,7 +255,7 @@ class EncounterDefinition(StrictModel):
         return _validate_entity_id(value, "遭遇/NPC ID")
 
     @model_validator(mode="after")
-    def validate_conditional_flags(self) -> "EncounterDefinition":
+    def validate_conditional_flags(self) -> EncounterDefinition:
         if (
             self.availability == "conditional"
             and not self.required_flags
@@ -330,7 +330,7 @@ class DiscoveryFallbackDefinition(StrictModel):
         return None if value is None else _validate_entity_id(value)
 
     @model_validator(mode="after")
-    def validate_mode(self) -> "DiscoveryFallbackDefinition":
+    def validate_mode(self) -> DiscoveryFallbackDefinition:
         if self.mode == "alternate_clue" and not self.clue_id:
             raise ValueError("alternate_clue 保底必须指定 clue_id")
         if self.mode == "grant_clue" and self.clue_id:
@@ -361,7 +361,7 @@ class DiscoveryRuleDefinition(StrictModel):
         return targets
 
     @model_validator(mode="after")
-    def validate_required_skill(self) -> "DiscoveryRuleDefinition":
+    def validate_required_skill(self) -> DiscoveryRuleDefinition:
         if self.check_type == "luck" and self.skill:
             raise ValueError("幸运发现规则不能同时指定 skill")
         if self.requires_success and self.check_type != "luck" and not self.skill:
@@ -502,7 +502,7 @@ class ModuleDefinition(StrictModel):
         return _validate_entity_id(value, "入口场景 ID")
 
     @model_validator(mode="after")
-    def validate_references(self) -> "ModuleDefinition":
+    def validate_references(self) -> ModuleDefinition:
         for mapping_name in ("npcs", "scenes", "clues", "endings"):
             for entity_id in getattr(self, mapping_name):
                 _validate_entity_id(entity_id, f"{mapping_name} ID")
@@ -634,7 +634,7 @@ class ModuleDefinitionV2(ModuleDefinition):
     progression: ProgressionDefinition = Field(default_factory=ProgressionDefinition)
 
     @model_validator(mode="after")
-    def validate_progression_safety(self) -> "ModuleDefinitionV2":
+    def validate_progression_safety(self) -> ModuleDefinitionV2:
         clue_ids = set(self.clues)
         missing = sorted(set(self.progression.essential_clue_ids) - clue_ids)
         if missing:

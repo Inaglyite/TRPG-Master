@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-
 _CHOICE_MARKER = re.compile(
     r"(?:\*{0,2})你可以(?:\s*)[—–-]{1,2}(?:\*{0,2})\s*[:：]?",
     re.IGNORECASE,
