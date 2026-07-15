@@ -1,7 +1,21 @@
 import threading
 import unittest
 
-from src.ws_session import PendingReply, SessionTurnGate, TurnRejection
+from src.ws_session import (
+    PendingReply,
+    SessionTurnGate,
+    TurnRejection,
+    WsSessionContext,
+)
+
+
+class _Outbound:
+    def __init__(self, *, active=True):
+        self.has_active_turn = active
+        self.messages = []
+
+    async def send(self, payload):
+        self.messages.append(payload)
 
 
 class SessionTurnGateTests(unittest.TestCase):
@@ -86,6 +100,30 @@ class PendingReplyTests(unittest.TestCase):
             if predicate():
                 return True
         return False
+
+
+class WsSessionContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_world_contention_has_stable_protocol_reason(self):
+        world_lock = threading.Lock()
+        world_lock.acquire()
+        outbound = _Outbound()
+        session = WsSessionContext(outbound, SessionTurnGate(world_lock))
+
+        acquired = await session.reserve_turn()
+
+        self.assertFalse(acquired)
+        self.assertEqual("world_turn_in_progress", outbound.messages[0]["reason"])
+        world_lock.release()
+
+    async def test_session_contention_distinguishes_active_and_finalizing(self):
+        outbound = _Outbound(active=False)
+        session = WsSessionContext(outbound, SessionTurnGate(threading.Lock()))
+        self.assertTrue(await session.reserve_turn())
+
+        self.assertFalse(await session.reserve_turn())
+
+        self.assertEqual("turn_finalizing", outbound.messages[0]["reason"])
+        session.release_turn()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .endings import validate_ending
 from .runtime import RuntimeContext
+from .tool_runtime import ToolRuntime
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -781,6 +782,105 @@ def _run_cli(argv: list, context: RuntimeContext) -> str:
         return f"[异常] {e}"
 
 
+TOOL_RUNTIME = ToolRuntime()
+
+
+def _register_cli_tool(name: str, argv_builder) -> None:
+    def handler(args: dict, context: RuntimeContext) -> str:
+        return _run_cli(argv_builder(sys.executable, args), context)
+
+    TOOL_RUNTIME.add(name, handler)
+
+
+_CLI_TOOL_BUILDERS = {
+    "dice_roll": lambda exe, args: [exe, "tools/dice.py", args.get("spec", "d20")],
+    "state_get": lambda exe, args: [
+        exe, "tools/state_manager.py", "get", args.get("path", "pc.hp")
+    ],
+    "state_set": lambda exe, args: [
+        exe, "tools/state_manager.py", "set",
+        args.get("path", ""), args.get("value", ""),
+    ],
+    "state_npcs": lambda exe, _args: [exe, "tools/state_manager.py", "npcs"],
+    "state_clues": lambda exe, _args: [exe, "tools/state_manager.py", "clues"],
+    "state_add_item": lambda exe, args: [
+        exe, "tools/state_manager.py", "add-item", args.get("item", "")
+    ],
+    "state_remove_item": lambda exe, args: [
+        exe, "tools/state_manager.py", "remove-item", args.get("item", "")
+    ],
+    "apply_damage": lambda exe, args: [
+        exe, "tools/damage.py", "damage", args.get("target", "pc"),
+        args.get("amount", 0), args.get("damage_type", "物理"),
+    ],
+    "apply_heal": lambda exe, args: [
+        exe, "tools/damage.py", "heal",
+        args.get("target", "pc"), args.get("amount", 0),
+    ],
+    "sanity_loss": lambda exe, args: [
+        exe, "tools/sanity.py", "loss", args.get("severity", "moderate")
+    ],
+    "sanity_restore": lambda exe, args: [
+        exe, "tools/sanity.py", "restore", args.get("amount", 0)
+    ],
+    "sanity_check": lambda exe, _args: [exe, "tools/sanity.py", "check"],
+    "load_character": lambda exe, args: [
+        exe, "tools/character.py", "load", args.get("path", "")
+    ],
+    "use_item": lambda exe, args: [
+        exe, "tools/item.py", json.dumps(args, ensure_ascii=False)
+    ],
+    "combat_start": lambda exe, args: [
+        exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)
+    ],
+    "combat_status": lambda exe, _args: [exe, "tools/combat.py", "status", "{}"],
+    "combat_action": lambda exe, args: [
+        exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)
+    ],
+    "combat_decide": lambda exe, args: [
+        exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)
+    ],
+    "combat_end": lambda exe, args: [
+        exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)
+    ],
+    "attribute_check": lambda exe, args: [
+        exe, "tools/skill_check.py", args.get("attribute", "STR"),
+        args.get("bonus_dice", 0) or 0, args.get("penalty_dice", 0) or 0,
+    ],
+    "luck_check": lambda exe, _args: [exe, "tools/skill_check.py", "POW"],
+    "psychoanalysis": lambda exe, args: [
+        exe, "tools/sanity.py", "psychoanalysis", args.get("target", "pc")
+    ],
+    "reality_check": lambda exe, _args: [exe, "tools/sanity.py", "reality-check"],
+    "set_psychological_trait": lambda exe, args: [
+        exe, "tools/state_manager.py", "psych-trait",
+        args.get("category", "phobia"), args.get("name", ""),
+        args.get("context", ""),
+    ],
+    "link_clues": lambda exe, args: [
+        exe, "tools/state_manager.py", "link-clues", args.get("from_id", ""),
+        args.get("to_id", ""), args.get("reasoning", ""),
+    ],
+    "npc_reveal": lambda exe, args: [
+        exe, "tools/state_manager.py", "npc-reveal", args.get("npc_id", ""),
+        args.get("tier", 1), args.get("entry_text", ""),
+    ],
+    "get_npc_secret": lambda exe, args: [
+        exe, "tools/state_manager.py", "npc-secret", args.get("npc_id", "")
+    ],
+    "get_private_memory": lambda exe, _args: [
+        exe, "tools/state_manager.py", "private-memory"
+    ],
+    "update_private_memory": lambda exe, args: [
+        exe, "tools/state_manager.py", "private-memory-update",
+        args.get("section", ""), args.get("value", ""),
+    ],
+}
+
+for _tool_name, _argv_builder in _CLI_TOOL_BUILDERS.items():
+    _register_cli_tool(_tool_name, _argv_builder)
+
+
 def execute_function(
     name: str,
     args: dict,
@@ -788,6 +888,8 @@ def execute_function(
     context: RuntimeContext | None = None,
 ) -> str:
     context = context or RuntimeContext.local()
+    if name in TOOL_RUNTIME.names:
+        return TOOL_RUNTIME.execute(name, args, context)
     exe = sys.executable  # frozen exe 路径；argv 列表经 CreateProcess 启动，不怕空格/中文
 
     def run_cli(argv: list) -> str:

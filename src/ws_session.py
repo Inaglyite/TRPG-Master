@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 
 class TurnRejection(str, Enum):
@@ -145,3 +145,58 @@ class PendingReply(Generic[T]):
     def active(self) -> bool:
         with self._lock:
             return self._event is not None
+
+
+@dataclass
+class WsSessionContext:
+    """Mutable lifecycle state owned by exactly one WebSocket connection."""
+
+    outbound: Any
+    turn_gate: SessionTurnGate
+    suggest_reply: PendingReply[bool] = field(
+        default_factory=lambda: PendingReply(False)
+    )
+    decision_reply: PendingReply[str | None] = field(
+        default_factory=lambda: PendingReply(None)
+    )
+    active_lease: TurnLease | None = None
+    close_requested: bool = False
+
+    async def reserve_turn(self) -> bool:
+        """Acquire a turn lease and emit the stable protocol rejection if busy."""
+        lease, rejection = self.turn_gate.try_acquire()
+        if rejection is TurnRejection.SESSION_BUSY:
+            finishing = not self.outbound.has_active_turn
+            await self.outbound.send({
+                "type": "turn_rejected",
+                "reason": "turn_finalizing" if finishing else "turn_in_progress",
+                "message": (
+                    "上一回合正在收尾，请稍后重试刚才的行动。"
+                    if finishing
+                    else "上一回合尚未结束，请等待守秘人完成叙述。"
+                ),
+            })
+            return False
+        if rejection is TurnRejection.WORLD_BUSY:
+            await self.outbound.send({
+                "type": "turn_rejected",
+                "reason": "world_turn_in_progress",
+                "message": "这个世界的上一回合仍在后台收尾，请稍后再恢复或行动。",
+            })
+            return False
+        self.active_lease = lease
+        return True
+
+    def release_turn(self) -> None:
+        lease = self.active_lease
+        if lease is not None:
+            self.active_lease = None
+            lease.release()
+
+    @property
+    def turn_busy(self) -> bool:
+        return self.turn_gate.busy
+
+    def cancel_pending_replies(self) -> None:
+        self.suggest_reply.cancel()
+        self.decision_reply.cancel()

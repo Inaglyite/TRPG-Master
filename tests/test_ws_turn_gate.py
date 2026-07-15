@@ -27,6 +27,39 @@ class WebSocketTurnGateTests(unittest.TestCase):
         self.assertEqual("unknown_message_type", response["code"])
         self.assertEqual("future_client_message", response["message_type"])
 
+    def test_world_switch_never_releases_another_sessions_world_lock(self):
+        import server
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = RuntimeContext(
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+                world_id="busy-world",
+                module_name="mansion_of_madness",
+            )
+            target_lock = server._world_turn_lock(target)
+            target_lock.acquire()
+            try:
+                with (
+                    patch("src.engine.API_KEY", "test-api-key"),
+                    patch.object(server.WORLD_BRANCHES, "open", return_value=target),
+                ):
+                    with TestClient(server.app) as client:
+                        with client.websocket_connect("/ws") as ws:
+                            for _ in range(5):
+                                ws.receive_json()
+                            ws.send_json({
+                                "type": "world_switch",
+                                "world_id": "busy-world",
+                            })
+                            response = ws.receive_json()
+
+                self.assertEqual("world_switch_failed", response["type"])
+                self.assertTrue(target_lock.locked())
+            finally:
+                if target_lock.locked():
+                    target_lock.release()
+
     def test_second_action_is_rejected_before_another_turn_starts(self):
         import server
 

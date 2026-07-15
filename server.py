@@ -114,7 +114,7 @@ from src.module_registry import (
 from src.runtime import RuntimeContext
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
-from src.ws_session import PendingReply, SessionTurnGate, TurnLease, TurnRejection
+from src.ws_session import SessionTurnGate, WsSessionContext
 from src.ws_router import WsMessageRouter
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -299,44 +299,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
     loop = asyncio.get_running_loop()
     outbound = OrderedTurnEventStream(ws, loop)
-    suggest_reply = PendingReply(False)
-    decision_reply: PendingReply[str | None] = PendingReply(None)
     turn_gate = SessionTurnGate(_world_turn_lock(engine.context))
-    active_lease: list[TurnLease | None] = [None]
-
-    async def reserve_turn() -> bool:
-        """Reserve the session before a lifecycle id can be created."""
-        lease, rejection = turn_gate.try_acquire()
-        if rejection is TurnRejection.SESSION_BUSY:
-            finishing = not outbound.has_active_turn
-            await outbound.send({
-                "type": "turn_rejected",
-                "reason": "turn_finalizing" if finishing else "turn_in_progress",
-                "message": (
-                    "上一回合正在收尾，请稍后重试刚才的行动。"
-                    if finishing
-                    else "上一回合尚未结束，请等待守秘人完成叙述。"
-                ),
-            })
-            return False
-        if rejection is TurnRejection.WORLD_BUSY:
-            await outbound.send({
-                "type": "turn_rejected",
-                "reason": "world_turn_in_progress",
-                "message": "这个世界的上一回合仍在后台收尾，请稍后再恢复或行动。",
-            })
-            return False
-        active_lease[0] = lease
-        return True
+    session = WsSessionContext(outbound=outbound, turn_gate=turn_gate)
+    suggest_reply = session.suggest_reply
+    decision_reply = session.decision_reply
+    reserve_turn = session.reserve_turn
 
     def turn_state_busy() -> bool:
-        return turn_gate.busy
+        return session.turn_busy
 
     def release_turn() -> None:
-        lease = active_lease[0]
-        if lease is not None:
-            active_lease[0] = None
-            lease.release()
+        session.release_turn()
 
     def run_reserved_turn(coro_fn, *args):
         """Run a previously reserved turn in the executor."""
@@ -593,6 +566,424 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             ),
         })
 
+    @router.handler("player_notes_update")
+    async def handle_player_notes_update(data: dict) -> None:
+        try:
+            notes = PlayerNotesStore(engine.context.world_dir).save(
+                data.get("text", ""),
+                expected_revision=(
+                    int(data["revision"])
+                    if data.get("revision") is not None
+                    else None
+                ),
+            )
+            await outbound.send({"type": "player_notes", "saved": True, **notes})
+        except PlayerNotesConflict as exc:
+            current = PlayerNotesStore(engine.context.world_dir).load()
+            await outbound.send({
+                "type": "player_notes_conflict",
+                "message": str(exc),
+                **current,
+            })
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            await outbound.send({
+                "type": "player_notes_error",
+                "message": str(exc) or "玩家笔记保存失败",
+            })
+
+    @router.handler("model_settings_update")
+    async def handle_model_settings_update(data: dict) -> None:
+        global _active_model_settings
+        if not turn_gate.try_acquire_session():
+            await outbound.send({
+                "type": "model_settings_error",
+                "message": "当前回合尚未结束，请在本轮叙述完成后重试。",
+            })
+            return
+        try:
+            settings = ModelSettings.validated(
+                data.get("narrative_model"),
+                data.get("judgement_model"),
+            )
+            persist_model_settings(_ENV_FILE, settings)
+            engine.configure_models(
+                settings.narrative_model,
+                settings.judgement_model,
+            )
+            _active_model_settings = settings
+            await outbound.send({
+                **_model_settings_payload(settings),
+                "saved": True,
+            })
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            await outbound.send({
+                "type": "model_settings_error",
+                "message": f"模型设置保存失败：{exc}",
+            })
+        finally:
+            turn_gate.release_session()
+
+    @router.handler("save")
+    async def handle_save(data: dict) -> None:
+        is_manual = data.get("manual", False)
+        slot_id = None if is_manual else AUTO_SAVE_SLOT
+        if turn_state_busy():
+            await outbound.send({
+                "type": "saved",
+                "ok": False,
+                "slot_id": slot_id or "",
+                "reason": "turn_in_progress",
+            })
+            return
+        sid = engine.save(slot_id)
+        await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
+
+    @router.handler("save_delete")
+    async def handle_save_delete(data: dict) -> None:
+        slot_id = data.get("slot_id", "")
+        if slot_id == AUTO_SAVE_SLOT:
+            await outbound.send({
+                "type": "error",
+                "message": "自动存档不可手动删除。",
+            })
+            return
+        delete_save(slot_id, context=engine.context)
+        await outbound.send({"type": "save_deleted", "slot_id": slot_id})
+
+    @router.handler("save_create")
+    async def handle_save_create(_data: dict) -> None:
+        if turn_state_busy():
+            await outbound.send({
+                "type": "saved",
+                "ok": False,
+                "slot_id": "",
+                "reason": "turn_in_progress",
+            })
+            return
+        used = set()
+        for save in engine.list_saves():
+            if save["id"].startswith("slot_") and save["id"] != AUTO_SAVE_SLOT:
+                try:
+                    used.add(int(save["id"].split("_")[1]))
+                except (ValueError, IndexError):
+                    pass
+        number = 1
+        while number in used:
+            number += 1
+        slot_id = f"slot_{number:03d}"
+        sid = engine.save(slot_id)
+        await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
+
+    @router.handler("save_rename")
+    async def handle_save_rename(data: dict) -> None:
+        from src.persistence import rename_save
+
+        slot_id = data.get("slot_id", "")
+        label = data.get("label", "")
+        ok = rename_save(slot_id, label, context=engine.context)
+        await outbound.send({
+            "type": "save_renamed",
+            "slot_id": slot_id,
+            "label": label,
+            "ok": ok,
+        })
+
+    @router.handler("settle_case")
+    async def handle_settle_case(data: dict) -> None:
+        if turn_state_busy():
+            await outbound.send({
+                "type": "error",
+                "message": "当前回合尚未结束，暂时不能结算案件。",
+            })
+            return
+        result = engine.settle_case(
+            data.get("ending_type", "neutral"),
+            data.get("title", "故事结束"),
+            data.get("summary", ""),
+        )
+        await outbound.send({"type": "case_settled", **result})
+        await outbound.send({
+            "type": "character_list",
+            **list_character_options(
+                engine.context.module_name,
+                context=engine.context,
+            ),
+        })
+        await outbound.send({"type": "state"})
+
+    @router.handler("load")
+    async def handle_legacy_load(_data: dict) -> None:
+        if turn_state_busy():
+            await outbound.send({
+                "type": "error",
+                "message": "当前回合尚未结束，暂时不能读档。",
+            })
+            return
+        try:
+            count = engine.load()
+        except StaleRevisionError as exc:
+            await outbound.send({"type": "error", "message": str(exc)})
+            return
+        await outbound.send({
+            "type": "loaded",
+            "ok": count is not None,
+            "count": count or 0,
+        })
+
+    @router.handler("state")
+    async def handle_state(_data: dict) -> None:
+        try:
+            world_state = engine.context.world_store.load()
+            pc_data = world_state.get("pc", {})
+            clues_data = _enrich_clues_for_frontend(
+                world_state.get("clues_found", {}),
+                world_state,
+                engine.context,
+            )
+        except Exception:
+            pc_data, clues_data = {}, {}
+        await outbound.send({
+            "type": "state_data",
+            "data": json.dumps(pc_data, ensure_ascii=False),
+            "clues": json.dumps(clues_data, ensure_ascii=False),
+        })
+
+    @router.handler("quit")
+    async def handle_quit(_data: dict) -> None:
+        engine.save(AUTO_SAVE_SLOT)
+        await outbound.send({"type": "quit_ok"})
+        session.close_requested = True
+
+    @router.handler("turn_branch_create")
+    async def handle_turn_branch_create(data: dict) -> None:
+        if not await reserve_turn():
+            return
+        turn_id = str(data.get("turn_id") or "")
+        if not turn_id:
+            release_turn()
+            await outbound.send({
+                "type": "turn_branch_failed",
+                "message": "缺少分支回合 ID",
+            })
+            return
+        try:
+            branch = await asyncio.to_thread(
+                WORLD_BRANCHES.create,
+                engine.context,
+                engine.turn_journal,
+                turn_id,
+                label=data.get("label", ""),
+            )
+            engine.switch_context(branch.context)
+            engine.adopt_message_history(branch.messages)
+            turn_gate.rebind_world(_world_turn_lock(branch.context))
+            _set_active_context(branch.context)
+            history = engine.turn_journal.public_history()
+        except Exception as exc:
+            release_turn()
+            await outbound.send({
+                "type": "turn_branch_failed",
+                "source_turn_id": turn_id,
+                "message": str(exc) or "创建时间线分支失败",
+            })
+            return
+        release_turn()
+        await outbound.send({
+            "type": "turn_branched",
+            "source_turn_id": turn_id,
+            "world_id": branch.context.world_id,
+            "module_name": branch.context.module_name,
+            "label": branch.label,
+            "history": history,
+        })
+        await outbound.send(world_context_payload())
+        await outbound.send(world_list_payload())
+        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+        await send_character_state()
+
+    @router.handler("world_switch")
+    async def handle_world_switch(data: dict) -> None:
+        if not turn_gate.try_acquire_session():
+            await outbound.send({
+                "type": "world_switch_failed",
+                "message": "当前回合尚未结束，暂时不能切换时间线。",
+            })
+            return
+        target_lock: threading.Lock | None = None
+        target_lock_acquired = False
+        try:
+            context = WORLD_BRANCHES.open(str(data.get("world_id") or ""))
+            target_lock = _world_turn_lock(context)
+            if not target_lock.acquire(blocking=False):
+                raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
+            target_lock_acquired = True
+            messages, _snapshot = load_game(AUTO_SAVE_SLOT, context=context)
+            engine.switch_context(context)
+            if messages is not None:
+                engine.adopt_message_history(messages)
+            turn_gate.rebind_world(target_lock)
+            _set_active_context(context)
+            history = engine.turn_journal.public_history()
+        except Exception as exc:
+            await outbound.send({
+                "type": "world_switch_failed",
+                "message": str(exc) or "切换时间线失败",
+            })
+            return
+        finally:
+            if target_lock is not None and target_lock_acquired:
+                target_lock.release()
+            turn_gate.release_session()
+        await outbound.send({
+            "type": "world_switched",
+            "world_id": engine.context.world_id,
+            "module_name": engine.context.module_name,
+            "history": history,
+        })
+        await outbound.send(world_context_payload())
+        await outbound.send(world_list_payload())
+        await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
+        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+        await send_character_state()
+
+    @router.handler("turn_rewrite")
+    async def handle_turn_rewrite(data: dict) -> None:
+        if not await reserve_turn():
+            return
+        turn_id = str(data.get("turn_id") or "")
+        if not turn_id:
+            release_turn()
+            await outbound.send({
+                "type": "turn_rewrite_failed",
+                "message": "缺少需要重新叙述的回合 ID",
+            })
+            return
+        await launch_rewrite(turn_id)
+
+    @router.handler("switch_module")
+    async def handle_switch_module(data: dict) -> None:
+        name = data.get("module", engine.context.module_name)
+        try:
+            MODULE_REGISTRY.resolve(name)
+        except FileNotFoundError:
+            await outbound.send({"type": "error", "message": f"模组'{name}'不存在"})
+            return
+        if not turn_gate.try_acquire_session():
+            await outbound.send({
+                "type": "error",
+                "message": "当前回合尚未结束，暂时不能切换模组。",
+            })
+            return
+        try:
+            context = RuntimeContext.local(
+                name,
+                project_root=PROJECT_ROOT,
+                runtime_root=RUNTIME_ROOT,
+            )
+            engine.switch_context(context)
+            turn_gate.rebind_world(_world_turn_lock(context))
+            _set_active_context(context)
+            await outbound.send(world_context_payload())
+            await outbound.send(world_list_payload())
+            await outbound.send({"type": "theme", "theme": _load_theme(context)})
+            await outbound.send({
+                "type": "module_list",
+                "modules": _list_mods(),
+                "active": name,
+            })
+            await outbound.send({
+                "type": "character_list",
+                **list_character_options(name, context=context),
+            })
+            await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+        finally:
+            turn_gate.release_session()
+
+    @router.handler("start")
+    async def handle_start(data: dict) -> None:
+        if not await reserve_turn():
+            return
+        try:
+            engine.reset(data.get("character_ref"))
+        except ValueError as exc:
+            release_turn()
+            await outbound.send({"type": "error", "message": str(exc)})
+            return
+        except Exception:
+            release_turn()
+            raise
+        try:
+            await send_character_state()
+        except Exception:
+            release_turn()
+            raise
+        await launch_reserved_turn(
+            engine.handle_action,
+            None,
+            turn_kind="opening",
+        )
+
+    async def resume_game(slot_id: str | None, *, announce_loaded: bool) -> None:
+        if not await reserve_turn():
+            return
+        try:
+            count = engine.load(slot_id)
+        except StaleRevisionError as exc:
+            release_turn()
+            await outbound.send({"type": "error", "message": str(exc)})
+            return
+        except Exception:
+            release_turn()
+            raise
+        if count is None:
+            release_turn()
+            message = "未找到存档。" if announce_loaded else "未找到存档，请开始新游戏。"
+            await outbound.send({"type": "error", "message": message})
+            return
+        engine.append_control_instruction(
+            "继续游戏。之前的存档和世界状态已经恢复。"
+            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
+            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
+            "不要从头开场，不要重新介绍世界观。"
+        )
+        try:
+            if announce_loaded:
+                await outbound.send({
+                    "type": "loaded",
+                    "ok": True,
+                    "slot_id": slot_id or "",
+                    "count": count,
+                })
+            await send_character_state()
+        except Exception:
+            release_turn()
+            raise
+        await launch_reserved_turn(
+            engine.handle_action,
+            None,
+            turn_kind="resume",
+        )
+
+    @router.handler("continue")
+    async def handle_continue(data: dict) -> None:
+        await resume_game(data.get("slot_id"), announce_loaded=False)
+
+    @router.handler("save_load")
+    async def handle_save_load(data: dict) -> None:
+        await resume_game(str(data.get("slot_id") or ""), announce_loaded=True)
+
+    @router.handler("action")
+    async def handle_action(data: dict) -> None:
+        if not await reserve_turn():
+            return
+        content = data.get("content", "")
+        await launch_reserved_turn(
+            engine.handle_action,
+            content,
+            turn_kind="action",
+            player_input=content,
+        )
+
     # 保持首连的五条初始化消息稳定；世界身份随 module_list 一并下发。
     await outbound.send({
         "type": "module_list",
@@ -643,430 +1034,15 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
             routed = await router.dispatch(data)
             if routed.handled:
+                if session.close_requested:
+                    break
                 continue
-            msg_type = routed.message_type
-
-            if msg_type == "player_notes_update":
-                try:
-                    notes = PlayerNotesStore(engine.context.world_dir).save(
-                        data.get("text", ""),
-                        expected_revision=(
-                            int(data["revision"])
-                            if data.get("revision") is not None
-                            else None
-                        ),
-                    )
-                    await outbound.send({"type": "player_notes", "saved": True, **notes})
-                except PlayerNotesConflict as exc:
-                    current = PlayerNotesStore(engine.context.world_dir).load()
-                    await outbound.send({
-                        "type": "player_notes_conflict",
-                        "message": str(exc),
-                        **current,
-                    })
-                except (OSError, TypeError, ValueError, RuntimeError) as exc:
-                    await outbound.send({
-                        "type": "player_notes_error",
-                        "message": str(exc) or "玩家笔记保存失败",
-                    })
-
-            elif msg_type == "turn_branch_create":
-                if not await reserve_turn():
-                    continue
-                turn_id = str(data.get("turn_id") or "")
-                if not turn_id:
-                    release_turn()
-                    await outbound.send({
-                        "type": "turn_branch_failed",
-                        "message": "缺少分支回合 ID",
-                    })
-                    continue
-                try:
-                    branch = await asyncio.to_thread(
-                        WORLD_BRANCHES.create,
-                        engine.context,
-                        engine.turn_journal,
-                        turn_id,
-                        label=data.get("label", ""),
-                    )
-                    engine.switch_context(branch.context)
-                    engine.adopt_message_history(branch.messages)
-                    turn_gate.rebind_world(_world_turn_lock(branch.context))
-                    _set_active_context(branch.context)
-                    history = engine.turn_journal.public_history()
-                except Exception as exc:
-                    release_turn()
-                    await outbound.send({
-                        "type": "turn_branch_failed",
-                        "source_turn_id": turn_id,
-                        "message": str(exc) or "创建时间线分支失败",
-                    })
-                    continue
-                release_turn()
-                await outbound.send({
-                    "type": "turn_branched",
-                    "source_turn_id": turn_id,
-                    "world_id": branch.context.world_id,
-                    "module_name": branch.context.module_name,
-                    "label": branch.label,
-                    "history": history,
-                })
-                await outbound.send(world_context_payload())
-                await outbound.send(world_list_payload())
-                await outbound.send({"type": "save_list", "saves": engine.list_saves()})
-                await send_character_state()
-
-            elif msg_type == "world_switch":
-                if not turn_gate.try_acquire_session():
-                    await outbound.send({
-                        "type": "world_switch_failed",
-                        "message": "当前回合尚未结束，暂时不能切换时间线。",
-                    })
-                    continue
-                target_lock: threading.Lock | None = None
-                try:
-                    context = WORLD_BRANCHES.open(str(data.get("world_id") or ""))
-                    target_lock = _world_turn_lock(context)
-                    if not target_lock.acquire(blocking=False):
-                        raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
-                    messages, _snapshot = load_game("slot_000", context=context)
-                    engine.switch_context(context)
-                    if messages is not None:
-                        engine.adopt_message_history(messages)
-                    turn_gate.rebind_world(target_lock)
-                    _set_active_context(context)
-                    history = engine.turn_journal.public_history()
-                except Exception as exc:
-                    await outbound.send({
-                        "type": "world_switch_failed",
-                        "message": str(exc) or "切换时间线失败",
-                    })
-                    continue
-                finally:
-                    if target_lock is not None and target_lock.locked():
-                        target_lock.release()
-                    turn_gate.release_session()
-                await outbound.send({
-                    "type": "world_switched",
-                    "world_id": engine.context.world_id,
-                    "module_name": engine.context.module_name,
-                    "history": history,
-                })
-                await outbound.send(world_context_payload())
-                await outbound.send(world_list_payload())
-                await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
-                await outbound.send({"type": "save_list", "saves": engine.list_saves()})
-                await send_character_state()
-
-            elif msg_type == "turn_rewrite":
-                if not await reserve_turn():
-                    continue
-                turn_id = str(data.get("turn_id") or "")
-                if not turn_id:
-                    release_turn()
-                    await outbound.send({
-                        "type": "turn_rewrite_failed",
-                        "message": "缺少需要重新叙述的回合 ID",
-                    })
-                    continue
-                await launch_rewrite(turn_id)
-
-            elif msg_type == "model_settings_update":
-                if not turn_gate.try_acquire_session():
-                    await outbound.send({
-                        "type": "model_settings_error",
-                        "message": "当前回合尚未结束，请在本轮叙述完成后重试。",
-                    })
-                    continue
-                try:
-                    settings = ModelSettings.validated(
-                        data.get("narrative_model"),
-                        data.get("judgement_model"),
-                    )
-                    persist_model_settings(_ENV_FILE, settings)
-                    engine.configure_models(
-                        settings.narrative_model,
-                        settings.judgement_model,
-                    )
-                    _active_model_settings = settings
-                    await outbound.send({
-                        **_model_settings_payload(settings),
-                        "saved": True,
-                    })
-                except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
-                    await outbound.send({
-                        "type": "model_settings_error",
-                        "message": f"模型设置保存失败：{exc}",
-                    })
-                finally:
-                    turn_gate.release_session()
-
-            elif msg_type == "switch_module":
-                # 切换活跃模组（开场前在下拉框选择）
-                name = data.get("module", engine.context.module_name)
-                try:
-                    MODULE_REGISTRY.resolve(name)
-                except FileNotFoundError:
-                    await outbound.send({"type": "error", "message": f"模组'{name}'不存在"})
-                    continue
-                if not turn_gate.try_acquire_session():
-                    await outbound.send({
-                        "type": "error",
-                        "message": "当前回合尚未结束，暂时不能切换模组。",
-                    })
-                else:
-                    try:
-                        context = RuntimeContext.local(
-                            name,
-                            project_root=PROJECT_ROOT,
-                            runtime_root=RUNTIME_ROOT,
-                        )
-                        engine.switch_context(context)
-                        turn_gate.rebind_world(_world_turn_lock(context))
-                        _set_active_context(context)
-                        # 下发新主题 + 新存档列表
-                        await outbound.send(world_context_payload())
-                        await outbound.send(world_list_payload())
-                        await outbound.send({"type": "theme", "theme": _load_theme(context)})
-                        await outbound.send({
-                            "type": "module_list",
-                            "modules": _list_mods(),
-                            "active": name,
-                        })
-                        await outbound.send({
-                            "type": "character_list",
-                            **list_character_options(name, context=context),
-                        })
-                        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
-                    finally:
-                        turn_gate.release_session()
-
-            elif msg_type == "start":
-                # 开始新游戏：触发开场 GM 回合（用 reset() 里预置的开场 prompt）
-                if not await reserve_turn():
-                    continue
-                try:
-                    engine.reset(data.get("character_ref"))
-                except ValueError as exc:
-                    release_turn()
-                    await outbound.send({"type": "error", "message": str(exc)})
-                    continue
-                except Exception:
-                    release_turn()
-                    raise
-                try:
-                    await send_character_state()
-                except Exception:
-                    release_turn()
-                    raise
-                await launch_reserved_turn(
-                    engine.handle_action,
-                    None,
-                    turn_kind="opening",
-                )
-
-            elif msg_type == "continue":
-                # 继续游戏：读档 + 恢复快照 + 续写 prompt
-                if not await reserve_turn():
-                    continue
-                slot = data.get("slot_id")  # 可选：指定槽位
-                try:
-                    count = engine.load(slot)
-                except StaleRevisionError as exc:
-                    release_turn()
-                    await outbound.send({"type": "error", "message": str(exc)})
-                    continue
-                except Exception:
-                    release_turn()
-                    raise
-                if count is None:
-                    release_turn()
-                    await outbound.send({"type": "error", "message": "未找到存档，请开始新游戏。"})
-                else:
-                    engine.append_control_instruction(
-                        "继续游戏。之前的存档和世界状态已经恢复。"
-                        "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-                        "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-                        "不要从头开场，不要重新介绍世界观。"
-                    )
-                    try:
-                        await send_character_state()
-                    except Exception:
-                        release_turn()
-                        raise
-                    await launch_reserved_turn(
-                        engine.handle_action,
-                        None,
-                        turn_kind="resume",
-                    )
-
-            elif msg_type == "action":
-                # 同上：不 await，避免 on_suggest 阻塞时主循环死锁
-                if not await reserve_turn():
-                    continue
-                await launch_reserved_turn(
-                    engine.handle_action,
-                    data.get("content", ""),
-                    turn_kind="action",
-                    player_input=data.get("content", ""),
-                )
-
-            elif msg_type == "save":
-                is_manual = data.get("manual", False)
-                slot_id = None if is_manual else AUTO_SAVE_SLOT
-                if turn_state_busy():
-                    await outbound.send({
-                        "type": "saved",
-                        "ok": False,
-                        "slot_id": slot_id or "",
-                        "reason": "turn_in_progress",
-                    })
-                    continue
-                sid = engine.save(slot_id)
-                await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
-
-            elif msg_type == "save_load":
-                if not await reserve_turn():
-                    continue
-                slot_id = data.get("slot_id", "")
-                try:
-                    cnt = engine.load(slot_id)
-                except StaleRevisionError as exc:
-                    release_turn()
-                    await outbound.send({"type": "error", "message": str(exc)})
-                    continue
-                except Exception:
-                    release_turn()
-                    raise
-                if cnt is not None:
-                    try:
-                        engine.append_control_instruction(
-                            "继续游戏。之前的存档和世界状态已经恢复。"
-                            "请基于当前对话历史中的场景、NPC 状态和已发现线索，"
-                            "用 1-2 句话简述玩家当前位置和情况，然后提供行动选项。"
-                            "不要从头开场，不要重新介绍世界观。"
-                        )
-                        await outbound.send({
-                            "type": "loaded",
-                            "ok": True,
-                            "slot_id": slot_id,
-                            "count": cnt,
-                        })
-                        await send_character_state()
-                    except Exception:
-                        release_turn()
-                        raise
-                    await launch_reserved_turn(
-                        engine.handle_action,
-                        None,
-                        turn_kind="resume",
-                    )
-                else:
-                    release_turn()
-                    await outbound.send({"type": "error", "message": "未找到存档。"})
-
-            elif msg_type == "save_delete":
-                slot_id = data.get("slot_id", "")
-                if slot_id == AUTO_SAVE_SLOT:
-                    await outbound.send({"type": "error", "message": "自动存档不可手动删除。"})
-                else:
-                    delete_save(slot_id, context=engine.context)
-                    await outbound.send({"type": "save_deleted", "slot_id": slot_id})
-
-            elif msg_type == "save_create":
-                if turn_state_busy():
-                    await outbound.send({
-                        "type": "saved",
-                        "ok": False,
-                        "slot_id": "",
-                        "reason": "turn_in_progress",
-                    })
-                    continue
-                existing = engine.list_saves()
-                used = set()
-                for s in existing:
-                    if s["id"].startswith("slot_") and s["id"] != AUTO_SAVE_SLOT:
-                        try:
-                            used.add(int(s["id"].split("_")[1]))
-                        except (ValueError, IndexError):
-                            pass
-                n = 1
-                while n in used:
-                    n += 1
-                slot_id = f"slot_{n:03d}"
-                sid = engine.save(slot_id)
-                await outbound.send({"type": "saved", "ok": True, "slot_id": sid})
-
-            elif msg_type == "save_rename":
-                slot_id = data.get("slot_id", "")
-                label = data.get("label", "")
-                from src.persistence import rename_save
-                ok = rename_save(slot_id, label, context=engine.context)
-                await outbound.send({"type": "save_renamed", "slot_id": slot_id, "label": label, "ok": ok})
-
-            elif msg_type == "settle_case":
-                if turn_state_busy():
-                    await outbound.send({
-                        "type": "error",
-                        "message": "当前回合尚未结束，暂时不能结算案件。",
-                    })
-                    continue
-                result = engine.settle_case(
-                    data.get("ending_type", "neutral"),
-                    data.get("title", "故事结束"),
-                    data.get("summary", ""),
-                )
-                await outbound.send({"type": "case_settled", **result})
-                await outbound.send({
-                    "type": "character_list",
-                    **list_character_options(
-                        engine.context.module_name, context=engine.context
-                    ),
-                })
-                await outbound.send({"type": "state"})
-
-            elif msg_type == "quit":
-                engine.save("slot_000")  # 退出时存档
-                await outbound.send({"type": "quit_ok"})
-                break  # 退出消息循环
-
-            elif msg_type == "load":
-                if turn_state_busy():
-                    await outbound.send({
-                        "type": "error",
-                        "message": "当前回合尚未结束，暂时不能读档。",
-                    })
-                    continue
-                try:
-                    count = engine.load()
-                except StaleRevisionError as exc:
-                    await outbound.send({"type": "error", "message": str(exc)})
-                    continue
-                await outbound.send({"type": "loaded", "ok": count is not None, "count": count or 0})
-
-            elif msg_type == "state":
-                try:
-                    _ws = engine.context.world_store.load()
-                    pc_data = _ws.get("pc", {})
-                    clues_data = _enrich_clues_for_frontend(
-                        _ws.get("clues_found", {}), _ws, engine.context
-                    )
-                except Exception:
-                    pc_data, clues_data = {}, {}
-                await outbound.send({
-                    "type": "state_data",
-                    "data": json.dumps(pc_data, ensure_ascii=False),
-                    "clues": json.dumps(clues_data, ensure_ascii=False)
-                })
-
-            else:
-                await outbound.send({
-                    "type": "protocol_error",
-                    "code": "unknown_message_type",
-                    "message_type": msg_type,
-                    "message": "客户端发送了当前服务端不支持的消息类型。",
-                })
-
+            await outbound.send({
+                "type": "protocol_error",
+                "code": "unknown_message_type",
+                "message_type": routed.message_type,
+                "message": "客户端发送了当前服务端不支持的消息类型。",
+            })
     except WebSocketDisconnect:
         pass
     except RuntimeError:
@@ -1079,8 +1055,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         # A disconnected browser can no longer answer modal handshakes. Wake
         # the worker immediately so it can take the safe default and release
         # the world-level turn lock instead of waiting the full timeout.
-        suggest_reply.cancel()
-        decision_reply.cancel()
+        session.cancel_pending_replies()
         await outbound.close()
 
 
