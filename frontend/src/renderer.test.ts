@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addMsg,
   beginNarrativeReplacement,
+  branchSourceTurnId,
   completeNarrativeReplacement,
   flushNarrativeStream,
   onNarrativeChunk,
@@ -63,5 +64,14 @@ describe("React message renderer adapter", () => {
       turnId: "source",
       streaming: false,
     });
+  });
+
+  it("branches from before the action represented by a result turn", () => {
+    expect(
+      branchSourceTurnId({ turn_id: "result", parent_turn_id: "decision" }),
+    ).toBe("decision");
+    expect(
+      branchSourceTurnId({ turn_id: "opening", parent_turn_id: null }),
+    ).toBe("opening");
   });
 });

@@ -379,6 +379,7 @@ class TurnJournal:
             return [
                 {
                     "turn_id": record.get("turn_id"),
+                    "parent_turn_id": record.get("parent_turn_id"),
                     "kind": record.get("kind"),
                     "player_input": record.get("player_input"),
                     "narrative": record.get("narrative", ""),

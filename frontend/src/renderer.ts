@@ -22,10 +22,15 @@ const branchCallbacks = new Map<string, () => void>();
 
 export type TurnHistoryItem = {
   turn_id?: string;
+  parent_turn_id?: string | null;
   player_input?: string | null;
   narrative?: string;
   choices?: Array<{ label: string; isFree: boolean }>;
 };
+
+export function branchSourceTurnId(turn: TurnHistoryItem): string {
+  return String(turn.parent_turn_id || turn.turn_id || "");
+}
 
 export type DiceRollData = {
   d100_roll?: number;

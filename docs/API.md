@@ -705,7 +705,7 @@ done
 ```
 
 `turn_rewrite` 仅接受当前世界最后一个完成回合，并要求世界 revision 未继续推进；服务端禁用 tools，
-固定 choices、工具结果和世界快照。`turn_branch_create` 可以针对父链中的任一完成回合，原世界不变。
+固定 choices、工具结果和世界快照。`turn_branch_create` 可以针对父链中的任一完成回合，原世界不变。公开回合历史包含 `parent_turn_id`；客户端在结果消息上创建分支时使用父回合，从而恢复到本次玩家行动之前的决策点。
 玩家笔记不进入 system prompt、Lorebook 扫描或 `world_state`。
 
 ## 5. 服务端发送事件

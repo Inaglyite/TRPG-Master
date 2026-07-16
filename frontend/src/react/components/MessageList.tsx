@@ -177,8 +177,8 @@ function Message({
               type="button"
               className="turn-branch-button"
               disabled={actionsDisabled}
-              title="从此回合创建时间线分支"
-              aria-label="从此回合创建独立时间线分支"
+              title="从本次行动前创建时间线分支"
+              aria-label="回到本次行动前并创建独立时间线分支"
               onClick={() => {
                 setActionsDisabled(true);
                 invokeTurnBranch(message.turnId!);

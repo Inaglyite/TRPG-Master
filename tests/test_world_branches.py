@@ -72,6 +72,10 @@ class WorldBranchTests(unittest.TestCase):
             engine.handle_action("走向书架")
             second_turn = engine.turn_journal.latest_completed_id()
             self.assertNotEqual(first_turn, second_turn)
+            self.assertEqual(
+                first_turn,
+                engine.turn_journal.public_history()[-1]["parent_turn_id"],
+            )
 
             service = WorldBranchService(root, root)
             PlayerNotesStore(engine.context.world_dir).save("不要相信书架后的声音。")
@@ -94,6 +98,7 @@ class WorldBranchTests(unittest.TestCase):
             branch_engine.adopt_message_history(branch.messages)
             branch_history = branch_engine.turn_journal.public_history()
             self.assertEqual([first_turn], [item["turn_id"] for item in branch_history])
+            self.assertIsNone(branch_history[0]["parent_turn_id"])
             self.assertNotIn("走向书架", json.dumps(branch.messages, ensure_ascii=False))
             self.assertEqual(
                 "不要相信书架后的声音。",

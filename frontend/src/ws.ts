@@ -14,6 +14,7 @@ import {
   addMsg,
   attachTurnBranchAction,
   attachTurnRewriteAction,
+  branchSourceTurnId,
   beginNarrativeReplacement,
   cancelNarrativeReplacement,
   completeNarrativeReplacement,
@@ -109,6 +110,7 @@ type HandoutMessage = Parameters<typeof showHandout>[0];
 let gmTurnActive = false;
 let deferredHandouts: HandoutMessage[] = [];
 let activeTurnId: string | null = null;
+let activeBranchSourceTurnId: string | null = null;
 let activeTurnKind: string | null = null;
 let rewriteSourceTurnId: string | null = null;
 let lastTurnSeq = 0;
@@ -243,7 +245,10 @@ function requestTurnBranch(turnId: string) {
 function attachTurnActions(history: TurnHistoryItem[]) {
   history.forEach((turn) => {
     const turnId = String(turn.turn_id || "");
-    if (turnId) attachTurnBranchAction(turnId, () => requestTurnBranch(turnId));
+    const sourceTurnId = branchSourceTurnId(turn);
+    if (turnId && sourceTurnId) {
+      attachTurnBranchAction(turnId, () => requestTurnBranch(sourceTurnId));
+    }
   });
   const latestTurnId = String(history[history.length - 1]?.turn_id || "");
   if (latestTurnId) {
@@ -352,6 +357,7 @@ export function recoverLatestTurn() {
 
 type PublicTurnRecord = {
   turn_id?: string;
+  parent_turn_id?: string | null;
   status?: string;
   narrative?: string;
   choices?: ActionChoice[];
@@ -404,7 +410,8 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
     onNarrativeChunk(record.narrative);
   }
   onDone(pendingChoices);
-  attachTurnBranchAction(turnId, () => requestTurnBranch(turnId));
+  const branchSourceId = String(record.parent_turn_id || turnId);
+  attachTurnBranchAction(turnId, () => requestTurnBranch(branchSourceId));
   attachTurnRewriteAction(turnId, () => requestTurnRewrite(turnId));
   gmTurnActive = false;
   setDisplayTurnId(null);
@@ -466,6 +473,8 @@ function handleMessage(e: MessageEvent) {
           ? String(data.source_turn_id || "") || null
           : null;
       setDisplayTurnId(activeTurnId);
+      activeBranchSourceTurnId =
+        String(data.parent_turn_id || activeTurnId || "") || null;
       if (activeTurnId && activeTurnKind !== "rewrite") {
         tagPendingPlayerMessage(activeTurnId);
       }
@@ -512,10 +521,11 @@ function handleMessage(e: MessageEvent) {
       break;
     case "done":
       const completedTurnId = activeTurnId;
+      const completedBranchSourceTurnId = activeBranchSourceTurnId;
       onDone(pendingChoices);
       if (completedTurnId) {
         attachTurnBranchAction(completedTurnId, () =>
-          requestTurnBranch(completedTurnId),
+          requestTurnBranch(completedBranchSourceTurnId || completedTurnId),
         );
         attachTurnRewriteAction(completedTurnId, () =>
           requestTurnRewrite(completedTurnId),
@@ -525,6 +535,7 @@ function handleMessage(e: MessageEvent) {
       deferredHandouts.forEach((handout) => showHandout(handout));
       deferredHandouts = [];
       activeTurnId = null;
+      activeBranchSourceTurnId = null;
       activeTurnKind = null;
       rewriteSourceTurnId = null;
       setDisplayTurnId(null);
@@ -548,8 +559,11 @@ function handleMessage(e: MessageEvent) {
         : pendingChoices;
       onDone(pendingChoices);
       if (sourceTurnId) {
+        const branchSourceId = String(
+          data.branch_source_turn_id || sourceTurnId,
+        );
         attachTurnBranchAction(sourceTurnId, () =>
-          requestTurnBranch(sourceTurnId),
+          requestTurnBranch(branchSourceId),
         );
         attachTurnRewriteAction(sourceTurnId, () =>
           requestTurnRewrite(sourceTurnId),
@@ -575,8 +589,11 @@ function handleMessage(e: MessageEvent) {
       if (sourceTurnId) cancelNarrativeReplacement(sourceTurnId);
       onDone();
       if (sourceTurnId) {
+        const branchSourceId = String(
+          data.branch_source_turn_id || sourceTurnId,
+        );
         attachTurnBranchAction(sourceTurnId, () =>
-          requestTurnBranch(sourceTurnId),
+          requestTurnBranch(branchSourceId),
         );
         attachTurnRewriteAction(sourceTurnId, () =>
           requestTurnRewrite(sourceTurnId),

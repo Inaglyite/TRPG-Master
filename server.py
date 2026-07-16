@@ -362,7 +362,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 kind=turn_kind,
                 player_input=player_input,
             )
-            await outbound.begin_turn(turn_id)
+            turn_record = engine.turn_journal.read(turn_id)
+            await outbound.begin_turn(
+                turn_id,
+                metadata={"parent_turn_id": turn_record.get("parent_turn_id")},
+            )
         except Exception:
             engine.finish_turn_record(
                 status="failed",
@@ -374,6 +378,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
 
     async def launch_rewrite(turn_id: str) -> None:
         operation_id = f"rewrite:{secrets.token_hex(8)}"
+        source_record = engine.turn_journal.read(turn_id)
+        branch_source_turn_id = source_record.get("parent_turn_id") or turn_id
         try:
             await outbound.begin_turn(
                 operation_id,
@@ -388,6 +394,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
             try:
                 result = game_app.rewrite_turn.execute(turn_id)
                 result["source_turn_id"] = result.pop("turn_id")
+                result["branch_source_turn_id"] = branch_source_turn_id
                 outbound.end_turn({"type": "turn_rewritten", **result})
             except Exception as exc:
                 log_message = f"{type(exc).__name__}: {exc}"
@@ -395,6 +402,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                 outbound.end_turn({
                     "type": "turn_rewrite_failed",
                     "source_turn_id": turn_id,
+                    "branch_source_turn_id": branch_source_turn_id,
                     "message": str(exc) or "重新叙述失败",
                 })
             finally:
