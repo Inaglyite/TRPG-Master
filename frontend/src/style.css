@@ -64,6 +64,13 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; }
 
+#root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 #app {
   flex: 1;
   width: 100%;
@@ -195,13 +202,17 @@ body:has(#start-overlay:not(.hidden)) #bottom {
 
 /* ---- 主体 ---- */
 #main {
-  display: flex; flex: 1; margin-top: 84px; height: calc(100vh - 84px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
   min-width: 0;
+  margin-top: 84px;
+  height: calc(100vh - 84px);
 }
 
 /* ---- 聊天面板 ---- */
 #chat-panel {
-  flex: 1; display: flex; flex-direction: column;
+  width: 100%; display: flex; flex-direction: column;
   overflow: hidden; position: relative;
   min-width: 0;
 }
@@ -247,7 +258,7 @@ body:has(#start-overlay:not(.hidden)) #bottom {
   /* scroll-behavior: smooth 已移除：流式输出时程序化平滑滚动会和用户滚轮抢，
      改为瞬时滚动，由 pinnedToBottom 决定是否跟随。 */
 }
-.loading-label { margin-left: 8px; font-size: 13px; }
+.loading-label { font-size: 13px; }
 #messages::-webkit-scrollbar { width: 8px; }
 #messages::-webkit-scrollbar-track { background: var(--bg); }
 #messages::-webkit-scrollbar-thumb {
@@ -276,6 +287,16 @@ body:has(#start-overlay:not(.hidden)) #bottom {
   word-break: break-word;
   position: relative;
   animation: msg-in 0.35s ease-out;
+}
+.msg.loading {
+  width: fit-content;
+  max-width: min(92%, 680px);
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
 }
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -706,12 +727,9 @@ body:has(#start-overlay:not(.hidden)) #bottom {
 
 /* ---- 展示材料（Handout） ---- */
 #handout-container {
-  position: fixed; top: 96px; right: 20px; z-index: 80;
+  position: absolute; top: 12px; right: 20px; z-index: 80;
   display: flex; flex-direction: column; gap: 10px;
   max-width: 260px;
-}
-#main:has(#char-panel:not(.collapsed)) #handout-container {
-  right: 322px;
 }
 .handout-card {
   background: var(--bg-panel, #1a1a2e);
@@ -815,8 +833,8 @@ body:has(#start-overlay:not(.hidden)) #bottom {
 .clue-tier.asset { background: var(--blue); }
 
 #toast-stack {
-  position: fixed;
-  top: 96px;
+  position: absolute;
+  top: 12px;
   right: 20px;
   z-index: 95;
   display: flex;
@@ -825,11 +843,8 @@ body:has(#start-overlay:not(.hidden)) #bottom {
   gap: 8px;
   pointer-events: none;
 }
-body:has(#char-panel:not(.collapsed)) #toast-stack {
-  right: 322px;
-}
 body:has(.clue-toast) #handout-container {
-  top: 144px;
+  top: 60px;
 }
 .clue-toast {
   max-width: min(280px, calc(100vw - 40px));
@@ -1122,6 +1137,7 @@ body:has(.clue-toast) #handout-container {
   transform: none;
 }
 #module-import-status {
+  grid-column: 1 / -1;
   min-height: 18px;
   margin-top: 6px;
   color: var(--text-dim);
@@ -2743,20 +2759,18 @@ body:has(.clue-toast) #handout-container {
     padding: 0;
   }
 
-  #handout-container,
-  #main:has(#char-panel:not(.collapsed)) #handout-container {
-    top: 84px;
+  #handout-container {
+    top: 12px;
     right: 12px;
     max-width: min(240px, calc(100vw - 24px));
   }
-  #toast-stack,
-  body:has(#char-panel:not(.collapsed)) #toast-stack {
-    top: 84px;
+  #toast-stack {
+    top: 12px;
     right: 12px;
     max-width: calc(100vw - 24px);
   }
   body:has(.clue-toast) #handout-container {
-    top: 128px;
+    top: 56px;
   }
   .clue-toast {
     max-width: calc(100vw - 24px);

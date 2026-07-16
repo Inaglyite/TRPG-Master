@@ -52,7 +52,9 @@ describe("StartScreen", () => {
 
   it("moves from module menu to investigator selection without DOM adapters", () => {
     render(<StartScreen />);
-    expect(screen.getByDisplayValue("猩红文档")).toBeInTheDocument();
+    const moduleSelect = screen.getByDisplayValue("猩红文档");
+    const importButton = screen.getByRole("button", { name: /导入模组/ });
+    expect(moduleSelect.parentElement).toBe(importButton.parentElement);
     fireEvent.click(screen.getByRole("button", { name: /开始新游戏/ }));
     expect(
       screen.getByRole("heading", { name: "选择调查员" }),

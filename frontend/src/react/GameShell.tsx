@@ -19,8 +19,8 @@ export function GameShell() {
           <AppHeader />
         </header>
         <main id="main">
-          <HandoutLayer />
           <div id="chat-panel">
+            <HandoutLayer />
             <ConnectionNotice />
             <MessageList />
             <GameControls />

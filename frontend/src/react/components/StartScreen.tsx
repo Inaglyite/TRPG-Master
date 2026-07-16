@@ -228,8 +228,8 @@ export function StartScreen() {
                     </option>
                   ))}
                 </select>
+                <ModuleImporter />
               </div>
-              <ModuleImporter />
             </div>
             <nav className="start-menu-actions">
               <button

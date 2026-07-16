@@ -145,32 +145,30 @@ export function ModuleImporter() {
   };
   return (
     <>
-      <div className="module-select-row module-import-row">
-        <button
-          id="btn-import-module"
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            if (input.current) {
-              input.current.value = "";
-              input.current.click();
-            }
-          }}
-        >
-          ⇧ <span>导入模组</span>
-        </button>
-        <input
-          ref={input}
-          id="module-file-input"
-          type="file"
-          accept=".trpgmod,application/zip"
-          hidden
-          onChange={(event) => {
-            const selected = event.target.files?.[0];
-            if (selected) void inspect(selected);
-          }}
-        />
-      </div>
+      <button
+        id="btn-import-module"
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          if (input.current) {
+            input.current.value = "";
+            input.current.click();
+          }
+        }}
+      >
+        ⇧ <span>导入模组</span>
+      </button>
+      <input
+        ref={input}
+        id="module-file-input"
+        type="file"
+        accept=".trpgmod,application/zip"
+        hidden
+        onChange={(event) => {
+          const selected = event.target.files?.[0];
+          if (selected) void inspect(selected);
+        }}
+      />
       <div
         id="module-import-status"
         data-state={statusKind || undefined}
