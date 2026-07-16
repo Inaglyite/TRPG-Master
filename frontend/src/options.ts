@@ -7,28 +7,17 @@
  */
 
 import {
-  messagesEl,
-  optionsBar,
-  userInput,
-  btnSend,
-  modalOverlay,
-  modalText,
-  modalActions,
-  modalYes,
-  modalNo,
-} from "./dom";
-import {
   addMsg,
   removeLoading,
   removeRollPending,
   showGmThinking,
   showRollPending,
-  getStreamTarget,
-  setStreamTarget,
+  finishNarrativeStream,
   flushNarrativeStream,
 } from "./renderer";
 import { safeSend } from "./ws";
-import { escapeHtml } from "./text";
+import { useAppStore } from "./state/app-store";
+import { useMessageStore } from "./state/message-store";
 
 let activeDecisionId: string | null = null;
 let inputEnabledBeforeDisconnect = false;
@@ -42,16 +31,7 @@ export type ActionChoice = {
 export function onSuggest(data: any) {
   flushNarrativeStream();
   removeLoading();
-  modalActions.replaceChildren(modalYes, modalNo);
-  modalText.innerHTML = `
-    <div class="suggest-desc">${escapeHtml(data.description)}</div>
-    <div class="suggest-roll">
-      <b>${escapeHtml(data.skill)}</b>（${escapeHtml(data.attribute)}）
-      — 难度：${escapeHtml(data.dc_label)}（DC ${escapeHtml(data.dc)}）
-    </div>
-  `;
-  modalOverlay.classList.remove("hidden");
-  modalYes.focus();
+  useAppStore.getState().setDialog({ kind: "suggest", ...data });
 }
 
 // ---- 通用多选决定（战斗防御等） ----
@@ -60,30 +40,13 @@ export function onDecision(data: any) {
   removeLoading();
   activeDecisionId = data.id || null;
   const options = Array.isArray(data.options) ? data.options : [];
-  modalText.innerHTML = `
-    <div class="decision-title">${escapeHtml(data.title || "需要你做出决定")}</div>
-    <div class="suggest-desc">${escapeHtml(data.description || "")}</div>
-  `;
-  modalActions.replaceChildren();
-
-  options.forEach((option: any) => {
-    const button = document.createElement("button");
-    const isDangerous = ["confirm_violence", "confirm_threat", "fight_back", "no_defense"].includes(option.id);
-    button.className = `${isDangerous ? "btn-danger" : "btn-safe"} decision-option`;
-    const label = document.createElement("strong");
-    label.textContent = option.label || option.id;
-    button.appendChild(label);
-    if (option.description) {
-      const description = document.createElement("span");
-      description.textContent = option.description;
-      button.appendChild(description);
-    }
-    button.onclick = () => sendDecisionReply(data.id, option.id, option.label || option.id);
-    modalActions.appendChild(button);
+  useAppStore.getState().setDialog({
+    kind: "decision",
+    id: String(data.id || ""),
+    title: data.title,
+    description: data.description,
+    options,
   });
-
-  modalOverlay.classList.remove("hidden");
-  (modalActions.querySelector("button") as HTMLButtonElement | null)?.focus();
 }
 
 // ---- GM 叙述结束，解析选项 ----
@@ -91,93 +54,57 @@ export function onDone(structuredChoices?: ActionChoice[]) {
   flushNarrativeStream();
   removeLoading();
   removeRollPending();
-  // 结束流式光标
-  if (getStreamTarget()) {
-    getStreamTarget()!.classList.remove("streaming-cursor");
-    setStreamTarget(null);
-  }
+  finishNarrativeStream();
   // 解析选项：从最近的 GM 消息中提取（跳过骰子、摘要等非叙事消息）
   const opts: ActionChoice[] = Array.isArray(structuredChoices)
-    ? structuredChoices.filter((choice) => choice && typeof choice.label === "string" && choice.label.trim())
+    ? structuredChoices.filter(
+        (choice) =>
+          choice && typeof choice.label === "string" && choice.label.trim(),
+      )
     : [];
-  const children = messagesEl.children;
-  for (let i = children.length - 1; opts.length === 0 && i >= 0; i--) {
-    const el = children[i];
-    if (!el.classList.contains("gm")) continue;
-
-    // 优先从最后一个 <ol> 提取（marked 渲染的编号列表），
-    // 且该 <ol> 必须在"你可以"之后出现，避免把叙事中的编号列表误判为选项
-    const olElements = el.querySelectorAll("ol");
-    if (olElements.length > 0) {
-      const html = el.innerHTML;
-      // 找到"你可以"在 HTML 中的位置
-      const markerMatch = html.match(/你可以|您可以/);
-      const markerIdx = markerMatch && markerMatch.index != null ? markerMatch.index : -1;
-
-      // 取最后一个 <ol>，但如果它与"你可以"的距离合理（在其之后），就用它
-      let targetOl: Element | null = null;
-      for (let i = olElements.length - 1; i >= 0; i--) {
-        const olHtml = olElements[i].outerHTML;
-        const olIdx = html.indexOf(olHtml);
-        if (markerIdx < 0 || olIdx > markerIdx) {
-          targetOl = olElements[i];
-          break;
-        }
+  if (opts.length === 0) {
+    const messages = useMessageStore.getState().messages;
+    let narrative = "";
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].kind === "gm") {
+        narrative = messages[index].text;
+        break;
       }
-      // 兼容旧服务端时只接受明确标记之后的列表，避免把证据编号误当成按钮。
-      if (targetOl && markerIdx >= 0) {
-        const liElements = targetOl.querySelectorAll("li");
-        liElements.forEach((li) => {
-          const label = (li.textContent || "").trim();
-          if (label) {
-            const isFree = label.includes("自由行动") || label.includes("你决定做什么");
-            opts.push({ label, isFree });
-          }
+    }
+    const marker = Math.max(
+      narrative.lastIndexOf("你可以"),
+      narrative.lastIndexOf("您可以"),
+    );
+    if (marker >= 0) {
+      narrative
+        .slice(marker)
+        .split("\n")
+        .forEach((line) => {
+          const match = line.trim().match(/^\d+[.、]\s*(.+)/);
+          if (!match) return;
+          const label = match[1].trim();
+          opts.push({
+            label,
+            isFree:
+              label.includes("自由行动") || label.includes("你决定做什么"),
+          });
         });
-      }
     }
-
-    // 降级：<br> 分隔的纯文本格式
-    if (opts.length === 0) {
-      const text = el.textContent || "";
-      const lines = text.split("\n");
-      let startIdx = 0;
-      for (let j = lines.length - 1; j >= 0; j--) {
-        if (/你可以|您可以/.test(lines[j])) { startIdx = j; break; }
-      }
-      for (let j = startIdx; j < lines.length; j++) {
-        const m = lines[j].trim().match(/^\d+\.\s*(.+)/);
-        if (m) {
-          const label = m[1].trim();
-          const isFree = label.includes("自由行动") || label.includes("你决定做什么");
-          opts.push({ label, isFree });
-        }
-      }
-    }
-    break; // 只查最近一条 GM 消息
   }
 
   if (opts.length > 0) {
     renderOptions(opts);
   } else {
     // 没解析出选项，显示输入框
-    optionsBar.innerHTML = "";
+    useAppStore.getState().setChoices([]);
     enableInput(true);
   }
 }
 
 // ---- 渲染选项按钮 ----
 export function renderOptions(opts: { label: string; isFree: boolean }[]) {
-  optionsBar.innerHTML = "";
-  opts.forEach((o, i) => {
-    const btn = document.createElement("button");
-    btn.className = "opt-btn" + (o.isFree ? " free" : "");
-    btn.textContent = `${i + 1}. ${o.label}`;
-    btn.onclick = () => {
-      sendAction(o.label);
-    };
-    optionsBar.appendChild(btn);
-  });
+  useAppStore.getState().setChoices(opts);
+  useAppStore.getState().setEnding(null);
   // 自由行动时同时启用输入框
   const hasFree = opts.some((o) => o.isFree);
   enableInput(hasFree);
@@ -185,40 +112,41 @@ export function renderOptions(opts: { label: string; isFree: boolean }[]) {
 
 // ---- 启用 / 禁用输入 ----
 export function enableInput(on: boolean) {
-  userInput.disabled = !on;
-  btnSend.disabled = !on;
-  userInput.placeholder = on ? "你决定做什么？" : "守秘人正在叙述……";
-  if (on) userInput.focus();
+  useAppStore
+    .getState()
+    .setInput(on, on ? "你决定做什么？" : "守秘人正在叙述……");
 }
 
 export function onTurnPhase(label: string) {
-  if (!userInput.disabled) return;
-  userInput.placeholder = label || "守秘人正在处理本轮行动……";
+  if (useAppStore.getState().inputEnabled) return;
+  useAppStore.getState().setInput(false, label || "守秘人正在处理本轮行动……");
   showGmThinking(label || "守秘人正在处理本轮行动……");
 }
 
 export function onConnectionLost(turnInterrupted: boolean) {
-  inputEnabledBeforeDisconnect = !userInput.disabled;
+  inputEnabledBeforeDisconnect = useAppStore.getState().inputEnabled;
   flushNarrativeStream();
   removeLoading();
   removeRollPending();
-  modalOverlay.classList.add("hidden");
+  useAppStore.getState().setDialog(null);
   activeDecisionId = null;
-  if (getStreamTarget()) {
-    getStreamTarget()!.classList.remove("streaming-cursor");
-    setStreamTarget(null);
-  }
-  if (turnInterrupted) optionsBar.replaceChildren();
+  finishNarrativeStream();
+  if (turnInterrupted) useAppStore.getState().setChoices([]);
   enableInput(false);
-  userInput.placeholder = turnInterrupted
-    ? "本轮连接中断，重连后可恢复进度"
-    : "连接已断开，正在重试……";
+  useAppStore
+    .getState()
+    .setInput(
+      false,
+      turnInterrupted
+        ? "本轮连接中断，重连后可恢复进度"
+        : "连接已断开，正在重试……",
+    );
 }
 
 export function onConnectionRestored(recoveryRequired: boolean) {
   if (recoveryRequired) {
     enableInput(false);
-    userInput.placeholder = "请选择恢复最近自动存档";
+    useAppStore.getState().setInput(false, "请选择恢复最近自动存档");
     return;
   }
   enableInput(inputEnabledBeforeDisconnect);
@@ -227,7 +155,8 @@ export function onConnectionRestored(recoveryRequired: boolean) {
 // ---- 发送行动 ----
 export function sendAction(text: string) {
   addMsg("player", text, true);
-  optionsBar.innerHTML = "";
+  useAppStore.getState().setChoices([]);
+  useAppStore.getState().setEnding(null);
   enableInput(false);
   showGmThinking();
   safeSend(JSON.stringify({ type: "action", content: text }));
@@ -235,7 +164,7 @@ export function sendAction(text: string) {
 
 // ---- 发送建议检定回复 ----
 export function sendSuggestReply(confirmed: boolean) {
-  modalOverlay.classList.add("hidden");
+  useAppStore.getState().setDialog(null);
   if (confirmed) {
     addMsg("player", "🎲 确定尝试！", true);
     showRollPending();
@@ -245,8 +174,12 @@ export function sendSuggestReply(confirmed: boolean) {
   safeSend(JSON.stringify({ type: "suggest_reply", confirmed }));
 }
 
-export function sendDecisionReply(decisionId: string, optionId: string, label: string) {
-  modalOverlay.classList.add("hidden");
+export function sendDecisionReply(
+  decisionId: string,
+  optionId: string,
+  label: string,
+) {
+  useAppStore.getState().setDialog(null);
   activeDecisionId = null;
   addMsg("player", label, true);
   if (optionId === "confirm_threat") {
@@ -254,16 +187,18 @@ export function sendDecisionReply(decisionId: string, optionId: string, label: s
   } else if (!["cancel_violence", "cancel_threat"].includes(optionId)) {
     showRollPending();
   }
-  safeSend(JSON.stringify({
-    type: "decision_reply",
-    decision_id: decisionId,
-    option_id: optionId,
-  }));
+  safeSend(
+    JSON.stringify({
+      type: "decision_reply",
+      decision_id: decisionId,
+      option_id: optionId,
+    }),
+  );
 }
 
 export function onDecisionResolved(data: any) {
   if (!data.automatic || data.decision_id !== activeDecisionId) return;
-  modalOverlay.classList.add("hidden");
+  useAppStore.getState().setDialog(null);
   activeDecisionId = null;
   if (["cancel_violence", "cancel_threat"].includes(data.option_id)) {
     const action = data.option_id === "cancel_threat" ? "威胁" : "攻击";
@@ -273,21 +208,3 @@ export function onDecisionResolved(data: any) {
     showRollPending();
   }
 }
-
-// ==================== 按钮事件绑定 ====================
-
-btnSend.onclick = () => {
-  const text = userInput.value.trim();
-  if (!text) return;
-  sendAction(text);
-  userInput.value = "";
-};
-
-userInput.onkeydown = (e) => {
-  if (e.key === "Enter") {
-    btnSend.click();
-  }
-};
-
-modalYes.onclick = () => sendSuggestReply(true);
-modalNo.onclick = () => sendSuggestReply(false);

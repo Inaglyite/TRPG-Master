@@ -9,13 +9,7 @@
  *      ES 模块的 live binding 机制保证了模块初始化完成后值立即可用。
  */
 
-import {
-  setConn,
-  savePanelOverlay,
-  connectionNotice,
-  connectionNoticeText,
-  connectionRecover,
-} from "./dom";
+import { useAppStore, type ConnectionState } from "./state/app-store";
 import {
   addMsg,
   attachTurnBranchAction,
@@ -63,7 +57,7 @@ import {
   showHandout,
   clearTransientHandouts,
 } from "./panels";
-import { applyTheme } from "./main";
+import { applyTheme } from "./theme";
 import {
   onModelSettings,
   onModelSettingsError,
@@ -75,6 +69,7 @@ import {
   onPlayerNotesConflict,
   onPlayerNotesError,
 } from "./utility";
+import { parseServerMessage } from "./protocol/server-message";
 
 // ---- 后端地址 ----
 const WS_HOST = location.hostname || "localhost";
@@ -99,6 +94,7 @@ function rememberWorld(worldId: unknown, moduleName: unknown) {
   if (!id || !module) return;
   preferredWorldId = id;
   preferredWorldModule = module;
+  useAppStore.getState().setWorld(id, module);
   localStorage.setItem(WORLD_ID_KEY, id);
   localStorage.setItem(WORLD_MODULE_KEY, module);
 }
@@ -131,22 +127,22 @@ let noticeHideTimer: number | null = null;
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
 
+function setConn(connection: ConnectionState) {
+  useAppStore.getState().setConnection(connection);
+}
+
 function showConnectionNotice(message: string, showRecovery = false) {
   if (noticeHideTimer !== null) {
     window.clearTimeout(noticeHideTimer);
     noticeHideTimer = null;
   }
-  connectionNoticeText.textContent = message;
-  connectionNotice.classList.remove("hidden");
-  connectionRecover.classList.toggle("hidden", !showRecovery);
-  connectionRecover.disabled = false;
+  useAppStore.getState().setConnectionNotice(message, showRecovery);
 }
 
 function hideConnectionNotice(delay = 0) {
   if (noticeHideTimer !== null) window.clearTimeout(noticeHideTimer);
   noticeHideTimer = window.setTimeout(() => {
-    connectionNotice.classList.add("hidden");
-    connectionRecover.classList.add("hidden");
+    useAppStore.getState().setConnectionNotice(null);
     noticeHideTimer = null;
   }, delay);
 }
@@ -163,10 +159,12 @@ function requestTurnRecovery(delay = 0) {
   recoveryPollTimer = window.setTimeout(() => {
     recoveryPollTimer = null;
     if (!ws || ws.readyState !== WebSocket.OPEN || !interruptedTurnId) return;
-    ws.send(JSON.stringify({
-      type: "turn_recovery_get",
-      turn_id: interruptedTurnId,
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "turn_recovery_get",
+        turn_id: interruptedTurnId,
+      }),
+    );
   }, delay);
 }
 
@@ -207,7 +205,10 @@ function queueHandout(handout: HandoutMessage) {
   const key = `${data.entity_type}:${data.entity_id}:${data.asset_id || data.file}`;
   const exists = deferredHandouts.some((item) => {
     const queued = item as HandoutMessage & { asset_id?: string };
-    return `${queued.entity_type}:${queued.entity_id}:${queued.asset_id || queued.file}` === key;
+    return (
+      `${queued.entity_type}:${queued.entity_id}:${queued.asset_id || queued.file}` ===
+      key
+    );
   });
   if (!exists) deferredHandouts.push(handout);
 }
@@ -246,12 +247,16 @@ function attachTurnActions(history: TurnHistoryItem[]) {
   });
   const latestTurnId = String(history[history.length - 1]?.turn_id || "");
   if (latestTurnId) {
-    attachTurnRewriteAction(latestTurnId, () => requestTurnRewrite(latestTurnId));
+    attachTurnRewriteAction(latestTurnId, () =>
+      requestTurnRewrite(latestTurnId),
+    );
   }
 }
 
 function displayWorldHistory(rawHistory: unknown) {
-  const history = Array.isArray(rawHistory) ? rawHistory as TurnHistoryItem[] : [];
+  const history = Array.isArray(rawHistory)
+    ? (rawHistory as TurnHistoryItem[])
+    : [];
   const latest = renderTurnHistory(history);
   onDone(latest?.choices);
   attachTurnActions(history);
@@ -259,7 +264,11 @@ function displayWorldHistory(rawHistory: unknown) {
 
 // ---- 连接 ----
 export function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (
+    ws &&
+    (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+  )
+    return;
   setConn("connecting");
   const socket = new WebSocket(websocketUrl());
   ws = socket;
@@ -280,9 +289,7 @@ export function connect() {
     if (!interruptedTurn) socket.send(JSON.stringify({ type: "state" }));
     if (interruptedTurn) {
       onConnectionRestored(true);
-      showConnectionNotice(
-        "连接已恢复，正在核对刚才回合的提交状态……",
-      );
+      showConnectionNotice("连接已恢复，正在核对刚才回合的提交状态……");
       requestTurnRecovery();
     } else {
       onConnectionRestored(false);
@@ -303,7 +310,8 @@ export function connect() {
       cancelNarrativeReplacement(rewriteSourceTurnId);
     }
     interruptedTurn = interruptedTurn || (gmTurnActive && !rewriteInterrupted);
-    if (gmTurnActive && activeTurnId && !rewriteInterrupted) interruptedTurnId = activeTurnId;
+    if (gmTurnActive && activeTurnId && !rewriteInterrupted)
+      interruptedTurnId = activeTurnId;
     if (!outageActive) {
       outageActive = true;
       if (interruptedTurn) clearTransientHandouts();
@@ -335,13 +343,12 @@ export function disconnectCleanly() {
   }
 }
 
-connectionRecover.onclick = () => {
+export function recoverLatestTurn() {
   if (!ws || ws.readyState !== WebSocket.OPEN || recoveryPending) return;
   recoveryPending = true;
-  connectionRecover.disabled = true;
   showConnectionNotice("正在恢复最近一个已完成回合……");
   ws.send(JSON.stringify({ type: "save_load", slot_id: "slot_000" }));
-};
+}
 
 type PublicTurnRecord = {
   turn_id?: string;
@@ -367,7 +374,8 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
   for (const event of events) {
     switch (event?.type) {
       case "narrative_chunk":
-        replayedNarrative = replayedNarrative || Boolean(String(event.text || "").trim());
+        replayedNarrative =
+          replayedNarrative || Boolean(String(event.text || "").trim());
         onNarrativeChunk(String(event.text || ""));
         break;
       case "tension":
@@ -386,7 +394,9 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
         addMsg("error", String(event.message || "本轮出现错误。"));
         break;
       case "choices":
-        pendingChoices = Array.isArray(event.choices) ? event.choices : pendingChoices;
+        pendingChoices = Array.isArray(event.choices)
+          ? event.choices
+          : pendingChoices;
         break;
     }
   }
@@ -413,11 +423,12 @@ function onTurnRecovery(data: any) {
   if (!interruptedTurn || !interruptedTurnId) return;
   const requested = data.requested as PublicTurnRecord | null;
   const active = data.active as PublicTurnRecord | null;
-  const candidate = requested?.turn_id === interruptedTurnId
-    ? requested
-    : active?.turn_id === interruptedTurnId
-      ? active
-      : null;
+  const candidate =
+    requested?.turn_id === interruptedTurnId
+      ? requested
+      : active?.turn_id === interruptedTurnId
+        ? active
+        : null;
 
   if (candidate?.status === "completed") {
     replayRecoveredTurn(candidate);
@@ -437,7 +448,12 @@ function onTurnRecovery(data: any) {
 
 // ---- 消息分发 ----
 function handleMessage(e: MessageEvent) {
-  const data = JSON.parse(e.data);
+  const parsed = parseServerMessage(e.data);
+  if (!parsed) {
+    addMsg("error", "守秘人发送了无法识别的协议消息，已安全忽略。", true);
+    return;
+  }
+  const data: any = parsed;
   if (!acceptTurnEvent(data)) return;
   switch (data.type) {
     case "pong":
@@ -445,9 +461,10 @@ function handleMessage(e: MessageEvent) {
     case "gm_turn_start":
       gmTurnActive = true;
       activeTurnKind = String(data.turn_kind || "gameplay");
-      rewriteSourceTurnId = activeTurnKind === "rewrite"
-        ? String(data.source_turn_id || "") || null
-        : null;
+      rewriteSourceTurnId =
+        activeTurnKind === "rewrite"
+          ? String(data.source_turn_id || "") || null
+          : null;
       setDisplayTurnId(activeTurnId);
       if (activeTurnId && activeTurnKind !== "rewrite") {
         tagPendingPlayerMessage(activeTurnId);
@@ -497,8 +514,12 @@ function handleMessage(e: MessageEvent) {
       const completedTurnId = activeTurnId;
       onDone(pendingChoices);
       if (completedTurnId) {
-        attachTurnBranchAction(completedTurnId, () => requestTurnBranch(completedTurnId));
-        attachTurnRewriteAction(completedTurnId, () => requestTurnRewrite(completedTurnId));
+        attachTurnBranchAction(completedTurnId, () =>
+          requestTurnBranch(completedTurnId),
+        );
+        attachTurnRewriteAction(completedTurnId, () =>
+          requestTurnRewrite(completedTurnId),
+        );
       }
       gmTurnActive = false;
       deferredHandouts.forEach((handout) => showHandout(handout));
@@ -518,13 +539,21 @@ function handleMessage(e: MessageEvent) {
       safeSend(JSON.stringify({ type: "state" }));
       break;
     case "turn_rewritten": {
-      const sourceTurnId = String(data.source_turn_id || rewriteSourceTurnId || "");
+      const sourceTurnId = String(
+        data.source_turn_id || rewriteSourceTurnId || "",
+      );
       if (sourceTurnId) completeNarrativeReplacement(sourceTurnId);
-      pendingChoices = Array.isArray(data.choices) ? data.choices : pendingChoices;
+      pendingChoices = Array.isArray(data.choices)
+        ? data.choices
+        : pendingChoices;
       onDone(pendingChoices);
       if (sourceTurnId) {
-        attachTurnBranchAction(sourceTurnId, () => requestTurnBranch(sourceTurnId));
-        attachTurnRewriteAction(sourceTurnId, () => requestTurnRewrite(sourceTurnId));
+        attachTurnBranchAction(sourceTurnId, () =>
+          requestTurnBranch(sourceTurnId),
+        );
+        attachTurnRewriteAction(sourceTurnId, () =>
+          requestTurnRewrite(sourceTurnId),
+        );
       }
       gmTurnActive = false;
       deferredHandouts = [];
@@ -540,12 +569,18 @@ function handleMessage(e: MessageEvent) {
       break;
     }
     case "turn_rewrite_failed": {
-      const sourceTurnId = String(data.source_turn_id || rewriteSourceTurnId || "");
+      const sourceTurnId = String(
+        data.source_turn_id || rewriteSourceTurnId || "",
+      );
       if (sourceTurnId) cancelNarrativeReplacement(sourceTurnId);
       onDone();
       if (sourceTurnId) {
-        attachTurnBranchAction(sourceTurnId, () => requestTurnBranch(sourceTurnId));
-        attachTurnRewriteAction(sourceTurnId, () => requestTurnRewrite(sourceTurnId));
+        attachTurnBranchAction(sourceTurnId, () =>
+          requestTurnBranch(sourceTurnId),
+        );
+        attachTurnRewriteAction(sourceTurnId, () =>
+          requestTurnRewrite(sourceTurnId),
+        );
       }
       gmTurnActive = false;
       deferredHandouts = [];
@@ -573,7 +608,11 @@ function handleMessage(e: MessageEvent) {
       rememberWorld(data.world_id, data.module_name);
       if (getGameStarted()) displayWorldHistory(data.history);
       closeSavePanel();
-      addMsg("system", `已进入「${data.label || "新的时间线"}」，原时间线保持不变。`, true);
+      addMsg(
+        "system",
+        `已进入「${data.label || "新的时间线"}」，原时间线保持不变。`,
+        true,
+      );
       safeSend(JSON.stringify({ type: "state" }));
       break;
     case "turn_branch_failed":
@@ -604,10 +643,13 @@ function handleMessage(e: MessageEvent) {
       break;
     case "turn_rejected":
       resetTurnActionButtons();
-      if (onStartTurnRejected(
-        String(data.message || "上一局仍在收尾，请稍候。"),
-        data.reason === "world_turn_in_progress" || data.reason === "turn_finalizing",
-      )) {
+      if (
+        onStartTurnRejected(
+          String(data.message || "上一局仍在收尾，请稍候。"),
+          data.reason === "world_turn_in_progress" ||
+            data.reason === "turn_finalizing",
+        )
+      ) {
         break;
       }
       addMsg("error", data.message || "上一回合尚未结束，请稍候。", true);
@@ -643,10 +685,12 @@ function handleMessage(e: MessageEvent) {
       addMsg(
         data.ok ? "system" : "error",
         data.ok
-          ? (data.slot_id === "slot_000" ? "进度已快速保存。" : "新存档已创建。")
+          ? data.slot_id === "slot_000"
+            ? "进度已快速保存。"
+            : "新存档已创建。"
           : "存档失败，请稍后再试。",
       );
-      if (!savePanelOverlay.classList.contains("hidden")) {
+      if (useAppStore.getState().savePanelOpen) {
         safeSend(JSON.stringify({ type: "save_list" }));
       }
       break;
@@ -691,21 +735,27 @@ function handleMessage(e: MessageEvent) {
       break;
     case "save_list":
       onSaveList(data);
-      if (!savePanelOverlay.classList.contains("hidden")) {
-        renderSavePanel(data.saves || []);
-      }
+      renderSavePanel(data.saves || []);
       break;
     case "save_available":
       onSaveAvailable(data);
       break;
     case "loaded":
-      addMsg("system", data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。");
+      addMsg(
+        "system",
+        data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。",
+      );
       if (recoveryPending && data.ok) {
         showConnectionNotice("进度已恢复，守秘人正在重建当前场景……");
       }
       break;
     case "case_settled":
-      addMsg("system", data.ok ? "案件经历已写入调查员长期履历。" : `履历写入失败：${data.error || "未知错误"}`);
+      addMsg(
+        "system",
+        data.ok
+          ? "案件经历已写入调查员长期履历。"
+          : `履历写入失败：${data.error || "未知错误"}`,
+      );
       break;
     case "character_state":
       // 新游戏/读档确认后立即采用服务端的权威角色，避免显示静态占位角色。

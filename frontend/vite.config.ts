@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  plugins: [react()],
   root: ".",
   // 用相对路径，这样 Electron 用 file:// 加载 dist/index.html 时
   // 资源能正确解析为 ./assets/... 而不是 /assets/...（后者会指向文件系统根）
@@ -17,5 +19,9 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
   },
 });

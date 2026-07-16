@@ -423,16 +423,18 @@ sequenceDiagram
 
 | 模块 | 职责 |
 |---|---|
-| `main.ts` | 启动 WebSocket、校验并应用主题变量 |
+| `react-main.tsx` / `react/App.tsx` | 创建 React 根节点并启动 WebSocket 生命周期 |
+| `react/GameShell.tsx` | 组合主界面、开始菜单与所有覆盖层 |
+| `react/components/` | 聊天、控制区、存档、设置、笔记、模组导入等声明式视图 |
+| `state/` | Zustand 客户端状态；服务写入、组件订阅 |
 | `ws.ts` | 连接、有界退避、断线恢复入口、发送队列、回合序号校验与事件分发 |
 | `start.ts` | 模组/调查员选择、新游戏与继续游戏入口 |
-| `module-import.ts` | `.trpgmod` 文件选择、HTTP 预检、确认安装与自动切换 |
-| `renderer.ts` | Markdown 消息、流式追加、滚动策略、骰子与 handout 容器 |
+| `react/components/ModuleImporter.tsx` | `.trpgmod` 文件选择、HTTP 预检、确认安装与自动切换 |
+| `renderer.ts` | 将叙事流、骰子和历史记录转换为消息状态 |
 | `options.ts` | 行动选项、自由输入、检定确认 |
-| `panels.ts` | 角色、线索、结局、存档与快速存档 |
+| `panels.ts` | 角色、线索、结局、存档与快速存档命令适配 |
 | `settings.ts` | 模型路由、回合耗时/context 分区与 Lorebook trace 诊断 |
 | `utility.ts` | 不注入模型的玩家笔记，以及仅发送普通 action 的快捷行动 |
-| `dom.ts` | DOM 引用与连接状态 |
 | `style.css` | 主题变量、素材化控件和响应式布局 |
 
 前端在 Electron 中通过 `file://` 加载生产资源，因此主题和动态状态主要经 WebSocket 下发。图片 handout 同时携带 `asset_data_uri` 与 HTTP `asset_url`：Electron 优先使用 data URI，浏览器可回退到 HTTP 资产路由。回合中若 handout 先于任何可见叙事到达，前端只缓存到第一段叙事；已有可见叙事时立即展示，不再统一等待 `done`。等待状态由 `turn_phase` 驱动，超过 8 秒后在同一状态条显示耗时；最终按钮优先使用结构化 `choices`。
