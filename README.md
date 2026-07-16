@@ -6,7 +6,7 @@
 
 ## 主要能力
 
-- Electron 桌面端与浏览器前端，共用 Vite + TypeScript 渲染层。
+- Electron 桌面端与浏览器前端，共用 React + Vite + TypeScript 渲染层；Zustand 管理客户端状态，Zod 校验 WebSocket 消息入口。
 - OpenAI 兼容接口，默认配置面向 DeepSeek，可自定义请求地址和模型名。
 - LangGraph 双角色编排：探索由叙事 Agent 处理，战斗由无私有记忆的战斗 Agent 接管。
 - 服务端权威战斗状态机，负责先攻、回合、d100 对抗、伤害、枪械弹药与玩家防御确认。
@@ -19,7 +19,7 @@
 - 持久回合日志：把最终叙事、结构化选项、可重放事件、消息和世界快照绑定到同一个 `turn_id`，断线后可确认并恢复完整回合。
 - 回合级上下文诊断：查看模型首 token/总耗时、prompt 分区估算、工具名和 Lorebook 逐条筛选原因，不暴露私有提示正文。
 - 无副作用重新叙述：只替换最后一轮文字表达，不重跑工具、骰子、判定、线索或资源变化。
-- 时间线分支：可从任一已提交回合复制独立 `world_id`，并在存档页切换主时间线与分支。
+- 决策点时间线分支：结果消息上的分支操作自动锚定到本次行动前的父回合，恢复当时的世界快照、聊天和结构化选项，并在存档页切换主时间线与分支。
 - 私人调查笔记与快捷行动：笔记按世界原子保存且不注入模型；快捷行动仍走普通可见玩家行动协议。
 - `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
@@ -35,6 +35,8 @@
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
 - [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
 - [模组编辑器规划](docs/MODULE_EDITOR.md)：编辑器需求、技术架构、阶段与验收标准。
+- [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。
+- [当前开发交接](docs/HANDOFF_2026-07-16.md)：最新提交、验证基线、已完成能力和后续风险。
 - [模组工程模板](examples/module-template/manifest.json)：可直接打包的 v1 示例。
 
 ## 快速开始
@@ -313,7 +315,10 @@ powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 venv/bin/python -m unittest discover -s tests -v
 venv/bin/python -m ruff check src server.py tools tests
 venv/bin/python -m compileall -q src tools server.py tests
-cd frontend && npm run build
+cd frontend
+npm test
+npm run format:check
+npm run build
 bash -n ../start_desktop.sh
 ```
 

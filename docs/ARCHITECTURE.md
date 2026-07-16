@@ -354,9 +354,12 @@ worlds/<world_id>/saves/slot_NNN/
 短 prompt、禁用全部 tools，并只替换匹配的 assistant 正文；固定 choices、工具结果和世界快照不变。
 每个变体及模型诊断写回回合记录，失败则恢复原消息和自动存档。
 
-“创建分支”从指定完成回合复制父链、消息和快照到唯一 `world_id`，保留分叉 revision，并在
-`world.json.branch` 记录 parent world 与 source turn。原世界不回滚；新世界后续状态、存档、回合日志
-和笔记均独立。存档面板按模组列出这些时间线，前端把当前 world/module 记入本地连接偏好。
+每个回合记录同时保存本回合 `player_input`、结果叙事以及 `parent_turn_id`。结果消息上的“创建分支”
+不是复制结果后的状态，而是以 `parent_turn_id` 恢复到本次玩家行动前的决策点；首个没有父回合的
+开场记录才以自身作为分支源。服务端从该完成回合复制父链、消息和快照到唯一 `world_id`，保留
+分叉 revision，并在 `world.json.branch` 记录 parent world 与 source turn。原世界不回滚；新世界后续
+状态、存档、回合日志和笔记均独立。存档面板按模组列出这些时间线，前端把当前 world/module
+记入本地连接偏好。
 
 ### 8.4 调查员与长期履历
 
