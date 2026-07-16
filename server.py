@@ -101,6 +101,12 @@ from src.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
+from src.editor_projects import (
+    EditorProjectConflict,
+    EditorProjectError,
+    EditorProjectNotFound,
+    EditorProjectStore,
+)
 from src.engine import EngineCallbacks, GameEngine
 from src.event_stream import OrderedTurnEventStream
 from src.game_application import (
@@ -137,11 +143,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["null"],
     allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Module-Filename"],
 )
 MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
 WORLD_BRANCHES = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)
+EDITOR_PROJECTS = EditorProjectStore(RUNTIME_ROOT)
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 _active_model_settings = ModelSettings.validated(
     NARRATIVE_MODEL, JUDGEMENT_MODEL
@@ -1178,6 +1185,69 @@ async def compile_module_preview(data: dict):
         data.get("lorebook"),
     )
     return preview.to_dict()
+
+
+def _editor_error(exc: EditorProjectError) -> JSONResponse:
+    if isinstance(exc, EditorProjectConflict):
+        return JSONResponse({
+            "ok": False,
+            "error_code": "revision_conflict",
+            "error": str(exc),
+            "current": exc.current,
+        }, status_code=409)
+    status = 404 if isinstance(exc, EditorProjectNotFound) else 400
+    return JSONResponse({
+        "ok": False,
+        "error_code": "project_not_found" if status == 404 else "invalid_project",
+        "error": str(exc),
+    }, status_code=status)
+
+
+@app.get("/api/editor/projects")
+async def list_editor_projects():
+    projects = await asyncio.to_thread(EDITOR_PROJECTS.list)
+    return {"ok": True, "projects": projects}
+
+
+@app.post("/api/editor/projects")
+async def create_editor_project(data: dict):
+    try:
+        record = await asyncio.to_thread(EDITOR_PROJECTS.create, data.get("project"))
+        return JSONResponse({"ok": True, **record}, status_code=201)
+    except EditorProjectError as exc:
+        return _editor_error(exc)
+
+
+@app.get("/api/editor/projects/{session_id}")
+async def get_editor_project(session_id: str):
+    try:
+        record = await asyncio.to_thread(EDITOR_PROJECTS.get, session_id)
+        return {"ok": True, **record}
+    except EditorProjectError as exc:
+        return _editor_error(exc)
+
+
+@app.patch("/api/editor/projects/{session_id}")
+async def update_editor_project(session_id: str, data: dict):
+    try:
+        record = await asyncio.to_thread(
+            EDITOR_PROJECTS.update,
+            session_id,
+            data.get("expected_revision"),
+            data.get("project"),
+        )
+        return {"ok": True, **record}
+    except EditorProjectError as exc:
+        return _editor_error(exc)
+
+
+@app.delete("/api/editor/projects/{session_id}")
+async def delete_editor_project(session_id: str):
+    try:
+        await asyncio.to_thread(EDITOR_PROJECTS.delete, session_id)
+        return {"ok": True}
+    except EditorProjectError as exc:
+        return _editor_error(exc)
 
 
 @app.post("/api/modules/inspect")

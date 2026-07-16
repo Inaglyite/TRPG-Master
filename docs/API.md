@@ -38,6 +38,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/modules/schema/module-v1` | 模组定义 JSON Schema |
 | `GET` | `/api/modules/schema/lorebook-v3` | Lorebook v3 JSON Schema |
 | `POST` | `/api/modules/compile` | 无副作用编译作者态数据并返回诊断/trace |
+| `GET/POST` | `/api/editor/projects` | 列出或创建编辑器工程会话 |
+| `GET/PATCH/DELETE` | `/api/editor/projects/{session_id}` | 读取、revision 保存或删除工程会话 |
 | `POST` | `/api/modules/inspect` | 预检 `.trpgmod`，不安装 |
 | `POST` | `/api/modules/import` | 校验并版本化安装 `.trpgmod` |
 | `GET` | `/api/characters` | 当前模组可选调查员 |
@@ -189,6 +191,31 @@ HTTP 异常。响应结构：
 存在 `error` 级诊断时 `ok:false`、`outputs:null`；`warning` 和 `advice` 不阻止编译。该接口不读写
 工程、不安装包、不创建世界，也不检查 ZIP/checksum 或素材文件是否真实存在；发布前仍必须调用
 `/inspect` 或 `/import` 完成包级安全校验。
+
+### 2.6.1 编辑器工程会话
+
+工程会话是作者态 `EditorProject` 的持久草稿，不是游戏世界或存档。创建会话：
+
+```http
+POST /api/editor/projects
+Content-Type: application/json
+
+{"project":{"editor_version":2,"manifest":{},"module":{}}}
+```
+
+保存必须携带上次读取到的 revision：
+
+```http
+PATCH /api/editor/projects/editor_0123456789abcdef01234567
+Content-Type: application/json
+
+{"expected_revision":12,"project":{}}
+```
+
+成功后 revision 加一。revision 已过期时返回 HTTP 409、`error: "revision_conflict"` 和 `current`
+完整服务器版本，由编辑器让作者选择载入服务器版本或显式覆盖。单个工程 JSON 上限为 8 MiB；图片等
+素材必须保存为包内相对路径引用。`GET /api/editor/projects` 只返回最近工程摘要，完整工程通过带会话 ID
+的 GET 获取，DELETE 删除指定会话。
 
 ### 2.7 `POST /api/modules/inspect`
 
