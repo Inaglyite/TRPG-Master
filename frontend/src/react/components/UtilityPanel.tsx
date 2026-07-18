@@ -63,7 +63,10 @@ export function UtilityPanel() {
         aria-labelledby="utility-title"
       >
         <header className="utility-header">
-          <h2 id="utility-title">调查笔记</h2>
+          <div>
+            <div className="panel-eyebrow">INVESTIGATOR / FIELD NOTES</div>
+            <h2 id="utility-title">调查笔记</h2>
+          </div>
           <button
             id="utility-close"
             type="button"

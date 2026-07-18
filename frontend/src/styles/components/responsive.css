@@ -376,3 +376,47 @@
     min-height: 190px;
   }
 }
+
+/* ---- 中屏（1080px）：收窄侧栏与留白，避免聊天区被挤压 ---- */
+@media (max-width: 1080px) {
+  #char-panel {
+    width: 260px;
+    padding: 14px;
+  }
+  #messages {
+    padding: 24px 22px;
+  }
+  #toolbar {
+    gap: 10px;
+  }
+  #toolbar button {
+    width: 84px;
+    height: 60px;
+  }
+}
+
+/* ---- 低高度视口：压缩开始界面纵向节奏，保证主操作可见 ---- */
+@media (max-height: 760px) {
+  #start-title {
+    font-size: clamp(30px, 5.4vh, 44px);
+  }
+  .start-brand {
+    margin-bottom: 18px;
+  }
+  #start-description {
+    margin-top: 12px;
+    line-height: 1.7;
+  }
+  #module-selector {
+    margin-bottom: 14px;
+  }
+  .start-menu-actions {
+    gap: 9px;
+  }
+  #btn-start {
+    min-height: 58px;
+  }
+  #btn-continue {
+    min-height: 46px;
+  }
+}

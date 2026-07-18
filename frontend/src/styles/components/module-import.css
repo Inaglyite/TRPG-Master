@@ -28,26 +28,28 @@
   animation: pop-in 0.2s ease-out;
 }
 .module-import-header {
-  min-height: 78px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 20px;
-  padding: 18px 20px;
+  gap: 18px;
+  padding: 18px 22px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg3);
+  background: color-mix(in srgb, var(--bg3) 55%, transparent);
 }
 .module-import-eyebrow {
+  margin-bottom: 5px;
   color: var(--gold-dim);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.22em;
 }
 #module-import-title {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--gold-bright);
-  font-size: 20px;
-  letter-spacing: 0.04em;
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.06em;
 }
 #module-import-close {
   width: 36px;
