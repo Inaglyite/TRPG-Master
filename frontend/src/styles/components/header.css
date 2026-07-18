@@ -1,0 +1,180 @@
+/* ---- 顶栏 ---- */
+#header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 84px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg2) 94%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 88%, transparent) 100%
+    ),
+    var(--ui-strip-small-dark) right center / 320px 56px no-repeat;
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 18%, transparent);
+  box-shadow: 0 3px 18px rgba(0, 0, 0, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 10;
+}
+/* 顶栏下沿的描金饰线 */
+#header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 4%,
+    color-mix(in srgb, var(--gold) 48%, transparent) 50%,
+    transparent 96%
+  );
+  pointer-events: none;
+}
+#header h1 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--gold);
+  letter-spacing: 3px;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--gold) 40%, transparent);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+#toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+#toolbar button {
+  width: 112px;
+  height: 76px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  position: relative;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  color: transparent;
+  font-size: 0;
+  text-indent: -999px;
+  overflow: hidden;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    opacity 0.18s ease;
+}
+#toolbar button::after {
+  content: attr(title);
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  min-width: 42px;
+  padding: 2px 7px 3px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--gold-bright);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-align: center;
+  text-indent: 0;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 2px #000,
+    0 0 7px color-mix(in srgb, var(--gold-bright) 60%, transparent);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.44);
+  pointer-events: none;
+}
+#toolbar button:hover {
+  transform: translateY(-1px);
+  filter: drop-shadow(0 0 10px var(--gold-glow)) brightness(1.1);
+}
+#toolbar button:active {
+  transform: translateY(0);
+}
+#toolbar button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+  transform: none;
+}
+#btn-save {
+  background-image: var(--ui-save);
+}
+#btn-save.saving {
+  opacity: 0.86;
+  animation: quick-save-pulse 0.8s ease-in-out infinite alternate;
+}
+#btn-save.save-success {
+  filter: drop-shadow(0 0 13px rgba(107, 154, 82, 0.82)) brightness(1.16);
+}
+#btn-save.save-failed {
+  filter: drop-shadow(0 0 13px rgba(201, 80, 80, 0.78)) brightness(0.92);
+}
+#btn-load {
+  background-image: var(--ui-load);
+}
+#btn-new {
+  background-image: var(--ui-restart);
+}
+#btn-panel {
+  background-image: var(--ui-character);
+}
+#toolbar #btn-notes {
+  background-image: var(--ui-notebook);
+  background-position: center;
+  background-size: 96px 96px;
+}
+#toolbar #btn-model-settings {
+  background-image: var(--ui-model-settings);
+  background-position: center;
+  background-size: 100px 100px;
+}
+
+@keyframes quick-save-pulse {
+  from {
+    filter: drop-shadow(0 0 5px rgba(236, 208, 122, 0.3)) brightness(0.96);
+  }
+  to {
+    filter: drop-shadow(0 0 15px rgba(236, 208, 122, 0.76)) brightness(1.15);
+  }
+}
+
+/* ---- 连接状态指示器（标题旁小圆点） ---- */
+#conn-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 10px;
+  background: var(--text-faint);
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+}
+#conn-status.connected {
+  background: var(--green);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--green) 62%, transparent);
+}
+#conn-status.connecting {
+  background: var(--gold);
+  box-shadow: 0 0 6px var(--gold-glow);
+  animation: blink 1s infinite;
+}
+#conn-status.disconnected {
+  background: var(--red-bright);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--red-bright) 62%, transparent);
+}

@@ -1,5 +1,8 @@
 import { create } from "zustand";
 
+export const DEFAULT_TITLE = "疯狂宅邸";
+export const DEFAULT_SUBTITLE = "A TRPG of Madness & Mystery";
+
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
 export type CharacterState = {
@@ -95,6 +98,8 @@ type AppState = {
   activeModule: string | null;
   title: string;
   subtitle: string;
+  description: string;
+  startButtonText: string;
   character: CharacterState | null;
   clues: ClueState;
   inputEnabled: boolean;
@@ -127,6 +132,8 @@ type AppState = {
   setWorld: (worldId: string | null, moduleName: string | null) => void;
   setTitle: (title: string) => void;
   setSubtitle: (subtitle: string) => void;
+  setDescription: (description: string) => void;
+  setStartButtonText: (text: string) => void;
   setCharacter: (character: CharacterState) => void;
   setClues: (clues: ClueState) => void;
   setInput: (enabled: boolean, placeholder?: string) => void;
@@ -166,8 +173,10 @@ export const useAppStore = create<AppState>((set) => ({
   connectionRecoveryAvailable: false,
   activeWorldId: null,
   activeModule: null,
-  title: "疯狂宅邸",
-  subtitle: "A TRPG of Madness & Mystery",
+  title: DEFAULT_TITLE,
+  subtitle: DEFAULT_SUBTITLE,
+  description: "",
+  startButtonText: "",
   character: null,
   clues: {},
   inputEnabled: false,
@@ -206,6 +215,8 @@ export const useAppStore = create<AppState>((set) => ({
     set({ activeWorldId, activeModule }),
   setTitle: (title) => set({ title }),
   setSubtitle: (subtitle) => set({ subtitle }),
+  setDescription: (description) => set({ description }),
+  setStartButtonText: (startButtonText) => set({ startButtonText }),
   setCharacter: (character) => set({ character }),
   setClues: (clues) => set({ clues }),
   setInput: (inputEnabled, inputPlaceholder) =>

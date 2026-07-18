@@ -1,0 +1,16 @@
+/* 样式入口：按原 style.css 的规则顺序组合，保持级联不变 */
+@import "./tokens.css";
+@import "./base.css";
+@import "./layout.css";
+@import "./effects.css";
+@import "./components/header.css";
+@import "./components/messages.css";
+@import "./components/controls.css";
+@import "./components/char-panel.css";
+@import "./components/handout.css";
+@import "./components/start-screen.css";
+@import "./components/overlays.css";
+@import "./components/module-import.css";
+@import "./components/character-select.css";
+@import "./components/save-panel.css";
+@import "./components/responsive.css";

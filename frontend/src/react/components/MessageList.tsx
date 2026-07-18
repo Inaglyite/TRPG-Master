@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import {
+  cancelDice3D,
+  isDice3DBusy,
+  isDice3DEligible,
+  rollDice3D,
+} from "../../dice3d/controller";
 import { renderMarkdown } from "../../markdown";
 import { invokeTurnBranch, invokeTurnRewrite } from "../../renderer";
 import {
@@ -48,6 +54,7 @@ function DiceMessage({ message }: { message: ChatMessage }) {
   const dice = message.dice || [];
   const [values, setValues] = useState(() => dice.map(randomValue));
   const [settled, setSettled] = useState(dice.length === 0);
+  const [stage3D, setStage3D] = useState(false);
   useEffect(() => {
     if (
       !dice.length ||
@@ -57,21 +64,49 @@ function DiceMessage({ message }: { message: ChatMessage }) {
       setSettled(true);
       return;
     }
-    const interval = window.setInterval(
-      () => setValues(dice.map(randomValue)),
-      48,
-    );
-    const timeout = window.setTimeout(
-      () => {
-        window.clearInterval(interval);
-        setValues(dice.map((die) => die.final));
-        setSettled(true);
-      },
-      560 + dice.length * 80,
-    );
+
+    let cancelled = false;
+    let used3D = false;
+    let interval = 0;
+    let timeout = 0;
+
+    const settleFinal = () => {
+      setValues(dice.map((die) => die.final));
+      setSettled(true);
+    };
+    // 经典 CSS 滚动路径（也是 3D 失败时的回退）
+    const startCssRoll = () => {
+      interval = window.setInterval(() => setValues(dice.map(randomValue)), 48);
+      timeout = window.setTimeout(
+        () => {
+          window.clearInterval(interval);
+          settleFinal();
+        },
+        560 + dice.length * 80,
+      );
+    };
+
+    if (isDice3DEligible(dice) && !isDice3DBusy()) {
+      used3D = true;
+      setStage3D(true);
+      rollDice3D(dice)
+        .then(() => {
+          if (!cancelled) settleFinal();
+        })
+        .catch(() => {
+          if (!cancelled) startCssRoll();
+        })
+        .finally(() => {
+          if (!cancelled) setStage3D(false);
+        });
+    } else {
+      startCssRoll();
+    }
     return () => {
+      cancelled = true;
       window.clearInterval(interval);
       window.clearTimeout(timeout);
+      if (used3D) cancelDice3D();
     };
   }, [dice]);
 
@@ -91,7 +126,9 @@ function DiceMessage({ message }: { message: ChatMessage }) {
       data-turn-id={message.turnId}
     >
       <div className="dice-title">命运之骰翻滚</div>
-      <div className="dice-stage">
+      <div
+        className={`dice-stage${stage3D && !settled ? " stage-3d-active" : ""}`}
+      >
         {dice.map((die, index) => (
           <div className="dice-wrap" key={`${die.label}-${index}`}>
             <div

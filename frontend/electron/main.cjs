@@ -28,7 +28,7 @@ function ensureEnvJson(backendRoot) {
     title: "请为您的守秘人注入灵魂",
     resizable: false,
     autoHideMenuBar: true,
-    backgroundColor: "#1a0e0a",
+    backgroundColor: "#14100c",
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   });
   Menu.setApplicationMenu(null);
@@ -37,15 +37,16 @@ function ensureEnvJson(backendRoot) {
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:system-ui,sans-serif; background:#1a0e0a; color:#d4c5b0; padding:30px; }
-  h2 { color:#c9a96e; margin-bottom:8px; font-size:18px; }
-  p.sub { color:#8a7e6b; font-size:12px; margin-bottom:20px; }
+  body { font-family:"Noto Serif SC","Songti SC",serif; background:#14100c; color:#ddd0bc; padding:30px; }
+  h2 { color:#ecd07a; margin-bottom:8px; font-size:18px; letter-spacing:2px; }
+  p.sub { color:#8c7e6a; font-size:12px; margin-bottom:20px; }
   label { display:block; margin:12px 0 4px; font-size:13px; color:#b5a48e; }
-  input { width:100%; padding:8px 10px; border:1px solid #3a2a1a; background:#0d0805; color:#d4c5b0; border-radius:4px; font-size:13px; }
-  .hint { font-size:11px; color:#6b5e4e; margin-top:3px; }
-  button { margin-top:18px; padding:10px 24px; background:#5a3a1a; color:#e8d5b0; border:none; border-radius:4px; cursor:pointer; font-size:14px; }
-  button:hover { background:#7a4a2a; }
-  .error { color:#c44; font-size:12px; margin-top:8px; display:none; }
+  input { width:100%; padding:8px 10px; border:1px solid #3a2f24; background:#0d0a07; color:#ddd0bc; border-radius:4px; font-size:13px; }
+  input:focus { outline:none; border-color:#c8a24e; }
+  .hint { font-size:11px; color:#5e5346; margin-top:3px; }
+  button { margin-top:18px; padding:10px 24px; background:linear-gradient(180deg,#ecd07a,#c8a24e); color:#241806; border:1px solid #8a6e30; border-radius:4px; cursor:pointer; font-size:14px; font-weight:700; letter-spacing:1px; }
+  button:hover { filter:brightness(1.08); }
+  .error { color:#c95050; font-size:12px; margin-top:8px; display:none; }
 </style></head><body>
 <h2>请为您的守秘人注入灵魂</h2>
 <p class="sub">请输入 OpenAI 兼容格式的请求地址及 API Key</p>

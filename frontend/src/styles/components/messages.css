@@ -1,0 +1,522 @@
+.connection-notice {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--gold-dim);
+  background: color-mix(in srgb, var(--bg2) 96%, black);
+  color: var(--gold-bright);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  z-index: 3;
+}
+.connection-notice > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.connection-notice.hidden,
+#connection-recover.hidden {
+  display: none;
+}
+#connection-recover {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg3) 92%, transparent);
+  color: var(--gold-bright);
+  font: 700 12px/1.2 var(--font);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+#connection-recover:hover,
+#connection-recover:focus-visible {
+  border-color: var(--gold);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 26%, transparent);
+  outline: none;
+}
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* scroll-behavior: smooth 已移除：流式输出时程序化平滑滚动会和用户滚轮抢，
+     改为瞬时滚动，由 pinnedToBottom 决定是否跟随。 */
+}
+.loading-label {
+  font-size: 13px;
+}
+#messages::-webkit-scrollbar {
+  width: 8px;
+}
+#messages::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+#messages::-webkit-scrollbar-thumb {
+  background: var(--border-bright);
+  border-radius: 4px;
+}
+#messages::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-dim);
+}
+
+/* ---- 消息卡片 ---- */
+.msg {
+  max-width: min(86%, 860px);
+  padding: 13px 17px;
+  border-radius: 10px;
+  line-height: 1.75;
+  font-size: 15.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  position: relative;
+  animation: msg-in 0.35s ease-out;
+}
+.msg.loading {
+  width: fit-content;
+  max-width: min(92%, 680px);
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg.gm {
+  background: linear-gradient(
+    180deg,
+    rgba(34, 27, 21, 0.96) 0%,
+    rgba(25, 19, 15, 0.96) 100%
+  );
+  align-self: flex-start;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow);
+}
+.msg.gm:has(.turn-message-actions) {
+  padding-right: 88px;
+}
+.rewrite-source-hidden {
+  display: none !important;
+}
+.rewrite-target {
+  min-height: 52px;
+}
+.turn-message-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+.msg.gm:hover .turn-message-actions,
+.msg.gm:focus-within .turn-message-actions {
+  opacity: 1;
+}
+.turn-rewrite-button,
+.turn-branch-button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  color: var(--gold-bright);
+  font: 700 19px/1 sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.turn-rewrite-button:hover:not(:disabled),
+.turn-rewrite-button:focus-visible,
+.turn-branch-button:hover:not(:disabled),
+.turn-branch-button:focus-visible {
+  border-color: var(--gold);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--gold) 26%, transparent);
+  outline: none;
+}
+.turn-rewrite-button:disabled,
+.turn-branch-button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+@media (hover: none) {
+  .turn-message-actions {
+    opacity: 1;
+  }
+}
+
+/* 玩家行动卡：淡金染底，靠右，棱线在右 */
+.msg.player {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--gold) 13%, var(--bg2)) 0%,
+    color-mix(in srgb, var(--gold) 8%, var(--bg)) 100%
+  );
+  align-self: flex-end;
+  border: 1px solid var(--gold-dim);
+  border-right: 3px solid var(--gold-dim);
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+  box-shadow: var(--shadow);
+}
+.msg.system {
+  align-self: center;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 6px 16px;
+  min-width: 0;
+  text-align: center;
+  background: transparent;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  border-radius: 0;
+  text-shadow: 0 1px 2px #000;
+}
+.msg.tension {
+  align-self: center;
+  font-size: 14px;
+  color: var(--blue-bright);
+  font-style: italic;
+  padding: 8px 20px;
+  letter-spacing: 1px;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--blue-bright) 32%, transparent);
+}
+.msg.dice {
+  align-self: center;
+  min-width: min(360px, 92vw);
+  color: var(--gold-bright);
+  font-weight: 700;
+  padding: 14px 22px 13px;
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--gold-bright) 14%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--gold) 8%, transparent);
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  text-shadow: 0 0 12px var(--gold-glow);
+  box-shadow: var(--shadow-glow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+.dice-title {
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--gold);
+  text-shadow: 0 1px 2px #000;
+}
+.dice-stage {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.dice-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.dice-face {
+  width: 58px;
+  height: 58px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(
+    50% 0,
+    88% 14%,
+    100% 50%,
+    88% 86%,
+    50% 100%,
+    12% 86%,
+    0 50%,
+    12% 14%
+  );
+  background: linear-gradient(
+    145deg,
+    rgba(255, 241, 180, 0.96),
+    rgba(172, 121, 43, 0.96) 54%,
+    rgba(78, 43, 18, 0.98)
+  );
+  color: #1b1107;
+  border: 1px solid rgba(255, 235, 166, 0.72);
+  box-shadow:
+    0 0 16px rgba(236, 208, 122, 0.26),
+    0 8px 16px rgba(0, 0, 0, 0.42);
+}
+.dice-face::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  clip-path: polygon(50% 0, 100% 34%, 82% 100%, 18% 100%, 0 34%);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.2), transparent 50%),
+    rgba(48, 30, 14, 0.1);
+}
+.dice-face span {
+  position: relative;
+  z-index: 1;
+  min-width: 2ch;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 900;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 242, 180, 0.56);
+}
+.msg.dice.rolling .dice-face {
+  animation: dice-jitter 0.14s steps(2, end) infinite;
+}
+.dice-face.locked {
+  animation: dice-lock 0.22s ease-out both;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 247, 205, 1),
+    rgba(212, 158, 55, 0.98) 56%,
+    rgba(96, 52, 20, 1)
+  );
+}
+@keyframes dice-jitter {
+  from {
+    transform: translateY(-1px) rotate(-3deg) scale(0.98);
+    filter: brightness(1.08);
+  }
+  to {
+    transform: translateY(1px) rotate(3deg) scale(1.02);
+    filter: brightness(1.24);
+  }
+}
+@keyframes dice-lock {
+  0% {
+    transform: scale(1.14) rotate(6deg);
+    box-shadow:
+      0 0 30px rgba(236, 208, 122, 0.72),
+      0 8px 16px rgba(0, 0, 0, 0.42);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+.dice-face-label {
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1;
+  text-shadow: 0 1px 2px #000;
+}
+.dice-result {
+  max-width: 100%;
+  color: var(--gold-bright);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.dice-result.hidden {
+  visibility: hidden;
+}
+.msg.dice .dice-stage.stage-3d-active {
+  visibility: hidden;
+}
+
+/* ---- 3D 骰覆盖层 ---- */
+.dice-3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--ink) 30%, transparent),
+    color-mix(in srgb, var(--ink) 68%, transparent)
+  );
+  animation: fade-in 0.25s ease;
+  cursor: pointer;
+}
+.dice-3d-overlay.hidden {
+  display: none;
+}
+.dice-3d-scene {
+  width: 100%;
+  height: 100%;
+}
+.dice-3d-scene canvas {
+  display: block;
+}
+.dice-3d-skip {
+  position: absolute;
+  bottom: 18px;
+  right: 22px;
+  color: var(--text-faint);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+.msg.summary {
+  align-self: center;
+  font-size: 13px;
+  color: var(--blue-bright);
+  padding: 8px 18px;
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  border-left: 3px solid var(--blue);
+  border-radius: 4px;
+  text-shadow: 0 1px 2px #000;
+}
+.msg.error {
+  align-self: center;
+  font-size: 13px;
+  color: var(--red-bright);
+  padding: 8px 18px;
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  border: 1px solid var(--red);
+  border-radius: 6px;
+}
+
+/* 结局画面 */
+.msg.ending {
+  align-self: center;
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--gold) 13%, transparent) 0%,
+    color-mix(in srgb, var(--gold) 4%, transparent) 100%
+  );
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  padding: 32px 40px;
+  max-width: 500px;
+  box-shadow: 0 0 40px color-mix(in srgb, var(--gold) 20%, transparent);
+  animation: msg-in 0.6s ease-out;
+}
+.ending-emoji {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+.ending-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--gold-bright);
+  letter-spacing: 3px;
+  margin-bottom: 16px;
+}
+.ending-summary {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.8;
+  text-align: left;
+}
+
+/* 流式光标 */
+.streaming-cursor::after {
+  content: "▊";
+  animation: blink 0.8s infinite;
+  color: currentColor;
+  margin-left: 2px;
+}
+
+/* GM 消息内的小标题/分隔线美化 */
+.msg.gm b {
+  color: var(--gold-bright);
+  font-weight: 800;
+}
+.msg.gm hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+.msg.gm ol li::marker,
+.msg.gm ul li::marker {
+  color: var(--gold);
+}
+.msg.player b {
+  color: var(--gold-bright);
+}
+.msg p {
+  margin: 0 0 8px;
+}
+.msg p:last-child {
+  margin-bottom: 0;
+}
+.msg ul,
+.msg ol {
+  margin: 8px 0 0 1.4em;
+  padding: 0;
+}
+.msg li {
+  padding-left: 2px;
+}
+
+/* ---- 加载动画 ---- */
+.typing-dots {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding-left: 42px;
+  min-height: 36px;
+  background: var(--ui-candle) left center / 34px 40px no-repeat;
+}
+.typing-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold-bright);
+  animation: dot-bounce 1.4s infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--gold-bright) 55%, transparent);
+}
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0) scale(0.9);
+    opacity: 0.48;
+  }
+  30% {
+    transform: translateY(-7px) scale(1.08);
+    opacity: 1;
+  }
+}

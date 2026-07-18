@@ -1,0 +1,70 @@
+/* ========================================================================
+   疯狂宅邸 — 克苏鲁暗色主题
+   设计语言：旧羊皮纸 + 烛火金 + 暗红血迹 + 深渊靛蓝
+   ======================================================================== */
+
+:root {
+  --ui-start-bg: url("../assets/ui/start_background.png");
+  --ui-save: url("../assets/ui/save.png");
+  --ui-load: url("../assets/ui/load.png");
+  --ui-restart: url("../assets/ui/restart.png");
+  --ui-character: url("../assets/ui/character.png");
+  --ui-notebook: url("../assets/ui/调查笔记.png");
+  --ui-model-settings: url("../assets/ui/模型设置.png");
+  --ui-send: url("../assets/ui/send.png");
+  --ui-start: url("../assets/ui/start.png");
+  --ui-continue: url("../assets/ui/continue.png");
+  --ui-return: url("../assets/ui/return.png");
+  --ui-panel-message-large: url("../assets/ui/extracted/01_panel_message_large.png");
+  --ui-panel-small-light: url("../assets/ui/extracted/02_panel_small_light.png");
+  --ui-strip-small-dark: url("../assets/ui/extracted/05_strip_small_dark.png");
+  --ui-option-light: url("../assets/ui/extracted/06_button_option_light.png");
+  --ui-option-dark: url("../assets/ui/extracted/07_button_option_ornate_dark.png");
+  --ui-panel-input: url("../assets/ui/extracted/08_panel_input_wide.png");
+  --ui-panel-sidebar: url("../assets/ui/extracted/09_panel_sidebar_tall.png");
+  --ui-panel-modal: url("../assets/ui/extracted/10_panel_modal_wide.png");
+  --ui-bar-status: url("../assets/ui/extracted/11_bar_status_round_ends.png");
+  --ui-strip-action: url("../assets/ui/extracted/12_strip_action_long.png");
+  --ui-panel-book: url("../assets/ui/extracted/13_panel_book_double.png");
+  --ui-panel-card: url("../assets/ui/extracted/15_panel_card_medium.png");
+  --ui-strip-ornate: url("../assets/ui/extracted/16_strip_ornate_wide.png");
+  --ui-button-strip: url("../assets/ui/extracted/18_button_strip_plain.png");
+  --ui-candle: url("../assets/ui/extracted/21_fx_candle_middle.png");
+  --ui-eye: url("../assets/ui/extracted/26_fx_eye_left.png");
+  --bg: #14100c;
+  --bg2: #1e1812;
+  --bg3: #2a221a;
+  --bg4: #36291f;
+  --text: #ddd0bc;
+  --text-dim: #8c7e6a;
+  --text-faint: #5e5346;
+  --gold: #c8a24e;
+  --gold-dim: #8a6e30;
+  --gold-bright: #ecd07a;
+  --gold-glow: rgba(236, 208, 122, 0.25);
+  --red: #9a3b3b;
+  --red-dim: #5e2a2a;
+  --red-bright: #c95050;
+  --crimson: #6b1a22;
+  --crimson-bright: #a62632;
+  --green: #6b9a52;
+  --blue: #4a7a9a;
+  --blue-bright: #6aa6c8;
+  --purple: #7a5a9a;
+  --ink: #100b08;
+  --border: #3a2f24;
+  --border-bright: #5a4836;
+  --font:
+    "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "Georgia",
+    serif;
+  --font-display:
+    "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "Georgia",
+    serif;
+  --font-mono: "Courier New", monospace;
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 24px rgba(200, 162, 78, 0.15);
+  --paper-ink: #1a1008;
+  --paper-ink-soft: #33210f;
+  --paper-wash: rgba(252, 231, 176, 0.72);
+  --paper-wash-strong: rgba(255, 238, 188, 0.84);
+}

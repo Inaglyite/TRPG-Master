@@ -1,0 +1,224 @@
+#bottom {
+  border-top: 1px solid var(--border);
+  padding: 14px 18px;
+  background: linear-gradient(180deg, var(--bg2) 0%, var(--bg3) 100%);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
+}
+
+/* ---- 选项按钮 ---- */
+#options-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.opt-btn {
+  flex: 1;
+  min-width: 150px;
+  background: linear-gradient(180deg, var(--bg3) 0%, var(--bg2) 100%);
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  font-family: var(--font);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  padding: 11px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.opt-btn.end-confirm {
+  flex: 2 1 260px;
+  font-weight: 800;
+}
+.opt-btn.end-continue {
+  flex: 1 1 160px;
+}
+.opt-btn:hover,
+.opt-btn:focus-visible {
+  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 100%);
+  border-color: var(--gold);
+  color: #241806;
+  box-shadow: 0 0 14px var(--gold-glow);
+  transform: translateY(-1px);
+  outline: none;
+}
+.opt-btn:active {
+  transform: translateY(0);
+}
+.opt-btn.free {
+  border-style: dashed;
+  opacity: 0.75;
+}
+.opt-btn.free:hover,
+.opt-btn.free:focus-visible {
+  opacity: 1;
+}
+
+/* ---- 输入栏 ---- */
+#input-bar {
+  display: flex;
+  gap: 8px;
+}
+#user-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  padding: 11px 14px;
+  border-radius: 4px;
+  outline: none;
+  transition: all 0.18s ease;
+}
+#user-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 10px var(--gold-glow);
+}
+#user-input::placeholder {
+  color: var(--text-faint);
+  font-style: italic;
+}
+#user-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+#btn-send {
+  min-width: 64px;
+  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 100%);
+  border: none;
+  color: #241806;
+  font-size: 17px;
+  padding: 10px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.18s ease;
+}
+#btn-send:hover {
+  box-shadow: 0 0 14px var(--gold-glow);
+  transform: translateY(-1px);
+}
+#btn-send:active {
+  transform: translateY(0);
+}
+#btn-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--bg3);
+  color: var(--text-dim);
+}
+
+/* ---- 弹窗 ---- */
+#modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fade-in 0.2s ease;
+}
+
+#modal-overlay.hidden {
+  display: none;
+}
+#modal-box {
+  background: var(--ui-panel-modal) center / 100% 100% no-repeat;
+  border: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+  padding: 64px 56px 44px;
+  max-width: 560px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  text-align: center;
+  color: var(--paper-ink-soft);
+  box-shadow: none;
+  filter: drop-shadow(0 18px 34px rgba(0, 0, 0, 0.68));
+  animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#modal-text {
+  font-size: 15px;
+  line-height: 1.85;
+  margin-bottom: 20px;
+  font-weight: 720;
+  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.64);
+}
+.suggest-desc {
+  display: block;
+  color: #3f2a15;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.suggest-roll {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.decision-title {
+  color: #2d1b0e;
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+#modal-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+}
+#modal-actions button {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 13px 28px;
+  border-radius: 0;
+  cursor: pointer;
+  border: none;
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease;
+}
+.decision-option {
+  align-items: center;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 74px;
+  min-width: 132px;
+  max-width: 190px;
+}
+.decision-option span {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 4px;
+  opacity: 0.82;
+  overflow-wrap: anywhere;
+}
+.btn-danger {
+  background: var(--ui-option-dark) center / 100% 100% no-repeat;
+  color: #f1deb0;
+  text-shadow: 0 2px 4px #000;
+}
+.btn-danger:hover {
+  filter: drop-shadow(0 0 12px rgba(201, 80, 80, 0.34)) brightness(1.08);
+  transform: translateY(-1px);
+}
+.btn-safe {
+  background: var(--ui-option-light) center / 100% 100% no-repeat;
+  color: #2b1f12;
+  border: 0 !important;
+  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.4);
+}
+.btn-safe:hover {
+  filter: drop-shadow(0 0 10px var(--gold-glow)) brightness(1.06);
+}

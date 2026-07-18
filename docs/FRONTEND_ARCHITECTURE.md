@@ -46,6 +46,44 @@ React 已覆盖：
 “回到本次行动之前尝试另一选择”，而不是“复制当前结果之后的状态”。历史回放、实时回合、
 断线恢复和重新叙述必须使用同一个锚点规则。
 
+## 样式与主题契约
+
+样式全部位于 `src/styles/`（全局作用域，无 CSS Modules）：`tokens.css` 保存设计令牌
+与 `--ui-*` 贴图变量，`base.css` 为 reset/滚动条/选区/焦点，`effects.css` 为氛围层
+（胶片噪点、暗角、烛光呼吸），`layout.css` 为页面骨架，`components/` 按界面区域
+拆分，`index.css` 按级联顺序 `@import` 汇总，由 `react-main.tsx` 引入。
+
+模组 `theme.json` 经 WS `theme` 消息原样透传，由 `src/theme.ts` 安全校验后注入：
+
+- `colors`：`bg/bg2/bg3/bg4/text/textDim/textFaint/gold/goldDim/goldBright/red/
+  redDim/redBright/crimson/crimsonBright/green/blue/blueBright/purple/ink/border/
+  borderBright` 映射为对应 CSS 变量（如 `bg→--bg`、`textDim→--text-dim`）；
+  未知键与非法颜色值被忽略。
+- `fonts`：`body→--font`、`mono→--font-mono`、`heading→--font-display`
+  （拒绝含 `;{}<>` 或 `url(` 的值）。
+- `title/subtitle/description/startButtonText`：写入 app-store，由开始页渲染；
+  缺省时回退内置默认文案。
+- `backgroundImage`：模组 `assets/` 内的相对路径（禁 `..`、协议头、反斜杠，仅图片
+  扩展名），拼为 `/api/assets/{module}/{path}` 注入 `--module-bg-image`；开始页
+  背景以 `var(--module-bg-image, var(--ui-start-bg))` 消费，缺省自动回退打包贴图。
+- `effects`：`{grain, flicker, vignette}` 任一为 `false` 时在 `<html>` 上设置
+  `data-fx-*="off"` 关闭对应氛围特效；`prefers-reduced-motion` 同步禁用动画。
+
+每次应用主题会先清除上一个模组注入的全部受管变量与特效属性，未提供的字段回退到
+`tokens.css` 默认值，因此模组只需给出想覆盖的子集。组件颜色必须引用 `tokens.css`
+中的变量（必要时用 `color-mix` 派生透明度），禁止硬编码色值。
+
+## 3D 检定骰
+
+检定骰默认以 3D 物理骰呈现（`@3d-dice/dice-box-threejs`，three + cannon-es）。
+点数仍由后端权威：投掷记法带 `@` 预定结果（如 `2d10@3,2`），物理翻滚后强制停在
+服务器给出的面值。`src/dice3d/controller.ts` 为单例懒加载封装（动态 import，独立
+chunk 不进主包），覆盖层挂载于 `#chat-panel`，物理定格/超时（5s）/点击跳过都会
+落定并显示结果文本。以下情况一律静默回退 CSS 八边形骰：`prefers-reduced-motion`、
+无 WebGL（含 jsdom 测试环境）、初始化失败、非标准面数（d2/d4/d6/d8/d10/d12/d20
+之外）、并发忙线。骰子颜色取自主题 CSS 变量（`--gold-bright`/`--bg3`/`--gold-dim`），
+`applyTheme` 时重建。
+
 ## 扩展约束
 
 新地图、面板或业务交互必须直接实现为 React 组件和类型化状态，不得引入命令式 DOM

@@ -174,6 +174,8 @@ export function StartScreen() {
   const state = useStartStore();
   const title = useAppStore((value) => value.title);
   const subtitle = useAppStore((value) => value.subtitle);
+  const description = useAppStore((value) => value.description);
+  const startButtonText = useAppStore((value) => value.startButtonText);
   const characters = state.characterGroups.flatMap(
     (group) => group.characters || [],
   );
@@ -208,8 +210,11 @@ export function StartScreen() {
             aria-label="主菜单"
           >
             <div className="start-brand">
-              <div id="start-title">{title}</div>
+              <div id="start-title" className="fx-glow">
+                {title}
+              </div>
               <div id="start-subtitle">{subtitle}</div>
+              {description && <div id="start-description">{description}</div>}
             </div>
             <div id="module-selector">
               <label htmlFor="module-select">当前模组</label>
@@ -243,8 +248,9 @@ export function StartScreen() {
                 }
                 onClick={() => useStartStore.setState({ view: "characters" })}
               >
-                <span>▶</span>
-                <span>开始新游戏</span>
+                <span className="start-art-label">
+                  {startButtonText || "开始新游戏"}
+                </span>
               </button>
               <button
                 id="btn-continue"
@@ -252,8 +258,7 @@ export function StartScreen() {
                 disabled={!state.hasSaves || state.gameStarting}
                 onClick={() => void startCommand("continueGame")}
               >
-                <span>▤</span>
-                <span>从存档开始</span>
+                <span className="start-art-label">从存档开始</span>
               </button>
               <ModelSettingsTrigger />
               {/\bElectron\//.test(navigator.userAgent) && (

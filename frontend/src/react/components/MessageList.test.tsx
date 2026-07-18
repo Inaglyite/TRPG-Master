@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMessageStore } from "../../state/message-store";
 import { MessageList } from "./MessageList";
@@ -45,5 +45,36 @@ describe("MessageList", () => {
     });
     expect(screen.getByText("守秘人正在处理")).toBeInTheDocument();
     expect(screen.getByText("判定中")).toBeInTheDocument();
+  });
+
+  it("settles dice via the CSS fallback when WebGL is unavailable", () => {
+    // jsdom 无 WebGL：isDice3DEligible 必然为 false，走经典 CSS 滚动路径
+    vi.useFakeTimers();
+    try {
+      render(<MessageList />);
+      act(() => {
+        useMessageStore.getState().replaceMessages([
+          {
+            id: "dice-1",
+            kind: "dice",
+            text: "🎲 【侦查】d100=32 vs 70 → ◆ 困难成功",
+            turnId: "turn-3",
+            dice: [
+              { min: 0, max: 9, final: 3, label: "十位", formatter: "tens" },
+              { min: 0, max: 9, final: 2, label: "个位" },
+            ],
+          },
+        ]);
+      });
+      expect(screen.getByText(/d100=32/)).toHaveClass("hidden");
+      act(() => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(screen.getByText("30")).toBeInTheDocument();
+      expect(screen.getByText("2")).toBeInTheDocument();
+      expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,6 +2,7 @@
   "title": "猩红文档",
   "subtitle": "Crimson Letters — A Call of Cthulhu Mystery",
   "description": "密斯卡托尼克大学学者离奇死亡，珍贵文档下落不明，封印在墨水中的怪物正逐渐苏醒……",
+  "backgroundImage": "墨中怪物显形.png",
 
   "colors": {
     "bg": "#0a0608",

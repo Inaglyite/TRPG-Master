@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./react/App";
-import "./style.css";
+import "./styles/index.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("React root #root is missing");

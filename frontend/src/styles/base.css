@@ -1,0 +1,93 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(
+      ellipse at 50% 0%,
+      color-mix(in srgb, var(--gold) 7%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 50% 100%,
+      color-mix(in srgb, var(--blue) 6%, transparent) 0%,
+      transparent 50%
+    ),
+    var(--bg);
+  color: var(--text);
+  display: flex;
+  user-select: none;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.6;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+/* ---- 选区与焦点 ---- */
+::selection {
+  background: var(--gold-dim);
+  color: var(--bg);
+}
+
+:focus-visible {
+  outline: 1px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* ---- 全局滚动条（组件可用更具体的选择器覆盖） ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--bg3);
+  border: 2px solid var(--bg);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-dim);
+}
+
+/* ---- 排版工具类 ---- */
+/* 眉题：面板顶部的大写小字标签，如 KEEPER / ARCHIVE */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+}
+
+body:has(#start-overlay:not(.hidden)) #header,
+body:has(#start-overlay:not(.hidden)) #bottom {
+  opacity: 0;
+  pointer-events: none;
+}

@@ -1,0 +1,98 @@
+/* ---- 共享动画关键帧（被多个组件文件引用的全局 @keyframes） ---- */
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ---- 烛光呼吸：金色光晕的明暗摇曳 ---- */
+@keyframes candle-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  23% {
+    opacity: 0.84;
+  }
+  41% {
+    opacity: 0.96;
+  }
+  62% {
+    opacity: 0.8;
+  }
+  83% {
+    opacity: 0.93;
+  }
+}
+
+/* 需要烛光感的元素（标题光晕、烛火图标等）挂这个类 */
+.fx-glow {
+  animation: candle-flicker 3.6s ease-in-out infinite;
+}
+
+/* ========================================================================
+   氛围层：胶片噪点 + 暗角
+   纯 CSS 实现，颜色取自主题变量，模组换色时自动适配。
+   模组可在 theme.json 的 effects 中逐项关闭（data-fx-*="off"）。
+   ======================================================================== */
+
+/* 胶片噪点：SVG 分形噪声，极低透明度覆盖全屏 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+}
+
+/* 暗角：四周沉入 --ink 色，聚焦画面中心 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1999;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 118% 92% at 50% 44%,
+    transparent 56%,
+    color-mix(in srgb, var(--ink) 90%, black) 128%
+  );
+}
+
+html[data-fx-grain="off"] body::before,
+html[data-fx-vignette="off"] body::after {
+  display: none;
+}
+
+html[data-fx-flicker="off"] .fx-glow {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-glow {
+    animation: none;
+  }
+}
