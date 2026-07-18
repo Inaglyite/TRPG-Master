@@ -26,21 +26,7 @@
   flex: 0 0 auto;
   min-height: 30px;
   padding: 4px 11px;
-  border: 1px solid var(--gold-dim);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg3) 92%, transparent);
-  color: var(--gold-bright);
   font: 700 12px/1.2 var(--font);
-  cursor: pointer;
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-#connection-recover:hover,
-#connection-recover:focus-visible {
-  border-color: var(--gold);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 26%, transparent);
-  outline: none;
 }
 #messages {
   flex: 1;
@@ -48,9 +34,13 @@
   padding: 28px 32px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   /* scroll-behavior: smooth 已移除：流式输出时程序化平滑滚动会和用户滚轮抢，
      改为瞬时滚动，由 pinnedToBottom 决定是否跟随。 */
+}
+/* 同一回合的消息收紧（与 18px 回合间距叠加后 ≈10px） */
+.msg.same-turn {
+  margin-top: -8px;
 }
 .loading-label {
   font-size: 13px;
@@ -121,6 +111,32 @@
 .msg.gm:has(.turn-message-actions) {
   padding-right: 88px;
 }
+/* 说话人抬头（档案信头式） */
+.msg-attribution {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -2px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 16%, transparent);
+  color: var(--gold);
+  font-family: var(--font-display);
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+}
+.msg-attribution span {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+}
+.msg.player .msg-attribution {
+  justify-content: flex-end;
+  color: var(--gold-dim);
+  border-bottom-color: color-mix(in srgb, var(--gold) 12%, transparent);
+}
 .rewrite-source-hidden {
   display: none !important;
 }
@@ -188,19 +204,34 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
   box-shadow: var(--shadow);
 }
+/* 系统消息：居中分隔饰，不用框线 */
 .msg.system {
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(86%, 720px);
   font-size: 13px;
   color: var(--text-dim);
   font-style: italic;
-  padding: 6px 16px;
-  min-width: 0;
+  padding: 2px 0;
   text-align: center;
   background: transparent;
-  border-top: 1px dashed var(--border);
-  border-bottom: 1px dashed var(--border);
+  border: 0;
   border-radius: 0;
   text-shadow: 0 1px 2px #000;
+}
+.msg.system::before,
+.msg.system::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--border-bright),
+    transparent
+  );
 }
 .msg.tension {
   align-self: center;
@@ -213,7 +244,8 @@
 }
 .msg.dice {
   align-self: center;
-  min-width: min(360px, 92vw);
+  width: fit-content;
+  max-width: min(92%, 560px);
   color: var(--gold-bright);
   font-weight: 700;
   padding: 14px 22px 13px;
@@ -225,7 +257,7 @@
     ),
     color-mix(in srgb, var(--gold) 8%, transparent);
   border: 1px solid var(--gold);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
   font-family: var(--font-mono);
   text-shadow: 0 0 12px var(--gold-glow);
   box-shadow: var(--shadow-glow);
@@ -235,110 +267,10 @@
   gap: 9px;
 }
 .dice-title {
-  font-family: var(--font);
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: var(--gold);
-  text-shadow: 0 1px 2px #000;
-}
-.dice-stage {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-}
-.dice-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.dice-face {
-  width: 58px;
-  height: 58px;
-  position: relative;
-  display: grid;
-  place-items: center;
-  clip-path: polygon(
-    50% 0,
-    88% 14%,
-    100% 50%,
-    88% 86%,
-    50% 100%,
-    12% 86%,
-    0 50%,
-    12% 14%
-  );
-  background: linear-gradient(
-    145deg,
-    rgba(255, 241, 180, 0.96),
-    rgba(172, 121, 43, 0.96) 54%,
-    rgba(78, 43, 18, 0.98)
-  );
-  color: #1b1107;
-  border: 1px solid rgba(255, 235, 166, 0.72);
-  box-shadow:
-    0 0 16px rgba(236, 208, 122, 0.26),
-    0 8px 16px rgba(0, 0, 0, 0.42);
-}
-.dice-face::before {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  clip-path: polygon(50% 0, 100% 34%, 82% 100%, 18% 100%, 0 34%);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.2), transparent 50%),
-    rgba(48, 30, 14, 0.1);
-}
-.dice-face span {
-  position: relative;
-  z-index: 1;
-  min-width: 2ch;
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 900;
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(255, 242, 180, 0.56);
-}
-.msg.dice.rolling .dice-face {
-  animation: dice-jitter 0.14s steps(2, end) infinite;
-}
-.dice-face.locked {
-  animation: dice-lock 0.22s ease-out both;
-  background: linear-gradient(
-    145deg,
-    rgba(255, 247, 205, 1),
-    rgba(212, 158, 55, 0.98) 56%,
-    rgba(96, 52, 20, 1)
-  );
-}
-@keyframes dice-jitter {
-  from {
-    transform: translateY(-1px) rotate(-3deg) scale(0.98);
-    filter: brightness(1.08);
-  }
-  to {
-    transform: translateY(1px) rotate(3deg) scale(1.02);
-    filter: brightness(1.24);
-  }
-}
-@keyframes dice-lock {
-  0% {
-    transform: scale(1.14) rotate(6deg);
-    box-shadow:
-      0 0 30px rgba(236, 208, 122, 0.72),
-      0 8px 16px rgba(0, 0, 0, 0.42);
-  }
-  100% {
-    transform: scale(1) rotate(0);
-  }
-}
-.dice-face-label {
-  color: var(--text-dim);
-  font-family: var(--font);
-  font-size: 11px;
-  letter-spacing: 1px;
-  line-height: 1;
+  font-family: var(--font-display);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: 0.26em;
+  color: var(--gold-dim);
   text-shadow: 0 1px 2px #000;
 }
 .dice-result {
@@ -350,9 +282,6 @@
   overflow-wrap: anywhere;
 }
 .dice-result.hidden {
-  visibility: hidden;
-}
-.msg.dice .dice-stage.stage-3d-active {
   visibility: hidden;
 }
 
@@ -408,7 +337,7 @@
   padding: 8px 18px;
   background: color-mix(in srgb, var(--red) 14%, transparent);
   border: 1px solid var(--red);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
 }
 
 /* 结局画面 */

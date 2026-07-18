@@ -22,7 +22,7 @@
   font-size: 14px;
   letter-spacing: 0.02em;
   padding: 11px 16px;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: all 0.18s ease;
   text-align: left;
@@ -70,7 +70,7 @@
   font-family: var(--font);
   font-size: 15px;
   padding: 11px 14px;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   outline: none;
   transition: all 0.18s ease;
 }
@@ -88,28 +88,8 @@
 }
 #btn-send {
   min-width: 64px;
-  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 100%);
-  border: none;
-  color: #241806;
   font-size: 17px;
   padding: 10px 18px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-  transition: all 0.18s ease;
-}
-#btn-send:hover {
-  box-shadow: 0 0 14px var(--gold-glow);
-  transform: translateY(-1px);
-}
-#btn-send:active {
-  transform: translateY(0);
-}
-#btn-send:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  background: var(--bg3);
-  color: var(--text-dim);
 }
 
 /* ---- 弹窗 ---- */

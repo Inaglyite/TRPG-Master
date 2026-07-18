@@ -91,7 +91,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg2) 90%, transparent);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
 }
@@ -120,7 +120,7 @@
 #character-choice-list::-webkit-scrollbar-thumb,
 #character-detail::-webkit-scrollbar-thumb {
   background: var(--bg4);
-  border-radius: 4px;
+  border-radius: var(--r-md);
 }
 .character-group {
   margin-bottom: 16px;
@@ -150,7 +150,7 @@
   overflow: hidden;
   padding: 11px 13px 10px 16px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg3) 72%, transparent);
   color: var(--text);
   font-family: var(--font);
@@ -203,7 +203,7 @@
   max-width: 84px;
   padding: 3px 6px;
   border: 1px solid var(--gold-dim);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--bg2) 82%, transparent);
   color: var(--gold);
   font-size: 9px;
@@ -239,7 +239,7 @@
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--gold-dim);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg2) 93%, transparent);
   color: var(--text);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.46);
@@ -286,7 +286,7 @@
   flex: 0 0 auto;
   padding: 4px 8px;
   border: 1px solid var(--gold-dim);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--bg3) 70%, transparent);
   color: var(--gold);
   font-size: 10px;
@@ -421,35 +421,11 @@
   min-width: 210px;
   min-height: 44px;
   padding: 0 18px;
-  border: 1px solid var(--gold-dim);
-  border-radius: 3px;
-  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-  color: #241806;
   font-family: var(--font);
   font-size: 14px;
-  font-weight: 800;
   letter-spacing: 0.1em;
-  cursor: pointer;
-  box-shadow:
-    0 7px 18px rgba(0, 0, 0, 0.4),
-    0 0 16px color-mix(in srgb, var(--gold) 22%, transparent);
-  text-shadow: none;
-  transition:
-    filter 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s ease;
-}
-#btn-character-confirm:hover:not(:disabled),
-#btn-character-confirm:focus-visible {
-  filter: brightness(1.08);
-  box-shadow:
-    0 8px 20px rgba(0, 0, 0, 0.46),
-    0 0 22px color-mix(in srgb, var(--gold) 34%, transparent);
-  transform: translateY(-1px);
-  outline: none;
 }
 #btn-character-confirm:disabled {
-  opacity: 0.5;
   cursor: wait;
 }
 #start-hint {

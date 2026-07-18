@@ -22,14 +22,34 @@
 }
 #char-panel::-webkit-scrollbar-thumb {
   background: var(--border-bright);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
 }
 
+/* 档案头：眉题 + 姓名展示字 + 打字机元数据行 */
+.dossier-eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--gold-dim);
+  font-family: var(--font-display);
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.24em;
+}
+.dossier-eyebrow span {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+}
 #char-content h3 {
   color: var(--gold-bright);
   font-family: var(--font-display);
-  font-size: 18px;
-  letter-spacing: 0.08em;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
   text-shadow: 0 0 8px var(--gold-glow);
 }
 #char-content h4 {
@@ -42,6 +62,11 @@
   text-transform: uppercase;
   margin-bottom: 6px;
 }
+#char-content h4::before {
+  content: "◆";
+  color: var(--gold-dim);
+  font-size: 8px;
+}
 #char-content h4::after {
   content: "";
   flex: 1;
@@ -50,9 +75,12 @@
 }
 #char-content .sub {
   color: var(--text-dim);
-  font-size: 13px;
-  margin-bottom: 14px;
-  font-style: italic;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 #char-content hr {
   border: 0;
@@ -78,17 +106,30 @@
   white-space: nowrap;
 }
 
+/* 状态条：档案量表（加粗 + 10% 刻度纹） */
 .stat-bar {
-  height: 7px;
-  border-radius: 4px;
+  position: relative;
+  height: 10px;
+  border-radius: var(--r-md);
   margin: 5px 0 10px;
   background: var(--bg3);
   overflow: hidden;
   border: 1px solid var(--border);
 }
+.stat-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(10% - 1px),
+    color-mix(in srgb, var(--bg) 72%, transparent) calc(10% - 1px) 10%
+  );
+  pointer-events: none;
+}
 .stat-bar-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   transition: width 0.6s ease;
 }
 .stat-bar-fill.hp {
@@ -105,6 +146,14 @@
 }
 #attr-list .stat-row {
   font-size: 13px;
+}
+/* 属性行：档案点线（label …… value） */
+#attr-list .stat-row::after {
+  content: "";
+  flex: 1;
+  margin: 0 8px;
+  border-bottom: 1px dotted var(--border-bright);
+  transform: translateY(-3px);
 }
 #inv-list,
 #clues-list {
@@ -141,7 +190,7 @@
 }
 .clue-item.profile {
   padding: 9px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--gold) 7%, transparent);
   border-bottom-color: color-mix(in srgb, var(--gold) 22%, transparent);
 }
@@ -182,7 +231,7 @@
   height: 56px;
   padding: 0;
   border: 1px solid var(--border-bright);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: var(--bg3);
   overflow: hidden;
   cursor: zoom-in;
@@ -209,7 +258,7 @@
   width: 76px;
   height: 56px;
   border: 1px dashed var(--border-bright);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   color: var(--text-faint);
   background: rgba(0, 0, 0, 0.18);
   display: flex;
@@ -220,22 +269,30 @@
   line-height: 1.3;
   text-align: center;
 }
+/* 线索分级：凸版印章式小章 */
 .clue-tier {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--blue);
-  color: var(--bg);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 1px 5px 2px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+  color: var(--blue-bright);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 .clue-tier.profile {
-  background: var(--gold-dim);
+  border-color: var(--gold-dim);
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
   color: var(--gold-bright);
 }
 .clue-tier.inferred {
-  background: var(--red-bright);
-  color: var(--bg);
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red-bright);
 }
 .clue-tier.asset {
-  background: var(--blue);
-  color: var(--bg);
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 16%, transparent);
+  color: var(--blue-bright);
 }

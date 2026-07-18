@@ -46,14 +46,22 @@
   display: flex;
   align-items: center;
 }
+/* 标题旁的烛火贴图小件（替代原 emoji） */
+.header-candle {
+  width: 20px;
+  height: 26px;
+  margin-right: 12px;
+  background: var(--ui-candle) center / contain no-repeat;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--gold) 55%, transparent));
+}
 #toolbar {
   display: flex;
-  gap: 10px;
+  gap: 14px;
   align-items: center;
 }
 #toolbar button {
-  width: 112px;
-  height: 76px;
+  width: 92px;
+  height: 64px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -61,7 +69,7 @@
   position: relative;
   background-color: transparent;
   background-repeat: no-repeat;
-  background-position: center;
+  background-position: center 2px;
   background-size: contain;
   color: transparent;
   font-size: 0;
@@ -73,30 +81,33 @@
     filter 0.18s ease,
     opacity 0.18s ease;
 }
+/* 铭牌条：与按钮同宽、贴底、深底金字细框 */
 #toolbar button::after {
   content: attr(title);
   position: absolute;
-  left: 50%;
-  bottom: 8px;
-  transform: translateX(-50%);
-  min-width: 42px;
-  padding: 2px 7px 3px;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  height: 15px;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--gold-dim);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
   color: var(--gold-bright);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 1px;
   text-align: center;
   text-indent: 0;
   white-space: nowrap;
+  overflow: hidden;
   text-shadow:
     0 1px 2px #000,
-    0 0 7px color-mix(in srgb, var(--gold-bright) 60%, transparent);
-  box-shadow: 0 0 8px rgba(0, 0, 0, 0.44);
+    0 0 6px color-mix(in srgb, var(--gold-bright) 50%, transparent);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
 #toolbar button:hover {
@@ -135,13 +146,13 @@
 }
 #toolbar #btn-notes {
   background-image: var(--ui-notebook);
-  background-position: center;
-  background-size: 96px 96px;
+  background-position: center 2px;
+  background-size: 56px 56px;
 }
 #toolbar #btn-model-settings {
   background-image: var(--ui-model-settings);
-  background-position: center;
-  background-size: 100px 100px;
+  background-position: center 2px;
+  background-size: 58px 58px;
 }
 
 @keyframes quick-save-pulse {
@@ -156,25 +167,32 @@
 /* ---- 连接状态指示器（标题旁小圆点） ---- */
 #conn-status {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  margin-left: 10px;
+  margin-left: 12px;
   background: var(--text-faint);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg3) 80%, transparent);
   transition:
     background 0.3s,
     box-shadow 0.3s;
 }
 #conn-status.connected {
   background: var(--green);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--green) 62%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg3) 80%, transparent),
+    0 0 8px color-mix(in srgb, var(--green) 72%, transparent);
 }
 #conn-status.connecting {
   background: var(--gold);
-  box-shadow: 0 0 6px var(--gold-glow);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg3) 80%, transparent),
+    0 0 8px var(--gold-glow);
   animation: blink 1s infinite;
 }
 #conn-status.disconnected {
   background: var(--red-bright);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--red-bright) 62%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg3) 80%, transparent),
+    0 0 8px color-mix(in srgb, var(--red-bright) 72%, transparent);
 }

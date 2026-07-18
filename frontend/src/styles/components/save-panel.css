@@ -44,7 +44,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 12px 6px;
-  border-radius: 5px;
+  border-radius: var(--r-md);
   background: rgba(34, 22, 11, 0.68);
   border: 1px solid rgba(236, 208, 122, 0.42);
   font-size: 19px;
@@ -61,7 +61,7 @@
   height: 32px;
   padding: 0 13px;
   border: 1px solid rgba(236, 208, 122, 0.58);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
   background: linear-gradient(
     180deg,
     rgba(66, 43, 20, 0.92),
@@ -132,7 +132,7 @@
   align-items: center;
   padding: 8px 10px 8px 12px;
   border: 1px solid rgba(67, 42, 18, 0.32);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: rgba(245, 229, 185, 0.68);
 }
 .world-entry.active {
@@ -165,7 +165,7 @@
   height: 34px;
   padding: 0;
   border: 1px solid rgba(67, 42, 18, 0.5);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: rgba(49, 31, 15, 0.92);
   color: #fff1c6;
   font-size: 17px;
@@ -223,7 +223,7 @@
   align-items: start;
   background: rgba(241, 224, 178, 0.72);
   border: 1px solid rgba(67, 42, 18, 0.34);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   padding: 12px 14px;
   box-shadow: 0 2px 8px rgba(43, 27, 10, 0.16);
   transition:
@@ -279,7 +279,7 @@
   display: inline-block;
   padding: 1px 5px;
   margin-right: 4px;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: rgba(154, 59, 59, 0.85);
   color: #fff4d8;
   font-size: 11px;
@@ -290,7 +290,7 @@
   font-size: 13px;
   font-weight: 700;
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   border: 1px solid rgba(67, 42, 18, 0.34);
   background: rgba(56, 36, 16, 0.12);
   color: #3c2917;
@@ -309,7 +309,7 @@
   transform: translate(-50%, 3px);
   padding: 4px 8px;
   border: 1px solid rgba(236, 208, 122, 0.56);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: rgba(20, 13, 8, 0.96);
   color: #fff4cf;
   font-family: var(--font);
@@ -373,7 +373,7 @@
   height: 32px;
   padding: 4px 9px;
   border: 1px solid #76552b;
-  border-radius: 4px;
+  border-radius: var(--r-md);
   outline: none;
   background: rgba(255, 247, 219, 0.94);
   color: #211407;
@@ -395,7 +395,7 @@
   height: 30px;
   padding: 0;
   border: 1px solid rgba(67, 42, 18, 0.42);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   color: #fff8df;
   font-family: var(--font);
   font-size: 17px;

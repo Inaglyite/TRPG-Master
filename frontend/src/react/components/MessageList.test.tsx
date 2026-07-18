@@ -47,8 +47,8 @@ describe("MessageList", () => {
     expect(screen.getByText("判定中")).toBeInTheDocument();
   });
 
-  it("settles dice via the CSS fallback when WebGL is unavailable", () => {
-    // jsdom 无 WebGL：isDice3DEligible 必然为 false，走经典 CSS 滚动路径
+  it("settles dice via the fallback path when WebGL is unavailable", () => {
+    // jsdom 无 WebGL：isDice3DEligible 必然为 false，走回退路径直接落定
     vi.useFakeTimers();
     try {
       render(<MessageList />);
@@ -66,12 +66,12 @@ describe("MessageList", () => {
           },
         ]);
       });
+      expect(screen.getByText("命运之骰翻滚")).toBeInTheDocument();
       expect(screen.getByText(/d100=32/)).toHaveClass("hidden");
       act(() => {
         vi.advanceTimersByTime(1200);
       });
-      expect(screen.getByText("30")).toBeInTheDocument();
-      expect(screen.getByText("2")).toBeInTheDocument();
+      expect(screen.getByText("命运之骰落定")).toBeInTheDocument();
       expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
     } finally {
       vi.useRealTimers();

@@ -8,11 +8,7 @@ import {
 } from "../../dice3d/controller";
 import { renderMarkdown } from "../../markdown";
 import { invokeTurnBranch, invokeTurnRewrite } from "../../renderer";
-import {
-  useMessageStore,
-  type ChatMessage,
-  type VisualDie,
-} from "../../state/message-store";
+import { useMessageStore, type ChatMessage } from "../../state/message-store";
 
 function LoadingMessage({ label }: { label: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -38,73 +34,38 @@ function LoadingMessage({ label }: { label: string }) {
   );
 }
 
-function formatDie(die: VisualDie, value: number) {
-  return die.formatter === "tens"
-    ? value === 0
-      ? "00"
-      : String(value * 10)
-    : String(value);
-}
-
-function randomValue(die: VisualDie) {
-  return Math.floor(Math.random() * (die.max - die.min + 1)) + die.min;
-}
-
 function DiceMessage({ message }: { message: ChatMessage }) {
   const dice = message.dice || [];
-  const [values, setValues] = useState(() => dice.map(randomValue));
   const [settled, setSettled] = useState(dice.length === 0);
-  const [stage3D, setStage3D] = useState(false);
   useEffect(() => {
     if (
       !dice.length ||
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
     ) {
-      setValues(dice.map((die) => die.final));
       setSettled(true);
       return;
     }
 
     let cancelled = false;
     let used3D = false;
-    let interval = 0;
     let timeout = 0;
 
-    const settleFinal = () => {
-      setValues(dice.map((die) => die.final));
-      setSettled(true);
-    };
-    // 经典 CSS 滚动路径（也是 3D 失败时的回退）
-    const startCssRoll = () => {
-      interval = window.setInterval(() => setValues(dice.map(randomValue)), 48);
-      timeout = window.setTimeout(
-        () => {
-          window.clearInterval(interval);
-          settleFinal();
-        },
-        560 + dice.length * 80,
-      );
-    };
-
     if (isDice3DEligible(dice) && !isDice3DBusy()) {
+      // 3D 物理骰表演（覆盖层），定格/超时/跳过后落定
       used3D = true;
-      setStage3D(true);
       rollDice3D(dice)
-        .then(() => {
-          if (!cancelled) settleFinal();
-        })
-        .catch(() => {
-          if (!cancelled) startCssRoll();
-        })
+        .catch(() => undefined)
         .finally(() => {
-          if (!cancelled) setStage3D(false);
+          if (!cancelled) setSettled(true);
         });
     } else {
-      startCssRoll();
+      // 3D 不可用时的回退：短暂展示“翻滚”标题后直接落定结果
+      timeout = window.setTimeout(() => {
+        if (!cancelled) setSettled(true);
+      }, 600);
     }
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
       window.clearTimeout(timeout);
       if (used3D) cancelDice3D();
     };
@@ -125,21 +86,8 @@ function DiceMessage({ message }: { message: ChatMessage }) {
       className={`msg dice ${settled ? "settled" : "rolling"}`}
       data-turn-id={message.turnId}
     >
-      <div className="dice-title">命运之骰翻滚</div>
-      <div
-        className={`dice-stage${stage3D && !settled ? " stage-3d-active" : ""}`}
-      >
-        {dice.map((die, index) => (
-          <div className="dice-wrap" key={`${die.label}-${index}`}>
-            <div
-              className={`dice-face${settled ? " locked" : ""}`}
-              data-sides={die.max}
-            >
-              <span>{formatDie(die, values[index] ?? die.final)}</span>
-            </div>
-            <div className="dice-face-label">{die.label}</div>
-          </div>
-        ))}
+      <div className="dice-title">
+        {settled ? "命运之骰落定" : "命运之骰翻滚"}
       </div>
       <div
         className={`dice-result${settled ? "" : " hidden"}`}
@@ -154,9 +102,11 @@ function DiceMessage({ message }: { message: ChatMessage }) {
 function Message({
   message,
   actionReset,
+  sameTurn,
 }: {
   message: ChatMessage;
   actionReset: number;
+  sameTurn: boolean;
 }) {
   const [actionsDisabled, setActionsDisabled] = useState(false);
   useEffect(() => setActionsDisabled(false), [actionReset]);
@@ -168,24 +118,30 @@ function Message({
     message.kind,
     message.streaming ? "streaming-cursor" : "",
     message.rewriteTarget ? "rewrite-target" : "",
+    sameTurn ? "same-turn" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <div id={message.id} className={className} data-turn-id={message.turnId}>
+      {message.kind === "gm" && (
+        <div className="msg-attribution">
+          守秘人<span>THE KEEPER</span>
+        </div>
+      )}
+      {message.kind === "player" && (
+        <div className="msg-attribution">调查员</div>
+      )}
       {message.kind === "loading" ? (
         <LoadingMessage label={message.text} />
       ) : message.kind === "roll-pending" ? (
         <>
           <div className="dice-title">判定中</div>
-          <div className="dice-stage">
-            <div className="dice-wrap">
-              <div className="dice-face">
-                <span>?</span>
-              </div>
-              <div className="dice-face-label">等待结果</div>
-            </div>
+          <div className="typing-dots">
+            <span />
+            <span />
+            <span />
           </div>
           <div className="dice-result">{message.text}</div>
         </>
@@ -259,8 +215,17 @@ export function MessageList() {
           element.scrollHeight - element.scrollTop - element.clientHeight < 8;
       }}
     >
-      {messages.map((message) => (
-        <Message key={message.id} message={message} actionReset={actionReset} />
+      {messages.map((message, index) => (
+        <Message
+          key={message.id}
+          message={message}
+          actionReset={actionReset}
+          sameTurn={
+            index > 0 &&
+            Boolean(message.turnId) &&
+            message.turnId === messages[index - 1].turnId
+          }
+        />
       ))}
     </div>
   );

@@ -1,0 +1,156 @@
+/* ========================================================================
+   按钮三族（全局统一语法）
+   ① 实金斜面主钮：.btn-primary —— 上高光、下暗影、按压下沉
+   ② 描金幽灵次钮：.btn-ghost   —— 暗底描金边
+   ③ 贴图艺术钮：       —— 见各组件（顶栏/弹窗/开始页返回，保留原样）
+   迁移方式：选择器名单制，组件零改动；尺寸/布局类覆盖留在组件文件。
+   ======================================================================== */
+
+/* ---- ① 实金斜面主钮 ---- */
+.btn-primary,
+#btn-character-confirm,
+#model-settings-save,
+#player-notes-save,
+#module-import-confirm,
+#btn-send {
+  border: 1px solid color-mix(in srgb, var(--gold-dim) 82%, black);
+  border-radius: var(--r-md);
+  background: linear-gradient(
+    180deg,
+    var(--gold-bright) 0%,
+    var(--gold) 55%,
+    var(--gold-dim) 135%
+  );
+  color: #241806;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 244, 207, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 207, 0.42),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.2),
+    0 3px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition:
+    filter 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.1s ease;
+}
+.btn-primary:hover:not(:disabled),
+#btn-character-confirm:hover:not(:disabled),
+#model-settings-save:hover:not(:disabled),
+#player-notes-save:hover:not(:disabled),
+#module-import-confirm:hover:not(:disabled),
+#btn-send:hover:not(:disabled),
+.btn-primary:focus-visible,
+#btn-character-confirm:focus-visible,
+#model-settings-save:focus-visible,
+#player-notes-save:focus-visible,
+#module-import-confirm:focus-visible,
+#btn-send:focus-visible {
+  filter: brightness(1.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 207, 0.42),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.2),
+    0 3px 12px rgba(0, 0, 0, 0.5),
+    0 0 14px color-mix(in srgb, var(--gold) 32%, transparent);
+  outline: none;
+}
+.btn-primary:active:not(:disabled),
+#btn-character-confirm:active:not(:disabled),
+#model-settings-save:active:not(:disabled),
+#player-notes-save:active:not(:disabled),
+#module-import-confirm:active:not(:disabled),
+#btn-send:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.32),
+    0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.btn-primary:disabled,
+#btn-character-confirm:disabled,
+#model-settings-save:disabled,
+#player-notes-save:disabled,
+#module-import-confirm:disabled,
+#btn-send:disabled {
+  filter: grayscale(0.45);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- ② 描金幽灵次钮 ---- */
+.btn-ghost,
+#btn-import-module,
+.quick-actions-grid button,
+#model-settings-cancel,
+#player-notes-cancel,
+#module-import-cancel,
+#connection-recover,
+#turn-diagnostics-refresh,
+#model-settings-close,
+#utility-close,
+#module-import-close {
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg2) 84%, transparent);
+  color: var(--gold);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.1s ease;
+}
+.btn-ghost:hover:not(:disabled),
+#btn-import-module:hover:not(:disabled),
+.quick-actions-grid button:hover:not(:disabled),
+#model-settings-cancel:hover:not(:disabled),
+#player-notes-cancel:hover:not(:disabled),
+#module-import-cancel:hover:not(:disabled),
+#connection-recover:hover:not(:disabled),
+#turn-diagnostics-refresh:hover:not(:disabled),
+#model-settings-close:hover:not(:disabled),
+#utility-close:hover:not(:disabled),
+#module-import-close:hover:not(:disabled),
+.btn-ghost:focus-visible,
+#btn-import-module:focus-visible,
+.quick-actions-grid button:focus-visible,
+#model-settings-cancel:focus-visible,
+#player-notes-cancel:focus-visible,
+#module-import-cancel:focus-visible,
+#connection-recover:focus-visible,
+#turn-diagnostics-refresh:focus-visible,
+#model-settings-close:focus-visible,
+#utility-close:focus-visible,
+#module-import-close:focus-visible {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--gold) 22%, transparent);
+  outline: none;
+}
+.btn-ghost:active:not(:disabled),
+#btn-import-module:active:not(:disabled),
+.quick-actions-grid button:active:not(:disabled),
+#model-settings-cancel:active:not(:disabled),
+#player-notes-cancel:active:not(:disabled),
+#module-import-cancel:active:not(:disabled),
+#connection-recover:active:not(:disabled),
+#turn-diagnostics-refresh:active:not(:disabled),
+#model-settings-close:active:not(:disabled),
+#utility-close:active:not(:disabled),
+#module-import-close:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn-ghost:disabled,
+#btn-import-module:disabled,
+.quick-actions-grid button:disabled,
+#model-settings-cancel:disabled,
+#player-notes-cancel:disabled,
+#module-import-cancel:disabled,
+#connection-recover:disabled,
+#turn-diagnostics-refresh:disabled,
+#model-settings-close:disabled,
+#utility-close:disabled,
+#module-import-close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

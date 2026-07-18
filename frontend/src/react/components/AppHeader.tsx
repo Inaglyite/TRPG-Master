@@ -36,7 +36,8 @@ export function AppHeader() {
   return (
     <>
       <h1>
-        🏛 {title}
+        <span className="header-candle" aria-hidden="true" />
+        {title}
         <span
           id="conn-status"
           className={connection}

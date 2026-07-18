@@ -12,7 +12,7 @@
 .handout-card {
   background: var(--bg2);
   border: 1px solid var(--gold-dim);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   animation: handout-in 0.34s cubic-bezier(0.18, 0.8, 0.24, 1) both;
   cursor: default;
@@ -108,7 +108,7 @@ body:has(.clue-toast) #handout-container {
   max-width: min(280px, calc(100vw - 40px));
   padding: 7px 13px 8px;
   border: 1px solid var(--gold-dim);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--bg3) 96%, transparent),

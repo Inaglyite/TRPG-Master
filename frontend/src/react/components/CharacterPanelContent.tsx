@@ -70,6 +70,9 @@ export function CharacterPanelContent() {
 
   return (
     <>
+      <div className="dossier-eyebrow">
+        调查员档案<span>INVESTIGATOR</span>
+      </div>
       <h3 id="char-name">{character?.name || "调查员"}</h3>
       <p className="sub" id="char-occupation">
         {character?.occupation || "档案载入中…"}

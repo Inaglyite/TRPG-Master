@@ -67,4 +67,30 @@
   --paper-ink-soft: #33210f;
   --paper-wash: rgba(252, 231, 176, 0.72);
   --paper-wash-strong: rgba(255, 238, 188, 0.84);
+
+  /* ---- 形状阶梯：徽章/小件 → 按钮/卡片 → 面板/浮层 ---- */
+  --r-sm: 2px;
+  --r-md: 4px;
+  --r-lg: 6px;
+
+  /* ---- 阴影层级 ---- */
+  --shadow-1: 0 4px 20px rgba(0, 0, 0, 0.5); /* 卡片 */
+  --shadow-2: 0 12px 30px rgba(0, 0, 0, 0.46); /* 面板 */
+  --shadow-3: 0 22px 68px rgba(0, 0, 0, 0.72); /* 浮层 */
+
+  /* ---- 间距栅格 ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ---- 字体阶梯 ---- */
+  --fs-eyebrow: 10.5px; /* 眉题/档案标签 */
+  --fs-aux: 12px; /* 辅助说明 */
+  --fs-small: 13.5px; /* 小字正文 */
+  --fs-body: 15.5px; /* 正文 */
+  --fs-card-title: 19px; /* 卡片标题 */
+  --fs-section: 26px; /* 区域节题 */
 }

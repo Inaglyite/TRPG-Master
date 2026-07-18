@@ -55,19 +55,9 @@
     max-width: 100%;
   }
   .msg.dice {
-    min-width: 0;
+    max-width: 100%;
     width: 100%;
     padding: 12px 14px;
-  }
-  .dice-stage {
-    gap: 8px;
-  }
-  .dice-face {
-    width: 50px;
-    height: 50px;
-  }
-  .dice-face span {
-    font-size: 18px;
   }
 
   #bottom {
@@ -175,9 +165,6 @@
   #module-selector {
     width: 100%;
   }
-  .module-select-row {
-    grid-template-columns: minmax(0, 1fr) 54px;
-  }
   #btn-import-module span {
     display: none;
   }
@@ -188,8 +175,8 @@
     width: min(245px, 72%);
   }
   .start-menu-button {
-    min-height: 48px;
-    font-size: 14px;
+    min-height: 32px;
+    font-size: 12.5px;
   }
 
   #character-select-view {

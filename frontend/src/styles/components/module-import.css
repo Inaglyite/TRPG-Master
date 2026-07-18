@@ -21,7 +21,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--gold-dim);
-  border-radius: 6px;
+  border-radius: var(--r-lg);
   background: var(--bg2);
   color: var(--text);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7);
@@ -53,15 +53,6 @@
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  border: 1px solid var(--border-bright);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--text-dim);
-  cursor: pointer;
-}
-#module-import-close:hover {
-  color: var(--gold-bright);
-  border-color: var(--gold);
 }
 .module-import-body {
   overflow-y: auto;
@@ -116,7 +107,7 @@
   margin-top: 18px;
   padding: 13px 15px;
   border: 1px solid var(--red);
-  border-radius: 4px;
+  border-radius: var(--r-md);
   background: color-mix(in srgb, var(--red) 14%, transparent);
   color: var(--red-bright);
   white-space: pre-wrap;
@@ -138,40 +129,9 @@
 .module-import-actions button {
   min-width: 108px;
   min-height: 40px;
-  border-radius: 4px;
   font-family: var(--font);
   font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0;
-  cursor: pointer;
-  transition:
-    border-color 0.16s ease,
-    filter 0.16s ease,
-    box-shadow 0.16s ease;
-}
-#module-import-cancel {
-  border: 1px solid var(--border-bright);
-  background: var(--bg2);
-  color: var(--text-dim);
-}
-#module-import-cancel:hover:not(:disabled),
-#module-import-cancel:focus-visible {
-  border-color: var(--gold);
-  color: var(--text);
-  outline: none;
-}
-#module-import-confirm {
-  border: 1px solid var(--gold-dim);
-  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-  color: #241806;
-}
-#module-import-confirm:hover:not(:disabled),
-#module-import-confirm:focus-visible {
-  filter: brightness(1.08);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--gold) 28%, transparent);
-  outline: none;
 }
 .module-import-actions button:disabled {
-  opacity: 0.48;
   cursor: wait;
 }
