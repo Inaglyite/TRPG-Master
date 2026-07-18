@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
+import { backendHttpOrigin } from "../../backend-url";
 import { safeSend } from "../../ws";
 
 const maxBytes = 64 * 1024 * 1024;
-const backendOrigin = `http://${location.hostname || "127.0.0.1"}:8765`;
+const backendOrigin = backendHttpOrigin();
 type Summary = {
   module_key: string;
   package_id: string;

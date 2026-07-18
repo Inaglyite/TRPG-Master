@@ -5,5 +5,10 @@ declare module "@3d-dice/dice-box-threejs" {
     initialize(): Promise<void>;
     roll(notation: string): Promise<unknown>;
     clearDice(): void;
+    renderer?: {
+      dispose?: () => void;
+      forceContextLoss?: () => void;
+      domElement?: HTMLCanvasElement;
+    };
   }
 }

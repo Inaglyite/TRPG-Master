@@ -3,7 +3,7 @@ import type { VisualDie } from "../state/message-store";
 /**
  * 3D 骰控制器：懒加载 @3d-dice/dice-box-threejs（three+cannon-es 经动态
  * import 进入独立 chunk，不进主包），单例 DiceBox 附着在聊天面板的
- * 覆盖层上。所有路径都有 2D CSS 回退：
+ * 覆盖层上。所有路径都有权威文字结果回退：
  * reduced-motion、无 WebGL、初始化失败、非标准面数、忙线并发。
  */
 
@@ -11,6 +11,11 @@ type DiceBoxLike = {
   initialize(): Promise<void>;
   roll(notation: string): Promise<unknown>;
   clearDice(): void;
+  renderer?: {
+    dispose?: () => void;
+    forceContextLoss?: () => void;
+    domElement?: HTMLCanvasElement;
+  };
 };
 
 // dice-box 物理模型支持的面数（d10 数字骰单独处理）
@@ -24,8 +29,11 @@ let overlayEl: HTMLDivElement | null = null;
 let rolling = false;
 let rollSeq = 0;
 let skipCurrent: (() => void) | null = null;
+let boxGeneration = 0;
 
 function hasWebGL(): boolean {
+  // jsdom 暴露 canvas.getContext，但调用只会向 stderr 输出 not-implemented。
+  if (typeof WebGLRenderingContext === "undefined") return false;
   try {
     const canvas = document.createElement("canvas");
     return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
@@ -88,6 +96,18 @@ function buildColorset(): Record<string, unknown> {
   };
 }
 
+function disposeBox(instance: DiceBoxLike | null): void {
+  if (!instance) return;
+  try {
+    instance.clearDice();
+    instance.renderer?.dispose?.();
+    instance.renderer?.forceContextLoss?.();
+    instance.renderer?.domElement?.remove();
+  } catch (error) {
+    console.warn("释放 3D 骰资源失败", error);
+  }
+}
+
 function ensureOverlay(): HTMLDivElement {
   if (overlayEl) return overlayEl;
   const el = document.createElement("div");
@@ -107,6 +127,7 @@ async function ensureBox(): Promise<DiceBoxLike | null> {
   if (box) return box;
   if (boxFailed) return null;
   if (!boxInit) {
+    const generation = boxGeneration;
     boxInit = (async () => {
       try {
         const { default: DiceBox } = await import("@3d-dice/dice-box-threejs");
@@ -123,12 +144,18 @@ async function ensureBox(): Promise<DiceBoxLike | null> {
           strength: 1,
         });
         await instance.initialize();
+        if (generation !== boxGeneration) {
+          disposeBox(instance as DiceBoxLike);
+          return null;
+        }
         box = instance as DiceBoxLike;
         return box;
       } catch (error) {
-        console.warn("3D 骰初始化失败，回退 CSS 骰", error);
-        hideOverlay();
-        boxFailed = true;
+        if (generation === boxGeneration) {
+          console.warn("3D 骰初始化失败，回退文字结果", error);
+          hideOverlay();
+          boxFailed = true;
+        }
         return null;
       }
     })();
@@ -138,8 +165,12 @@ async function ensureBox(): Promise<DiceBoxLike | null> {
 
 /** 模组换色后重建骰子（下次投掷时以新主题色初始化）。 */
 export function resetDice3DTheme(): void {
+  cancelDice3D();
+  boxGeneration += 1;
+  disposeBox(box);
   box = null;
   boxInit = null;
+  boxFailed = false;
   const scene = overlayEl?.querySelector("#dice-3d-scene");
   if (scene) scene.innerHTML = "";
 }
@@ -164,22 +195,30 @@ export function isDice3DBusy(): boolean {
 export async function rollDice3D(dice: VisualDie[]): Promise<void> {
   const notation = toNotation(dice);
   if (!notation || rolling) throw new Error("dice3d unavailable");
-  const instance = await ensureBox();
-  if (!instance) throw new Error("dice3d init failed");
-
+  // 在第一个 await 之前占位，避免两条消息同时穿过 busy 检查。
   rolling = true;
   const seq = ++rollSeq;
-  showOverlay();
   try {
+    const instance = await ensureBox();
+    if (!instance || seq !== rollSeq) throw new Error("dice3d init cancelled");
+    const activeInstance = instance;
+    showOverlay();
     await new Promise<void>((resolve) => {
-      const timer = window.setTimeout(finish, ROLL_TIMEOUT_MS);
-      skipCurrent = finish;
-      function finish() {
+      let finished = false;
+      const timer = window.setTimeout(() => finish(true), ROLL_TIMEOUT_MS);
+      skipCurrent = () => finish(true);
+      function finish(clear = false) {
+        if (finished) return;
+        finished = true;
+        if (clear) activeInstance.clearDice();
         window.clearTimeout(timer);
         skipCurrent = null;
         resolve();
       }
-      instance.roll(notation).then(finish, finish);
+      activeInstance.roll(notation).then(
+        () => finish(),
+        () => finish(true),
+      );
     });
   } finally {
     if (seq === rollSeq) {
@@ -193,6 +232,8 @@ export async function rollDice3D(dice: VisualDie[]): Promise<void> {
 export function cancelDice3D(): void {
   rollSeq += 1;
   rolling = false;
+  box?.clearDice();
   skipCurrent?.();
+  skipCurrent = null;
   hideOverlay();
 }

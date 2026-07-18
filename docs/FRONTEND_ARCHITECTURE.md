@@ -81,8 +81,13 @@ React 已覆盖：
 chunk 不进主包），覆盖层挂载于 `#chat-panel`，物理定格/超时（5s）/点击跳过都会
 落定并显示结果文本。以下情况一律静默回退 CSS 八边形骰：`prefers-reduced-motion`、
 无 WebGL（含 jsdom 测试环境）、初始化失败、非标准面数（d2/d4/d6/d8/d10/d12/d20
-之外）、并发忙线。骰子颜色取自主题 CSS 变量（`--gold-bright`/`--bg3`/`--gold-dim`），
-`applyTheme` 时重建。
+之外）、并发忙线。回退路径短暂显示投掷状态后直接呈现后端权威文字结果，不再模拟第二套骰面。
+骰子颜色取自主题 CSS 变量（`--gold-bright`/`--bg3`/`--gold-dim`），`applyTheme` 时取消旧投掷、
+释放 WebGL renderer/context 并按新主题懒重建。初始化、投掷、跳过、超时和卸载共享同一代次令牌，
+过期异步任务不得恢复覆盖层或占用新实例。
+
+后端 HTTP/WS 地址统一由 `src/backend-url.ts` 生成；本地默认使用当前 hostname 的 8765 端口，
+HTTPS 页面自动切换到 HTTPS/WSS，反向代理或非默认部署通过 `VITE_TRPG_BACKEND_ORIGIN` 覆盖。
 
 ## 扩展约束
 

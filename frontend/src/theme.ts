@@ -1,4 +1,5 @@
 import { resetDice3DTheme } from "./dice3d/controller";
+import { backendHttpOrigin } from "./backend-url";
 import {
   DEFAULT_SUBTITLE,
   DEFAULT_TITLE,
@@ -90,9 +91,8 @@ function isSafeAssetPath(value: unknown): value is string {
 function moduleAssetUrl(path: string): string | null {
   const moduleName = useAppStore.getState().activeModule;
   if (!moduleName) return null;
-  const host = location.hostname || "127.0.0.1";
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-  return `http://${host}:8765/api/assets/${encodeURIComponent(moduleName)}/${encodedPath}`;
+  return `${backendHttpOrigin()}/api/assets/${encodeURIComponent(moduleName)}/${encodedPath}`;
 }
 
 export function applyTheme(theme: any) {

@@ -59,6 +59,7 @@ import {
   clearTransientHandouts,
 } from "./panels";
 import { applyTheme } from "./theme";
+import { backendWebSocketUrl } from "./backend-url";
 import {
   onModelSettings,
   onModelSettingsError,
@@ -73,8 +74,7 @@ import {
 import { parseServerMessage } from "./protocol/server-message";
 
 // ---- 后端地址 ----
-const WS_HOST = location.hostname || "localhost";
-const WS_BASE_URL = `ws://${WS_HOST}:8765/ws`;
+const WS_BASE_URL = backendWebSocketUrl();
 const WORLD_ID_KEY = "trpg-active-world-id";
 const WORLD_MODULE_KEY = "trpg-active-world-module";
 let preferredWorldId = localStorage.getItem(WORLD_ID_KEY) || "";
