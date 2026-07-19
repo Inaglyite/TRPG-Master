@@ -10,6 +10,8 @@ Group=trpgdeploy
 WorkingDirectory=/opt/trpg-master/current
 EnvironmentFile=/etc/trpg-master/trpg-master.env
 Environment=TRPG_RUNTIME_ROOT=/var/lib/trpg-master
+Environment=TRPG_LOG_DIR=/var/log/trpg-master
+Environment=TRPG_LOG_STDERR=1
 ExecStart=/opt/trpg-master/current/.venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8765 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3

@@ -4,7 +4,9 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR = Path(
+    os.environ.get("TRPG_LOG_DIR", Path(__file__).resolve().parent.parent / "logs")
+)
 LOG_FILE = LOG_DIR / "trpg.log"
 MAX_BYTES = 5 * 1024 * 1024  # 5MB
 BACKUP_COUNT = 3
