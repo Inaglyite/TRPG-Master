@@ -1,0 +1,143 @@
+import unittest
+
+from src.speaker_parser import SpeakerStreamParser, parse_segments
+
+
+def npc_ok(npc_id: str) -> bool:
+    return npc_id in {"bryce_fallon", "butler_gregory"}
+
+
+class SpeakerParserTests(unittest.TestCase):
+    def feed_all(self, chunks, is_valid=npc_ok):
+        parser = SpeakerStreamParser(is_valid_npc=is_valid)
+        pieces = []
+        for chunk in chunks:
+            pieces.extend(parser.feed(chunk))
+        pieces.extend(parser.flush())
+        return pieces
+
+    def test_plain_narration_has_no_speech(self):
+        segments, clean = parse_segments("雨水顺着窗户滑落。他看了一眼抽屉。")
+        self.assertEqual(clean, "雨水顺着窗户滑落。他看了一眼抽屉。")
+        self.assertEqual([s.kind for s in segments], ["narration"])
+
+    def test_speech_tag_produces_speech_segment(self):
+        text = '雨还在下。【npc:bryce_fallon】"莱特生前一直在隐瞒什么。"【/npc】他说完看向抽屉。'
+        segments, clean = parse_segments(text, is_valid_npc=npc_ok)
+        self.assertEqual(clean, '雨还在下。"莱特生前一直在隐瞒什么。"他说完看向抽屉。')
+        self.assertEqual([s.kind for s in segments], ["narration", "speech", "narration"])
+        self.assertEqual(segments[1].npc_id, "bryce_fallon")
+        self.assertIn("隐瞒", segments[1].text)
+
+    def test_ascii_tags_are_accepted_and_never_leak(self):
+        text = '[npc:bryce_fallon]"门打开以后，空气里全是墨水味。"[/npc]'
+        segments, clean = parse_segments(text, is_valid_npc=npc_ok)
+        self.assertEqual([s.kind for s in segments], ["speech"])
+        self.assertEqual(segments[0].npc_id, "bryce_fallon")
+        self.assertNotIn("[npc:", clean)
+        self.assertNotIn("[/npc]", clean)
+
+    def test_ascii_tag_split_across_deltas(self):
+        pieces = self.feed_all(
+            ["[n", "pc:bryce_fa", "llon]", "\"台词\"", "[/n", "pc]"]
+        )
+        self.assertEqual(pieces[0][0], "speech_start")
+        self.assertIn("speech_end", [kind for kind, _, _ in pieces])
+
+    def test_multiple_speakers_split_into_units(self):
+        text = (
+            "【npc:bryce_fallon】「第一句。」【/npc】"
+            "【npc:butler_gregory】「第二句。」【/npc】"
+        )
+        segments, _ = parse_segments(text, is_valid_npc=npc_ok)
+        self.assertEqual([s.npc_id for s in segments], ["bryce_fallon", "butler_gregory"])
+
+    def test_unknown_npc_id_falls_back_to_narration(self):
+        calls = []
+        segments, clean = parse_segments(
+            '【npc:ghost】"不存在的人。"【/npc】',
+            is_valid_npc=npc_ok,
+            on_unknown_npc=calls.append,
+        )
+        self.assertEqual(calls, ["ghost"])
+        self.assertEqual([s.kind for s in segments], ["narration"])
+        self.assertNotIn("【npc:", clean)
+
+    def test_unclosed_speech_is_closed_at_end_of_stream(self):
+        segments, clean = parse_segments('开场。【npc:bryce_fallon】"没说完的话。', is_valid_npc=npc_ok)
+        self.assertEqual([s.kind for s in segments], ["narration", "speech"])
+        self.assertEqual(segments[1].npc_id, "bryce_fallon")
+        self.assertNotIn("【npc:", clean)
+        self.assertIn("没说完的话", clean)
+
+    def test_open_only_markers_end_at_paragraph_or_next_speaker_marker(self):
+        text = (
+            "【npc:bryce_fallon】「第一句。」\n\n他说完看向窗外。\n\n"
+            "【npc:bryce_fallon】「第二句。」\n\n"
+            "【npc:butler_gregory】「第三句。」"
+        )
+        segments, clean = parse_segments(text, is_valid_npc=npc_ok)
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("speech", "butler_gregory"),
+            ],
+        )
+        self.assertNotIn("npc:", clean)
+
+    def test_legacy_mismatched_right_bracket_is_accepted(self):
+        segments, clean = parse_segments(
+            '【npc:bryce_fallon⟧"旧格式台词。"【/npc】',
+            is_valid_npc=npc_ok,
+        )
+        self.assertEqual([(s.kind, s.npc_id) for s in segments], [("speech", "bryce_fallon")])
+        self.assertNotIn("npc:", clean)
+
+    def test_stray_close_tag_is_stripped(self):
+        segments, clean = parse_segments("叙述【/npc】继续。", is_valid_npc=npc_ok)
+        self.assertEqual(clean, "叙述继续。")
+        self.assertEqual([s.kind for s in segments], ["narration"])
+
+    def test_literal_bracket_in_prose_passes_through(self):
+        segments, clean = parse_segments("他写下【注】这个符号。", is_valid_npc=npc_ok)
+        self.assertEqual(clean, "他写下【注】这个符号。")
+        self.assertEqual([s.kind for s in segments], ["narration"])
+
+    def test_incremental_matches_finalize_across_chunk_boundaries(self):
+        text = '第一段。【npc:bryce_fallon】"跨块台词。"【/npc】第二段。【npc:butler_gregory】"二句。"【/npc】结尾。'
+        expected_segments, expected_clean = parse_segments(text, is_valid_npc=npc_ok)
+        # 以各种粒度切分喂入，结果必须一致
+        for step in (1, 2, 3, 7, 13, 64):
+            chunks = [text[i : i + step] for i in range(0, len(text), step)]
+            pieces = self.feed_all(chunks)
+            clean = "".join(t for kind, t, _ in pieces if kind == "text")
+            self.assertEqual(clean, expected_clean, f"chunk size {step}")
+            from src.speaker_parser import pieces_to_segments
+
+            segments = pieces_to_segments(pieces)
+            self.assertEqual(
+                [(s.kind, s.npc_id) for s in segments],
+                [(s.kind, s.npc_id) for s in expected_segments],
+                f"chunk size {step}",
+            )
+
+    def test_tag_split_across_many_deltas(self):
+        chunks = ["【n", "pc:bryce_fa", "llon】", "\"台词\"", "【/n", "pc】"]
+        pieces = self.feed_all(chunks)
+        kinds = [k for k, _, _ in pieces]
+        self.assertEqual(kinds[0], "speech_start")
+        self.assertIn("speech_end", kinds)
+
+    def test_empty_and_none_inputs(self):
+        parser = SpeakerStreamParser()
+        self.assertEqual(parser.feed(""), [])
+        segments, clean = parse_segments("")
+        self.assertEqual(segments, [])
+        self.assertEqual(clean, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

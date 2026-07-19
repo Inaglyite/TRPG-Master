@@ -9,6 +9,9 @@ import {
 import { renderMarkdown } from "../../markdown";
 import { invokeTurnBranch, invokeTurnRewrite } from "../../renderer";
 import { useMessageStore, type ChatMessage } from "../../state/message-store";
+import type { NarrativeSegment } from "../../state/message-store";
+import { useAppStore } from "../../state/app-store";
+import { AvatarDisc } from "./AvatarDisc";
 
 function LoadingMessage({ label }: { label: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -99,6 +102,35 @@ function DiceMessage({ message }: { message: ChatMessage }) {
   );
 }
 
+function NarrationUnit({ text }: { text: string }) {
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  return (
+    <>
+      <div className="msg-attribution">
+        守秘人<span>THE KEEPER</span>
+      </div>
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+    </>
+  );
+}
+
+function SpeechUnit({ segment }: { segment: NarrativeSegment }) {
+  const html = useMemo(() => renderMarkdown(segment.text), [segment.text]);
+  const name = segment.speaker?.name || "人物";
+  return (
+    <div className="speech-unit">
+      <AvatarDisc name={name} avatar={segment.speaker?.avatar} family="npc" />
+      <div className="speech-body">
+        <div className="speech-name">{name}</div>
+        <div
+          className="speech-text"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Message({
   message,
   actionReset,
@@ -111,6 +143,7 @@ function Message({
   const [actionsDisabled, setActionsDisabled] = useState(false);
   useEffect(() => setActionsDisabled(false), [actionReset]);
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
+  const character = useAppStore((state) => state.character);
   if (message.hidden) return null;
   if (message.kind === "dice") return <DiceMessage message={message} />;
   const className = [
@@ -122,16 +155,27 @@ function Message({
   ]
     .filter(Boolean)
     .join(" ");
+  const hasSegments =
+    message.kind === "gm" && Boolean(message.segments?.length);
 
   return (
     <div id={message.id} className={className} data-turn-id={message.turnId}>
-      {message.kind === "gm" && (
+      {message.kind === "gm" && !hasSegments && (
         <div className="msg-attribution">
           守秘人<span>THE KEEPER</span>
         </div>
       )}
       {message.kind === "player" && (
-        <div className="msg-attribution">调查员</div>
+        <div className="msg-attribution msg-attribution-investigator">
+          <span className="msg-attribution-name">
+            {character?.name || "调查员"}
+          </span>
+          <AvatarDisc
+            name={character?.name || "调查员"}
+            avatar={character?.avatar}
+            family="investigator"
+          />
+        </div>
       )}
       {message.kind === "loading" ? (
         <LoadingMessage label={message.text} />
@@ -145,6 +189,14 @@ function Message({
           </div>
           <div className="dice-result">{message.text}</div>
         </>
+      ) : hasSegments ? (
+        message.segments!.map((segment, index) =>
+          segment.kind === "speech" ? (
+            <SpeechUnit key={index} segment={segment} />
+          ) : (
+            <NarrationUnit key={index} text={segment.text} />
+          ),
+        )
       ) : (
         <div dangerouslySetInnerHTML={{ __html: html }} />
       )}

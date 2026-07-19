@@ -1,11 +1,15 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useAppStore } from "../../state/app-store";
 import { useMessageStore } from "../../state/message-store";
 import { MessageList } from "./MessageList";
 
 describe("MessageList", () => {
-  beforeEach(() => useMessageStore.setState({ messages: [], actionReset: 0 }));
+  beforeEach(() => {
+    useMessageStore.setState({ messages: [], actionReset: 0 });
+    useAppStore.setState({ character: null });
+  });
 
   it("renders markdown while suppressing model-provided images", () => {
     render(<MessageList />);
@@ -76,5 +80,59 @@ describe("MessageList", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renders speech units with speaker name and keeper attribution", () => {
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([
+        {
+          id: "g1",
+          kind: "gm",
+          text: "合并文本",
+          turnId: "t-seg",
+          segments: [
+            { kind: "narration", text: "雨还在下。" },
+            {
+              kind: "speech",
+              text: "「莱特生前一直在隐瞒什么。」",
+              speaker: { type: "npc", id: "bryce_fallon", name: "布莱斯·法伦" },
+            },
+          ],
+        },
+      ]);
+    });
+
+    expect(screen.getByText("守秘人")).toBeInTheDocument();
+    expect(screen.getByText("布莱斯·法伦")).toBeInTheDocument();
+    expect(screen.getByText(/莱特生前一直在隐瞒什么/)).toBeInTheDocument();
+  });
+
+  it("renders plain gm messages without segments unchanged", () => {
+    render(<MessageList />);
+    act(() => {
+      useMessageStore
+        .getState()
+        .replaceMessages([
+          { id: "g2", kind: "gm", text: "纯文本叙述。", turnId: "t-plain" },
+        ]);
+    });
+
+    expect(screen.getByText("守秘人")).toBeInTheDocument();
+    expect(screen.getByText("纯文本叙述。")).toBeInTheDocument();
+  });
+
+  it("shows the investigator name on player messages", () => {
+    useAppStore.getState().setCharacter({ name: "黄千陆" });
+    render(<MessageList />);
+    act(() => {
+      useMessageStore
+        .getState()
+        .replaceMessages([
+          { id: "p1", kind: "player", text: "我检查地毯。", turnId: "t-p" },
+        ]);
+    });
+
+    expect(screen.getByText("黄千陆")).toBeInTheDocument();
   });
 });

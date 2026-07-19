@@ -14,6 +14,11 @@ export type CharacterState = {
   max_san?: number;
   attributes?: Record<string, unknown>;
   inventory?: string[];
+  avatar?: {
+    asset_url?: string;
+    asset_data_uri?: string;
+    alt?: string;
+  };
 };
 
 export type ClueAsset = {

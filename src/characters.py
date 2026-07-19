@@ -185,6 +185,7 @@ def character_to_pc(char: dict, ref: dict | None = None,
         "inventory": copy.deepcopy(char.get("inventory", pc.get("inventory", []))),
         "credit_rating": char.get("credit_rating", pc.get("credit_rating", 0)),
         "backstory": copy.deepcopy(char.get("backstory", pc.get("backstory", {}))),
+        "portrait": char.get("portrait") or pc.get("portrait"),
         "psychological_profile": copy.deepcopy(char.get("psychological_profile", pc.get(
             "psychological_profile",
             {"traits": [], "key_relationships": [], "phobias": [], "manias": []},

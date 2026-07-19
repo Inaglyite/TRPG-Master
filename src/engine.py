@@ -13,6 +13,7 @@ from openai import OpenAI
 from .action_checks import infer_action_check, infer_scene_transition
 from .action_resolution import ActionResolution, plan_player_action
 from .agent_graph import build_turn_graph
+from .asset_payload import npc_id_known
 from .characters import apply_character_to_state, default_character_ref
 from .characters import settle_case as settle_character_case
 from .combat import preview_player_escalation
@@ -55,6 +56,7 @@ from .model_streamer import (
     StreamPolicy,
     sanitize_visible_narrative,
 )
+from .npc_conversations import commit_npc_conversations
 from .persistence import (
     has_save,
     list_saves,
@@ -65,6 +67,7 @@ from .persistence import (
     save_game,
 )
 from .runtime import RuntimeContext
+from .speaker_parser import parse_segments as parse_speaker_segments
 from .tools import (
     dice_summary,
     execute_function,
@@ -86,7 +89,8 @@ module_opening、opening_public_facts、current_scene 和 npc_public_state 是�
 检定目标或 flag，也不得借此提前公开幕后秘密。不要调用工具，不要确认指令。只能陈述
 module_opening 明确标为“开局既成事实”的玩家处境；不得替调查员说出台词、展示证物、
 接受承诺、得出结论或执行新的有意义行动。NPC 可以先开口，但必须在第一个真实选择点
-停下，并按 module_opening 指定的格式输出行动选项，把主动权交还玩家。"""
+停下，并按 module_opening 指定的格式输出行动选项，把主动权交还玩家。NPC 真正说出口的
+台词必须用 【npc:<npc_public_state 中的 id>】…【/npc】 包裹；旁白、转述与动作描写不加标签。"""
 
 _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 
@@ -94,7 +98,8 @@ _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 发现内容、时间顺序和行动结果已经固定，必须全部保持一致。不得增加、删除或改变事实，
 不得重新判定，不得让调查员说出原文没有的台词、作出新行动或获得新线索。可以调整句式、
 节奏、感官细节和对白表达，但普通气氛描写不能升级成证据。只输出改写后的叙事正文；
-不要解释任务，不要输出行动选项、标题、分析、JSON 或 Markdown 代码块。"""
+不要解释任务，不要输出行动选项、标题、分析、JSON 或 Markdown 代码块。原文中 NPC 真正说
+出口的台词必须用 【npc:<id>⟧…【/npc】 原样保留或补标；旁白与转述不加标签。"""
 
 
 class TurnCancelledError(RuntimeError):
@@ -119,7 +124,7 @@ def _thinking_type_for_request(model: str, request_role: str) -> str | None:
 @dataclass
 class EngineCallbacks:
     """引擎输出事件回调。每个回调在特定时机触发。"""
-    on_narrative: Callable[[str], None] = lambda text: None       # 流式文本块
+    on_narrative: Callable[..., None] = lambda text, npc_id=None: None  # 流式文本块（npc_id 表示发言 NPC）
     on_tension: Callable[[str, str], None] = lambda text, cat: None  # 沉浸式提示
     on_dice: Callable[[str, dict | None], None] = lambda summary, roll_data=None: None  # 骰子结果
     on_glm_summary: Callable[[str], None] = lambda text: None    # 快速摘要
@@ -131,6 +136,8 @@ class EngineCallbacks:
     on_game_over: Callable[[str, str, str], None] = lambda t, ti, s: None  # 游戏结束
     on_handout: Callable[[dict], None] = lambda info: None       # 展示材料
     on_error: Callable[[str], None] = lambda msg: None           # 错误
+    on_speaker_segment: Callable[[str], None] = lambda npc_id: None  # NPC 发言段开始
+    on_narrative_segments: Callable[[list], None] = lambda segments: None  # 发言段定稿
 
 
 class GameEngine:
@@ -360,6 +367,16 @@ class GameEngine:
         if journal is not None:
             journal.append_event(getattr(self, "_active_turn_id", None), payload)
 
+    def is_valid_npc_id(self, npc_id: str) -> bool:
+        """【npc:id】 发言标签校验：id 必须存在于权威 NPC 表或 asset_map。"""
+        try:
+            return npc_id_known(self.context.world_store.load(), npc_id)
+        except Exception:
+            return False
+
+    def log_unknown_npc_speaker(self, npc_id: str) -> None:
+        log_error(f"⟦npc⟧ 发言标签引用了未知 NPC id：{npc_id}（已按旁白处理）")
+
     def _complete_turn_record(
         self,
         *,
@@ -367,6 +384,7 @@ class GameEngine:
         choices: list[dict],
         executed_tools: list[dict],
         lore_entry_ids: list[str],
+        narrative_segments: list[dict] | None = None,
     ) -> dict | None:
         turn_id = getattr(self, "_active_turn_id", None)
         journal = getattr(self, "turn_journal", None)
@@ -384,6 +402,7 @@ class GameEngine:
                 "model_calls": list(self._turn_diagnostics),
                 "lorebook": dict(self._turn_lore_diagnostics),
             },
+            narrative_segments=narrative_segments,
         )
         self._active_turn_id = None
         return record
@@ -485,6 +504,11 @@ class GameEngine:
             messages_override=rewrite_messages,
         )
         rewritten = narrative_body(_sanitize_visible_narrative(rewritten)).strip()
+        rewrite_segments, rewritten = parse_speaker_segments(
+            rewritten,
+            is_valid_npc=self.is_valid_npc_id,
+            on_unknown_npc=self.log_unknown_npc_speaker,
+        )
         if tool_calls or not rewritten:
             raise RuntimeError("模型没有返回有效的叙事改写")
         if self.context.world_store.revision != expected_revision:
@@ -513,6 +537,7 @@ class GameEngine:
                 messages=updated_messages,
                 model=self.narrative_model,
                 diagnostics=list(self._turn_diagnostics[diagnostics_start:]),
+                narrative_segments=[s.to_dict() for s in rewrite_segments],
             )
         except Exception:
             self.messages = previous_messages
@@ -527,6 +552,7 @@ class GameEngine:
             "narrative": rewritten,
             "choices": copy.deepcopy(record.get("choices", [])),
             "world_revision": expected_revision,
+            "narrative_segments": [s.to_dict() for s in rewrite_segments],
         }
 
     def append_control_instruction(self, content: str) -> None:
@@ -1208,6 +1234,11 @@ class GameEngine:
             "flags": world.get("flags", {}),
             "case_clocks": world.get("case_clocks", {}),
             "recent_known_clues": known_clues[-20:],
+            "recent_npc_conversations": {
+                npc_id: list(entries[-6:])
+                for npc_id, entries in (world.get("npc_conversations") or {}).items()
+                if npc_id in present_npc_ids and isinstance(entries, list)
+            },
             "available_scene_clues": scene_clues[:20],
             "sanity_triggers": module_rules.get("sanity_triggers", []),
             "keeper_memory": {
@@ -1303,6 +1334,8 @@ class GameEngine:
 
     def _reconcile_narrative_entities(self, narrative: str) -> list[str]:
         return reconcile_narrative_entities(self, narrative)
+
+    _commit_npc_conversations = commit_npc_conversations
 
     def _turn_needs_model_audit(
         self,

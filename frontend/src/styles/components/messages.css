@@ -137,6 +137,86 @@
   color: var(--gold-dim);
   border-bottom-color: color-mix(in srgb, var(--gold) 12%, transparent);
 }
+/* 调查员抬头：名称 + 头像（右对齐） */
+.msg-attribution-investigator {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.msg-attribution-name {
+  letter-spacing: 0.18em;
+}
+
+/* ---- 发言者头像 ---- */
+.avatar-disc {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--gold-dim);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  background: var(--bg2);
+}
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+}
+.avatar-keeper {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+  background: color-mix(in srgb, var(--gold) 12%, var(--bg2));
+}
+.avatar-npc {
+  border-color: var(--crimson-bright);
+  color: var(--red-bright);
+  background: color-mix(in srgb, var(--crimson) 24%, var(--bg2));
+}
+.avatar-investigator {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  font-size: 13px;
+  border-color: var(--blue);
+  color: var(--blue-bright);
+  background: color-mix(in srgb, var(--blue) 16%, var(--bg2));
+}
+
+/* ---- NPC 发言单元（叙事块内，不做气泡） ---- */
+.speech-unit {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 10px 0 12px;
+  padding-left: 2px;
+}
+.speech-body {
+  min-width: 0;
+  flex: 1;
+}
+.speech-name {
+  margin-bottom: 2px;
+  color: var(--crimson-bright);
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.speech-text {
+  color: var(--text);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.speech-text p {
+  margin: 0 0 6px;
+}
+.speech-text p:last-child {
+  margin-bottom: 0;
+}
 .rewrite-source-hidden {
   display: none !important;
 }

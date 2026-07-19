@@ -592,7 +592,8 @@ class ToolExecutionSafetyTests(unittest.TestCase):
         })
 
         self.assertIn("[错误]", result["executed_tools"][0]["output"])
-        self.assertIn("[错误]", engine.messages[-1]["content"])
+        self.assertIn("[错误]", engine.messages[-2]["content"])
+        self.assertIn("NPC 直接引语", engine.messages[-1]["content"])
 
     def test_optional_skill_messages_follow_entire_tool_batch(self):
         engine = SimpleNamespace(
@@ -622,10 +623,11 @@ class ToolExecutionSafetyTests(unittest.TestCase):
 
         self.assertEqual(
             [message["role"] for message in engine.messages],
-            ["assistant", "tool", "tool", "user", "user"],
+            ["assistant", "tool", "tool", "user", "user", "user"],
         )
         self.assertEqual(engine.messages[1]["tool_call_id"], "call_one")
         self.assertEqual(engine.messages[2]["tool_call_id"], "call_two")
+        self.assertIn("同一人物再次开口", engine.messages[-1]["content"])
 
     def test_sanity_loss_emits_d100_event(self):
         events = []

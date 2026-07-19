@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const serverMessageTypes = [
   "narrative_chunk",
+  "narrative_segment",
+  "narrative_segments",
   "tension",
   "dice_result",
   "glm_summary",

@@ -24,6 +24,7 @@ PROCESS_INSTANCE_ID = secrets.token_hex(12)
 _TURN_ID = re.compile(r"^turn_[0-9]{8}T[0-9]{12}Z_[0-9a-f]{8}$")
 _REPLAY_EVENT_TYPES = {
     "narrative_chunk",
+    "narrative_segment",
     "tension",
     "dice_result",
     "glm_summary",
@@ -240,6 +241,8 @@ class TurnJournal:
                 event.get("type") == "narrative_chunk"
                 and events
                 and events[-1].get("type") == "narrative_chunk"
+                and not event.get("npc_id")
+                and not events[-1].get("npc_id")
             ):
                 events[-1]["text"] = (
                     str(events[-1].get("text", "")) + str(event.get("text", ""))
@@ -259,6 +262,7 @@ class TurnJournal:
         executed_tools: list[dict] | None = None,
         lore_entry_ids: list[str] | None = None,
         diagnostics: dict | None = None,
+        narrative_segments: list[dict] | None = None,
     ) -> dict:
         with self._thread_lock, file_lock(self.lock_path):
             index = self._load_index_unlocked()
@@ -288,6 +292,7 @@ class TurnJournal:
                 "message_count": len(serializable_messages),
                 "narrative": str(narrative or ""),
                 "choices": _json_safe(choices),
+                "narrative_segments": _json_safe(narrative_segments or []),
                 "events": events,
                 "executed_tools": _json_safe(executed_tools or []),
                 "lore_entry_ids": [str(item) for item in (lore_entry_ids or [])],
@@ -384,6 +389,9 @@ class TurnJournal:
                     "player_input": record.get("player_input"),
                     "narrative": record.get("narrative", ""),
                     "choices": copy.deepcopy(record.get("choices", [])),
+                    "narrative_segments": copy.deepcopy(
+                        record.get("narrative_segments", [])
+                    ),
                     "completed_at": record.get("completed_at"),
                     "world_revision": record.get("world_revision"),
                 }
@@ -439,6 +447,7 @@ class TurnJournal:
         messages: list[dict],
         model: str,
         diagnostics: list[dict] | None = None,
+        narrative_segments: list[dict] | None = None,
     ) -> dict:
         """Select a new prose variant without touching the authoritative snapshot."""
         with self._thread_lock, file_lock(self.lock_path):
@@ -470,6 +479,7 @@ class TurnJournal:
                 "narrative": narrative,
                 "model": model,
                 "selected": True,
+                "narrative_segments": _json_safe(narrative_segments or []),
             }
             variants.append(variant)
 
@@ -523,6 +533,7 @@ class TurnJournal:
                 "narrative_variants": variants,
                 "selected_variant_id": variant_id,
                 "rewrite_diagnostics": rewrite_diagnostics,
+                "narrative_segments": _json_safe(narrative_segments or []),
                 "events": events,
                 "message_count": len(serializable_messages),
                 "updated_at": _now(),
@@ -548,6 +559,7 @@ class TurnJournal:
                 "player_input",
                 "narrative",
                 "choices",
+                "narrative_segments",
                 "events",
                 "world_revision",
                 "message_count",

@@ -11,6 +11,7 @@ from typing import Any
 
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
+from .speaker_parser import SpeakerStreamParser
 from .tools import MODEL_TOOLS, model_tools_for
 
 _INTERNAL_NARRATIVE_PATTERNS = (
@@ -184,6 +185,30 @@ class ModelStreamer:
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
         usage_data: dict = {}
+
+        # ⟦npc:id⟧ 发言标签增量解析：标签剥离后文本照常流出，
+        # speech_start 触发 on_speaker_segment，发言文本带 npc_id 上下文。
+        speaker_parser = SpeakerStreamParser(
+            is_valid_npc=getattr(host, "is_valid_npc_id", None)
+            or (lambda _npc_id: False),
+            on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
+        )
+
+        def emit_visible(raw: str) -> None:
+            for kind, text, npc_id in speaker_parser.feed(raw):
+                if kind == "text":
+                    visible = sanitize_visible_narrative(text)
+                    if visible:
+                        # 旁白保持单参数调用（兼容既有回调签名），
+                        # 发言文本才附带 npc_id 上下文。
+                        if npc_id:
+                            host.cb.on_narrative(visible, npc_id)
+                        else:
+                            host.cb.on_narrative(visible)
+                elif kind == "speech_start":
+                    # speech_start Piece = (kind, npc_id, None)：人物 id 在 text 槽。
+                    host.cb.on_speaker_segment(text)
+
         host._set_active_stream(provider_stream)
         try:
             host.raise_if_turn_cancelled()
@@ -206,16 +231,12 @@ class ModelStreamer:
                     full_text += delta.content
                     if not buffer_if_tools:
                         if initial_sentence_released:
-                            visible = sanitize_visible_narrative(delta.content)
-                            if visible:
-                                host.cb.on_narrative(visible)
+                            emit_visible(delta.content)
                         else:
                             pending_visible += delta.content
                             complete, _ = take_complete_sentences(pending_visible)
                             if complete:
-                                visible = sanitize_visible_narrative(pending_visible)
-                                if visible:
-                                    host.cb.on_narrative(visible)
+                                emit_visible(pending_visible)
                                 pending_visible = ""
                                 initial_sentence_released = True
                 for tool_call in delta.tool_calls or []:
@@ -249,10 +270,19 @@ class ModelStreamer:
             host._clear_active_stream(provider_stream)
 
         full_text = sanitize_visible_narrative(full_text)
-        if not buffer_if_tools and pending_visible:
-            visible = sanitize_visible_narrative(pending_visible)
-            if visible:
-                host.cb.on_narrative(visible)
+        if not buffer_if_tools:
+            if pending_visible:
+                emit_visible(pending_visible)
+            for kind, text, npc_id in speaker_parser.flush():
+                if kind == "text":
+                    visible = sanitize_visible_narrative(text)
+                    if visible:
+                        if npc_id:
+                            host.cb.on_narrative(visible, npc_id)
+                        else:
+                            host.cb.on_narrative(visible)
+                elif kind == "speech_start":
+                    host.cb.on_speaker_segment(text)
         if finish_reason == "length" and not tool_calls_acc:
             host.cb.on_error("（叙述过长被截断，请重试或继续）")
         tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
@@ -260,7 +290,17 @@ class ModelStreamer:
             if tool_calls:
                 full_text = ""
             elif full_text:
-                host.cb.on_narrative(full_text)
+                emit_visible(full_text)
+                for kind, text, npc_id in speaker_parser.flush():
+                    if kind == "text":
+                        visible = sanitize_visible_narrative(text)
+                        if visible:
+                            if npc_id:
+                                host.cb.on_narrative(visible, npc_id)
+                            else:
+                                host.cb.on_narrative(visible)
+                    elif kind == "speech_start":
+                        host.cb.on_speaker_segment(text)
 
         elapsed = time.monotonic() - started_at
         first_token = first_token_at - started_at if first_token_at is not None else None

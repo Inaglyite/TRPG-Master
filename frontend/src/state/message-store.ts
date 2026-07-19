@@ -8,6 +8,27 @@ export type VisualDie = {
   formatter?: "tens";
 };
 
+export type SpeakerAvatar = {
+  asset_url?: string;
+  asset_data_uri?: string;
+  alt?: string;
+};
+
+export type Speaker = {
+  type: "keeper" | "npc" | "investigator" | "system";
+  id?: string;
+  name: string;
+  avatar?: SpeakerAvatar;
+};
+
+export type NarrativeSegment = {
+  kind: "narration" | "speech";
+  text: string;
+  /** 流式归因键；人物资料可晚于首段文本到达，再据此回填。 */
+  npcId?: string;
+  speaker?: Speaker;
+};
+
 export type ChatMessage = {
   id: string;
   kind: string;
@@ -19,6 +40,8 @@ export type ChatMessage = {
   dice?: VisualDie[];
   canRewrite?: boolean;
   canBranch?: boolean;
+  /** 发言者段结构（守秘人旁白 + NPC 发言单元）；旧消息无此字段按原文渲染 */
+  segments?: NarrativeSegment[];
 };
 
 type MessageState = {

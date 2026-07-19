@@ -37,6 +37,7 @@ import {
   populateCharacterList,
 } from "./start";
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
+import { onNarrativeSegment, onNarrativeSegments } from "./renderer";
 import {
   onSuggest,
   onDecision,
@@ -360,6 +361,7 @@ type PublicTurnRecord = {
   parent_turn_id?: string | null;
   status?: string;
   narrative?: string;
+  narrative_segments?: import("./state/message-store").NarrativeSegment[];
   choices?: ActionChoice[];
   events?: any[];
 };
@@ -382,7 +384,10 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
       case "narrative_chunk":
         replayedNarrative =
           replayedNarrative || Boolean(String(event.text || "").trim());
-        onNarrativeChunk(String(event.text || ""));
+        onNarrativeChunk(String(event.text || ""), event.npc_id);
+        break;
+      case "narrative_segment":
+        onNarrativeSegment(event.segment?.speaker);
         break;
       case "tension":
         onTension(String(event.text || ""));
@@ -408,6 +413,12 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
   }
   if (!replayedNarrative && record.narrative) {
     onNarrativeChunk(record.narrative);
+  }
+  if (
+    Array.isArray(record.narrative_segments) &&
+    record.narrative_segments.length
+  ) {
+    onNarrativeSegments(record.narrative_segments);
   }
   onDone(pendingChoices);
   const branchSourceId = String(record.parent_turn_id || turnId);
@@ -491,12 +502,19 @@ function handleMessage(e: MessageEvent) {
       onTurnPhase(String(data.label || "守秘人正在处理本轮行动……"));
       break;
     case "narrative_chunk":
-      onNarrativeChunk(data.text);
+      if (data.speaker) onNarrativeSegment(data.speaker);
+      onNarrativeChunk(data.text, data.npc_id);
       if (!turnHasVisibleNarrative && String(data.text || "").trim()) {
         turnHasVisibleNarrative = true;
         deferredHandouts.forEach((handout) => showHandout(handout));
         deferredHandouts = [];
       }
+      break;
+    case "narrative_segment":
+      onNarrativeSegment(data.segment?.speaker);
+      break;
+    case "narrative_segments":
+      onNarrativeSegments(data.segments);
       break;
     case "tension":
       onTension(data.text);
@@ -554,6 +572,12 @@ function handleMessage(e: MessageEvent) {
         data.source_turn_id || rewriteSourceTurnId || "",
       );
       if (sourceTurnId) completeNarrativeReplacement(sourceTurnId);
+      if (
+        Array.isArray(data.narrative_segments) &&
+        data.narrative_segments.length
+      ) {
+        onNarrativeSegments(data.narrative_segments);
+      }
       pendingChoices = Array.isArray(data.choices)
         ? data.choices
         : pendingChoices;

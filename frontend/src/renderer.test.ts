@@ -5,8 +5,11 @@ import {
   beginNarrativeReplacement,
   branchSourceTurnId,
   completeNarrativeReplacement,
+  finishNarrativeStream,
   flushNarrativeStream,
   onNarrativeChunk,
+  onNarrativeSegment,
+  onNarrativeSegments,
   renderTurnHistory,
   setDisplayTurnId,
 } from "./renderer";
@@ -19,6 +22,8 @@ describe("React message renderer adapter", () => {
       scrollRequest: 0,
       forceScrollRequest: 0,
     });
+    // 清理 renderer 模块级的流状态（streamMessageId/段结构），保证测试隔离
+    finishNarrativeStream();
     vi.stubGlobal("requestAnimationFrame", () => 1);
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
   });
@@ -73,5 +78,128 @@ describe("React message renderer adapter", () => {
     expect(
       branchSourceTurnId({ turn_id: "opening", parent_turn_id: null }),
     ).toBe("opening");
+  });
+
+  it("builds live speech segments from npc-tagged chunks", () => {
+    setDisplayTurnId("turn-9");
+    onNarrativeSegment({
+      type: "npc",
+      id: "bryce_fallon",
+      name: "布莱斯·法伦",
+    });
+    onNarrativeChunk("雨还在下。");
+    onNarrativeChunk("「莱特生前一直在隐瞒什么。」", "bryce_fallon");
+    onNarrativeChunk("他说完看向抽屉。");
+    flushNarrativeStream();
+
+    const gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments?.map((segment) => segment.kind)).toEqual([
+      "narration",
+      "speech",
+      "narration",
+    ]);
+    expect(gm?.segments?.[1].speaker?.name).toBe("布莱斯·法伦");
+    expect(gm?.segments?.[1].text).toContain("隐瞒");
+    expect(gm?.text).toContain("他说完看向抽屉。");
+  });
+
+  it("backfills a live speech placeholder when speaker identity arrives", () => {
+    setDisplayTurnId("turn-late-speaker");
+    onNarrativeChunk("「门打开以后，空气里全是墨水味。」", "bryce_late");
+    flushNarrativeStream();
+
+    let gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments?.[0]).toMatchObject({
+      kind: "speech",
+      npcId: "bryce_late",
+    });
+    expect(gm?.segments?.[0].speaker).toBeUndefined();
+
+    onNarrativeSegment({
+      type: "npc",
+      id: "bryce_late",
+      name: "布莱斯·法伦",
+      avatar: { asset_url: "/api/assets/scarlet/bryce.png" },
+    });
+
+    gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments?.[0].speaker).toMatchObject({
+      id: "bryce_late",
+      name: "布莱斯·法伦",
+      avatar: { asset_url: "/api/assets/scarlet/bryce.png" },
+    });
+  });
+
+  it("renders speaker identity before the first npc text chunk", () => {
+    setDisplayTurnId("turn-inline-speaker");
+    onNarrativeSegment({
+      type: "npc",
+      id: "bryce_inline",
+      name: "布莱斯·法伦",
+      avatar: { asset_url: "/api/assets/scarlet/bryce.png" },
+    });
+    onNarrativeChunk("「黄先生，请坐。」", "bryce_inline");
+    flushNarrativeStream();
+
+    const speech = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm")?.segments?.[0];
+    expect(speech).toMatchObject({
+      kind: "speech",
+      npcId: "bryce_inline",
+      speaker: {
+        id: "bryce_inline",
+        name: "布莱斯·法伦",
+        avatar: { asset_url: "/api/assets/scarlet/bryce.png" },
+      },
+    });
+  });
+
+  it("applies authoritative segments over the live stream", () => {
+    setDisplayTurnId("turn-10");
+    onNarrativeChunk("全部文本。");
+    onNarrativeSegments([
+      { kind: "narration", text: "第一段。" },
+      {
+        kind: "speech",
+        text: "「第二句。」",
+        speaker: { type: "npc", id: "x", name: "某人" },
+      },
+    ]);
+
+    const gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments).toHaveLength(2);
+    expect(gm?.segments?.[1].speaker?.name).toBe("某人");
+  });
+
+  it("carries segments through turn history replay", () => {
+    renderTurnHistory([
+      {
+        turn_id: "t-hist",
+        player_input: "开门",
+        narrative: "旧叙述",
+        narrative_segments: [
+          { kind: "narration", text: "旧叙述" },
+          {
+            kind: "speech",
+            text: "「旧台词」",
+            speaker: { type: "npc", id: "y", name: "旧人" },
+          },
+        ],
+      },
+    ]);
+
+    const gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments?.[1].speaker?.name).toBe("旧人");
   });
 });

@@ -690,6 +690,35 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(visible, ["雨落在阿卡姆。", "你", "推开", "了门。"])
         self.assertEqual(tool_calls, [])
 
+    def test_speech_start_callback_receives_npc_id_not_empty_piece_slot(self):
+        chunks = [
+            stream_chunk(content="【npc:bryce_fallon】“请坐。”【/npc】"),
+            stream_chunk(finish_reason="stop"),
+        ]
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
+            )
+        )
+        engine.messages = []
+        visible = []
+        speakers = []
+        engine.is_valid_npc_id = lambda npc_id: npc_id == "bryce_fallon"
+        engine.cb = SimpleNamespace(
+            on_narrative=lambda text, npc_id=None: visible.append((text, npc_id)),
+            on_speaker_segment=speakers.append,
+            on_error=lambda _message: None,
+        )
+
+        with patch("src.engine.log_model_call"):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        self.assertEqual(speakers, ["bryce_fallon"])
+        self.assertEqual(visible, [("“请坐。”", "bryce_fallon")])
+        self.assertEqual(text, "【npc:bryce_fallon】“请坐。”【/npc】")
+        self.assertEqual(tool_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

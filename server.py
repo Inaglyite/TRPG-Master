@@ -3,7 +3,6 @@
 """TRPG Agent WebSocket 服务器 —— GameEngine + FastAPI"""
 
 import asyncio
-import base64
 import copy
 import json
 import mimetypes
@@ -14,7 +13,6 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -90,6 +88,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.asset_payload import (
+    SpeakerPayloadResolver,
+    asset_payload,
+    enrich_narrative_segments,
+    enrich_pc_for_frontend,
+)
 from src.characters import list_character_options
 from src.config import (
     AUTO_SAVE_SLOT,
@@ -186,24 +190,6 @@ def _list_mods() -> list:
     return [record.to_dict() for record in MODULE_REGISTRY.list_modules()]
 
 
-def _asset_payload(filename: str, context: RuntimeContext | None = None) -> dict:
-    """生成前端可直接渲染的资产信息。"""
-    context = context or _active_context
-    if not filename:
-        return {}
-    asset_path = (context.assets_dir / filename).resolve()
-    allowed = context.assets_dir.resolve()
-    if not asset_path.is_relative_to(allowed) or not asset_path.is_file():
-        return {}
-
-    mime, _ = mimetypes.guess_type(str(asset_path))
-    data = base64.b64encode(asset_path.read_bytes()).decode("ascii")
-    return {
-        "asset_data_uri": f"data:{mime or 'image/png'};base64,{data}",
-        "asset_url": f"/api/assets/{quote(context.module_name)}/{quote(filename)}",
-    }
-
-
 def _collect_known_npc_ids(world_state: dict) -> list[str]:
     """收集已发放过人物展示材料的 NPC ID，不把仅被提及的人物提前入册。"""
     known: list[str] = []
@@ -293,7 +279,7 @@ def _enrich_clues_for_frontend(
                 continue
             asset = item.get("asset")
             if isinstance(asset, dict) and asset.get("file"):
-                asset.update(_asset_payload(asset["file"], context))
+                asset.update(asset_payload(asset["file"], context))
     return enriched
 
 
@@ -319,6 +305,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     suggest_reply = session.suggest_reply
     decision_reply = session.decision_reply
     reserve_turn = session.reserve_turn
+    # 每个发言段各自携带一次内联身份；不按 NPC/会话去重，避免 Electron 退回占位
+    pending_inline_speakers: dict[str, dict] = {}
+    resolve_speaker = SpeakerPayloadResolver(engine)
 
     def turn_state_busy() -> bool:
         return session.turn_busy
@@ -440,6 +429,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         """在进入叙述前同步角色栏，不提前发送线索。"""
         try:
             pc_data = engine.context.world_store.load().get("pc", {})
+            pc_data = enrich_pc_for_frontend(pc_data, engine.context)
         except Exception:
             pc_data = {}
         await outbound.send({
@@ -462,12 +452,29 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
                     and event.get("type") == "handout"
                     and event.get("file")
                 ):
-                    event.update(_asset_payload(event["file"], engine.context))
+                    event.update(asset_payload(event["file"], engine.context))
         return {"type": "turn_recovery", **payload}
 
     # ---- 同步回调（被引擎在工作线程里同步调用）----
-    def on_narrative(text: str):
-        emit({"type": "narrative_chunk", "text": text})
+    def on_narrative(text: str, npc_id: str | None = None):
+        payload = {"type": "narrative_chunk", "text": text}
+        if npc_id:
+            payload["npc_id"] = npc_id
+            # Electron 就地兜底：NPC 首个文本块同时携带身份，不等另一条事件。
+            speaker = pending_inline_speakers.pop(npc_id, None)
+            if speaker:
+                payload["speaker"] = speaker
+        emit(payload)
+
+    def on_speaker_segment(npc_id: str):
+        speaker = resolve_speaker(npc_id)
+        if speaker:
+            pending_inline_speakers[npc_id] = speaker
+            emit({"type": "narrative_segment", "segment": {"kind": "speech", "speaker": speaker}})
+
+    def on_narrative_segments(segments: list):
+        enriched = enrich_narrative_segments(segments, resolve_speaker)
+        emit({"type": "narrative_segments", "segments": enriched})
 
     def on_tension(text: str, cat: str):
         emit({"type": "tension", "text": text, "category": cat})
@@ -479,11 +486,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         emit({"type": "glm_summary", "text": text})
 
     def on_suggest(info: dict) -> bool:
-        """向客户端发起检定确认，阻塞当前工作线程等待回复。
-
-        用 threading.Event 做跨线程握手，避免 asyncio.Future 跨线程的复杂性：
-        工作线程在这里阻塞等 event，主循环的 suggest_reply 处理器置位 event。
-        """
+        """向客户端发起检定确认，工作线程经 threading.Event 阻塞等待回复。"""
         emit({"type": "suggest_check", **info})
         return suggest_reply.wait(timeout=120)
 
@@ -746,7 +749,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
     async def handle_state(_data: dict) -> None:
         try:
             world_state = engine.context.world_store.load()
-            pc_data = world_state.get("pc", {})
+            pc_data = enrich_pc_for_frontend(
+                world_state.get("pc", {}), engine.context
+            )
             clues_data = _enrich_clues_for_frontend(
                 world_state.get("clues_found", {}),
                 world_state,
@@ -1032,6 +1037,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine):
         on_game_over=on_game_over,
         on_handout=on_handout,
         on_error=on_error,
+        on_speaker_segment=on_speaker_segment,
+        on_narrative_segments=on_narrative_segments,
     )
 
     # 消息循环

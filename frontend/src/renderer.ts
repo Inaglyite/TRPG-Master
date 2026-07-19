@@ -7,6 +7,8 @@
 import {
   useMessageStore,
   type ChatMessage,
+  type NarrativeSegment,
+  type Speaker,
   type VisualDie,
 } from "./state/message-store";
 
@@ -20,11 +22,18 @@ let replacement: { sourceTurnId: string; targetId: string } | null = null;
 const rewriteCallbacks = new Map<string, () => void>();
 const branchCallbacks = new Map<string, () => void>();
 
+// ---- 发言者段状态（流式期间实时构建，finalize 由权威段覆盖）----
+let streamSegments: NarrativeSegment[] = [];
+let streamNpc: string | null = null;
+const pendingPieces: { text: string; npcId: string | null }[] = [];
+const liveSpeakers = new Map<string, Speaker>();
+
 export type TurnHistoryItem = {
   turn_id?: string;
   parent_turn_id?: string | null;
   player_input?: string | null;
   narrative?: string;
+  narrative_segments?: NarrativeSegment[];
   choices?: Array<{ label: string; isFree: boolean }>;
 };
 
@@ -128,6 +137,9 @@ export function beginNarrativeReplacement(sourceTurnId: string) {
   streamMessageId = targetId;
   streamBuffer = "";
   pendingStreamText = "";
+  pendingPieces.length = 0;
+  streamSegments = [];
+  streamNpc = null;
   replacement = { sourceTurnId, targetId };
   scrollDown(true);
 }
@@ -244,6 +256,14 @@ export function renderTurnHistory(
         kind: "gm",
         text: String(turn.narrative),
         turnId,
+        ...(Array.isArray(turn.narrative_segments) &&
+        turn.narrative_segments.length
+          ? {
+              segments: turn.narrative_segments.map((segment) => ({
+                ...segment,
+              })),
+            }
+          : {}),
       });
     }
   });
@@ -328,6 +348,25 @@ function clearStream() {
   streamMessageId = null;
   streamBuffer = "";
   pendingStreamText = "";
+  pendingPieces.length = 0;
+  streamSegments = [];
+  streamNpc = null;
+}
+
+/** 把一段带发言者上下文的文本并入流式段结构。 */
+function pushStreamPiece(text: string, npcId: string | null) {
+  if (!streamSegments.length || npcId !== streamNpc) {
+    streamNpc = npcId;
+    const speaker = npcId ? liveSpeakers.get(npcId) : undefined;
+    streamSegments.push({
+      kind: npcId ? "speech" : "narration",
+      text: "",
+      ...(npcId ? { npcId } : {}),
+      ...(speaker ? { speaker } : {}),
+    });
+  }
+  const current = streamSegments[streamSegments.length - 1];
+  current.text += text;
 }
 
 export function flushNarrativeStream() {
@@ -339,6 +378,8 @@ export function flushNarrativeStream() {
   removeLoading();
   if (!streamMessageId) {
     streamMessageId = nextId();
+    streamSegments = [];
+    streamNpc = null;
     append({
       id: streamMessageId,
       kind: "gm",
@@ -350,23 +391,72 @@ export function flushNarrativeStream() {
   }
   streamBuffer += pendingStreamText;
   pendingStreamText = "";
+  const pieces = pendingPieces.splice(0);
+  for (const piece of pieces) pushStreamPiece(piece.text, piece.npcId);
   const targetId = streamMessageId;
+  const segments = streamSegments.map((segment) => ({ ...segment }));
   updateMessages((messages) =>
     messages.map((message) =>
-      message.id === targetId ? { ...message, text: streamBuffer } : message,
+      message.id === targetId
+        ? { ...message, text: streamBuffer, segments }
+        : message,
     ),
   );
   scrollDown();
 }
 
-export function onNarrativeChunk(text: string) {
+export function onNarrativeChunk(text: string, npcId?: string | null) {
   pendingStreamText += text;
+  pendingPieces.push({ text, npcId: npcId || null });
   if (streamFrame === null) {
     streamFrame = requestAnimationFrame(() => {
       streamFrame = null;
       flushNarrativeStream();
     });
   }
+}
+
+/** 流式期间的 NPC 发言段开始：记录发言者资料，供段渲染取用。 */
+export function onNarrativeSegment(speaker: Speaker | undefined) {
+  if (!speaker?.id) return;
+  liveSpeakers.set(speaker.id, speaker);
+
+  // WebSocket 事件有序，但浏览器会按 animation frame 批量提交文本。若发言文本
+  // 已先形成占位段，身份资料到达后应立即回填，而不是等整个回合定稿。
+  let changed = false;
+  streamSegments = streamSegments.map((segment) => {
+    if (segment.kind !== "speech" || segment.npcId !== speaker.id)
+      return segment;
+    changed = true;
+    return { ...segment, speaker };
+  });
+  if (!changed || !streamMessageId) return;
+  const targetId = streamMessageId;
+  const segments = streamSegments.map((segment) => ({ ...segment }));
+  updateMessages((messages) =>
+    messages.map((message) =>
+      message.id === targetId ? { ...message, segments } : message,
+    ),
+  );
+}
+
+/** 回合定稿：以服务端权威段结构覆盖流式期间的实时段。 */
+export function onNarrativeSegments(segments: NarrativeSegment[]) {
+  if (!Array.isArray(segments) || !segments.length) return;
+  flushNarrativeStream();
+  updateMessages((messages) => {
+    const index = lastMessageIndex(
+      messages,
+      (message) =>
+        message.kind === "gm" &&
+        (!displayTurnId || message.turnId === displayTurnId),
+    );
+    if (index < 0) return messages;
+    const authoritative = segments.map((segment) => ({ ...segment }));
+    return messages.map((message, current) =>
+      current === index ? { ...message, segments: authoritative } : message,
+    );
+  });
 }
 
 export function onTension(text: string) {

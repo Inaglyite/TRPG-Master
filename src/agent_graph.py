@@ -23,6 +23,7 @@ from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
+from .speaker_parser import parse_segments as parse_speaker_segments
 from .tools import COMPLEX_FUNCTIONS, dice_summary
 
 
@@ -145,6 +146,10 @@ def _prepare_turn(state: TurnState) -> dict:
             )
         if authority:
             content += f"\n\n{authority}"
+        content += (
+            "\n\n[输出格式] NPC 直接引语的台词必须用 【npc:<npc_public_state 中的 id>】…"
+            "【/npc】 包裹（只包台词；提及、转述、动作神态不加）。"
+        )
         if lore_selection and lore_selection.context:
             content += f"\n\n{lore_selection.context}"
         engine.messages.append({"role": "user", "content": content})
@@ -310,6 +315,19 @@ def _execute_tools(state: TurnState) -> dict:
     ):
         engine._maybe_hint_optional_skill(name)
 
+    # 工具结果之后会发起一次新的模型调用。此时最靠近模型的是 tool 消息，
+    # 首轮玩家消息末尾的发言格式契约容易被长工具输出稀释，因此在合法的
+    # tool-response 批次结束后重新锚定协议。它是引擎控制指令，不是玩家台词。
+    engine.messages.append({
+        "role": "user",
+        "content": (
+            "[引擎控制指令｜非玩家发言] 基于以上工具结果继续完成本轮叙述；"
+            "不要复述工具调用过程。所有 NPC 直接引语必须逐段使用 "
+            "【npc:<npc_public_state 中的 id>】…【/npc】 包裹，短句、寒暄和"
+            "同一人物再次开口也不得省略标签；旁白和动作不加标签。"
+        ),
+    })
+
     if tool_outputs:
         quick = glm_quick_summary(tool_outputs, text or narrative)
         if quick:
@@ -412,6 +430,19 @@ def _finalize_turn(state: TurnState) -> dict:
             narrative += "\n\n"
         narrative += text
 
+    # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
+    # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
+    narrative_segments, narrative = parse_speaker_segments(
+        narrative,
+        is_valid_npc=getattr(engine, "is_valid_npc_id", None)
+        or (lambda _npc_id: False),
+        on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+    )
+    segment_dicts = [s.to_dict() for s in narrative_segments]
+    commit_memory = getattr(engine, "_commit_npc_conversations", None)
+    if commit_memory and segment_dicts:
+        commit_memory(segment_dicts)
+
     if narrative.strip():
         engine.messages.append({"role": "assistant", "content": narrative.strip()})
     else:
@@ -453,7 +484,10 @@ def _finalize_turn(state: TurnState) -> dict:
             choices=choices,
             executed_tools=list(state.get("executed_tools", [])),
             lore_entry_ids=list(state.get("lore_entry_ids", [])),
+            narrative_segments=segment_dicts,
         )
+    if segment_dicts and getattr(engine.cb, "on_narrative_segments", None):
+        engine.cb.on_narrative_segments(segment_dicts)
     engine._last_turn_high_risk = state.get("turn_had_check", False)
     engine._round_count += 1
     engine.cb.on_done()
