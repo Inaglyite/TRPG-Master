@@ -184,6 +184,19 @@ class StoryStreamingTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["prompt_profile"], "opening")
         self.assertEqual(calls[0][1]["temperature"], 0.65)
 
+    def test_story_followup_after_resolved_check_cannot_roll_again(self):
+        calls = []
+        engine = SimpleNamespace(
+            current_model="story-model",
+            _stream_llm=lambda model, **kwargs: (
+                calls.append((model, kwargs)) or ("判定结果已经显现。", [])
+            ),
+        )
+
+        _call_story_agent({"engine": engine, "turn_had_check": True})
+
+        self.assertFalse(calls[0][1]["enable_tools"])
+
     def test_combat_agent_uses_judgement_model(self):
         calls = []
 
@@ -594,6 +607,45 @@ class ToolExecutionSafetyTests(unittest.TestCase):
         self.assertIn("[错误]", result["executed_tools"][0]["output"])
         self.assertIn("[错误]", engine.messages[-2]["content"])
         self.assertIn("NPC 直接引语", engine.messages[-1]["content"])
+
+    def test_identical_check_in_one_turn_reuses_result_without_rerolling(self):
+        executions = []
+        dice_events = []
+        output = json.dumps({
+            "skill": "psychology",
+            "skill_value": 60,
+            "d100_roll": 24,
+            "level": "困难成功",
+        })
+        engine = SimpleNamespace(
+            messages=[],
+            judgement_model="judge-model",
+            current_model="story-model",
+            cb=SimpleNamespace(
+                on_tension=lambda *_args: None,
+                on_dice=lambda *args: dice_events.append(args),
+            ),
+            _execute_tool=lambda name, args: executions.append((name, args)) or output,
+            _maybe_hint_optional_skill=lambda _name: None,
+        )
+        call = lambda call_id: {
+            "id": call_id,
+            "function": {
+                "name": "skill_check",
+                "arguments": '{"skill":"psychology"}',
+            },
+        }
+
+        with patch("src.agent_graph.glm_quick_summary", return_value=None):
+            result = _execute_tools({
+                "engine": engine,
+                "tool_round": 0,
+                "tool_calls": [call("first"), call("duplicate")],
+            })
+
+        self.assertEqual(len(executions), 1)
+        self.assertEqual(len(dice_events), 1)
+        self.assertTrue(result["turn_had_check"])
 
     def test_optional_skill_messages_follow_entire_tool_batch(self):
         engine = SimpleNamespace(

@@ -26,6 +26,12 @@ from .logger import tool as log_tool
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tools import COMPLEX_FUNCTIONS, dice_summary
 
+_NON_REPEATABLE_CHECKS = {
+    "skill_check", "attribute_check", "luck_check",
+    "sanity_check", "sanity_loss", "sanity_event",
+    "psychoanalysis", "reality_check",
+}
+
 
 class TurnState(TypedDict, total=False):
     engine: Any
@@ -199,7 +205,10 @@ def _call_story_agent(state: TurnState) -> dict:
         system_prompt_override=(
             engine._opening_system_prompt() if opening_turn else None
         ),
-        enable_tools=not opening_turn,
+        # A resolved check is an immutable fact for this player action. The
+        # follow-up request may narrate it, but must not roll again or enter a
+        # second tool-planning loop.
+        enable_tools=not opening_turn and not state.get("turn_had_check", False),
         prompt_profile="opening" if opening_turn else None,
         temperature=0.65 if opening_turn else 0.8,
         buffer_if_tools=False,
@@ -261,6 +270,16 @@ def _execute_tools(state: TurnState) -> dict:
 
     tool_outputs: list[tuple[str, str]] = []
     executed_tools = list(state.get("executed_tools", []))
+    prior_checks = {
+        json.dumps(
+            {"name": entry.get("name"), "args": entry.get("args", {})},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ): str(entry.get("output") or "")
+        for entry in executed_tools
+        if isinstance(entry, dict) and entry.get("name") in _NON_REPEATABLE_CHECKS
+    }
     for tc in tool_calls:
         _check_cancelled(engine)
         name = tc["function"]["name"]
@@ -269,24 +288,36 @@ def _execute_tools(state: TurnState) -> dict:
         except (json.JSONDecodeError, TypeError):
             args = {}
 
-        try:
-            execute_model_tool = getattr(engine, "_execute_model_tool", None)
-            if execute_model_tool:
-                output = execute_model_tool(
-                    name,
-                    args,
-                    player_action=state.get("user_content") or "",
-                )
-            else:
-                output = engine._execute_tool(name, args)
-        except Exception as exc:
-            log_error(f"工具 {name} 执行异常: {type(exc).__name__}: {exc}")
-            output = "[错误] 工具执行失败，请检查参数后重试"
+        fingerprint = json.dumps(
+            {"name": name, "args": args},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        reused = name in _NON_REPEATABLE_CHECKS and fingerprint in prior_checks
+        if reused:
+            output = prior_checks[fingerprint]
+        else:
+            try:
+                execute_model_tool = getattr(engine, "_execute_model_tool", None)
+                if execute_model_tool:
+                    output = execute_model_tool(
+                        name,
+                        args,
+                        player_action=state.get("user_content") or "",
+                    )
+                else:
+                    output = engine._execute_tool(name, args)
+            except Exception as exc:
+                log_error(f"工具 {name} 执行异常: {type(exc).__name__}: {exc}")
+                output = "[错误] 工具执行失败，请检查参数后重试"
+            if name in _NON_REPEATABLE_CHECKS:
+                prior_checks[fingerprint] = output
         executed_tools.append({"name": name, "args": args, "output": output})
         engine.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
         log_tool(name, args)
 
-        if name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
+        if not reused and name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
             summary = dice_summary(output)
             if summary:
                 try:
