@@ -628,13 +628,14 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _execute_tool=lambda name, args: executions.append((name, args)) or output,
             _maybe_hint_optional_skill=lambda _name: None,
         )
-        call = lambda call_id: {
-            "id": call_id,
-            "function": {
-                "name": "skill_check",
-                "arguments": '{"skill":"psychology"}',
-            },
-        }
+        def call(call_id):
+            return {
+                "id": call_id,
+                "function": {
+                    "name": "skill_check",
+                    "arguments": '{"skill":"psychology"}',
+                },
+            }
 
         with patch("src.agent_graph.glm_quick_summary", return_value=None):
             result = _execute_tools({
