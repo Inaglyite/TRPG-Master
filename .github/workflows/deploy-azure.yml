@@ -1,0 +1,79 @@
+name: deploy-azure
+
+on:
+  workflow_run:
+    workflows: [quality]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: azure-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: azure-production
+    steps:
+      - name: Resolve release commit
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            echo "sha=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package release
+        run: |
+          tar -czf /tmp/trpg-master-release.tar.gz \
+            --exclude='**/__pycache__' \
+            server.py requirements.txt pyproject.toml \
+            src skills mod characters frontend/dist
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and activate release
+        env:
+          HOST: ${{ secrets.AZURE_VM_HOST }}
+          USER: ${{ secrets.AZURE_VM_USER }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          scp /tmp/trpg-master-release.tar.gz "$USER@$HOST:/tmp/trpg-master-$RELEASE_SHA.tar.gz"
+          ssh "$USER@$HOST" \
+            "sudo /usr/local/sbin/trpg-install-release '$RELEASE_SHA' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'"

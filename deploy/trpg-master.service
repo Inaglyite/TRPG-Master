@@ -1,0 +1,24 @@
+[Unit]
+Description=TRPG Master web service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trpgdeploy
+Group=trpgdeploy
+WorkingDirectory=/opt/trpg-master/current
+EnvironmentFile=/etc/trpg-master/trpg-master.env
+Environment=TRPG_RUNTIME_ROOT=/var/lib/trpg-master
+ExecStart=/opt/trpg-master/current/.venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8765 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/trpg-master /var/log/trpg-master
+
+[Install]
+WantedBy=multi-user.target
