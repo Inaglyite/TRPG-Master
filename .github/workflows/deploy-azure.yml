@@ -47,6 +47,8 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        env:
+          VITE_TRPG_BACKEND_ORIGIN: https://20.249.11.57
         run: |
           npm ci
           npm run build
