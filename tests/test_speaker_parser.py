@@ -70,6 +70,15 @@ class SpeakerParserTests(unittest.TestCase):
         self.assertNotIn("【npc:", clean)
         self.assertIn("没说完的话", clean)
 
+    def test_close_tag_with_id_is_accepted_and_stripped(self):
+        # 生产实测：模型会写 【/npc:butler_gregory】 作为闭标签
+        text = '开场。【npc:butler_gregory】"请您把它收起来吧。"【/npc:butler_gregory】他紧了紧双手。'
+        segments, clean = parse_segments(text, is_valid_npc=npc_ok)
+        self.assertNotIn("/npc", clean)
+        self.assertEqual([s.kind for s in segments], ["narration", "speech", "narration"])
+        self.assertEqual(segments[1].npc_id, "butler_gregory")
+        self.assertIn("紧了紧双手", segments[2].text)
+
     def test_open_only_markers_end_at_paragraph_or_next_speaker_marker(self):
         text = (
             "【npc:bryce_fallon】「第一句。」\n\n他说完看向窗外。\n\n"

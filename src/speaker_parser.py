@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 OPEN_PREFIXES = ("【npc:", "[npc:")
-CLOSE_TAGS = ("【/npc】", "[/npc]")
+CLOSE_PREFIXES = ("【/npc", "[/npc")
 _BRACKETS = ("【", "[")
 # 【npc: + 最长 NPC id + 】，超过即视为不可能构成开标签
 _MAX_OPEN_TAG_LEN = 64
@@ -114,10 +114,17 @@ class SpeakerStreamParser:
                 elif self.on_unknown_npc and npc_id:
                     self.on_unknown_npc(npc_id)
                 return end + 1
-            close_tag = next((tag for tag in CLOSE_TAGS if buf.startswith(tag)), None)
-            if close_tag:
-                return len(close_tag)  # 游离闭标签，剥离
-            if any(tag.startswith(buf) for tag in (*CLOSE_TAGS, *OPEN_PREFIXES)):
+            close_prefix = next(
+                (prefix for prefix in CLOSE_PREFIXES if buf.startswith(prefix)),
+                None,
+            )
+            if close_prefix:
+                closing = "】" if close_prefix.startswith("【") else "]"
+                end = buf.find(closing, len(close_prefix))
+                if end < 0:
+                    return 0 if len(buf) <= _MAX_OPEN_TAG_LEN else 1
+                return end + 1  # 游离闭标签（含 【/npc:id】 变体），剥离
+            if any(prefix.startswith(buf) for prefix in (*CLOSE_PREFIXES, *OPEN_PREFIXES)):
                 return 0  # 半个标签前缀
             self._emit_text(pieces, bracket)
             return 1  # 非标签的 ⟦，按普通文本输出
@@ -128,13 +135,20 @@ class SpeakerStreamParser:
             self._speech_npc = None
             pieces.append(("speech_end", "", None))
             return self._consume_construct(pieces)
-        close_tag = next((tag for tag in CLOSE_TAGS if buf.startswith(tag)), None)
-        if close_tag:
+        close_prefix = next(
+            (prefix for prefix in CLOSE_PREFIXES if buf.startswith(prefix)),
+            None,
+        )
+        if close_prefix:
+            closing = "】" if close_prefix.startswith("【") else "]"
+            end = buf.find(closing, len(close_prefix))
+            if end < 0:
+                return 0 if len(buf) <= _MAX_OPEN_TAG_LEN else 1
             self._in_speech = False
             self._speech_npc = None
             pieces.append(("speech_end", "", None))
-            return len(close_tag)
-        if any(tag.startswith(buf) for tag in CLOSE_TAGS):
+            return end + 1
+        if any(prefix.startswith(buf) for prefix in CLOSE_PREFIXES):
             return 0
         self._emit_text(pieces, bracket)
         return 1  # 嵌套开标签或其他 ⟦，按文本处理
