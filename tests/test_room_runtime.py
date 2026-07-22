@@ -126,6 +126,18 @@ async def _driver_sends_decisions_only_to_current_actor():
     transport = RoomDriverTransport(room)
 
     await transport.send_json({"type": "decision_request", "id": "decision-1"})
+    assert not room.accept_pending_reply(
+        "decision", "bob", request_id="decision-1"
+    )
+    assert not room.accept_pending_reply(
+        "decision", "alice", request_id="wrong-decision"
+    )
+    assert room.accept_pending_reply(
+        "decision", "alice", request_id="decision-1"
+    )
+    assert not room.accept_pending_reply(
+        "decision", "alice", request_id="decision-1"
+    )
     await transport.send_json(
         {
             "type": "private_event",

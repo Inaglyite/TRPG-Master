@@ -203,12 +203,23 @@ class RoomDriverTransport:
             visibility = (
                 f"player:{actor_user_id}" if actor_user_id else "server_only"
             )
+            if wire.get("type") == "suggest_check":
+                room.set_pending_reply("suggest", actor_user_id)
+            elif wire.get("type") == "decision_request":
+                room.set_pending_reply(
+                    "decision",
+                    actor_user_id,
+                    request_id=str(wire.get("id") or ""),
+                )
+            elif wire.get("type") == "decision_resolved":
+                room.clear_pending_reply()
         await room.hub.broadcast(wire, visibility=visibility)
         if payload.get("type") in {
             "done",
             "turn_rejected",
             "turn_rewrite_failed",
         }:
+            room.clear_pending_reply()
             room.release_action()
 
     async def close_input(self) -> None:
@@ -240,6 +251,9 @@ class GameRoom:
     last_empty_at: float | None = None
     driver_transport: RoomDriverTransport | None = field(default=None, repr=False)
     driver_task: asyncio.Task | None = field(default=None, repr=False)
+    pending_reply_kind: str | None = None
+    pending_reply_user_id: str | None = None
+    pending_reply_request_id: str | None = None
 
     def member_connected(self, user_id: str) -> bool:
         first_connection = user_id not in self.connected_users
@@ -265,6 +279,36 @@ class GameRoom:
 
     def assign_actor(self, actor_user_id: str | None) -> None:
         self.current_actor_user_id = actor_user_id
+
+    def set_pending_reply(
+        self,
+        kind: str,
+        user_id: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        self.pending_reply_kind = kind
+        self.pending_reply_user_id = user_id
+        self.pending_reply_request_id = request_id
+
+    def accept_pending_reply(
+        self,
+        kind: str,
+        user_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> bool:
+        if self.pending_reply_kind != kind or self.pending_reply_user_id != user_id:
+            return False
+        if kind == "decision" and self.pending_reply_request_id != str(request_id or ""):
+            return False
+        self.clear_pending_reply()
+        return True
+
+    def clear_pending_reply(self) -> None:
+        self.pending_reply_kind = None
+        self.pending_reply_user_id = None
+        self.pending_reply_request_id = None
 
     async def reserve_action(self, user_id: str, action_id: str) -> None:
         action_id = str(action_id or "").strip()

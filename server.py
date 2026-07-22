@@ -2518,6 +2518,20 @@ async def multiplayer_room_ws(ws: WebSocket):
                         }
                     )
                     continue
+                reply_kind = "suggest" if message_type == "suggest_reply" else "decision"
+                if not room.accept_pending_reply(
+                    reply_kind,
+                    user.id,
+                    request_id=data.get("decision_id"),
+                ):
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "stale_reply",
+                            "message": "该确认请求已经失效或尚未发起",
+                        }
+                    )
+                    continue
             unsupported_room_types = {
                 "quit",
                 "world_switch",
