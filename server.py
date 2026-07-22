@@ -209,7 +209,9 @@ _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 _active_model_settings = ModelSettings.validated(NARRATIVE_MODEL, JUDGEMENT_MODEL)
 _world_turn_locks: dict[str, threading.Lock] = {}
 _world_turn_locks_guard = threading.Lock()
-ROOM_MANAGER = RoomManager()
+ROOM_MANAGER = RoomManager(
+    max_rooms=max(1, int(os.environ.get("TRPG_MAX_ACTIVE_ROOMS", "8")))
+)
 
 
 @app.middleware("http")

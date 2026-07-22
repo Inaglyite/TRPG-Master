@@ -7,6 +7,7 @@ import pytest
 from src.room_runtime import (
     ActionReservationError,
     GameRoom,
+    RoomCapacityError,
     RoomConnection,
     RoomDriverTransport,
     RoomEventHub,
@@ -36,6 +37,19 @@ async def _room_manager_single_flights_concurrent_creation():
     assert calls == 1
     assert len({id(room) for room, _created in results}) == 1
     assert sum(created for _room, created in results) == 1
+
+
+async def _room_manager_enforces_active_room_capacity():
+    manager = RoomManager(max_rooms=1)
+    await manager.get_or_create(
+        "world-a",
+        lambda: GameRoom("world-a", object(), RoomEventHub("world-a"), "owner"),
+    )
+    with pytest.raises(RoomCapacityError):
+        await manager.get_or_create(
+            "world-b",
+            lambda: GameRoom("world-b", object(), RoomEventHub("world-b"), "owner"),
+        )
 
 
 async def _event_visibility_ack_and_replay_are_connection_scoped():
@@ -161,6 +175,10 @@ async def _driver_sends_decisions_only_to_current_actor():
 
 def test_room_manager_single_flights_concurrent_creation():
     asyncio.run(_room_manager_single_flights_concurrent_creation())
+
+
+def test_room_manager_enforces_active_room_capacity():
+    asyncio.run(_room_manager_enforces_active_room_capacity())
 
 
 def test_event_visibility_ack_and_replay_are_connection_scoped():

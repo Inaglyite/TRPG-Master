@@ -235,6 +235,10 @@ class ActionReservationError(RuntimeError):
         self.code = code
 
 
+class RoomCapacityError(RuntimeError):
+    pass
+
+
 @dataclass
 class GameRoom:
     world_id: str
@@ -342,10 +346,11 @@ RoomFactory = Callable[[], GameRoom | Awaitable[GameRoom]]
 class RoomManager:
     """Atomically creates at most one active GameRoom for each world."""
 
-    def __init__(self):
+    def __init__(self, *, max_rooms: int = 8):
         self._rooms: dict[str, GameRoom] = {}
         self._loading: dict[str, asyncio.Future[GameRoom]] = {}
         self._lock = asyncio.Lock()
+        self.max_rooms = max(1, int(max_rooms))
 
     async def get_or_create(self, world_id: str, factory: RoomFactory) -> tuple[GameRoom, bool]:
         creator = False
@@ -355,6 +360,8 @@ class RoomManager:
                 return existing, False
             pending = self._loading.get(world_id)
             if pending is None:
+                if len(self._rooms) + len(self._loading) >= self.max_rooms:
+                    raise RoomCapacityError("服务器活跃房间已达到上限，请稍后重试")
                 pending = asyncio.get_running_loop().create_future()
                 self._loading[world_id] = pending
                 creator = True
