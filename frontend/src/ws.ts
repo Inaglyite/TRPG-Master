@@ -23,6 +23,8 @@ import {
   renderTurnHistory,
   setDisplayTurnId,
   tagPendingPlayerMessage,
+  whenNarrativePresented,
+  whenNarrativeVisible,
   type TurnHistoryItem,
 } from "./renderer";
 import {
@@ -117,6 +119,7 @@ let activeTurnKind: string | null = null;
 let rewriteSourceTurnId: string | null = null;
 let lastTurnSeq = 0;
 let turnHasVisibleNarrative = false;
+let narrativeVisibilityScheduled = false;
 let pendingChoices: ActionChoice[] | undefined;
 let interruptedTurn = false;
 let interruptedTurnId: string | null = null;
@@ -331,6 +334,7 @@ export function connect() {
     rewriteSourceTurnId = null;
     lastTurnSeq = 0;
     turnHasVisibleNarrative = false;
+    narrativeVisibilityScheduled = false;
     pendingChoices = undefined;
     setConn("disconnected");
     scheduleReconnect();
@@ -377,6 +381,7 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
   setDisplayTurnId(turnId);
   gmTurnActive = true;
   turnHasVisibleNarrative = false;
+  narrativeVisibilityScheduled = false;
   pendingChoices = Array.isArray(record.choices) ? record.choices : undefined;
 
   const events = Array.isArray(record.events) ? record.events : [];
@@ -418,7 +423,8 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
   }
   if (
     (Array.isArray(record.chat_events) && record.chat_events.length) ||
-    (Array.isArray(record.narrative_segments) && record.narrative_segments.length)
+    (Array.isArray(record.narrative_segments) &&
+      record.narrative_segments.length)
   ) {
     onNarrativeSegments(record.chat_events || record.narrative_segments || []);
   }
@@ -493,6 +499,7 @@ function handleMessage(e: MessageEvent) {
       }
       deferredHandouts = [];
       turnHasVisibleNarrative = false;
+      narrativeVisibilityScheduled = false;
       pendingChoices = undefined;
       if (rewriteSourceTurnId) beginNarrativeReplacement(rewriteSourceTurnId);
       onGmTurnStart();
@@ -506,10 +513,13 @@ function handleMessage(e: MessageEvent) {
     case "narrative_chunk":
       if (data.speaker) onNarrativeSegment(data.speaker);
       onNarrativeChunk(data.text, data.npc_id);
-      if (!turnHasVisibleNarrative && String(data.text || "").trim()) {
-        turnHasVisibleNarrative = true;
-        deferredHandouts.forEach((handout) => showHandout(handout));
-        deferredHandouts = [];
+      if (!narrativeVisibilityScheduled && String(data.text || "").trim()) {
+        narrativeVisibilityScheduled = true;
+        whenNarrativeVisible(() => {
+          turnHasVisibleNarrative = true;
+          deferredHandouts.forEach((handout) => showHandout(handout));
+          deferredHandouts = [];
+        });
       }
       break;
     case "narrative_segment":
@@ -555,8 +565,10 @@ function handleMessage(e: MessageEvent) {
         );
       }
       gmTurnActive = false;
-      deferredHandouts.forEach((handout) => showHandout(handout));
-      deferredHandouts = [];
+      if (!narrativeVisibilityScheduled) {
+        deferredHandouts.forEach((handout) => showHandout(handout));
+        deferredHandouts = [];
+      }
       activeTurnId = null;
       activeBranchSourceTurnId = null;
       activeTurnKind = null;
@@ -564,6 +576,7 @@ function handleMessage(e: MessageEvent) {
       setDisplayTurnId(null);
       lastTurnSeq = 0;
       turnHasVisibleNarrative = false;
+      narrativeVisibilityScheduled = false;
       pendingChoices = undefined;
       if (recoveryPending || interruptedTurn) {
         recoveryPending = false;
@@ -576,10 +589,10 @@ function handleMessage(e: MessageEvent) {
       const sourceTurnId = String(
         data.source_turn_id || rewriteSourceTurnId || "",
       );
-      if (sourceTurnId) completeNarrativeReplacement(sourceTurnId);
       if (
         (Array.isArray(data.chat_events) && data.chat_events.length) ||
-        (Array.isArray(data.narrative_segments) && data.narrative_segments.length)
+        (Array.isArray(data.narrative_segments) &&
+          data.narrative_segments.length)
       ) {
         onNarrativeSegments(data.chat_events || data.narrative_segments);
       }
@@ -587,6 +600,11 @@ function handleMessage(e: MessageEvent) {
         ? data.choices
         : pendingChoices;
       onDone(pendingChoices);
+      if (sourceTurnId) {
+        whenNarrativePresented(() =>
+          completeNarrativeReplacement(sourceTurnId),
+        );
+      }
       if (sourceTurnId) {
         const branchSourceId = String(
           data.branch_source_turn_id || sourceTurnId,
@@ -606,6 +624,7 @@ function handleMessage(e: MessageEvent) {
       setDisplayTurnId(null);
       lastTurnSeq = 0;
       turnHasVisibleNarrative = false;
+      narrativeVisibilityScheduled = false;
       pendingChoices = undefined;
       addMsg("system", "叙述已更新；判定、线索与世界状态均未改变。", true);
       safeSend(JSON.stringify({ type: "state" }));

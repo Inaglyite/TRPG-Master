@@ -111,6 +111,25 @@ describe("MessageList", () => {
     expect(document.querySelector(".npc-bubble")).toBeInTheDocument();
   });
 
+  it("offers an accessible immediate reveal control while presenting", () => {
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([
+        {
+          id: "streaming-chat",
+          kind: "gm",
+          text: "雨声。",
+          streaming: true,
+          segments: [{ kind: "narration", text: "雨声。" }],
+        },
+      ]);
+    });
+
+    expect(
+      screen.getByRole("button", { name: "显示全文" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders plain gm messages without segments unchanged", () => {
     render(<MessageList />);
     act(() => {

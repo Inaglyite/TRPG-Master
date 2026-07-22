@@ -11,7 +11,9 @@ import {
   onNarrativeSegment,
   onNarrativeSegments,
   renderTurnHistory,
+  revealNarrativeImmediately,
   setDisplayTurnId,
+  whenNarrativePresented,
 } from "./renderer";
 import { useMessageStore } from "./state/message-store";
 
@@ -23,6 +25,7 @@ describe("React message renderer adapter", () => {
       forceScrollRequest: 0,
     });
     // 清理 renderer 模块级的流状态（streamMessageId/段结构），保证测试隔离
+    revealNarrativeImmediately();
     finishNarrativeStream();
     vi.stubGlobal("requestAnimationFrame", () => 1);
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
@@ -50,6 +53,66 @@ describe("React message renderer adapter", () => {
       streaming: true,
       turnId: "turn-2",
     });
+  });
+
+  it("plays provider text at a paced presentation speed", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-paced");
+      onNarrativeChunk("雨。风");
+
+      expect(useMessageStore.getState().messages[0].text).toBe("");
+      vi.advanceTimersByTime(34);
+      expect(useMessageStore.getState().messages[0].text).toBe("雨");
+      vi.advanceTimersByTime(34);
+      expect(useMessageStore.getState().messages[0].text).toBe("雨。");
+      vi.advanceTimersByTime(120);
+      expect(useMessageStore.getState().messages[0].text).toBe("雨。");
+      vi.advanceTimersByTime(65);
+      expect(useMessageStore.getState().messages[0].text).toBe("雨。风");
+    } finally {
+      revealNarrativeImmediately();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the turn presenting after network done until the queue drains", () => {
+    vi.useFakeTimers();
+    try {
+      let presented = false;
+      setDisplayTurnId("turn-done-order");
+      onNarrativeChunk("缓慢出现");
+      finishNarrativeStream();
+      whenNarrativePresented(() => {
+        presented = true;
+      });
+
+      expect(presented).toBe(false);
+      vi.runAllTimers();
+      expect(presented).toBe(true);
+      expect(useMessageStore.getState().messages[0]).toMatchObject({
+        text: "缓慢出现",
+        streaming: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accelerates when a large provider backlog accumulates", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-catch-up");
+      onNarrativeChunk("字".repeat(600));
+      vi.advanceTimersByTime(34);
+
+      expect(useMessageStore.getState().messages[0].text).toBe("字字字");
+    } finally {
+      revealNarrativeImmediately();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
   });
 
   it("atomically replaces a rewritten narrative", () => {
@@ -189,6 +252,7 @@ describe("React message renderer adapter", () => {
         speaker: { type: "npc", id: "x", name: "某人" },
       },
     ]);
+    flushNarrativeStream();
 
     const gm = useMessageStore
       .getState()

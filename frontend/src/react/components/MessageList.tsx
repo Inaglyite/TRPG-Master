@@ -7,7 +7,11 @@ import {
   rollDice3D,
 } from "../../dice3d/controller";
 import { renderMarkdown } from "../../markdown";
-import { invokeTurnBranch, invokeTurnRewrite } from "../../renderer";
+import {
+  invokeTurnBranch,
+  invokeTurnRewrite,
+  revealNarrativeImmediately,
+} from "../../renderer";
 import { useMessageStore, type ChatMessage } from "../../state/message-store";
 import type { NarrativeSegment } from "../../state/message-store";
 import { useAppStore } from "../../state/app-store";
@@ -196,13 +200,36 @@ function Message({
           <div className="dice-result">{message.text}</div>
         </>
       ) : hasSegments ? (
-        <div className="chat-event-list">
+        <div
+          className="chat-event-list"
+          title={message.streaming ? "点击立即显示完整叙述" : undefined}
+          onClick={(event) => {
+            if (!message.streaming) return;
+            if ((event.target as HTMLElement).closest("a, button")) return;
+            revealNarrativeImmediately();
+          }}
+        >
           {message.segments!.map((segment, index) =>
             segment.kind === "speech" ? (
               <SpeechUnit key={segment.eventId || index} segment={segment} />
             ) : (
-              <NarrationUnit key={segment.eventId || index} text={segment.text} />
+              <NarrationUnit
+                key={segment.eventId || index}
+                text={segment.text}
+              />
             ),
+          )}
+          {message.streaming && (
+            <button
+              type="button"
+              className="narrative-reveal-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                revealNarrativeImmediately();
+              }}
+            >
+              显示全文
+            </button>
           )}
         </div>
       ) : (

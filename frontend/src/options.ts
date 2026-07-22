@@ -14,6 +14,7 @@ import {
   showRollPending,
   finishNarrativeStream,
   flushNarrativeStream,
+  whenNarrativePresented,
 } from "./renderer";
 import { safeSend } from "./ws";
 import { useAppStore } from "./state/app-store";
@@ -51,10 +52,13 @@ export function onDecision(data: any) {
 
 // ---- GM 叙述结束，解析选项 ----
 export function onDone(structuredChoices?: ActionChoice[]) {
-  flushNarrativeStream();
   removeLoading();
   removeRollPending();
   finishNarrativeStream();
+  whenNarrativePresented(() => completePresentedTurn(structuredChoices));
+}
+
+function completePresentedTurn(structuredChoices?: ActionChoice[]) {
   // 解析选项：从最近的 GM 消息中提取（跳过骰子、摘要等非叙事消息）
   const opts: ActionChoice[] = Array.isArray(structuredChoices)
     ? structuredChoices.filter(

@@ -205,6 +205,7 @@
   flex-direction: column;
   gap: 14px;
   width: 100%;
+  cursor: default;
 }
 .chat-row {
   display: flex;
@@ -264,6 +265,27 @@
     color-mix(in srgb, var(--crimson) 14%, var(--bg2)),
     color-mix(in srgb, var(--bg2) 96%, black)
   );
+}
+.narrative-reveal-button {
+  align-self: flex-start;
+  margin: -6px 0 0 51px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--gold) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg2) 86%, transparent);
+  color: var(--text-faint);
+  font: 500 10px/1.4 var(--font);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.16s ease, border-color 0.16s ease;
+}
+.narrative-reveal-button:hover,
+.narrative-reveal-button:focus-visible {
+  opacity: 1;
+  border-color: var(--gold-dim);
+  color: var(--gold-bright);
+  outline: none;
 }
 .speech-unit {
   margin: 0;
@@ -524,10 +546,31 @@
 
 /* 流式光标 */
 .streaming-cursor::after {
-  content: "▊";
-  animation: blink 0.8s infinite;
-  color: currentColor;
-  margin-left: 2px;
+  content: none;
+}
+.msg.streaming-cursor .chat-row:last-of-type .chat-bubble::after,
+.msg.streaming-cursor:not(:has(.chat-event-list))::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 1em;
+  margin-left: 4px;
+  border-radius: 4px;
+  vertical-align: -0.14em;
+  background: currentColor;
+  box-shadow: 0 0 8px color-mix(in srgb, currentColor 45%, transparent);
+  animation: ink-cursor 0.9s ease-in-out infinite;
+}
+@keyframes ink-cursor {
+  0%, 100% { opacity: 0.22; transform: scaleY(0.72); }
+  48% { opacity: 0.9; transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg.streaming-cursor .chat-bubble::after,
+  .msg.streaming-cursor:not(:has(.chat-event-list))::after {
+    animation: none;
+  }
 }
 
 /* GM 消息内的小标题/分隔线美化 */

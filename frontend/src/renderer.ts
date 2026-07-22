@@ -16,8 +16,11 @@ let messageCounter = 0;
 let displayTurnId: string | null = null;
 let streamMessageId: string | null = null;
 let streamBuffer = "";
-let pendingStreamText = "";
-let streamFrame: number | null = null;
+let playbackTimer: number | null = null;
+let networkStreamFinished = false;
+let authoritativeSegments: NarrativeSegment[] | null = null;
+const presentationCallbacks: Array<() => void> = [];
+const visibilityCallbacks: Array<() => void> = [];
 let replacement: { sourceTurnId: string; targetId: string } | null = null;
 const rewriteCallbacks = new Map<string, () => void>();
 const branchCallbacks = new Map<string, () => void>();
@@ -25,8 +28,14 @@ const branchCallbacks = new Map<string, () => void>();
 // ---- 发言者段状态（流式期间实时构建，finalize 由权威段覆盖）----
 let streamSegments: NarrativeSegment[] = [];
 let streamNpc: string | null = null;
-const pendingPieces: { text: string; npcId: string | null }[] = [];
+type PlaybackPiece = { chars: string[]; npcId: string | null };
+const playbackQueue: PlaybackPiece[] = [];
 const liveSpeakers = new Map<string, Speaker>();
+
+const BASE_TICK_MS = 34;
+const COMMA_PAUSE_MS = 72;
+const SENTENCE_PAUSE_MS = 185;
+const SPEAKER_PAUSE_MS = 240;
 
 export type TurnHistoryItem = {
   turn_id?: string;
@@ -152,10 +161,11 @@ export function beginNarrativeReplacement(sourceTurnId: string) {
   });
   streamMessageId = targetId;
   streamBuffer = "";
-  pendingStreamText = "";
-  pendingPieces.length = 0;
+  playbackQueue.length = 0;
   streamSegments = [];
   streamNpc = null;
+  networkStreamFinished = false;
+  authoritativeSegments = null;
   replacement = { sourceTurnId, targetId };
   scrollDown(true);
 }
@@ -352,28 +362,51 @@ export function hasActiveNarrativeStream() {
 }
 
 export function finishNarrativeStream() {
-  flushNarrativeStream();
-  if (!streamMessageId) return;
+  networkStreamFinished = true;
+  if (playbackQueue.length) {
+    schedulePlayback();
+    return;
+  }
+  finalizePresentedStream();
+}
+
+function finalizePresentedStream() {
+  applyAuthoritativeSegments();
+  if (!streamMessageId) {
+    networkStreamFinished = false;
+    authoritativeSegments = null;
+    notifyPresentationComplete();
+    return;
+  }
   const targetId = streamMessageId;
   updateMessages((messages) =>
     messages.map((message) =>
       message.id === targetId ? { ...message, streaming: false } : message,
     ),
   );
-  clearStream();
+  streamMessageId = null;
+  streamBuffer = "";
+  streamSegments = [];
+  streamNpc = null;
+  authoritativeSegments = null;
+  networkStreamFinished = false;
+  notifyPresentationComplete();
 }
 
 function clearStream() {
-  if (streamFrame !== null) {
-    cancelAnimationFrame(streamFrame);
-    streamFrame = null;
+  if (playbackTimer !== null) {
+    window.clearTimeout(playbackTimer);
+    playbackTimer = null;
   }
   streamMessageId = null;
   streamBuffer = "";
-  pendingStreamText = "";
-  pendingPieces.length = 0;
+  playbackQueue.length = 0;
   streamSegments = [];
   streamNpc = null;
+  authoritativeSegments = null;
+  networkStreamFinished = false;
+  presentationCallbacks.splice(0);
+  visibilityCallbacks.splice(0);
 }
 
 /** 把一段带发言者上下文的文本并入流式段结构。 */
@@ -393,31 +426,28 @@ function pushStreamPiece(text: string, npcId: string | null) {
   current.text += text;
 }
 
-export function flushNarrativeStream() {
-  if (streamFrame !== null) {
-    cancelAnimationFrame(streamFrame);
-    streamFrame = null;
-  }
-  if (!pendingStreamText) return;
+function ensureStreamMessage() {
+  if (streamMessageId) return;
+  streamMessageId = nextId();
+  streamSegments = [];
+  streamNpc = null;
+  append({
+    id: streamMessageId,
+    kind: "gm",
+    text: "",
+    turnId: displayTurnId || undefined,
+    streaming: true,
+  });
+  streamBuffer = "";
+}
+
+function renderPlaybackText(text: string, npcId: string | null) {
+  if (!text) return;
   removeLoading();
-  if (!streamMessageId) {
-    streamMessageId = nextId();
-    streamSegments = [];
-    streamNpc = null;
-    append({
-      id: streamMessageId,
-      kind: "gm",
-      text: "",
-      turnId: displayTurnId || undefined,
-      streaming: true,
-    });
-    streamBuffer = "";
-  }
-  streamBuffer += pendingStreamText;
-  pendingStreamText = "";
-  const pieces = pendingPieces.splice(0);
-  for (const piece of pieces) pushStreamPiece(piece.text, piece.npcId);
-  const targetId = streamMessageId;
+  ensureStreamMessage();
+  streamBuffer += text;
+  pushStreamPiece(text, npcId);
+  const targetId = streamMessageId!;
   const segments = streamSegments.map((segment) => ({ ...segment }));
   updateMessages((messages) =>
     messages.map((message) =>
@@ -427,17 +457,105 @@ export function flushNarrativeStream() {
     ),
   );
   scrollDown();
+  if (streamBuffer && visibilityCallbacks.length) {
+    const callbacks = visibilityCallbacks.splice(0);
+    callbacks.forEach((callback) => callback());
+  }
+}
+
+function queuedCharacterCount() {
+  return playbackQueue.reduce((total, piece) => total + piece.chars.length, 0);
+}
+
+function charactersPerTick(backlog: number) {
+  if (backlog > 500) return 3;
+  if (backlog > 160) return 2;
+  return 1;
+}
+
+function playbackDelay(lastChar: string, speakerChanged: boolean) {
+  if (speakerChanged) return SPEAKER_PAUSE_MS;
+  if (/[。！？!?]/u.test(lastChar)) return SENTENCE_PAUSE_MS;
+  if (/[,，、；;：:]/u.test(lastChar)) return COMMA_PAUSE_MS;
+  if (lastChar === "\n") return 110;
+  return BASE_TICK_MS;
+}
+
+function schedulePlayback(delay = BASE_TICK_MS) {
+  if (playbackTimer !== null || !playbackQueue.length) return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    flushNarrativeStream();
+    return;
+  }
+  playbackTimer = window.setTimeout(playbackStep, delay);
+}
+
+function playbackStep() {
+  playbackTimer = null;
+  const piece = playbackQueue[0];
+  if (!piece) {
+    if (networkStreamFinished) finalizePresentedStream();
+    return;
+  }
+  const count = charactersPerTick(queuedCharacterCount());
+  const text = piece.chars.splice(0, count).join("");
+  renderPlaybackText(text, piece.npcId);
+  if (!piece.chars.length) playbackQueue.shift();
+  const speakerChanged =
+    Boolean(playbackQueue.length) && playbackQueue[0].npcId !== piece.npcId;
+  if (playbackQueue.length) {
+    schedulePlayback(
+      playbackDelay(Array.from(text).at(-1) || "", speakerChanged),
+    );
+  } else if (networkStreamFinished) {
+    finalizePresentedStream();
+  }
+}
+
+export function flushNarrativeStream() {
+  if (playbackTimer !== null) {
+    window.clearTimeout(playbackTimer);
+    playbackTimer = null;
+  }
+  while (playbackQueue.length) {
+    const piece = playbackQueue.shift()!;
+    renderPlaybackText(piece.chars.join(""), piece.npcId);
+  }
+  applyAuthoritativeSegments();
+  if (networkStreamFinished) finalizePresentedStream();
 }
 
 export function onNarrativeChunk(text: string, npcId?: string | null) {
-  pendingStreamText += text;
-  pendingPieces.push({ text, npcId: npcId || null });
-  if (streamFrame === null) {
-    streamFrame = requestAnimationFrame(() => {
-      streamFrame = null;
-      flushNarrativeStream();
-    });
+  if (!text) return;
+  removeLoading();
+  ensureStreamMessage();
+  playbackQueue.push({ chars: Array.from(text), npcId: npcId || null });
+  schedulePlayback();
+}
+
+export function revealNarrativeImmediately() {
+  flushNarrativeStream();
+}
+
+export function whenNarrativePresented(callback: () => void) {
+  if (!playbackQueue.length && !streamMessageId) {
+    callback();
+    return;
   }
+  presentationCallbacks.push(callback);
+}
+
+export function whenNarrativeVisible(callback: () => void) {
+  if (streamBuffer) {
+    callback();
+    return;
+  }
+  visibilityCallbacks.push(callback);
+}
+
+function notifyPresentationComplete() {
+  const callbacks = presentationCallbacks.splice(0);
+  callbacks.forEach((callback) => callback());
 }
 
 /** 流式期间的 NPC 发言段开始：记录发言者资料，供段渲染取用。 */
@@ -467,7 +585,17 @@ export function onNarrativeSegment(speaker: Speaker | undefined) {
 /** 回合定稿：以服务端权威段结构覆盖流式期间的实时段。 */
 export function onNarrativeSegments(segments: NarrativeSegment[]) {
   if (!Array.isArray(segments) || !segments.length) return;
-  flushNarrativeStream();
+  authoritativeSegments = segments.map((segment, segmentIndex) =>
+    normalizeNarrativeSegment(
+      segment,
+      `turn-${displayTurnId || "unknown"}-${segmentIndex}`,
+    ),
+  );
+  if (!playbackQueue.length) applyAuthoritativeSegments();
+}
+
+function applyAuthoritativeSegments() {
+  if (!authoritativeSegments?.length) return;
   updateMessages((messages) => {
     const index = lastMessageIndex(
       messages,
@@ -476,16 +604,14 @@ export function onNarrativeSegments(segments: NarrativeSegment[]) {
         (!displayTurnId || message.turnId === displayTurnId),
     );
     if (index < 0) return messages;
-    const authoritative = segments.map((segment, segmentIndex) =>
-      normalizeNarrativeSegment(
-        segment,
-        `turn-${displayTurnId || messages[index].turnId || "unknown"}-${segmentIndex}`,
-      ),
-    );
+    const authoritative = authoritativeSegments!.map((segment) => ({
+      ...segment,
+    }));
     return messages.map((message, current) =>
       current === index ? { ...message, segments: authoritative } : message,
     );
   });
+  authoritativeSegments = null;
 }
 
 export function onTension(text: string) {
