@@ -86,15 +86,11 @@ def test_room_recovery_payload_contains_only_requesting_players_private_state(
         turn_journal=SimpleNamespace(public_history=lambda: [{"text": "公共叙事"}]),
     )
     room = GameRoom("world-private", engine, RoomEventHub("world-private"), "user-alice")
-    PlayerNotesStore(tmp_path, user_id="user-alice").save(
-        "Alice 私人笔记", expected_revision=0
-    )
-    PlayerNotesStore(tmp_path, user_id="user-bob").save(
-        "Bob 私人笔记", expected_revision=0
-    )
+    PlayerNotesStore(tmp_path, user_id="user-alice").save("Alice 私人笔记", expected_revision=0)
+    PlayerNotesStore(tmp_path, user_id="user-bob").save("Bob 私人笔记", expected_revision=0)
 
-    alice = asyncio.run(server._room_full_recovery_payload(room, "user-alice"))
-    bob = asyncio.run(server._room_full_recovery_payload(room, "user-bob"))
+    alice = asyncio.run(server.MULTIPLAYER_WS.room_full_recovery_payload(room, "user-alice"))
+    bob = asyncio.run(server.MULTIPLAYER_WS.room_full_recovery_payload(room, "user-bob"))
 
     alice_wire = json.dumps(alice, ensure_ascii=False)
     bob_wire = json.dumps(bob, ensure_ascii=False)
@@ -192,9 +188,7 @@ def test_player_invite_respects_room_capacity(tmp_path: Path):
     with pytest.raises(MultiplayerError) as full:
         accept_invite(url, invite["token"], stranger.id)
     assert full.value.code == "world_full"
-    viewer_invite = create_invite(
-        url, "world-room", owner.id, role="viewer", max_uses=1
-    )
+    viewer_invite = create_invite(url, "world-room", owner.id, role="viewer", max_uses=1)
     accept_invite(url, viewer_invite["token"], stranger.id)
     with pytest.raises(MultiplayerError) as promote_full:
         update_member_role(url, "world-room", stranger.id, owner.id, "player")
@@ -314,9 +308,7 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
                     f"/api/invites/{invite.json()['token']}/accept", headers=headers
                 )
                 assert joined.status_code == 200
-                options = player_client.get(
-                    f"/api/worlds/{world_id}/investigators/options"
-                )
+                options = player_client.get(f"/api/worlds/{world_id}/investigators/options")
                 assert options.status_code == 200
                 character_key = next(
                     character["id"]
@@ -336,10 +328,7 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
                 )
                 assert transferred.status_code == 200
                 assert transferred.json()["owner_user_id"] == claimed.json()["user_id"]
-                assert (
-                    player_client.get(f"/api/worlds/{world_id}/invites").status_code
-                    == 200
-                )
+                assert player_client.get(f"/api/worlds/{world_id}/invites").status_code == 200
 
             members = owner_client.get(f"/api/worlds/{world_id}/members")
             assert members.status_code == 200
@@ -503,9 +492,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 unsupported = _receive_until(player_ws, "protocol_error")
                 assert unsupported["code"] == "unsupported_room_message"
                 player_ws.send_json({"type": "turn_diagnostics_get"})
-                diagnostics_denied = _receive_until(
-                    player_ws, "room_action_rejected"
-                )
+                diagnostics_denied = _receive_until(player_ws, "room_action_rejected")
                 assert diagnostics_denied["code"] == "owner_required"
 
                 owner_ws.send_json({"type": "start", "action_id": "start-before-ready"})
@@ -516,9 +503,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 _receive_until(owner_ws, "room_state")
                 owner_ws.send_json({"type": "start", "action_id": "start-ready"})
                 _receive_until(owner_ws, "done")
-                start_message = next(
-                    item for item in submitted_messages if item["type"] == "start"
-                )
+                start_message = next(item for item in submitted_messages if item["type"] == "start")
                 assert start_message["_room_investigator_id"] == owner_claim["id"]
                 assert len(start_message["_room_roster"]) == 2
 

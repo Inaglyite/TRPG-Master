@@ -99,7 +99,7 @@ flowchart LR
 | 桌面壳 | `frontend/electron/main.cjs`、`start_desktop.sh` | 窗口、首次配置、后端进程生命周期、退出确认 |
 | 终端入口 | `src/game_loop.py` | 以 print/input 回调运行同一 `GameEngine` 的终端模式循环 |
 | 前端 | `frontend/src/*.ts` | 开局、消息渲染、选项、骰子动画、面板、图片与 WS 状态 |
-| 传输适配 | `server.py`、`src/multiplayer_http.py`、`src/ws_session.py`、`src/ws_router.py`、`src/game_application.py`、`src/asset_payload.py` | 应用装配、多人 HTTP 控制面、WebSocket 协议分发、连接生命周期与回合租约、传输无关的游戏用例、素材载荷构建、引擎回调转事件 |
+| 传输适配 | `server.py`、`src/auth_http.py`、`src/multiplayer_http.py`、`src/multiplayer_ws.py`、`src/ws_session.py`、`src/ws_router.py`、`src/game_application.py`、`src/asset_payload.py` | 应用装配、账号 HTTP、多人 HTTP 控制面、权威房间 WS、单机会话协议、连接生命周期与回合租约、传输无关的游戏用例、素材载荷构建、引擎回调转事件 |
 | 鉴权 | `src/auth.py` | Argon2id 账号、可撤销 Session 与世界成员权限 |
 | 游戏内核 | `src/engine.py`、`src/history_compactor.py`、`src/npc_conversations.py` | 会话消息、模型调用、存档、角色应用、历史压缩策略、NPC 对话有界记忆、回调接口 |
 | 模型会话 | `src/model_session.py`、`src/model_streamer.py`、`src/tool_protocol.py`、`src/speaker_parser.py`、`src/llm.py` | 消息历史、活动流、取消与模型诊断；供应商流式边界、DSML 协议隔离与 NPC 发言归因；GLM 辅助摘要 |
