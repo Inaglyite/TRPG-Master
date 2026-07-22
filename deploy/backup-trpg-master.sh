@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-backup_root=/var/backups/trpg-master
-runtime_root=/var/lib/trpg-master
+backup_root="${TRPG_BACKUP_ROOT:-/var/backups/trpg-master}"
+runtime_root="${TRPG_BACKUP_RUNTIME_ROOT:-/var/lib/trpg-master}"
+backup_prefix="${TRPG_BACKUP_PREFIX:-trpg-master}"
+retention_days="${TRPG_BACKUP_RETENTION_DAYS:-30}"
+
+case "$backup_root" in
+    /var/backups/trpg-master|/var/backups/trpg-master-*) ;;
+    *) echo "unsafe backup root: $backup_root" >&2; exit 2 ;;
+esac
+case "$runtime_root" in
+    /var/lib/trpg-master|/var/lib/trpg-master-*) ;;
+    *) echo "unsafe runtime root: $runtime_root" >&2; exit 2 ;;
+esac
+if [[ ! "$backup_prefix" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
+    echo "invalid backup prefix" >&2
+    exit 2
+fi
+if [[ ! "$retention_days" =~ ^[1-9][0-9]{0,3}$ ]]; then
+    echo "invalid backup retention" >&2
+    exit 2
+fi
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -m 0700 "$backup_root"
 work="$(mktemp -d "$backup_root/.backup-$stamp-XXXXXX")"
@@ -19,5 +38,6 @@ sha256sum "$work/database.dump" "$work/runtime.tar.gz" > "$work/SHA256SUMS"
 tar --create --file - --directory "$work" database.dump runtime.tar.gz SHA256SUMS \
     | gpg --batch --yes --symmetric --cipher-algo AES256 \
         --passphrase-file "$TRPG_BACKUP_PASSPHRASE_FILE" \
-        --output "$backup_root/trpg-master-$stamp.tar.gpg"
-find "$backup_root" -maxdepth 1 -type f -name 'trpg-master-*.tar.gpg' -mtime +30 -delete
+        --output "$backup_root/$backup_prefix-$stamp.tar.gpg"
+find "$backup_root" -maxdepth 1 -type f -name "$backup_prefix-*.tar.gpg" \
+    -mtime "+$retention_days" -delete

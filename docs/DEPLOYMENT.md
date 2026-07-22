@@ -29,14 +29,18 @@
    TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/staging-backup-passphrase
    ```
 
-3. 安装 `deploy/trpg-master-staging.service`、`deploy/nginx-trpg-master-staging.conf` 和
+3. 安装 `deploy/trpg-master-staging.service`、`deploy/trpg-master-staging-backup.service`、
+   `deploy/trpg-master-staging-backup.timer`、`deploy/nginx-trpg-master-staging.conf` 和
    `deploy/install-staging-release.sh`，后者固定安装为
    `/usr/local/sbin/trpg-install-staging-release`。
-4. 执行 `nginx -t` 后才 reload；确认 Azure NSG 仅向测试来源开放 8443。
-5. 从 GitHub 手动运行 `deploy-multiplayer-staging`。它不会由分支 push 自动触发，也不会修改生产
+4. 启用 `trpg-master-staging-backup.timer`；staging 备份只写入
+   `/var/backups/trpg-master-staging`，不得与生产备份或运行目录混用。
+5. 执行 `nginx -t` 后才 reload；确认 Azure NSG 仅向测试来源开放 8443。
+6. 从 GitHub 手动运行 `deploy-multiplayer-staging`。它不会由分支 push 自动触发，也不会修改生产
    symlink。
 
-发布包必须包含 `alembic.ini`、`migrations/` 和运行时使用的 `tools/`。systemd 在每次启动前运行
+发布包必须包含 `alembic.ini`、`migrations/`、运行时使用的 `tools/` 和备份所需的 `deploy/`。
+systemd 在每次启动前运行
 `alembic upgrade head`；迁移失败会阻止新版本启动。
 
 手动 staging 工作流在上传前会启动一次性 PostgreSQL 17 service，实际执行全部 Alembic 迁移和
@@ -57,6 +61,10 @@
 
 `deploy/backup-trpg-master.sh` 使用 `pg_dump --format=custom`，连同运行目录、校验和一起用 GPG AES256
 加密。备份成功不等于可恢复：每次发布候选至少在隔离数据库执行一次以下演练：
+
+同一脚本通过 `TRPG_BACKUP_ROOT`、`TRPG_BACKUP_RUNTIME_ROOT` 和 `TRPG_BACKUP_PREFIX` 隔离环境；脚本
+只接受 `/var/backups/trpg-master[-*]` 与 `/var/lib/trpg-master[-*]` 范围内的目标。生产使用默认值，
+staging systemd 单元显式指向 staging 目录。
 
 1. 解密归档并验证 `SHA256SUMS`；
 2. 创建空数据库，使用 `pg_restore --no-owner --no-acl` 导入；

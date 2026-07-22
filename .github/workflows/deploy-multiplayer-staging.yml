@@ -64,7 +64,7 @@ jobs:
           tar -czf /tmp/trpg-master-staging.tar.gz \
             --exclude='**/__pycache__' \
             server.py requirements.txt pyproject.toml alembic.ini \
-            src tools skills mod characters migrations schemas frontend/dist
+            src tools skills mod characters migrations schemas deploy frontend/dist
 
       - name: Configure SSH
         env:

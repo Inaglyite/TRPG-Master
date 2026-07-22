@@ -20,7 +20,8 @@ if [[ -L "$root/current" ]]; then
 fi
 
 install -d -o trpgdeploy -g trpgdeploy \
-    "$root/releases" /var/lib/trpg-master-staging /var/log/trpg-master-staging
+    "$root/releases" /var/lib/trpg-master-staging /var/log/trpg-master-staging \
+    /var/backups/trpg-master-staging
 if [[ ! -e "$release" ]]; then
     install -d -o trpgdeploy -g trpgdeploy "$release"
     tar -xzf "$archive" -C "$release"
