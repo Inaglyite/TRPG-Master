@@ -1504,6 +1504,13 @@ async def owned_worlds(request: Request):
                     "role": member.role,
                     "updated_at": world.updated_at.isoformat(),
                     "metadata": world.metadata_json,
+                    "name": str((world.metadata_json or {}).get("name") or ""),
+                    "status": str(
+                        (world.metadata_json or {}).get("room_status") or "lobby"
+                    ),
+                    "max_players": int(
+                        (world.metadata_json or {}).get("max_players") or 4
+                    ),
                     "member_count": session.query(WorldMember)
                     .filter_by(world_id=world.id)
                     .count(),
@@ -2236,7 +2243,7 @@ async def multiplayer_room_ws(ws: WebSocket):
         await ws.accept()
         connection_id = f"connection_{secrets.token_hex(12)}"
         await room.hub.attach(RoomConnection(connection_id, user.id, role, ws))
-        room.member_connected(user.id)
+        first_user_connection = room.member_connected(user.id)
         if created:
             room.driver_task = asyncio.create_task(
                 run_ws_session(room.driver_transport, room.engine, user_id=owner_user_id)
@@ -2244,13 +2251,14 @@ async def multiplayer_room_ws(ws: WebSocket):
         else:
             await _room_bootstrap(ws, room)
         await ws.send_json(await _room_full_recovery_payload(room))
-        await room.hub.broadcast(
-            {
-                "type": "member_joined",
-                "user_id": user.id,
-                "role": role,
-            }
-        )
+        if first_user_connection:
+            await room.hub.broadcast(
+                {
+                    "type": "member_joined",
+                    "user_id": user.id,
+                    "role": role,
+                }
+            )
         await _broadcast_room_state(room)
     except Exception as exc:
         if ws.client_state.name == "CONNECTED":
@@ -2264,6 +2272,9 @@ async def multiplayer_room_ws(ws: WebSocket):
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            if websocket_user(ws, DATABASE_URL) is None:
+                await ws.close(code=4401, reason="登录会话已过期")
+                break
             try:
                 role = authorize_world(DATABASE_URL, user.id, world_id, "read")
             except Exception:
@@ -2479,9 +2490,21 @@ async def multiplayer_room_ws(ws: WebSocket):
                     )
                     continue
                 if message_type == "start":
+                    if room.status != "lobby":
+                        await ws.send_json(
+                            {
+                                "type": "room_action_rejected",
+                                "code": "room_already_started",
+                                "message": "房间已经开始游戏",
+                            }
+                        )
+                        continue
                     missing_claims = sorted(playable_members - claims_by_user.keys())
                     missing_ready = sorted(playable_members - room.ready_users)
-                    if missing_claims or missing_ready:
+                    missing_online = sorted(
+                        playable_members - room.connected_users.keys()
+                    )
+                    if missing_claims or missing_ready or missing_online:
                         await ws.send_json(
                             {
                                 "type": "room_action_rejected",
@@ -2489,6 +2512,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                                 "message": "所有玩家选择调查员并准备后才能开始",
                                 "missing_claim_user_ids": missing_claims,
                                 "missing_ready_user_ids": missing_ready,
+                                "missing_online_user_ids": missing_online,
                             }
                         )
                         continue
@@ -2540,8 +2564,8 @@ async def multiplayer_room_ws(ws: WebSocket):
         pass
     finally:
         await room.hub.detach(connection_id)
-        room.member_disconnected(user.id)
-        if user.id not in room.connected_users:
+        last_user_connection = room.member_disconnected(user.id)
+        if last_user_connection:
             await room.hub.broadcast({"type": "member_left", "user_id": user.id})
         await _broadcast_room_state(room)
         if not room.connected_users:

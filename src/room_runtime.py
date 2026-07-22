@@ -241,11 +241,13 @@ class GameRoom:
     driver_transport: RoomDriverTransport | None = field(default=None, repr=False)
     driver_task: asyncio.Task | None = field(default=None, repr=False)
 
-    def member_connected(self, user_id: str) -> None:
+    def member_connected(self, user_id: str) -> bool:
+        first_connection = user_id not in self.connected_users
         self.connected_users[user_id] = self.connected_users.get(user_id, 0) + 1
         self.last_empty_at = None
+        return first_connection
 
-    def member_disconnected(self, user_id: str) -> None:
+    def member_disconnected(self, user_id: str) -> bool:
         count = self.connected_users.get(user_id, 0)
         if count <= 1:
             self.connected_users.pop(user_id, None)
@@ -253,6 +255,7 @@ class GameRoom:
             self.connected_users[user_id] = count - 1
         if not self.connected_users:
             self.last_empty_at = time.monotonic()
+        return user_id not in self.connected_users
 
     def set_ready(self, user_id: str, ready: bool) -> None:
         if ready:

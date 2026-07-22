@@ -101,6 +101,16 @@ async def _room_is_removed_only_after_empty_idle_grace():
     assert await manager.get("world-a") is None
 
 
+def test_member_presence_changes_only_on_first_and_last_connection():
+    room = GameRoom("world-a", object(), RoomEventHub("world-a"), "owner")
+    assert room.member_connected("alice") is True
+    assert room.member_connected("alice") is False
+    assert room.connected_users == {"alice": 2}
+    assert room.member_disconnected("alice") is False
+    assert room.member_disconnected("alice") is True
+    assert room.connected_users == {}
+
+
 async def _driver_sends_decisions_only_to_current_actor():
     hub = RoomEventHub("world-a")
     alice_socket, bob_socket = Socket(), Socket()
