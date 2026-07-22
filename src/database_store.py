@@ -41,6 +41,10 @@ class DatabaseWorldStore:
         self._thread_lock = _lock(f"{database_url}:{world_id}")
         self._cache_depth = 0
         self._cached_snapshot: WorldSnapshot | None = None
+        self._turn_state: dict | None = None
+        self._turn_base_revision: int | None = None
+        self._turn_dirty = False
+        self._turn_flushed = False
 
     @property
     def exists(self) -> bool:
@@ -54,19 +58,93 @@ class DatabaseWorldStore:
 
     @contextmanager
     def turn_cache(self) -> Iterator[None]:
-        """Reuse authoritative reads inside one world-serialized engine turn."""
+        """Buffer one serialized engine turn and commit its state at most once."""
         with self._thread_lock:
+            outermost = self._cache_depth == 0
+            if outermost:
+                snapshot = self.snapshot()
+                self._turn_state = copy.deepcopy(snapshot.state)
+                self._turn_base_revision = snapshot.revision
+                self._turn_dirty = False
+                self._turn_flushed = False
             self._cache_depth += 1
         try:
             yield
+        except BaseException:
+            if outermost:
+                self._discard_turn_state()
+            raise
         finally:
             with self._thread_lock:
                 self._cache_depth = max(0, self._cache_depth - 1)
                 if self._cache_depth == 0:
+                    if self._turn_dirty and not self._turn_flushed:
+                        self.flush_turn()
                     self._cached_snapshot = None
+                    self._discard_turn_state()
+
+    def _discard_turn_state(self) -> None:
+        self._turn_state = None
+        self._turn_base_revision = None
+        self._turn_dirty = False
+        self._turn_flushed = False
+
+    def flush_turn(self) -> WorldSnapshot:
+        """Commit the buffered state once using the revision read at turn start."""
+        with self._thread_lock:
+            if self._turn_state is None or self._turn_base_revision is None:
+                return self.snapshot()
+            if not self._turn_dirty:
+                return WorldSnapshot(
+                    copy.deepcopy(self._turn_state), self._turn_base_revision
+                )
+            with session_scope(self.database_url) as session:
+                row = self._row(session, for_update=True)
+                if row.revision != self._turn_base_revision:
+                    raise StaleRevisionError(self._turn_base_revision, row.revision)
+                working, _ = migrate_world_state(copy.deepcopy(self._turn_state))
+                working["revision"] = row.revision + 1
+                working["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
+                row.state = working
+                row.revision += 1
+                row.schema_version = CURRENT_WORLD_SCHEMA_VERSION
+                row.updated_at = datetime.now(UTC)
+                session.flush()
+                snapshot = WorldSnapshot(copy.deepcopy(working), row.revision)
+            self._turn_state = copy.deepcopy(snapshot.state)
+            self._turn_base_revision = snapshot.revision
+            self._turn_dirty = False
+            self._turn_flushed = True
+            self._cache(snapshot)
+            return snapshot
+
+    def prepare_turn_commit(self) -> tuple[dict, int | None]:
+        """Return a final state plus the DB revision an atomic journal must verify."""
+        with self._thread_lock:
+            if self._turn_state is None or self._turn_base_revision is None:
+                return self.load(), None
+            state, _ = migrate_world_state(copy.deepcopy(self._turn_state))
+            expected = self._turn_base_revision if self._turn_dirty else None
+            state["revision"] = self._turn_base_revision + (1 if self._turn_dirty else 0)
+            state["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
+            return state, expected
+
+    def accept_turn_commit(self, state: dict) -> None:
+        """Synchronize the work unit after the journal transaction committed it."""
+        with self._thread_lock:
+            snapshot = WorldSnapshot(
+                copy.deepcopy(state), int(state.get("revision", 0))
+            )
+            self._turn_state = copy.deepcopy(snapshot.state)
+            self._turn_base_revision = snapshot.revision
+            self._turn_dirty = False
+            self._turn_flushed = True
+            self._cache(snapshot)
 
     def invalidate_cache(self) -> None:
         with self._thread_lock:
+            if self._turn_state is not None:
+                raise WorldStoreError("回合工作单元期间不能从外部失效状态")
             self._cached_snapshot = None
 
     def _cache(self, snapshot: WorldSnapshot) -> None:
@@ -122,6 +200,11 @@ class DatabaseWorldStore:
 
     def snapshot(self) -> WorldSnapshot:
         with self._thread_lock, session_scope(self.database_url) as session:
+            if self._turn_state is not None and self._turn_base_revision is not None:
+                return WorldSnapshot(
+                    copy.deepcopy(self._turn_state),
+                    int(self._turn_state.get("revision", self._turn_base_revision)),
+                )
             if self._cache_depth and self._cached_snapshot is not None:
                 return WorldSnapshot(
                     copy.deepcopy(self._cached_snapshot.state),
@@ -146,6 +229,26 @@ class DatabaseWorldStore:
         *,
         expected_revision: int | None = None,
     ) -> WorldSnapshot:
+        if self._turn_state is not None and self._turn_base_revision is not None:
+            with self._thread_lock:
+                actual = int(self._turn_state.get("revision", self._turn_base_revision))
+                if expected_revision is not None and expected_revision != actual:
+                    raise StaleRevisionError(expected_revision, actual)
+                working = copy.deepcopy(self._turn_state)
+                replacement = mutator(working)
+                if replacement is not None:
+                    if not isinstance(replacement, dict):
+                        raise TypeError("WorldStore mutator 只能返回 dict 或 None")
+                    working = replacement
+                working, _ = migrate_world_state(working)
+                working["revision"] = actual + 1
+                working["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
+                self._turn_state = working
+                self._turn_dirty = True
+                self._turn_flushed = False
+                snapshot = WorldSnapshot(copy.deepcopy(working), actual + 1)
+                self._cache(snapshot)
+                return snapshot
         with self._thread_lock, session_scope(self.database_url) as session:
             row = self._row(session, for_update=True)
             actual = row.revision
@@ -171,6 +274,19 @@ class DatabaseWorldStore:
 
     @contextmanager
     def transaction(self, *, expected_revision: int | None = None) -> Iterator[dict]:
+        if self._turn_state is not None:
+            before = copy.deepcopy(self._turn_state)
+            yield self._turn_state
+            if self._turn_state != before:
+                actual = int(before.get("revision", self._turn_base_revision or 0))
+                if expected_revision is not None and expected_revision != actual:
+                    self._turn_state = before
+                    raise StaleRevisionError(expected_revision, actual)
+                self._turn_state["revision"] = actual + 1
+                self._turn_state["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
+                self._turn_dirty = True
+                self._turn_flushed = False
+            return
         with self._thread_lock, session_scope(self.database_url) as session:
             row = self._row(session, for_update=True)
             actual = row.revision

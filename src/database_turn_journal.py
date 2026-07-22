@@ -18,6 +18,7 @@ from .database import (
     Turn,
     TurnEvent,
     World,
+    WorldState,
     database_url,
     new_id,
     session_scope,
@@ -34,7 +35,7 @@ from .turn_journal import (
     _now,
     serialize_messages,
 )
-from .world_store import atomic_write_json
+from .world_store import StaleRevisionError, atomic_write_json
 
 _REPLAY_EVENT_TYPES = {
     "narrative_chunk",
@@ -217,6 +218,7 @@ class DatabaseTurnJournal:
         lore_entry_ids=None,
         diagnostics=None,
         narrative_segments=None,
+        expected_world_revision: int | None = None,
     ) -> dict:
         journal_started = time.monotonic()
         with session_scope(self.database_url) as session:
@@ -226,6 +228,22 @@ class DatabaseTurnJournal:
             if row.status != "active":
                 raise TurnJournalError(f"回合 {turn_id} 状态为 {row.status}，不能提交")
             serializable = serialize_messages(messages)
+            if expected_world_revision is not None:
+                world_row = session.scalar(
+                    select(WorldState)
+                    .where(WorldState.world_id == self.world_id)
+                    .with_for_update()
+                )
+                if world_row is None:
+                    raise TurnJournalError(f"世界状态不存在: {self.world_id}")
+                if world_row.revision != expected_world_revision:
+                    raise StaleRevisionError(
+                        expected_world_revision, world_row.revision
+                    )
+                world_row.state = _json_safe(world_state)
+                world_row.revision = int(world_state.get("revision", 0))
+                world_row.schema_version = int(world_state.get("schema_version", 0))
+                world_row.updated_at = utcnow()
             events = self._active_events.pop(turn_id, [])
             started_at = self._started_at.pop(turn_id, None)
             record = self._record(row)

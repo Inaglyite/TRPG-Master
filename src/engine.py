@@ -424,11 +424,17 @@ class GameEngine:
             return None
         perf = getattr(self, "_turn_performance", None)
         performance = perf.snapshot() if perf is not None else {}
+        prepare_commit = getattr(self.context.world_store, "prepare_turn_commit", None)
+        if prepare_commit:
+            world_state, expected_world_revision = prepare_commit()
+        else:
+            world_state = self.context.world_store.load()
+            expected_world_revision = None
         with self.performance_span("journal_commit"):
             record = journal.complete(
             turn_id,
             messages=self.messages,
-            world_state=self.context.world_store.load(),
+            world_state=world_state,
             narrative=narrative,
             choices=choices,
             executed_tools=executed_tools,
@@ -440,7 +446,11 @@ class GameEngine:
                 "mutations": self._turn_mutations.snapshot(),
             },
             narrative_segments=narrative_segments,
+            expected_world_revision=expected_world_revision,
             )
+        accept_commit = getattr(self.context.world_store, "accept_turn_commit", None)
+        if accept_commit:
+            accept_commit(world_state)
         if perf is not None:
             performance = perf.snapshot()
             persisted_performance = (

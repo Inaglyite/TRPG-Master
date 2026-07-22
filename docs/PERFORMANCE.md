@@ -10,8 +10,8 @@
 - 模型设置面板显示首段可见、准备、工具、审计和提交耗时。
 - 所有模型可调用的内置工具均在服务进程内执行；`tools/*.py` 继续作为人工 CLI 入口，但运行时
   不再为每次工具调用启动 Python 子进程。
-- `DatabaseWorldStore.turn_cache()` 在同一条已串行化的世界回合中复用读取；每次 mutation 更新
-  缓存，回合结束立即清除，避免跨回合陈旧状态。
+- `DatabaseWorldStore.turn_cache()` 同时充当回合工作单元：在同一条已串行化的世界回合中复用读取、
+  缓冲 mutation，并在 TurnJournal 定稿时通过起始 revision 一次提交；异常或取消会丢弃缓冲状态。
 - 完成回合时，自动存档 `slot_000` 与 TurnJournal 共用同一个不可变 Snapshot，不再重复序列化和
   写入相同世界状态。
 - `TurnMutationLedger` 记录确定性领域变化和权威工具变化。已经落账的变化不再触发冗余的回合末
@@ -62,7 +62,8 @@ venv/bin/python tools/benchmark_turn_performance.py 100
 ## 配置与回退
 
 `TRPG_STREAM_BATCH_MS` 控制文本合并窗口，默认 `25`，允许范围 `0–100`。设置为 `0` 可关闭合并。
-数据库缓存只在 `GameEngine.handle_action()` 的世界锁保护期内启用，不提供跨请求全局缓存。
+数据库工作单元只在 `GameEngine.handle_action()` 的世界锁保护期内启用，不提供跨请求全局缓存。
+世界状态、Turn、Snapshot、自动存档和事件在同一个数据库事务内提交。
 
 性能改动的回归覆盖见 `tests/test_performance_optimization.py`、`tests/test_event_stream.py`、
 `tests/test_database_persistence.py` 和 `tests/test_turn_resolution.py`。

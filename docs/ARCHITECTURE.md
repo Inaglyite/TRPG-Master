@@ -152,8 +152,9 @@ sequenceDiagram
 每条连接拥有一个 `turn_lock`，每个 `world_id` 另有进程内共享的 `world_turn_lock`。二者都必须在
 `begin_turn()` 前非阻塞占用；失败返回 `turn_rejected`，所以异常客户端无法先覆盖 active
 `turn_id` 再排队 worker。世界锁也阻止断线后的旧 worker 与新连接同时推进同一世界。
-`DatabaseWorldStore` 使用进程内锁配合数据库行锁与事务，保证单次状态事务不会半写或
-丢更新；多个连接仍各自持有独立 `GameEngine.messages`，因此这还不是共享房间。
+`DatabaseWorldStore` 使用进程内锁配合回合工作单元：工具 mutation 先写入连接内缓冲状态，finalize
+再以回合起始 revision 加数据库行锁校验，并与 Turn、Snapshot、自动存档和事件在同一事务提交。
+异常或取消丢弃缓冲状态；多个连接仍各自持有独立 `GameEngine.messages`，因此这还不是共享房间。
 
 每次 gameplay 回合在 worker 启动前由 `DatabaseTurnJournal.begin()` 在 `turns` 创建持久 `turn_id`。
 finalize 在数据库事务中写入消息、不可变 `snapshots`、`turn_events` 与 completed 状态，事务成功后
