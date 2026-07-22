@@ -2616,12 +2616,13 @@ async def multiplayer_room_ws(ws: WebSocket):
                 "turn_rewrite",
             }
             if message_type in mutating_turn_types:
-                if message_type in {"start", "turn_rewrite"} and role != "owner":
+                owner_turn_types = {"start", "save_load", "turn_rewrite"}
+                if message_type in owner_turn_types and role != "owner":
                     await ws.send_json(
                         {
                             "type": "room_action_rejected",
                             "code": "owner_required",
-                            "message": "只有房主可以开始游戏",
+                            "message": "只有房主可以执行该房间控制操作",
                         }
                     )
                     continue
@@ -2669,7 +2670,11 @@ async def multiplayer_room_ws(ws: WebSocket):
                         continue
                 action_id = str(data.get("action_id") or "")
                 try:
-                    await room.reserve_action(user.id, action_id)
+                    await room.reserve_action(
+                        user.id,
+                        action_id,
+                        require_current_actor=message_type not in owner_turn_types,
+                    )
                 except ActionReservationError as exc:
                     await ws.send_json(
                         {

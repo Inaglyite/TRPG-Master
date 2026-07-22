@@ -102,6 +102,27 @@ async def _action_policy_rejects_wrong_actor_duplicates_and_overlap():
     room.release_action()
 
 
+async def _owner_control_reservation_does_not_require_current_actor():
+    room = GameRoom(
+        "world-owner-control",
+        object(),
+        RoomEventHub("world-owner-control"),
+        "owner",
+        current_actor_user_id="player",
+    )
+    await room.reserve_action(
+        "owner",
+        "load-save-1",
+        require_current_actor=False,
+    )
+    assert room.action_active
+    room.release_action()
+
+    with pytest.raises(ActionReservationError) as denied:
+        await room.reserve_action("owner", "normal-action")
+    assert denied.value.code == "not_current_actor"
+
+
 async def _room_is_removed_only_after_empty_idle_grace():
     manager = RoomManager()
     room, _ = await manager.get_or_create(
@@ -187,6 +208,10 @@ def test_event_visibility_ack_and_replay_are_connection_scoped():
 
 def test_action_policy_rejects_wrong_actor_duplicates_and_overlap():
     asyncio.run(_action_policy_rejects_wrong_actor_duplicates_and_overlap())
+
+
+def test_owner_control_reservation_does_not_require_current_actor():
+    asyncio.run(_owner_control_reservation_does_not_require_current_actor())
 
 
 def test_room_is_removed_only_after_empty_idle_grace():

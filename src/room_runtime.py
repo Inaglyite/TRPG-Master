@@ -314,11 +314,17 @@ class GameRoom:
         self.pending_reply_user_id = None
         self.pending_reply_request_id = None
 
-    async def reserve_action(self, user_id: str, action_id: str) -> None:
+    async def reserve_action(
+        self,
+        user_id: str,
+        action_id: str,
+        *,
+        require_current_actor: bool = True,
+    ) -> None:
         action_id = str(action_id or "").strip()
         if not action_id or len(action_id) > 160:
             raise ActionReservationError("invalid_action_id", "行动 ID 无效")
-        if self.current_actor_user_id != user_id:
+        if require_current_actor and self.current_actor_user_id != user_id:
             raise ActionReservationError("not_current_actor", "现在还没有轮到你行动")
         if action_id in self._action_id_set:
             raise ActionReservationError("duplicate_action", "该行动已经提交")

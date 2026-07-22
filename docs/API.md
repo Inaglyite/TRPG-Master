@@ -611,9 +611,10 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 
 - `room_ready {ready}`：owner/player 准备或取消准备；
 - `actor_assign {user_id}`：仅房主指定/跳过到某个 owner/player；
-- `start`、`continue`、`save_load`、`action`、`turn_rewrite`：都必须携带全局唯一的
-  `action_id`，且只能由当前行动者提交；`start` 还要求房主提交、全体 owner/player 已选调查员并
-  ready；
+- `start`、`save_load`、`turn_rewrite`：房主控制操作，必须携带全局唯一的 `action_id` 并经过
+  房间串行锁，但房主不需要同时占用当前行动权；`start` 还要求全体 owner/player 已选调查员、
+  在线并 ready；
+- `continue`、`action`：必须携带全局唯一的 `action_id`，且只能由当前行动者提交；
 - `suggest_reply`、`decision_reply`：只接受当前行动者；对应询问只发送给该用户的全部连接；
 - `player_notes_get`、`player_notes_update`：在连接边界按 Session 用户直接处理，不进入公共广播。
 

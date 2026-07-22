@@ -407,7 +407,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                     await transport.send_json(
                         {"type": "gm_turn_start", "turn_id": "test-turn", "seq": 1}
                     )
-                elif data.get("type") == "start":
+                elif data.get("type") in {"start", "save_load"}:
                     await transport.send_json({"type": "done"})
         except RuntimeError:
             return
@@ -477,6 +477,15 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 player_ws.send_json({"type": "actor_assign", "user_id": player_id})
                 denied = _receive_until(player_ws, "room_action_rejected")
                 assert denied["code"] == "owner_required"
+                player_ws.send_json(
+                    {
+                        "type": "save_load",
+                        "slot_id": "slot_000",
+                        "action_id": "player-load-denied",
+                    }
+                )
+                load_denied = _receive_until(player_ws, "room_action_rejected")
+                assert load_denied["code"] == "owner_required"
 
                 player_ws.send_json(
                     {
@@ -516,6 +525,19 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 owner_ws.send_json({"type": "actor_assign", "user_id": player_id})
                 changed = _receive_until(player_ws, "actor_changed")
                 assert changed["user_id"] == player_id
+                owner_ws.send_json(
+                    {
+                        "type": "save_load",
+                        "slot_id": "slot_000",
+                        "action_id": "owner-load-as-non-actor",
+                    }
+                )
+                _receive_until(owner_ws, "done")
+                owner_load = next(
+                    item for item in submitted_messages if item["type"] == "save_load"
+                )
+                assert owner_load["_room_user_id"] == owner_id
+                assert owner_load["_room_investigator_id"] == player_claim["id"]
                 player_ws.send_json(
                     {
                         "type": "action",
