@@ -847,6 +847,39 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(text, "【npc:bryce_fallon】“请坐。”【/npc】")
         self.assertEqual(tool_calls, [])
 
+    def test_untagged_large_delta_streams_inferred_npc_bubbles_before_finalize(self):
+        prose = (
+            "法伦把档案推到桌边。"
+            "“黄先生，请坐。”他压低声音说，“这件事不能声张。”"
+            "窗外的雨仍在下。"
+        )
+        chunks = [stream_chunk(content=prose), stream_chunk(finish_reason="stop")]
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
+            )
+        )
+        engine.messages = []
+        events = []
+        engine.is_valid_npc_id = lambda npc_id: npc_id == "bryce_fallon"
+        engine.npc_speaker_aliases = lambda: {"法伦": "bryce_fallon"}
+        engine.cb = SimpleNamespace(
+            on_narrative=lambda text, npc_id=None: events.append((text, npc_id)),
+            on_speaker_segment=lambda npc_id: events.append(("speaker", npc_id)),
+            on_error=lambda _message: None,
+        )
+
+        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        self.assertEqual(text, prose)
+        self.assertEqual(tool_calls, [])
+        self.assertIn(("speaker", "bryce_fallon"), events)
+        npc_text = "".join(part for part, npc_id in events if npc_id == "bryce_fallon")
+        self.assertIn("黄先生，请坐", npc_text)
+        self.assertIn("这件事不能声张", npc_text)
+
 
 if __name__ == "__main__":
     unittest.main()
