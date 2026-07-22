@@ -39,6 +39,10 @@
 发布包必须包含 `alembic.ini`、`migrations/` 和运行时使用的 `tools/`。systemd 在每次启动前运行
 `alembic upgrade head`；迁移失败会阻止新版本启动。
 
+手动 staging 工作流在上传前会启动一次性 PostgreSQL 17 service，实际执行全部 Alembic 迁移和
+`tests/test_postgresql_integration.py`，验证 JSONB、成员/邀请/调查员关系及房间行动唯一约束。SQLite
+测试不能替代这道发布门禁。
+
 ## 上线检查
 
 - `curl http://127.0.0.1:8766/api/health` 与外部 HTTPS 健康检查均成功；
