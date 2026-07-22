@@ -123,6 +123,13 @@ def test_player_invite_respects_room_capacity(tmp_path: Path):
     with pytest.raises(MultiplayerError) as full:
         accept_invite(url, invite["token"], stranger.id)
     assert full.value.code == "world_full"
+    viewer_invite = create_invite(
+        url, "world-room", owner.id, role="viewer", max_uses=1
+    )
+    accept_invite(url, viewer_invite["token"], stranger.id)
+    with pytest.raises(MultiplayerError) as promote_full:
+        update_member_role(url, "world-room", stranger.id, owner.id, "player")
+    assert promote_full.value.code == "world_full"
 
 
 def test_room_action_idempotency_survives_room_runtime_recreation(tmp_path: Path):

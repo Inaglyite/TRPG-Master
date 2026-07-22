@@ -9,7 +9,7 @@
 | 项目 | 值 |
 |---|---|
 | HTTP Base URL | `http://127.0.0.1:8765` |
-| WebSocket URL | `ws://127.0.0.1:8765/ws`；可选 `?module=<name>&world_id=<id>` |
+| WebSocket URL | 单机 `/ws`；多人 `/ws/room?world_id=<id>` |
 | 编码 | UTF-8 |
 | WebSocket 数据 | JSON text frame |
 | 鉴权 | `trpg_session` 服务端 Session Cookie；桌面模式允许匿名游戏，账号与 `/api/worlds` 接口仍要求登录 |
@@ -73,6 +73,15 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `POST` | `/api/auth/logout` | 撤销当前 Session |
 | `GET` | `/api/auth/me` | 查询当前登录账号 |
 | `GET/POST` | `/api/worlds` | 列出有权访问的世界或创建世界 |
+| `GET/POST` | `/api/worlds/{id}/invites` | 房主列出或创建邀请 |
+| `DELETE` | `/api/worlds/{id}/invites/{invite_id}` | 房主撤销邀请 |
+| `POST` | `/api/invites/{token}/accept` | 接受邀请 |
+| `GET` | `/api/worlds/{id}/members` | 房间成员与调查员占用 |
+| `PATCH/DELETE` | `/api/worlds/{id}/members/{user_id}` | 修改角色或移除/退出成员 |
+| `POST` | `/api/worlds/{id}/owner` | 移交房主 |
+| `GET` | `/api/worlds/{id}/investigators/options` | 房间可选调查员 |
+| `POST` | `/api/worlds/{id}/investigators/claim` | 当前账号占用调查员 |
+| `DELETE` | `/api/worlds/{id}/investigators/{id}/claim` | 释放调查员 |
 | `GET` | `/api/modules` | 模组列表与活动模组 |
 | `GET` | `/api/modules/schema/manifest-v1` | manifest JSON Schema |
 | `GET` | `/api/modules/schema/module-v1` | 模组定义 JSON Schema |
@@ -131,9 +140,22 @@ WebSocket 消息都有一个字符串字段 `type`：
 }
 ```
 
-`POST /api/worlds` 接收 `{"module":"mansion_of_madness"}`，创建世界及 owner 成员关系并返回
+`POST /api/worlds` 接收 `{"module":"mansion_of_madness","name":"周五调查团","max_players":4}`，创建世界及 owner 成员关系并返回
 `world_id` 和 `module`。这两个接口始终要求登录；云端模式还会在 WebSocket 握手和切换世界时校验
 该成员关系。
+
+### 2.4.1 多人房间控制面
+
+邀请明文 token 只在 `POST .../invites` 的创建响应返回一次；数据库只存 SHA-256 哈希，
+`GET .../invites` 仅返回用途、使用次数、过期时间与 active/revoked/expired/exhausted 状态。接受
+玩家邀请时，服务端在事务内按 `max_players` 校验 owner/player 总数；旁观者不占玩家名额。
+
+`GET .../members` 返回 owner/player/viewer、用户名和当前调查员占用。角色更新、移除成员、撤销
+邀请和房主移交都要求服务端 Session 中的当前房主；普通成员只能移除自己，房主必须先移交才能
+退出。房主移交请求为 `{"user_id":"目标账号 ID"}`。
+
+调查员占用请求为 `{"character_key":"服务端 options 返回的 id"}`。服务端会重新解析模组角色并
+保存可信 `character_ref`，客户端提交的 `user_id`、`investigator_id` 或角色正文均不作为授权事实。
 
 ### 2.5 `GET /api/theme`
 
@@ -552,6 +574,34 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 
 1. `ping`
 2. `state`
+
+### 多人 `/ws/room`
+
+多人入口必须携带 `world_id` 并复用登录 Cookie。它不接受 `module` 覆盖，也不接受客户端自报
+`user_id`、角色或权限。除上面的游戏初始化事件外，连接会收到：
+
+- `room_full_state`：公开回合父链、公开调查员状态、房主、当前行动者、在线成员和最新事件 ID；
+- `room_state`：房间状态、房主、当前行动者、ready/online 用户 ID；
+- `member_joined`、`member_left`、`member_removed`、`owner_changed`、`actor_changed`；
+- `room_action_rejected {code,message}`：稳定错误码包括 `owner_required`、`player_required`、
+  `not_current_actor`、`investigator_required`、`room_not_ready`、`duplicate_action` 和
+  `room_turn_in_progress`；
+- `room_event_gap`：客户端请求的增量已离开缓冲区，紧随其后发送 `room_full_state`。
+
+房间广播事件带单调 `room_event_id`。客户端发送 `room_ack {event_id}` 确认，重连后用
+`room_sync {after_event_id}` 请求增量；私人事件不出现在无权连接的实时流或补发结果中。
+
+房间控制消息：
+
+- `room_ready {ready}`：owner/player 准备或取消准备；
+- `actor_assign {user_id}`：仅房主指定/跳过到某个 owner/player；
+- `start`、`continue`、`save_load`、`action`、`turn_rewrite`：都必须携带全局唯一的
+  `action_id`，且只能由当前行动者提交；`start` 还要求房主提交、全体 owner/player 已选调查员并
+  ready；
+- `suggest_reply`、`decision_reply`：只接受当前行动者；对应询问只发送给该用户的全部连接；
+- `player_notes_get`、`player_notes_update`：在连接边界按 Session 用户直接处理，不进入公共广播。
+
+多人第一版只能运行一个 Uvicorn worker；跨进程房间租约和事件总线尚不属于当前协议。
 
 ### 回合生命周期
 

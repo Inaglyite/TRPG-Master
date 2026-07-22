@@ -7,6 +7,25 @@
 SQLAlchemy Repository；运行时不再读取 `world_state.json`、`turns/`、`saves/` 或
 `player_notes.json`。
 
+## 多人控制面与运行记录
+
+多人功能继续把动态世界正文放在 `world_states.state` JSON/JSONB 中，同时用关系表保证身份、唯一
+占用和幂等：
+
+| 表 | 权威职责 |
+|---|---|
+| `world_members` | owner/player/viewer 成员关系；`world_id + user_id` 唯一 |
+| `world_invites` | 邀请哈希、角色、过期、撤销和次数；不保存明文 token |
+| `world_investigators` | 账号与角色模板的唯一占用，以及服务端验证后的 `character_ref` |
+| `room_actions` | `world_id + action_id` 唯一，保证房间进程重建后仍不会重复执行行动 |
+| `turns` / `turn_events` | 完成回合父链、有序公开事件、模型消息与恢复索引 |
+| `snapshots` / `save_slots` | 不可变状态快照与存档元数据 |
+| `audit_events` | 登录、邀请、加入、角色占用、成员管理和房主移交审计 |
+
+多人世界状态中的 `investigators` 保存每位调查员的 HP、SAN、技能、物品等动态数据；旧引擎仍通过
+`pc` 字段操作当前行动者。`src/investigators.py` 在每次权威行动前投影正确调查员，并在回合完成后
+同步回集合。客户端提交的调查员正文或 ID 不会直接写入状态。
+
 ## 桌面启动与自动迁移
 
 正常情况下直接运行：

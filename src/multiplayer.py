@@ -262,6 +262,22 @@ def update_member_role(
         target = _require_member(session, world_id, target_user_id)
         if target.role == "owner":
             raise MultiplayerError("owner_role_locked", "请使用房主移交功能", 409)
+        if role == "player" and target.role != "player":
+            world = _require_world(session, world_id)
+            max_players = max(
+                2,
+                min(int((world.metadata_json or {}).get("max_players") or 4), 4),
+            )
+            player_count = (
+                session.query(WorldMember)
+                .filter(
+                    WorldMember.world_id == world_id,
+                    WorldMember.role.in_(("owner", "player")),
+                )
+                .count()
+            )
+            if player_count >= max_players:
+                raise MultiplayerError("world_full", "房间玩家人数已满", 409)
         target.role = role
         if role == "viewer":
             claim = (
