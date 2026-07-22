@@ -31,7 +31,7 @@ _prefer_utf8_stdio()
 
 # PyInstaller 打包后，工具层仍会通过 `sys.executable tools/*.py ...`
 # 启动确定性脚本。此处把自身当作轻量 Python launcher 使用。
-if len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
     script = Path(sys.argv[1])
     if not script.is_absolute():
         # 工具脚本以相对路径传入（如 tools/dice.py）。打包后数据在 _internal/
@@ -144,6 +144,17 @@ from src.module_registry import (
     ModulePackageError,
     ModuleRegistry,
     inspect_package,
+)
+from src.multiplayer import (
+    MultiplayerError,
+    accept_invite,
+    claim_investigator,
+    create_invite,
+    release_investigator,
+    remove_member,
+    revoke_invite,
+    room_members,
+    update_member_role,
 )
 from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
@@ -1420,6 +1431,9 @@ async def owned_worlds(request: Request):
                     "role": member.role,
                     "updated_at": world.updated_at.isoformat(),
                     "metadata": world.metadata_json,
+                    "member_count": session.query(WorldMember)
+                    .filter_by(world_id=world.id)
+                    .count(),
                 }
                 for world, member in rows
             ]
@@ -1440,11 +1454,178 @@ async def create_world(data: dict, request: Request):
     with session_scope(DATABASE_URL) as session:
         world = session.get(World, world_id)
         world.created_by = user.id
+        world.metadata_json = {
+            **dict(world.metadata_json or {}),
+            "name": str(data.get("name") or "").strip()[:120]
+            or f"{user.username} 的房间",
+            "room_status": "lobby",
+            "max_players": max(2, min(int(data.get("max_players") or 4), 4)),
+        }
         session.add(
             WorldMember(id=new_id("member"), world_id=world_id, user_id=user.id, role="owner")
         )
     audit(DATABASE_URL, "world_created", user_id=user.id, world_id=world_id)
     return {"world_id": context.world_id, "module": module}
+
+
+def _multiplayer_error(exc: MultiplayerError) -> JSONResponse:
+    return JSONResponse(
+        {"detail": exc.message, "code": exc.code}, status_code=exc.status_code
+    )
+
+
+@app.post("/api/worlds/{world_id}/invites", status_code=201)
+async def create_world_invite(world_id: str, data: dict, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        result = create_invite(
+            DATABASE_URL,
+            world_id,
+            user.id,
+            role=str(data.get("role") or "player"),
+            expires_in_hours=int(data.get("expires_in_hours") or 24),
+            max_uses=int(data.get("max_uses") or 1),
+        )
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"detail": "邀请参数无效", "code": "invalid_invite"}, status_code=400
+        )
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(DATABASE_URL, "world_invite_created", user_id=user.id, world_id=world_id)
+    return result
+
+
+@app.delete("/api/worlds/{world_id}/invites/{invite_id}", status_code=204)
+async def delete_world_invite(world_id: str, invite_id: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        revoke_invite(DATABASE_URL, world_id, invite_id, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(DATABASE_URL, "world_invite_revoked", user_id=user.id, world_id=world_id)
+
+
+@app.post("/api/invites/{token}/accept")
+async def join_world_by_invite(token: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        result = accept_invite(DATABASE_URL, token, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(
+        DATABASE_URL,
+        "world_invite_accepted",
+        user_id=user.id,
+        world_id=result["world_id"],
+    )
+    return result
+
+
+@app.get("/api/worlds/{world_id}/members")
+async def get_world_members(world_id: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        return room_members(DATABASE_URL, world_id, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+
+
+@app.patch("/api/worlds/{world_id}/members/{target_user_id}")
+async def patch_world_member(
+    world_id: str, target_user_id: str, data: dict, request: Request
+):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        result = update_member_role(
+            DATABASE_URL,
+            world_id,
+            target_user_id,
+            user.id,
+            str(data.get("role") or ""),
+        )
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(
+        DATABASE_URL,
+        "world_member_role_changed",
+        user_id=user.id,
+        world_id=world_id,
+        details={"target_user_id": target_user_id, "role": result["role"]},
+    )
+    return result
+
+
+@app.delete("/api/worlds/{world_id}/members/{target_user_id}", status_code=204)
+async def delete_world_member(world_id: str, target_user_id: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        remove_member(DATABASE_URL, world_id, target_user_id, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(
+        DATABASE_URL,
+        "world_member_removed",
+        user_id=user.id,
+        world_id=world_id,
+        details={"target_user_id": target_user_id},
+    )
+
+
+@app.post("/api/worlds/{world_id}/investigators/claim")
+async def claim_world_investigator(world_id: str, data: dict, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        result = claim_investigator(
+            DATABASE_URL, world_id, str(data.get("character_key") or ""), user.id
+        )
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(
+        DATABASE_URL,
+        "investigator_claimed",
+        user_id=user.id,
+        world_id=world_id,
+        details={"investigator_id": result["id"]},
+    )
+    return result
+
+
+@app.delete(
+    "/api/worlds/{world_id}/investigators/{investigator_id}/claim",
+    status_code=204,
+)
+async def release_world_investigator(
+    world_id: str, investigator_id: str, request: Request
+):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        release_investigator(DATABASE_URL, world_id, investigator_id, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    audit(
+        DATABASE_URL,
+        "investigator_released",
+        user_id=user.id,
+        world_id=world_id,
+        details={"investigator_id": investigator_id},
+    )
 
 
 @app.get("/api/modules")

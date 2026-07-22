@@ -96,6 +96,8 @@ def test_alembic_upgrade_creates_complete_schema(tmp_path: Path):
         "sessions",
         "worlds",
         "world_members",
+        "world_invites",
+        "world_investigators",
         "world_states",
         "snapshots",
         "turns",

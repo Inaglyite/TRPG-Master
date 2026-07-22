@@ -100,6 +100,45 @@ class WorldMember(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class WorldInvite(Base):
+    __tablename__ = "world_invites"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    invited_by: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(20), default="player")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorldInvestigator(Base):
+    __tablename__ = "world_investigators"
+    __table_args__ = (
+        UniqueConstraint("world_id", "character_key", name="uq_world_character_key"),
+        UniqueConstraint("world_id", "controller_user_id", name="uq_world_controller"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    character_key: Mapped[str] = mapped_column(String(200))
+    controller_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="available", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WorldState(Base):
     __tablename__ = "world_states"
 
