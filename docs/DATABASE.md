@@ -62,6 +62,7 @@ TRPG_DATABASE_URL=postgresql+psycopg://trpg_app:...@127.0.0.1/trpg_master
 TRPG_REQUIRE_AUTH=1
 TRPG_ALLOW_REGISTRATION=0
 TRPG_ALLOWED_ORIGINS=https://game.example.com
+TRPG_SESSION_COOKIE=trpg_session
 TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/backup-passphrase
 ```
 

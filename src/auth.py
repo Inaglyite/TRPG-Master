@@ -25,7 +25,12 @@ from .database import (
     utcnow,
 )
 
-SESSION_COOKIE = "trpg_session"
+_SESSION_COOKIE = os.environ.get("TRPG_SESSION_COOKIE", "trpg_session").strip()
+SESSION_COOKIE = (
+    _SESSION_COOKIE
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", _SESSION_COOKIE)
+    else "trpg_session"
+)
 SESSION_DAYS = 30
 USERNAME = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{3,40}$")
 PASSWORD_HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)
