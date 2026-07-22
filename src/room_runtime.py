@@ -194,6 +194,9 @@ class RoomDriverTransport:
         if wire.get("type") == "private_event":
             target_user_id = str(wire.pop("target_user_id", ""))
             visibility = f"player:{target_user_id}" if target_user_id else "server_only"
+        elif wire.get("type") == "character_state" and wire.get("target_user_id"):
+            target_user_id = str(wire.pop("target_user_id"))
+            visibility = f"player:{target_user_id}"
         elif wire.get("type") in {
             "suggest_check",
             "decision_request",

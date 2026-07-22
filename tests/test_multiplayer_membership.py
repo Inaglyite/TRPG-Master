@@ -538,6 +538,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 )
                 assert owner_load["_room_user_id"] == owner_id
                 assert owner_load["_room_investigator_id"] == player_claim["id"]
+                assert owner_load["_room_actor_user_id"] == player_id
                 player_ws.send_json(
                     {
                         "type": "action",
@@ -553,6 +554,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 )
                 assert action_message["_room_user_id"] == player_id
                 assert action_message["_room_investigator_id"] == player_claim["id"]
+                assert action_message["_room_actor_user_id"] == player_id
                 # The shared driver must accept the actor at the room boundary;
                 # the model itself is intentionally not awaited in this contract test.
                 player_ws.send_json(

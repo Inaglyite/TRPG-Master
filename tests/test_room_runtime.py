@@ -181,17 +181,28 @@ async def _driver_sends_decisions_only_to_current_actor():
             "clue": {"text": "只有 Bob 看见"},
         }
     )
+    await transport.send_json(
+        {
+            "type": "character_state",
+            "target_user_id": "alice",
+            "data": "{\"name\":\"Alice\",\"secret\":\"private\"}",
+        }
+    )
     await transport.send_json({"type": "narrative_chunk", "text": "公开叙述"})
 
     assert [message["type"] for message in alice_socket.messages] == [
         "decision_request",
+        "character_state",
         "narrative_chunk",
     ]
     assert [message["type"] for message in bob_socket.messages] == [
         "private_event",
-        "narrative_chunk"
+        "narrative_chunk",
     ]
     assert "target_user_id" not in bob_socket.messages[0]
+    assert "target_user_id" not in alice_socket.messages[1]
+    assert "Alice" not in str(bob_socket.messages)
+    assert not any(message["type"] == "character_state" for message in bob_socket.messages)
 
 
 def test_room_manager_single_flights_concurrent_creation():

@@ -572,19 +572,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             "worlds": worlds,
         }
 
-    async def send_character_state():
+    async def send_character_state(target_user_id: str | None = None):
         """在进入叙述前同步角色栏，不提前发送线索。"""
         try:
             pc_data = engine.context.world_store.load().get("pc", {})
             pc_data = enrich_pc_for_frontend(pc_data, engine.context)
         except Exception:
             pc_data = {}
-        await outbound.send(
-            {
-                "type": "character_state",
-                "data": json.dumps(pc_data, ensure_ascii=False),
-            }
-        )
+        payload = {
+            "type": "character_state",
+            "data": json.dumps(pc_data, ensure_ascii=False),
+        }
+        if target_user_id:
+            payload["target_user_id"] = target_user_id
+        await outbound.send(payload)
 
     def turn_recovery_payload(requested_turn_id: str | None = None) -> dict:
         payload = engine.turn_recovery_status(requested_turn_id)
@@ -1223,7 +1224,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             release_turn()
             raise
         try:
-            await send_character_state()
+            await send_character_state(data.get("_room_actor_user_id"))
         except Exception:
             release_turn()
             raise
@@ -1238,6 +1239,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         *,
         announce_loaded: bool,
         investigator_id: str | None = None,
+        target_user_id: str | None = None,
     ) -> None:
         if not await reserve_turn():
             return
@@ -1268,7 +1270,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                         "count": intent.loaded_message_count,
                     }
                 )
-            await send_character_state()
+            await send_character_state(target_user_id)
         except Exception:
             release_turn()
             raise
@@ -1284,6 +1286,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             data.get("slot_id"),
             announce_loaded=False,
             investigator_id=data.get("_room_investigator_id"),
+            target_user_id=data.get("_room_actor_user_id"),
         )
 
     @router.handler("save_load")
@@ -1292,6 +1295,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             str(data.get("slot_id") or ""),
             announce_loaded=True,
             investigator_id=data.get("_room_investigator_id"),
+            target_user_id=data.get("_room_actor_user_id"),
         )
 
     @router.handler("action")
@@ -2709,6 +2713,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                     data["character_ref"] = actor_claim["character_ref"]
                     data["_room_roster"] = roster
                 data["_room_investigator_id"] = actor_claim["investigator_id"]
+                data["_room_actor_user_id"] = actor_id
             passthrough_types = mutating_turn_types | owner_control_types | {
                 "suggest_reply",
                 "decision_reply",

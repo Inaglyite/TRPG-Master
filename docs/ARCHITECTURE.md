@@ -504,7 +504,7 @@ sequenceDiagram
 - `/ws/room` 是权威多人入口。一个应用进程内，同一 `world_id` 只存在一个共享引擎；行动按当前
   行动者和房间锁串行化，`room_actions` 的唯一约束保证进程重启后的 `action_id` 幂等。
 - `RoomEventHub` 在发送前过滤 `public`、`player:<user_id>`、`owner` 与 `server_only`，私人决定和
-  玩家笔记不会先广播再靠前端隐藏。
+  玩家笔记不会先广播再靠前端隐藏；完整 `character_state` 同样按当前调查员控制者定向投递。
 - 第一版只允许一个 Uvicorn worker。多 worker 或多 VM 尚未实现跨进程房间租约、粘性路由和事件
   总线，直接横向扩容会破坏“一世界一引擎”约束。
 - 不同世界由数据库外键、世界行锁、独立 `GameRoom` 和独立事件缓冲共同隔离。

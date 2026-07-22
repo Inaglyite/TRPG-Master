@@ -607,6 +607,10 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 拥有的私人线索，`player_notes` 只读取当前用户自己的笔记。客户端不得把它写入公共房间 store、
 日志或发给其他连接。缓冲缺口、主动 `turn_recovery_get` 与首次连接都遵守相同隔离规则。
 
+多人共享引擎产生的 `character_state` 也不是公共广播。服务端在提交房间驱动前写入权威行动者，
+房间事件边界据此只投递给该调查员的控制者，并在出站前删除内部 `target_user_id`。其他玩家只接收
+`room_full_state.investigators` 中允许公开的摘要。
+
 房间控制消息：
 
 - `room_ready {ready}`：owner/player 准备或取消准备；
