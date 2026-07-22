@@ -31,6 +31,7 @@ from .config import (
     PROMPT_PROFILE,
     STORY_THINKING_MODE,
 )
+from .database_turn_journal import DatabaseTurnJournal as TurnJournal
 from .discovery import (
     DiscoveryMatch,
     match_discovery_rules,
@@ -72,7 +73,6 @@ from .tools import (
     dice_summary,
     execute_function,
 )
-from .turn_journal import TurnJournal
 from .turn_reconciler import (
     narrative_body,
     reconcile_narrative_entities,

@@ -1,0 +1,12 @@
+[Unit]
+Description=Encrypted TRPG Master database and runtime backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=trpgdeploy
+Group=trpgdeploy
+EnvironmentFile=/etc/trpg-master/trpg-master.env
+ExecStart=/opt/trpg-master/current/deploy/backup-trpg-master.sh
+PrivateTmp=true
+NoNewPrivileges=true

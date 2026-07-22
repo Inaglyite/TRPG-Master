@@ -1,6 +1,6 @@
 # TRPG Master
 
-一个面向本地单人跑团的 AI 守秘人桌面应用。项目把叙事模型、CoC 7e 风格规则、确定性工具、模组状态和 Electron 界面拆成独立层，通过 FastAPI WebSocket 传递流式叙事与结构化游戏事件。
+一个支持本地桌面与账号化云端部署的 AI 守秘人应用。项目把叙事模型、CoC 7e 风格规则、确定性工具、模组状态和 Electron 界面拆成独立层，通过 FastAPI WebSocket 传递流式叙事与结构化游戏事件。
 
 当前仓库内置两个可游玩模组：`mansion_of_madness`（疯狂宅邸）与 `猩红文档`。目前的产品体验仍是单机、单玩家，但底层世界已经按 `world_id` 隔离，可并行运行多个实例；共享 GM 历史、房间身份和事件广播将在下一阶段实现。
 
@@ -8,7 +8,7 @@
 
 - Electron 桌面端与浏览器前端，共用 React + Vite + TypeScript 渲染层；Zustand 管理客户端状态，Zod 校验 WebSocket 消息入口。
 - OpenAI 兼容接口，默认配置面向 DeepSeek，可自定义请求地址和模型名。
-- LangGraph 双角色编排：探索由叙事 Agent 处理，战斗由无私有记忆的战斗 Agent 接管。
+- 单引擎 LangGraph 工作流：同一 `GameEngine` 和消息历史在普通叙事节点与战斗职责节点之间路由；当前不是多 Agent 系统。
 - 服务端权威战斗状态机，负责先攻、回合、d100 对抗、伤害、枪械弹药与玩家防御确认。
 - 非敌对 NPC 的首次不可逆攻击和武力威胁会在 GM 叙事前确认；取消时场景完全不变，确认后仍承担正常后果。
 - 统一道具使用层：验证耐用品、消耗一次性物品，并让战斗内外的真实开枪共用余弹结算。
@@ -20,8 +20,9 @@
 - 回合级上下文诊断：查看模型首 token/总耗时、prompt 分区估算、工具名和 Lorebook 逐条筛选原因，不暴露私有提示正文。
 - 无副作用重新叙述：只替换最后一轮文字表达，不重跑工具、骰子、判定、线索或资源变化。
 - 决策点时间线分支：结果消息上的分支操作自动锚定到本次行动前的父回合，恢复当时的世界快照、聊天和结构化选项，并在存档页切换主时间线与分支。
-- 私人调查笔记与快捷行动：笔记按世界原子保存且不注入模型；快捷行动仍走普通可见玩家行动协议。
-- `RuntimeContext + WorldStore`：revision 检查、线程/进程房间锁、原子替换、备份恢复和旧存档迁移。
+- 私人调查笔记与快捷行动：笔记按世界和账号写入数据库且不注入模型；快捷行动仍走普通可见玩家行动协议。
+- `RuntimeContext + DatabaseWorldStore`：桌面 SQLite / 生产 PostgreSQL 的 JSON 世界状态、revision 乐观并发、事务恢复和旧存档迁移。
+- 账号控制平面：Argon2id、可撤销服务端 Session、世界成员权限、审计事件与 WebSocket Origin 校验。
 - 图片线索、人物档案、场景展示材料与线索加入提示。
 - 模组声明式发现规则，在叙事前可靠结算线索、SAN、人物揭示、图片与旗标效果。
 - 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
@@ -30,13 +31,13 @@
 
 ## 文档
 
-- [开发路线图](docs/ROADMAP.md)：单机收口、多人房间、双人可玩版本、数据库与多 Agent 规划。
+- [开发路线图](docs/ROADMAP.md)：数据库化后的当前基线、多人房间和未来可选 Agent 的进入条件。
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
 - [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
 - [模组编辑器规划](docs/MODULE_EDITOR.md)：编辑器需求、技术架构、阶段与验收标准。
 - [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。
-- [当前开发交接](docs/HANDOFF_2026-07-16.md)：最新提交、验证基线、已完成能力和后续风险。
+- [历史开发交接](docs/HANDOFF_2026-07-16.md)：2026-07-16 的提交与验证快照，不作为现行架构说明。
 - [模组工程模板](examples/module-template/manifest.json)：可直接打包的 v1 示例。
 
 ## 快速开始
@@ -107,6 +108,9 @@ python3 start.py --config
 | `TRPG_MODULE` | 启动时使用的模组目录名 | `mansion_of_madness` |
 | `TRPG_PROJECT_ROOT` | 模组、规则与 Skill 的只读定义根目录 | 自动识别 |
 | `TRPG_RUNTIME_ROOT` | `worlds/`、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；打包模式为后端目录 |
+| `TRPG_DATABASE_URL` | SQLAlchemy 数据库 URL；云端必须使用 PostgreSQL | 桌面模式默认使用 `TRPG_RUNTIME_ROOT/trpg-master.db` |
+| `TRPG_REQUIRE_AUTH` | 启用账号、HTTP 与 WebSocket 权限门禁 | `0`；生产 service 设置为 `1` |
+| `TRPG_ALLOWED_ORIGINS` | 允许携带登录 Cookie 的 HTTP/WebSocket Origin | 生产环境必须显式配置 |
 | `TRPG_WORLD_ID` | 工具子进程打开的世界实例；通常由引擎自动注入 | 当前模组的默认本地世界 |
 
 ### 启动桌面版
@@ -117,6 +121,17 @@ python3 start.py --config
 ./start_desktop.sh
 ```
 
+启动脚本会在打开后端前依次执行：
+
+1. 优先激活项目的 `venv`，不存在时回退 `.venv`；
+2. 检查 SQLAlchemy、Alembic、psycopg 和 Argon2 等后端依赖，缺失时自动执行 `pip install -r requirements.txt`；
+3. 对桌面 SQLite 数据库执行 `alembic upgrade head`；
+4. 第一次数据库化启动时，把旧 `worlds/` 中的世界、回合、存档和笔记导入数据库。
+
+一次性导入成功后会在数据库的 `audit_events` 中写入 `legacy_import_completed`。后续启动只返回
+`already_imported`，不会再用旧 JSON 覆盖数据库状态。不要删除旧 `worlds/`，直到确认数据库中的
+世界和存档均可正常打开并完成备份。
+
 无终端桌面入口应使用 `Terminal=false` 的 `.desktop` 文件调用：
 
 ```text
@@ -125,6 +140,15 @@ Terminal=false
 ```
 
 桌面模式日志写入 `/tmp/trpg-desktop.log`，后端日志写入 `/tmp/trpg-server.log`。Electron 最后一个窗口关闭后，启动脚本会自动停止后端并释放 `8765` 端口。
+
+若出现 `ModuleNotFoundError: argon2`、`sqlalchemy` 或 `psycopg`，通常表示绕过了启动脚本，或
+虚拟环境尚未同步。可执行：
+
+```bash
+source venv/bin/activate
+python -m pip install -r requirements.txt
+bash start_desktop.sh
+```
 
 ### 启动终端版
 
@@ -178,8 +202,8 @@ trpg-master/
 │   └── MODULE_EDITOR.md
 ├── src/
 │   ├── engine.py             # GameEngine、模型调用、记忆与回调
-│   ├── agent_graph.py        # LangGraph 回合状态机
-│   ├── combat_agent.py       # 战斗 Agent 的临时职责提示词
+│   ├── agent_graph.py        # 单引擎 LangGraph 回合工作流
+│   ├── combat_agent.py       # 同一模型会话的临时战斗职责提示词
 │   ├── combat.py             # 权威战斗状态与确定性结算
 │   ├── inventory.py          # 道具验证、消耗与资源数量结算
 │   ├── tools.py              # Function Calling schema 与工具分发
@@ -208,7 +232,7 @@ trpg-master/
 ├── examples/module-template/ # v1 模组工程模板
 ├── characters/               # 默认与自定义调查员
 ├── profiles/                 # 长期角色履历（运行时生成）
-├── worlds/<world_id>/        # 当前世界、回合日志、笔记、时间线元数据和存档（运行时生成）
+├── worlds/<world_id>/        # 旧数据导入源与可选桌面兼容导出；不是运行时事实来源
 ├── frontend/
 │   ├── electron/main.cjs     # Electron 主进程与打包后端托管
 │   ├── src/                  # TypeScript UI
@@ -226,29 +250,28 @@ trpg-master/
   -> LangGraph 回合图
   -> OpenAI 兼容模型 / Python 工具
   -> RuntimeContext
-  -> worlds/<world_id>/world_state.json + saves/
+  -> PostgreSQL world_states.state(JSONB) + turns/snapshots/save_slots
 ```
 
-模型负责叙事和决定行动意图：非战斗回合走叙事 Agent，战斗激活后按同一世界状态切换为战斗 Agent。两者不维护互相独立的长期记忆；骰子、先攻、回合推进、技能值、伤害、SAN、世界状态、存档和素材发放均由 Python 代码执行。详细线程模型与数据流见 [架构文档](docs/ARCHITECTURE.md)。
+模型负责叙事和决定行动意图：非战斗回合走普通叙事节点，战斗激活后在同一个 `GameEngine`、同一份消息历史上切换到战斗职责节点。这里没有两个独立 Agent；节点只是选择模型和临时提示的工作流分支。骰子、先攻、回合推进、技能值、伤害、SAN、世界状态、存档和素材发放均由 Python 代码执行。详细线程模型与数据流见 [架构文档](docs/ARCHITECTURE.md)。
 
 ## 存档与角色数据
 
-存档按世界实例隔离：
+存档按世界实例隔离并事务化保存：
 
 ```text
-worlds/<world_id>/saves/slot_000/      # 自动槽
-worlds/<world_id>/saves/slot_001/      # 手动槽
-├── messages.json             # 模型对话与工具历史
-├── snapshot.json             # world_state 快照
-└── meta.json                 # 场景、调查员、HP/SAN、线索数等摘要
+save_slots                    # 自动槽 slot_000 与手动槽元数据、消息
+└── snapshots                 # 不可变 JSONB 世界快照
 ```
+
+桌面兼容模式可导出旧目录格式，但服务端不会从导出文件读取运行状态；生产 service 已关闭兼容导出。
 
 调查员数据分为三层：
 
 | 层 | 路径 | 作用 |
 |---|---|---|
 | 角色模板 | `characters/default`、`characters/custom`、`mod/*/characters` | 新游戏的候选调查员 |
-| 当前案件 | `worlds/<world_id>/world_state.json.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
+| 当前案件 | `world_states.state.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
 | 长期履历 | `profiles/player_profile.json` | 已完成模组、结局、声望、人脉与最后状态 |
 
 运行时数据和 API Key 均已加入 `.gitignore`。旧版 `mod/<module>/world_state.json` 只作为首次迁移来源保留；新游戏与工具调用不会再写入模组目录。
@@ -326,7 +349,7 @@ bash -n ../start_desktop.sh
 
 ## 当前边界
 
-- API 没有鉴权，后端用于本机桌面应用，不应直接暴露到公网。
-- 不同 `world_id` 已隔离；同一世界的写入由 `WorldStore` 跨线程/进程串行并带 revision。
+- 桌面模式默认关闭账号门禁，不应直接暴露到公网；云端必须设置 `TRPG_REQUIRE_AUTH=1`、TLS 和允许的 Origin。
+- 不同 `world_id` 已隔离；同一世界的写入由 `DatabaseWorldStore` 通过数据库事务、行锁和 revision 保护。
 - 每条 WebSocket 仍拥有独立 `GameEngine.messages`；多个连接尚不能作为一个共享 GM 房间。
-- 多人模式下一步需要 `RoomManager`、共享引擎、行动队列、玩家身份和事件广播，不能只增加玩家列表。
+- 多人模式下一步需要 `RoomManager`、共享引擎、行动队列、角色占用和事件广播；账号与世界成员权限已经存在。

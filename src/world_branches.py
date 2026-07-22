@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import json
+import os
 import re
 import secrets
-import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .database import SaveSlot, World, WorldState, database_url, session_scope, utcnow
+from .database_turn_journal import DatabaseTurnJournal as TurnJournal
 from .persistence import save_game
 from .player_notes import PlayerNotesStore
 from .runtime import RuntimeContext
-from .turn_journal import TurnJournal
 from .world_store import atomic_write_json
 
 
@@ -52,6 +52,7 @@ class WorldBranchService:
         turn_id: str,
         *,
         label: object = "",
+        user_id: str | None = None,
     ) -> WorldBranch:
         record = source_journal.read(turn_id)
         if record.get("status") != "completed":
@@ -82,38 +83,52 @@ class WorldBranchService:
             )
             source_journal.clone_lineage_to(target_journal, turn_id)
             save_game(messages, "slot_000", context=target_context)
-            source_notes = PlayerNotesStore(source_context.world_dir).load()
+            source_notes = PlayerNotesStore(source_context.world_dir, user_id=user_id).load()
             if source_notes.get("text"):
-                PlayerNotesStore(target_context.world_dir).save(source_notes["text"])
+                PlayerNotesStore(target_context.world_dir, user_id=user_id).save(
+                    source_notes["text"]
+                )
 
-            metadata = json.loads(target_context.metadata_file.read_text(encoding="utf-8"))
-            metadata.update({
-                "display_name": branch_label,
-                "branch": {
-                    "parent_world_id": source_context.world_id,
-                    "source_turn_id": turn_id,
-                    "source_world_revision": record.get("world_revision"),
-                    "created_at": datetime.now(UTC).isoformat(),
-                },
-            })
-            atomic_write_json(target_context.metadata_file, metadata)
+            with session_scope(target_context.database_url) as session:
+                world = session.get(World, world_id)
+                metadata = dict(world.metadata_json or {})
+                metadata.update(
+                    {
+                        "display_name": branch_label,
+                        "branch": {
+                            "parent_world_id": source_context.world_id,
+                            "source_turn_id": turn_id,
+                            "source_world_revision": record.get("world_revision"),
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                    }
+                )
+                world.metadata_json = metadata
+                world.updated_at = utcnow()
+            if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }:
+                atomic_write_json(target_context.metadata_file, metadata)
             return WorldBranch(target_context, messages, turn_id, branch_label)
         except Exception:
             if target_context is not None:
-                shutil.rmtree(target_context.world_dir, ignore_errors=True)
+                with session_scope(target_context.database_url) as session:
+                    world = session.get(World, target_context.world_id)
+                    if world is not None:
+                        session.delete(world)
             raise
 
     def open(self, world_id: str) -> RuntimeContext:
         if not world_id or Path(world_id).name != world_id or world_id in {".", ".."}:
             raise ValueError("非法 world_id")
-        world_dir = (self.worlds_dir / world_id).resolve()
-        if not world_dir.is_relative_to(self.worlds_dir.resolve()):
-            raise ValueError("非法 world_id")
-        metadata_file = world_dir / "world.json"
-        if not metadata_file.is_file():
-            raise FileNotFoundError(f"世界不存在: {world_id}")
-        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-        module_name = str(metadata.get("module_name") or "")
+        with session_scope(database_url(self.runtime_root)) as session:
+            world = session.get(World, world_id)
+            if world is None:
+                raise FileNotFoundError(f"世界不存在: {world_id}")
+            module_name = world.module_name
         if not module_name:
             raise ValueError(f"世界 {world_id} 缺少 module_name")
         return RuntimeContext.create(
@@ -125,43 +140,48 @@ class WorldBranchService:
 
     def list_worlds(self, module_name: str, *, active_world_id: str) -> list[dict]:
         worlds: list[dict] = []
-        if not self.worlds_dir.is_dir():
-            return worlds
-        for world_dir in self.worlds_dir.iterdir():
-            metadata_file = world_dir / "world.json"
-            if not world_dir.is_dir() or not metadata_file.is_file():
-                continue
-            try:
-                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-                if metadata.get("module_name") != module_name:
-                    continue
-                state = json.loads(
-                    (world_dir / "world_state.json").read_text(encoding="utf-8")
+        with session_scope(database_url(self.runtime_root)) as session:
+            rows = (
+                session.query(World, WorldState)
+                .join(WorldState)
+                .filter(World.module_name == module_name, World.status == "active")
+                .all()
+            )
+            for world, state_row in rows:
+                metadata = dict(world.metadata_json or {})
+                state = dict(state_row.state or {})
+                save = (
+                    session.query(SaveSlot)
+                    .filter_by(world_id=world.id, slot_key="slot_000")
+                    .one_or_none()
                 )
-                save_meta_file = world_dir / "saves" / "slot_000" / "meta.json"
-                save_meta = (
-                    json.loads(save_meta_file.read_text(encoding="utf-8"))
-                    if save_meta_file.is_file()
+                save_meta = dict(save.metadata_json or {}) if save else {}
+                branch = metadata.get("branch") if isinstance(metadata.get("branch"), dict) else {}
+                scene = (
+                    state.get("current_scene")
+                    if isinstance(state.get("current_scene"), dict)
                     else {}
                 )
-            except (OSError, json.JSONDecodeError, TypeError):
-                continue
-            branch = metadata.get("branch") if isinstance(metadata.get("branch"), dict) else {}
-            scene = state.get("current_scene") if isinstance(state.get("current_scene"), dict) else {}
-            pc = state.get("pc") if isinstance(state.get("pc"), dict) else {}
-            worlds.append({
-                "world_id": world_dir.name,
-                "label": metadata.get("display_name") or "主时间线",
-                "module_name": module_name,
-                "active": world_dir.name == active_world_id,
-                "is_branch": bool(branch),
-                "parent_world_id": branch.get("parent_world_id"),
-                "source_turn_id": branch.get("source_turn_id"),
-                "created_at": branch.get("created_at") or metadata.get("created_at"),
-                "updated_at": save_meta.get("created_at") or metadata.get("created_at"),
-                "scene_name": scene.get("name") or save_meta.get("scene_name") or "未知场景",
-                "character_name": pc.get("name") or save_meta.get("character_name") or "未知调查员",
-            })
+                pc = state.get("pc") if isinstance(state.get("pc"), dict) else {}
+                worlds.append(
+                    {
+                        "world_id": world.id,
+                        "label": metadata.get("display_name") or "主时间线",
+                        "module_name": module_name,
+                        "active": world.id == active_world_id,
+                        "is_branch": bool(branch),
+                        "parent_world_id": branch.get("parent_world_id"),
+                        "source_turn_id": branch.get("source_turn_id"),
+                        "created_at": branch.get("created_at") or metadata.get("created_at"),
+                        "updated_at": save_meta.get("created_at") or metadata.get("created_at"),
+                        "scene_name": scene.get("name")
+                        or save_meta.get("scene_name")
+                        or "未知场景",
+                        "character_name": pc.get("name")
+                        or save_meta.get("character_name")
+                        or "未知调查员",
+                    }
+                )
         worlds.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         worlds.sort(key=lambda item: not item["active"])
         return worlds

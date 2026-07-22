@@ -11,9 +11,11 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from .database import World, database_url, initialize_database, session_scope, utcnow
+from .database_store import DatabaseWorldStore
 from .handouts import refresh_static_handout_config
 from .module_registry import ModuleRecord, ModuleRegistry
-from .world_store import WorldStore, atomic_write_json
+from .world_store import atomic_write_json
 
 
 def default_world_id(module_name: str) -> str:
@@ -40,17 +42,28 @@ class RuntimeContext:
     runtime_root: Path
     world_id: str
     module_name: str
-    world_store: WorldStore = field(init=False, repr=False, compare=False)
+    world_store: DatabaseWorldStore = field(init=False, repr=False, compare=False)
+    database_url: str = field(init=False, repr=False, compare=False)
     module_record: ModuleRecord = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_root", Path(self.project_root).resolve())
         object.__setattr__(self, "runtime_root", Path(self.runtime_root).resolve())
         object.__setattr__(self, "world_id", _validate_component(self.world_id, "world_id"))
-        object.__setattr__(self, "module_name", _validate_component(self.module_name, "module_name"))
+        object.__setattr__(
+            self, "module_name", _validate_component(self.module_name, "module_name")
+        )
         registry = ModuleRegistry(self.project_root, self.runtime_root)
         object.__setattr__(self, "module_record", registry.resolve(self.module_name))
-        object.__setattr__(self, "world_store", WorldStore(self.world_dir))
+        db_url = database_url(self.runtime_root)
+        if db_url.startswith("sqlite:"):
+            initialize_database(db_url)
+        object.__setattr__(self, "database_url", db_url)
+        object.__setattr__(
+            self,
+            "world_store",
+            DatabaseWorldStore(db_url, self.world_id, self.world_dir),
+        )
 
     @property
     def module_dir(self) -> Path:
@@ -116,7 +129,6 @@ class RuntimeContext:
         if not self.module_dir.is_dir():
             raise FileNotFoundError(f"模组不存在: {self.module_dir}")
         self.world_dir.mkdir(parents=True, exist_ok=True)
-        self.saves_dir.mkdir(parents=True, exist_ok=True)
         self.custom_characters_dir.mkdir(parents=True, exist_ok=True)
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,7 +145,7 @@ class RuntimeContext:
             if any(key not in metadata for key in expected_metadata):
                 for key, value in expected_metadata.items():
                     metadata.setdefault(key, value)
-                atomic_write_json(self.metadata_file, metadata)
+                # Legacy metadata is imported below; the file is never authoritative.
         else:
             metadata = {
                 "world_id": self.world_id,
@@ -143,9 +155,33 @@ class RuntimeContext:
                 "created_at": datetime.now().isoformat(),
                 "layout_version": 1,
             }
+        with session_scope(self.database_url) as session:
+            world = session.get(World, self.world_id)
+            if world is None:
+                world = World(
+                    id=self.world_id,
+                    module_name=self.module_name,
+                    module_id=self.module_record.package_id,
+                    module_version=self.module_record.version,
+                    metadata_json=metadata,
+                )
+                session.add(world)
+            elif world.module_name != self.module_name:
+                raise ValueError(f"world_id={self.world_id} 已绑定模组 {world.module_name}")
+            else:
+                world.module_id = self.module_record.package_id
+                world.module_version = self.module_record.version
+                world.metadata_json = {**(world.metadata_json or {}), **metadata}
+                world.updated_at = utcnow()
+        if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
             atomic_write_json(self.metadata_file, metadata)
 
-        if not self.state_file.exists():
+        if not self.world_store.exists:
             source = None
             migrated_from = None
             if migrate_legacy and self.legacy_state_file.exists():
@@ -162,12 +198,12 @@ class RuntimeContext:
             if migrated_from:
                 metadata["migrated_from"] = migrated_from
                 metadata["migrated_at"] = datetime.now().isoformat()
-                atomic_write_json(self.metadata_file, metadata)
+                with session_scope(self.database_url) as session:
+                    world = session.get(World, self.world_id)
+                    world.metadata_json = metadata
 
         initial_state_revision = (
-            _file_revision(self.initial_state_file)
-            if self.initial_state_file.exists()
-            else ""
+            _file_revision(self.initial_state_file) if self.initial_state_file.exists() else ""
         )
         if initial_state_revision and (
             metadata.get("initial_state_revision") != initial_state_revision
@@ -176,13 +212,16 @@ class RuntimeContext:
             with self.world_store.transaction() as state:
                 refresh_static_handout_config(state, template)
             metadata["initial_state_revision"] = initial_state_revision
-            atomic_write_json(self.metadata_file, metadata)
+            with session_scope(self.database_url) as session:
+                world = session.get(World, self.world_id)
+                world.metadata_json = metadata
 
         if migrate_legacy and not metadata.get("legacy_saves_migrated"):
             legacy_save_dirs = [
                 self.runtime_root / "saves" / self.module_name,
                 self.project_root / "saves" / self.module_name,
             ]
+            self.saves_dir.mkdir(parents=True, exist_ok=True)
             if not any(self.saves_dir.iterdir()):
                 copied: set[Path] = set()
                 for legacy_saves in legacy_save_dirs:
@@ -198,12 +237,23 @@ class RuntimeContext:
                         break
             metadata["legacy_saves_migrated"] = True
             metadata["legacy_saves_migrated_at"] = datetime.now().isoformat()
+            with session_scope(self.database_url) as session:
+                world = session.get(World, self.world_id)
+                world.metadata_json = metadata
+        if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
             atomic_write_json(self.metadata_file, metadata)
         self.world_store.load()
         return self
 
     def reset_world(self) -> None:
-        source = self.initial_state_file if self.initial_state_file.exists() else self.legacy_state_file
+        source = (
+            self.initial_state_file if self.initial_state_file.exists() else self.legacy_state_file
+        )
         template = json.loads(source.read_text(encoding="utf-8"))
         self.world_store.initialize(template, overwrite=True)
 

@@ -24,7 +24,39 @@ echo ""
 if [ -f venv/bin/activate ]; then
     # shellcheck disable=SC1091
     source venv/bin/activate
+elif [ -f .venv/bin/activate ]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
 fi
+
+ensure_backend_dependencies() {
+    if python3 -c 'import alembic, argon2, fastapi, psycopg, sqlalchemy, uvicorn' \
+        >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "安装/更新后端依赖..."
+    python3 -m pip install --disable-pip-version-check -r requirements.txt || {
+        echo "❌ 后端依赖安装失败"
+        return 1
+    }
+}
+
+ensure_backend_dependencies || exit 1
+
+DESKTOP_RUNTIME_ROOT="${TRPG_RUNTIME_ROOT:-$SCRIPT_DIR}"
+if [ -z "${TRPG_DATABASE_URL:-}" ]; then
+    export TRPG_DATABASE_URL="sqlite:///$DESKTOP_RUNTIME_ROOT/trpg-master.db"
+fi
+
+# Apply schema changes before importing old file-backed worlds.  --once stores
+# its completion marker in the database, so later launches never overwrite
+# database state with stale compatibility exports.
+echo "检查数据库迁移..."
+python3 -m alembic upgrade head || { echo "❌ 数据库迁移失败"; exit 1; }
+python3 tools/import_worlds_to_database.py \
+    --runtime-root "$DESKTOP_RUNTIME_ROOT" --once --replace \
+    || { echo "❌ 旧世界数据导入失败"; exit 1; }
 
 # ---- Frontend dependencies and build ----
 if [ ! -d frontend/node_modules ]; then

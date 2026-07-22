@@ -1,7 +1,8 @@
 [Unit]
 Description=TRPG Master web service
-After=network-online.target
-Wants=network-online.target
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+Requires=postgresql.service
 
 [Service]
 Type=simple
@@ -12,6 +13,10 @@ EnvironmentFile=/etc/trpg-master/trpg-master.env
 Environment=TRPG_RUNTIME_ROOT=/var/lib/trpg-master
 Environment=TRPG_LOG_DIR=/var/log/trpg-master
 Environment=TRPG_LOG_STDERR=1
+Environment=TRPG_REQUIRE_AUTH=1
+Environment=TRPG_ALLOW_REGISTRATION=0
+Environment=TRPG_WRITE_COMPAT_EXPORTS=0
+ExecStartPre=/opt/trpg-master/current/.venv/bin/alembic -c /opt/trpg-master/current/alembic.ini upgrade head
 ExecStart=/opt/trpg-master/current/.venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8765 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3

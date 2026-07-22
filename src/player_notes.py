@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import threading
-from datetime import UTC, datetime
 from pathlib import Path
 
-from .world_store import atomic_write_json, file_lock
+from .database import (
+    PlayerNote,
+    World,
+    database_url,
+    initialize_database,
+    new_id,
+    session_scope,
+    utcnow,
+)
 
 PLAYER_NOTES_SCHEMA_VERSION = 1
 MAX_PLAYER_NOTES_CHARS = 20_000
@@ -31,11 +37,24 @@ def _notes_lock(path: Path) -> threading.RLock:
 
 
 class PlayerNotesStore:
-    def __init__(self, world_dir: Path) -> None:
+    def __init__(self, world_dir: Path, *, user_id: str | None = None) -> None:
         self.world_dir = Path(world_dir).resolve()
         self.path = self.world_dir / "player_notes.json"
-        self.lock_path = self.world_dir / ".player_notes.lock"
+        self.world_id = self.world_dir.name
+        self.user_id = user_id
+        self.owner_key = user_id or "__local__"
+        runtime_root = (
+            self.world_dir.parent.parent
+            if self.world_dir.parent.name == "worlds"
+            else self.world_dir.parent
+        )
+        self.database_url = database_url(runtime_root)
+        if self.database_url.startswith("sqlite:"):
+            initialize_database(self.database_url)
         self._thread_lock = _notes_lock(self.path)
+        with session_scope(self.database_url) as session:
+            if session.get(World, self.world_id) is None:
+                session.add(World(id=self.world_id, module_name="unknown"))
 
     @staticmethod
     def _empty() -> dict:
@@ -46,24 +65,21 @@ class PlayerNotesStore:
             "updated_at": None,
         }
 
-    def _read_unlocked(self) -> dict:
-        if not self.path.is_file():
-            return self._empty()
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"无法读取玩家笔记: {exc}") from exc
-        if not isinstance(data, dict):
-            raise RuntimeError("玩家笔记根节点必须是 object")
-        result = self._empty()
-        result.update(data)
-        result["revision"] = max(0, int(result.get("revision", 0)))
-        result["text"] = str(result.get("text") or "")
-        return result
-
     def load(self) -> dict:
-        with self._thread_lock, file_lock(self.lock_path):
-            return self._read_unlocked()
+        with self._thread_lock, session_scope(self.database_url) as session:
+            row = (
+                session.query(PlayerNote)
+                .filter_by(world_id=self.world_id, owner_key=self.owner_key)
+                .one_or_none()
+            )
+            if row is None:
+                return self._empty()
+            return {
+                "schema_version": PLAYER_NOTES_SCHEMA_VERSION,
+                "revision": row.revision,
+                "text": row.text,
+                "updated_at": row.updated_at.isoformat(),
+            }
 
     def save(self, text: object, *, expected_revision: int | None = None) -> dict:
         if not isinstance(text, str):
@@ -71,16 +87,30 @@ class PlayerNotesStore:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         if len(normalized) > MAX_PLAYER_NOTES_CHARS:
             raise ValueError(f"玩家笔记不能超过 {MAX_PLAYER_NOTES_CHARS} 个字符")
-        with self._thread_lock, file_lock(self.lock_path):
-            current = self._read_unlocked()
-            actual = int(current["revision"])
+        with self._thread_lock, session_scope(self.database_url) as session:
+            row = (
+                session.query(PlayerNote)
+                .filter_by(world_id=self.world_id, owner_key=self.owner_key)
+                .one_or_none()
+            )
+            actual = int(row.revision if row else 0)
             if expected_revision is not None and expected_revision != actual:
                 raise PlayerNotesConflict(expected_revision, actual)
+            if row is None:
+                row = PlayerNote(
+                    id=new_id("note"),
+                    world_id=self.world_id,
+                    user_id=self.user_id,
+                    owner_key=self.owner_key,
+                )
+                session.add(row)
+            row.revision = actual + 1
+            row.text = normalized
+            row.updated_at = utcnow()
             payload = {
                 "schema_version": PLAYER_NOTES_SCHEMA_VERSION,
-                "revision": actual + 1,
-                "text": normalized,
-                "updated_at": datetime.now(UTC).isoformat(),
+                "revision": row.revision,
+                "text": row.text,
+                "updated_at": row.updated_at.isoformat(),
             }
-            atomic_write_json(self.path, payload)
             return payload

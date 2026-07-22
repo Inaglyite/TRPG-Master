@@ -3,3 +3,7 @@ langgraph
 openai
 pydantic>=2.12,<3
 uvicorn[standard]
+SQLAlchemy>=2.0,<3
+alembic>=1.13,<2
+psycopg[binary]>=3.2,<4
+argon2-cffi>=23.1,<26

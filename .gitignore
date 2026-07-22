@@ -5,6 +5,7 @@ __pycache__/
 mod/*/savegame.json
 saves/
 worlds/
+trpg-master.db*
 .claude/
 node_modules/
 frontend/dist/

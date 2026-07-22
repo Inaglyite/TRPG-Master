@@ -10,8 +10,8 @@
 """
 
 import json
+import os
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from .config import (
     RUNTIME_ROOT,
     SKILL_LOAD_ORDER,
 )
+from .database import SaveSlot, Snapshot, new_id, session_scope, utcnow
 from .handouts import refresh_static_handout_config
 from .runtime import RuntimeContext, default_world_id
 from .world_migrations import migrate_world_state
@@ -40,7 +41,67 @@ def _runtime_context(context: RuntimeContext | None = None) -> RuntimeContext:
     )
 
 
+def _write_compat_exports() -> bool:
+    return os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _import_legacy_slot(context: RuntimeContext, slot_id: str) -> SaveSlot | None:
+    """Import one legacy slot on demand; database remains the read authority."""
+    slot_dir = _slot_dir(slot_id, context)
+    message_file = slot_dir / "messages.json"
+    if not message_file.is_file():
+        return None
+    try:
+        messages = normalize_tool_message_history(
+            json.loads(message_file.read_text(encoding="utf-8"))
+        )
+        snapshot_file = slot_dir / "snapshot.json"
+        snapshot = (
+            json.loads(snapshot_file.read_text(encoding="utf-8")) if snapshot_file.is_file() else {}
+        )
+        meta_file = slot_dir / "meta.json"
+        meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        return None
+    with session_scope(context.database_url) as session:
+        row = (
+            session.query(SaveSlot)
+            .filter_by(world_id=context.world_id, slot_key=slot_id)
+            .one_or_none()
+        )
+        if row is None:
+            row = SaveSlot(
+                id=new_id("save"),
+                world_id=context.world_id,
+                slot_key=slot_id,
+                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
+                snapshot_id="pending",
+            )
+            session.add(row)
+        snapshot_row = Snapshot(
+            id=new_id("snapshot"),
+            world_id=context.world_id,
+            kind="legacy_import",
+            revision=int(snapshot.get("revision", 0)),
+            state=snapshot,
+        )
+        session.add(snapshot_row)
+        row.messages = messages
+        row.snapshot_id = snapshot_row.id
+        row.metadata_json = meta
+        row.label = str(meta.get("label") or "")
+        row.world_revision = int(snapshot.get("revision", 0))
+        session.flush()
+        return row
+
+
 # ---- Skill 加载 ----
+
 
 def _module_prompt_content(content: str) -> str:
     """Drop module default PC templates from the runtime prompt.
@@ -89,11 +150,7 @@ def load_system_prompt(
         profile = "full"
     parts = []
     # 核心 skill
-    skill_order = (
-        _OPENING_SKILL_LOAD_ORDER
-        if profile == "opening"
-        else SKILL_LOAD_ORDER
-    )
+    skill_order = _OPENING_SKILL_LOAD_ORDER if profile == "opening" else SKILL_LOAD_ORDER
     for name in skill_order:
         path = context.project_root / "skills" / name
         if path.exists():
@@ -113,8 +170,7 @@ def load_system_prompt(
             if content:
                 mod_skill_contents.append(content)
     spine_parts = [
-        content for content in mod_skill_contents
-        if _PROMPT_SPINE_MARKER in content[:300]
+        content for content in mod_skill_contents if _PROMPT_SPINE_MARKER in content[:300]
     ]
     use_spine = profile == "hybrid" and sum(map(len, spine_parts)) >= 1000
 
@@ -131,6 +187,7 @@ def load_system_prompt(
 
 # ---- 存档 ----
 
+
 def _slot_dir(slot_id: str, context: RuntimeContext | None = None) -> Path:
     if not re.fullmatch(r"slot_\d{3,}", str(slot_id)):
         raise ValueError(f"非法存档槽位: {slot_id!r}")
@@ -140,12 +197,12 @@ def _slot_dir(slot_id: str, context: RuntimeContext | None = None) -> Path:
 def _next_slot(context: RuntimeContext | None = None) -> str:
     """返回下一个可用的手动存档槽位 ID"""
     context = _runtime_context(context)
-    context.saves_dir.mkdir(parents=True, exist_ok=True)
-    existing = sorted(
-        int(d.name.split("_")[1])
-        for d in context.saves_dir.iterdir()
-        if d.is_dir() and d.name.startswith("slot_") and d.name != AUTO_SAVE_SLOT
-    )
+    with session_scope(context.database_url) as session:
+        existing = sorted(
+            int(row.slot_key.split("_")[1])
+            for row in session.query(SaveSlot).filter_by(world_id=context.world_id).all()
+            if row.slot_key != AUTO_SAVE_SLOT
+        )
     n = 1
     while n in existing:
         n += 1
@@ -192,8 +249,7 @@ def save_game(
     if slot_id is None:
         slot_id = AUTO_SAVE_SLOT
 
-    slot_dir = _slot_dir(slot_id, context)
-    slot_dir.mkdir(parents=True, exist_ok=True)
+    _slot_dir(slot_id, context)  # validation only
 
     # 序列化消息（去掉不可序列化的字段）
     serializable = []
@@ -208,11 +264,42 @@ def save_game(
     # 读取当前世界状态作为快照
     world_state = context.world_store.load()
 
-    # 写入文件
-    atomic_write_json(slot_dir / "messages.json", serializable)
-    atomic_write_json(slot_dir / "snapshot.json", world_state)
-    # meta 最后写；它相当于该槽位提交完成的标记。
-    atomic_write_json(slot_dir / "meta.json", _slot_meta(serializable, world_state, context))
+    meta = _slot_meta(serializable, world_state, context)
+    with session_scope(context.database_url) as session:
+        row = (
+            session.query(SaveSlot)
+            .filter_by(world_id=context.world_id, slot_key=slot_id)
+            .one_or_none()
+        )
+        if row is None:
+            row = SaveSlot(
+                id=new_id("save"),
+                world_id=context.world_id,
+                slot_key=slot_id,
+                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
+                snapshot_id="pending",
+            )
+            session.add(row)
+        snapshot_row = Snapshot(
+            id=new_id("snapshot"),
+            world_id=context.world_id,
+            kind="save",
+            revision=int(world_state.get("revision", 0)),
+            state=world_state,
+        )
+        session.add(snapshot_row)
+        row.metadata_json = meta
+        row.messages = serializable
+        row.snapshot_id = snapshot_row.id
+        row.world_revision = int(world_state.get("revision", 0))
+        row.updated_at = utcnow()
+
+    if _write_compat_exports():
+        slot_dir = _slot_dir(slot_id, context)
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(slot_dir / "messages.json", serializable)
+        atomic_write_json(slot_dir / "snapshot.json", world_state)
+        atomic_write_json(slot_dir / "meta.json", meta)
 
     return slot_id
 
@@ -262,11 +349,16 @@ def normalize_tool_message_history(messages: list[dict]) -> list[dict]:
             cursor += 1
 
         for call_id in expected_ids:
-            repaired.append(responses.get(call_id, {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": "[错误] 旧存档缺少该工具调用的返回结果",
-            }))
+            repaired.append(
+                responses.get(
+                    call_id,
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": "[错误] 旧存档缺少该工具调用的返回结果",
+                    },
+                )
+            )
         repaired.extend(deferred)
         index = cursor
     return repaired
@@ -282,10 +374,26 @@ def load_game(
     """
     context = _runtime_context(context)
     if slot_id:
-        slot_dir = _slot_dir(slot_id, context)
-        if not slot_dir.exists():
-            return None, None
-        return _load_slot(slot_dir)
+        _slot_dir(slot_id, context)
+        with session_scope(context.database_url) as session:
+            row = (
+                session.query(SaveSlot)
+                .filter_by(world_id=context.world_id, slot_key=slot_id)
+                .one_or_none()
+            )
+            if row is None:
+                imported = _import_legacy_slot(context, slot_id)
+                if imported is None:
+                    return None, None
+                with session_scope(context.database_url) as imported_session:
+                    snapshot = imported_session.get(Snapshot, imported.snapshot_id)
+                    return normalize_tool_message_history(imported.messages or []), dict(
+                        snapshot.state if snapshot else {}
+                    )
+            snapshot = session.get(Snapshot, row.snapshot_id)
+            return normalize_tool_message_history(row.messages or []), dict(
+                snapshot.state if snapshot else {}
+            )
 
     # 找最新存档
     slots = list_saves(context=context)
@@ -293,7 +401,7 @@ def load_game(
         return None, None
 
     latest = slots[0]  # 已按时间倒序
-    return _load_slot(_slot_dir(latest["id"], context))
+    return load_game(latest["id"], context=context)
 
 
 def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
@@ -304,9 +412,7 @@ def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
     if not msg_file.exists():
         return None, None
 
-    messages = normalize_tool_message_history(
-        json.loads(msg_file.read_text(encoding="utf-8"))
-    )
+    messages = normalize_tool_message_history(json.loads(msg_file.read_text(encoding="utf-8")))
     snapshot = json.loads(snap_file.read_text(encoding="utf-8")) if snap_file.exists() else {}
 
     return messages, snapshot
@@ -340,22 +446,16 @@ def list_saves(*, context: RuntimeContext | None = None) -> list[dict]:
     """列出所有存档的元数据，按时间倒序"""
     context = _runtime_context(context)
     result = []
-    if not context.saves_dir.exists():
-        return result
-
-    for d in sorted(context.saves_dir.iterdir(), reverse=True):
-        if not d.is_dir() or not d.name.startswith("slot_"):
-            continue
-        meta_file = d / "meta.json"
-        if meta_file.exists():
-            try:
-                meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                meta["id"] = d.name
-                result.append(meta)
-            except json.JSONDecodeError:
-                pass
-        else:
-            result.append({"id": d.name, "created_at": "", "scene_name": "（旧格式存档）"})
+    if context.saves_dir.is_dir():
+        for slot_dir in context.saves_dir.glob("slot_*"):
+            if slot_dir.is_dir():
+                _import_legacy_slot(context, slot_dir.name)
+    with session_scope(context.database_url) as session:
+        rows = session.query(SaveSlot).filter_by(world_id=context.world_id).all()
+        for row in rows:
+            meta = dict(row.metadata_json or {})
+            meta["id"] = row.slot_key
+            result.append(meta)
 
     result.sort(key=lambda m: m.get("created_at", ""), reverse=True)
     return result
@@ -368,9 +468,16 @@ def has_save(*, context: RuntimeContext | None = None) -> bool:
 
 def delete_save(slot_id: str, *, context: RuntimeContext | None = None):
     """删除指定存档"""
-    slot_dir = _slot_dir(slot_id, context)
-    if slot_dir.exists():
-        shutil.rmtree(slot_dir)
+    context = _runtime_context(context)
+    _slot_dir(slot_id, context)
+    with session_scope(context.database_url) as session:
+        row = (
+            session.query(SaveSlot)
+            .filter_by(world_id=context.world_id, slot_key=slot_id)
+            .one_or_none()
+        )
+        if row is not None:
+            session.delete(row)
 
 
 def rename_save(
@@ -380,14 +487,19 @@ def rename_save(
     context: RuntimeContext | None = None,
 ) -> bool:
     """重命名存档——更新 meta.json 中的 label 字段"""
-    slot_dir = _slot_dir(slot_id, context)
-    meta_file = slot_dir / "meta.json"
-    if not meta_file.exists():
-        return False
-    try:
-        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    context = _runtime_context(context)
+    _slot_dir(slot_id, context)
+    with session_scope(context.database_url) as session:
+        row = (
+            session.query(SaveSlot)
+            .filter_by(world_id=context.world_id, slot_key=slot_id)
+            .one_or_none()
+        )
+        if row is None:
+            return False
+        meta = dict(row.metadata_json or {})
         meta["label"] = label
-        atomic_write_json(meta_file, meta)
+        row.label = label
+        row.metadata_json = meta
+        row.updated_at = utcnow()
         return True
-    except Exception:
-        return False

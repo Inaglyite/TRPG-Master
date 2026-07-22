@@ -19,7 +19,8 @@ if [[ -L "$root/current" ]]; then
     previous="$(readlink -f "$root/current")"
 fi
 
-install -d -o trpgdeploy -g trpgdeploy "$root/releases" /var/lib/trpg-master /var/log/trpg-master
+install -d -o trpgdeploy -g trpgdeploy \
+    "$root/releases" /var/lib/trpg-master /var/log/trpg-master /var/backups/trpg-master
 if [[ -e "$release" ]]; then
     echo "release already exists: $release_id"
 else
