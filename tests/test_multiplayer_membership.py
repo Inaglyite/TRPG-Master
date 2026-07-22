@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -33,11 +35,78 @@ from src.multiplayer import (
     transfer_owner,
     update_member_role,
 )
-from src.room_runtime import RoomManager
+from src.player_notes import PlayerNotesStore
+from src.room_runtime import GameRoom, RoomEventHub, RoomManager
 
 
 def sqlite_url(tmp_path: Path) -> str:
     return f"sqlite:///{tmp_path / 'multiplayer.db'}"
+
+
+def test_room_recovery_payload_contains_only_requesting_players_private_state(
+    tmp_path: Path,
+):
+    import server
+
+    state = {
+        "active_investigator_id": "inv-alice",
+        "pc": {"name": "Alice", "investigator_id": "inv-alice"},
+        "investigator_controllers": {
+            "user-alice": "inv-alice",
+            "user-bob": "inv-bob",
+        },
+        "investigators": {
+            "inv-alice": {"name": "Alice", "investigator_id": "inv-alice"},
+            "inv-bob": {"name": "Bob", "investigator_id": "inv-bob"},
+        },
+        "clues_found": {
+            "investigation": [
+                {"id": "public", "text": "公共线索"},
+                {
+                    "id": "alice-secret",
+                    "text": "Alice 的秘密",
+                    "visibility": "private",
+                    "owner_investigator_id": "inv-alice",
+                },
+                {
+                    "id": "bob-secret",
+                    "text": "Bob 的秘密",
+                    "visibility": "private",
+                    "owner_investigator_id": "inv-bob",
+                },
+            ]
+        },
+    }
+    context = SimpleNamespace(
+        world_store=SimpleNamespace(load=lambda: state),
+        world_dir=tmp_path,
+    )
+    engine = SimpleNamespace(
+        context=context,
+        turn_journal=SimpleNamespace(public_history=lambda: [{"text": "公共叙事"}]),
+    )
+    room = GameRoom("world-private", engine, RoomEventHub("world-private"), "user-alice")
+    PlayerNotesStore(tmp_path, user_id="user-alice").save(
+        "Alice 私人笔记", expected_revision=0
+    )
+    PlayerNotesStore(tmp_path, user_id="user-bob").save(
+        "Bob 私人笔记", expected_revision=0
+    )
+
+    alice = asyncio.run(server._room_full_recovery_payload(room, "user-alice"))
+    bob = asyncio.run(server._room_full_recovery_payload(room, "user-bob"))
+
+    alice_wire = json.dumps(alice, ensure_ascii=False)
+    bob_wire = json.dumps(bob, ensure_ascii=False)
+    assert "公共叙事" in alice_wire and "公共叙事" in bob_wire
+    assert "Alice 的秘密" in alice_wire
+    assert "Alice 私人笔记" in alice_wire
+    assert "Bob 的秘密" not in alice_wire
+    assert "Bob 私人笔记" not in alice_wire
+    assert "Bob 的秘密" in bob_wire
+    assert "Bob 私人笔记" in bob_wire
+    assert "Alice 的秘密" not in bob_wire
+    assert "Alice 私人笔记" not in bob_wire
 
 
 def seed_accounts_and_world(url: str):

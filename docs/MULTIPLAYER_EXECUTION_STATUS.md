@@ -111,8 +111,8 @@ Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检
   Azure HTTPS 同源应用，并限制导航、窗口创建和 IPC 来源。
 - `RoomManager` 是进程内单例，服务必须保持一个 Uvicorn worker，除非未来引入跨进程协调层。
 - 成员 HTTP 数据没有实时在线/准备状态，前端必须与 `room_state` 合并，不能凭空推断。
-- 完整恢复目前以公共历史为主；必须验证玩家自己的私人线索如何恢复，同时绝不能把私人事件混入公共
-  full state。
+- 完整恢复会按连接附加当前玩家自己的角色、可见线索和私人笔记；仍需在真实双客户端 E2E 中验证
+  交叉用户无法从网络消息、日志或恢复数据看到秘密。
 - staging 与生产必须使用独立数据库、运行目录、端口、Cookie 名和环境文件。
 - 可以停止旧应用服务，但不得误删 Nginx、PostgreSQL、备份和已有世界数据。
 - 不修改用户 SSH 密码或凭据；任何密码、Session、API Key、邀请明文和数据库 DSN 都不得写进仓库、
@@ -139,4 +139,3 @@ Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检
 - 系统边界：[`ARCHITECTURE.md`](ARCHITECTURE.md)
 - 数据模型与迁移：[`DATABASE.md`](DATABASE.md)
 - staging/生产部署：[`DEPLOYMENT.md`](DEPLOYMENT.md)
-

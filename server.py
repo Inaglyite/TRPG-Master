@@ -2068,8 +2068,53 @@ async def _room_bootstrap(ws: WebSocket, room: GameRoom) -> None:
     await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
 
 
-async def _room_full_recovery_payload(room: GameRoom) -> dict:
-    """Build a public-only recovery image after restart or replay-buffer gaps."""
+def _room_private_recovery_payload(room: GameRoom, user_id: str) -> dict:
+    """Build recovery data visible only to one authenticated room member."""
+    try:
+        world_state = room.engine.context.world_store.load()
+        controllers = world_state.get("investigator_controllers", {})
+        investigators = world_state.get("investigators", {})
+        investigator_id = (
+            controllers.get(user_id) if isinstance(controllers, dict) else None
+        )
+        own_pc = (
+            investigators.get(investigator_id, {})
+            if isinstance(investigators, dict)
+            else {}
+        )
+        if not own_pc and user_id == room.owner_user_id:
+            own_pc = world_state.get("pc", {})
+        pc_data = enrich_pc_for_frontend(
+            own_pc if isinstance(own_pc, dict) else {},
+            room.engine.context,
+        )
+        clues_data = _enrich_clues_for_frontend(
+            visible_clues_for_investigator(
+                world_state.get("clues_found", {}),
+                investigator_id,
+            ),
+            world_state,
+            room.engine.context,
+        )
+    except Exception:
+        investigator_id, pc_data, clues_data = None, {}, {}
+    try:
+        notes = PlayerNotesStore(
+            room.engine.context.world_dir,
+            user_id=user_id,
+        ).load()
+    except (OSError, TypeError, ValueError, RuntimeError):
+        notes = {"text": "", "revision": 0}
+    return {
+        "investigator_id": investigator_id,
+        "pc": pc_data,
+        "clues": clues_data,
+        "player_notes": notes,
+    }
+
+
+async def _room_full_recovery_payload(room: GameRoom, user_id: str) -> dict:
+    """Build a public recovery image plus the requesting member's private state."""
     try:
         history = room.engine.turn_journal.public_history()
     except Exception:
@@ -2092,6 +2137,7 @@ async def _room_full_recovery_payload(room: GameRoom) -> dict:
         "history": history,
         "investigators": investigators,
         "active_investigator_id": active_investigator_id,
+        "private_state": _room_private_recovery_payload(room, user_id),
     }
 
 
@@ -2273,7 +2319,7 @@ async def multiplayer_room_ws(ws: WebSocket):
             )
         else:
             await _room_bootstrap(ws, room)
-        await ws.send_json(await _room_full_recovery_payload(room))
+        await ws.send_json(await _room_full_recovery_payload(room, user.id))
         if first_user_connection:
             await room.hub.broadcast(
                 {
@@ -2327,7 +2373,9 @@ async def multiplayer_room_ws(ws: WebSocket):
                             "latest_event_id": replay["latest_event_id"],
                         }
                     )
-                    await ws.send_json(await _room_full_recovery_payload(room))
+                    await ws.send_json(
+                        await _room_full_recovery_payload(room, user.id)
+                    )
                 else:
                     for event in replay["events"]:
                         await ws.send_json(event)
@@ -2447,7 +2495,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                 )
                 continue
             if message_type == "turn_recovery_get":
-                await ws.send_json(await _room_full_recovery_payload(room))
+                await ws.send_json(await _room_full_recovery_payload(room, user.id))
                 continue
             if message_type == "module_list":
                 await ws.send_json(

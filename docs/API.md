@@ -580,7 +580,8 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 多人入口必须携带 `world_id` 并复用登录 Cookie。它不接受 `module` 覆盖，也不接受客户端自报
 `user_id`、角色或权限。除上面的游戏初始化事件外，连接会收到：
 
-- `room_full_state`：公开回合父链、公开调查员状态、房主、当前行动者、在线成员和最新事件 ID；
+- `room_full_state`：公开回合父链、公开调查员状态、房主、当前行动者、在线成员和最新事件 ID，
+  以及只为当前连接生成的 `private_state`；
 - `room_state`：房间状态、房主、当前行动者、ready/online 用户 ID；
 - `member_joined`、`member_left`、`member_removed`、`owner_changed`、`actor_changed`；
 - `room_action_rejected {code,message}`：稳定错误码包括 `owner_required`、`player_required`、
@@ -590,6 +591,21 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 
 房间广播事件带单调 `room_event_id`。客户端发送 `room_ack {event_id}` 确认，重连后用
 `room_sync {after_event_id}` 请求增量；私人事件不出现在无权连接的实时流或补发结果中。
+
+`room_full_state.private_state` 的结构为：
+
+```json
+{
+  "investigator_id": "investigator-...",
+  "pc": {},
+  "clues": {},
+  "player_notes": {"text": "...", "revision": 3}
+}
+```
+
+该字段由服务端根据登录 Session 和调查员绑定逐连接生成。`clues` 只包含公共线索和当前调查员
+拥有的私人线索，`player_notes` 只读取当前用户自己的笔记。客户端不得把它写入公共房间 store、
+日志或发给其他连接。缓冲缺口、主动 `turn_recovery_get` 与首次连接都遵守相同隔离规则。
 
 房间控制消息：
 
