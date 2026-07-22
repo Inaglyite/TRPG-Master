@@ -171,7 +171,11 @@ class RuntimeContext:
             else:
                 world.module_id = self.module_record.package_id
                 world.module_version = self.module_record.version
-                world.metadata_json = {**(world.metadata_json or {}), **metadata}
+                # Runtime/module metadata augments room metadata.  Keep control-plane
+                # fields such as the user-facing room name and player limit when a
+                # context initialization later persists migration markers.
+                metadata = {**(world.metadata_json or {}), **metadata}
+                world.metadata_json = metadata
                 world.updated_at = utcnow()
         if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
             "1",

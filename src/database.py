@@ -131,6 +131,7 @@ class WorldInvestigator(Base):
         ForeignKey("worlds.id", ondelete="CASCADE"), index=True
     )
     character_key: Mapped[str] = mapped_column(String(200))
+    character_ref: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     controller_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )

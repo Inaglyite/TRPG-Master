@@ -236,7 +236,14 @@ def remove_member(db_url: str, world_id: str, target_user_id: str, actor_user_id
         session.delete(target)
 
 
-def claim_investigator(db_url: str, world_id: str, character_key: str, user_id: str) -> dict:
+def claim_investigator(
+    db_url: str,
+    world_id: str,
+    character_key: str,
+    user_id: str,
+    *,
+    character_ref: dict | None = None,
+) -> dict:
     character_key = str(character_key or "").strip()
     if not character_key or len(character_key) > 200:
         raise MultiplayerError("invalid_character", "调查员标识无效")
@@ -267,6 +274,7 @@ def claim_investigator(db_url: str, world_id: str, character_key: str, user_id: 
                     id=new_id("investigator"),
                     world_id=world_id,
                     character_key=character_key,
+                    character_ref=dict(character_ref or {}),
                     controller_user_id=user_id,
                     status="claimed",
                 )
@@ -274,6 +282,8 @@ def claim_investigator(db_url: str, world_id: str, character_key: str, user_id: 
             else:
                 claim.controller_user_id = user_id
                 claim.status = "claimed"
+                if character_ref:
+                    claim.character_ref = dict(character_ref)
                 claim.updated_at = utcnow()
             session.flush()
             return {"id": claim.id, "character_key": character_key, "user_id": user_id}

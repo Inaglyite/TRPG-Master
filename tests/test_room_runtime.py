@@ -8,6 +8,7 @@ from src.room_runtime import (
     ActionReservationError,
     GameRoom,
     RoomConnection,
+    RoomDriverTransport,
     RoomEventHub,
     RoomManager,
 )
@@ -100,6 +101,32 @@ async def _room_is_removed_only_after_empty_idle_grace():
     assert await manager.get("world-a") is None
 
 
+async def _driver_sends_decisions_only_to_current_actor():
+    hub = RoomEventHub("world-a")
+    alice_socket, bob_socket = Socket(), Socket()
+    await hub.attach(RoomConnection("alice-tab", "alice", "player", alice_socket))
+    await hub.attach(RoomConnection("bob-tab", "bob", "player", bob_socket))
+    room = GameRoom(
+        "world-a",
+        object(),
+        hub,
+        "alice",
+        current_actor_user_id="alice",
+    )
+    transport = RoomDriverTransport(room)
+
+    await transport.send_json({"type": "decision_request", "id": "decision-1"})
+    await transport.send_json({"type": "narrative_chunk", "text": "公开叙述"})
+
+    assert [message["type"] for message in alice_socket.messages] == [
+        "decision_request",
+        "narrative_chunk",
+    ]
+    assert [message["type"] for message in bob_socket.messages] == [
+        "narrative_chunk"
+    ]
+
+
 def test_room_manager_single_flights_concurrent_creation():
     asyncio.run(_room_manager_single_flights_concurrent_creation())
 
@@ -114,3 +141,7 @@ def test_action_policy_rejects_wrong_actor_duplicates_and_overlap():
 
 def test_room_is_removed_only_after_empty_idle_grace():
     asyncio.run(_room_is_removed_only_after_empty_idle_grace())
+
+
+def test_driver_sends_decisions_only_to_current_actor():
+    asyncio.run(_driver_sends_decisions_only_to_current_actor())

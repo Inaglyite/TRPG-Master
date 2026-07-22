@@ -185,9 +185,18 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
                     f"/api/invites/{invite.json()['token']}/accept", headers=headers
                 )
                 assert joined.status_code == 200
+                options = player_client.get(
+                    f"/api/worlds/{world_id}/investigators/options"
+                )
+                assert options.status_code == 200
+                character_key = next(
+                    character["id"]
+                    for group in options.json()["groups"]
+                    for character in group["characters"]
+                )
                 claimed = player_client.post(
                     f"/api/worlds/{world_id}/investigators/claim",
-                    json={"character_key": "detective-huang"},
+                    json={"character_key": character_key},
                     headers=headers,
                 )
                 assert claimed.status_code == 200
@@ -291,6 +300,20 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
         client.post(
             f"/api/invites/{invite}/accept",
             headers=origin,
+        )
+        claim_investigator(
+            url,
+            world_id,
+            "owner-character",
+            owner_id,
+            character_ref={"type": "inline", "data": {"name": "房主调查员"}},
+        )
+        claim_investigator(
+            url,
+            world_id,
+            "player-character",
+            player_id,
+            character_ref={"type": "inline", "data": {"name": "玩家调查员"}},
         )
 
         with client.websocket_connect(

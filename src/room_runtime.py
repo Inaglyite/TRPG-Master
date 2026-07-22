@@ -161,7 +161,17 @@ class RoomDriverTransport:
         room = self.room
         if room is None:
             return
-        await room.hub.broadcast(payload)
+        visibility = "public"
+        if payload.get("type") in {
+            "suggest_check",
+            "decision_request",
+            "decision_resolved",
+        }:
+            actor_user_id = room.current_actor_user_id
+            visibility = (
+                f"player:{actor_user_id}" if actor_user_id else "server_only"
+            )
+        await room.hub.broadcast(payload, visibility=visibility)
         if payload.get("type") in {
             "done",
             "turn_rejected",

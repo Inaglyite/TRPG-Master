@@ -119,7 +119,14 @@ from src.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
-from src.database import World, WorldMember, database_url, new_id, session_scope
+from src.database import (
+    World,
+    WorldInvestigator,
+    WorldMember,
+    database_url,
+    new_id,
+    session_scope,
+)
 from src.editor_api import create_editor_router
 from src.editor_projects import EditorProjectStore
 from src.engine import EngineCallbacks, GameEngine
@@ -130,6 +137,12 @@ from src.game_application import (
     SaveNotFoundError,
 )
 from src.handouts import resolve_handout_asset
+from src.investigators import (
+    activate_investigator,
+    initialize_investigator_roster,
+    public_investigator_roster,
+    sync_active_investigator,
+)
 from src.lorebook import lorebook_json_schema
 from src.model_settings import ModelSettings, persist_model_settings
 from src.module_compiler import compile_payload
@@ -646,6 +659,19 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         emit({"type": "choices", "choices": choices})
 
     def on_done():
+        if getattr(engine, "_multiplayer_roster_active", False):
+            try:
+                sync_active_investigator(engine.context)
+                state = engine.context.world_store.load()
+                emit(
+                    {
+                        "type": "investigator_roster",
+                        "investigators": public_investigator_roster(state),
+                        "active_investigator_id": state.get("active_investigator_id"),
+                    }
+                )
+            except Exception as exc:
+                print(f"[room] 调查员状态同步失败: {exc}", file=sys.stderr)
         outbound.end_turn()
 
     def on_game_over(ending_type: str, title: str, summary: str):
@@ -1170,6 +1196,15 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             return
         try:
             intent = game_app.start_game.execute(data.get("character_ref"))
+            roster = data.get("_room_roster")
+            active_investigator_id = str(data.get("_room_investigator_id") or "")
+            if isinstance(roster, list) and roster:
+                initialize_investigator_roster(
+                    engine.context,
+                    roster,
+                    active_investigator_id=active_investigator_id,
+                )
+                engine._multiplayer_roster_active = True
         except ValueError as exc:
             release_turn()
             await outbound.send({"type": "error", "message": str(exc)})
@@ -1188,7 +1223,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             turn_kind=intent.kind,
         )
 
-    async def resume_game(slot_id: str | None, *, announce_loaded: bool) -> None:
+    async def resume_game(
+        slot_id: str | None,
+        *,
+        announce_loaded: bool,
+        investigator_id: str | None = None,
+    ) -> None:
         if not await reserve_turn():
             return
         try:
@@ -1206,6 +1246,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             release_turn()
             raise
         try:
+            if investigator_id:
+                activate_investigator(engine.context, investigator_id)
+                engine._multiplayer_roster_active = True
             if announce_loaded:
                 await outbound.send(
                     {
@@ -1227,17 +1270,29 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     @router.handler("continue")
     async def handle_continue(data: dict) -> None:
-        await resume_game(data.get("slot_id"), announce_loaded=False)
+        await resume_game(
+            data.get("slot_id"),
+            announce_loaded=False,
+            investigator_id=data.get("_room_investigator_id"),
+        )
 
     @router.handler("save_load")
     async def handle_save_load(data: dict) -> None:
-        await resume_game(str(data.get("slot_id") or ""), announce_loaded=True)
+        await resume_game(
+            str(data.get("slot_id") or ""),
+            announce_loaded=True,
+            investigator_id=data.get("_room_investigator_id"),
+        )
 
     @router.handler("action")
     async def handle_action(data: dict) -> None:
         if not await reserve_turn():
             return
         try:
+            investigator_id = str(data.get("_room_investigator_id") or "")
+            if investigator_id:
+                activate_investigator(engine.context, investigator_id)
+                engine._multiplayer_roster_active = True
             intent = game_app.perform_action.execute(data.get("content", ""))
         except ApplicationUseCaseError as exc:
             release_turn()
@@ -1548,6 +1603,29 @@ async def get_world_members(world_id: str, request: Request):
         return _multiplayer_error(exc)
 
 
+@app.get("/api/worlds/{world_id}/investigators/options")
+async def get_world_investigator_options(world_id: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        authorize_world(DATABASE_URL, user.id, world_id, "read")
+        with session_scope(DATABASE_URL) as db_session:
+            world = db_session.get(World, world_id)
+            if world is None or world.status != "active":
+                raise MultiplayerError("world_not_found", "房间不存在", 404)
+            module_name = world.module_name
+        context = RuntimeContext.create(
+            world_id,
+            module_name,
+            project_root=PROJECT_ROOT,
+            runtime_root=RUNTIME_ROOT,
+        )
+        return list_character_options(module_name, context=context)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+
+
 @app.patch("/api/worlds/{world_id}/members/{target_user_id}")
 async def patch_world_member(
     world_id: str, target_user_id: str, data: dict, request: Request
@@ -1598,9 +1676,37 @@ async def claim_world_investigator(world_id: str, data: dict, request: Request):
     user = request_user(request, DATABASE_URL)
     if user is None:
         return JSONResponse({"detail": "未登录"}, status_code=401)
+    character_key = str(data.get("character_key") or "")
     try:
+        with session_scope(DATABASE_URL) as db_session:
+            world = db_session.get(World, world_id)
+            if world is None:
+                raise MultiplayerError("world_not_found", "房间不存在", 404)
+            module_name = world.module_name
+        context = RuntimeContext.create(
+            world_id,
+            module_name,
+            project_root=PROJECT_ROOT,
+            runtime_root=RUNTIME_ROOT,
+        )
+        options = list_character_options(module_name, context=context)
+        selected = next(
+            (
+                character
+                for group in options.get("groups", [])
+                for character in group.get("characters", [])
+                if str(character.get("id") or "") == character_key
+            ),
+            None,
+        )
+        if selected is None or not isinstance(selected.get("ref"), dict):
+            raise MultiplayerError("invalid_character", "调查员不在当前房间的角色列表中")
         result = claim_investigator(
-            DATABASE_URL, world_id, str(data.get("character_key") or ""), user.id
+            DATABASE_URL,
+            world_id,
+            character_key,
+            user.id,
+            character_ref=selected["ref"],
         )
     except MultiplayerError as exc:
         return _multiplayer_error(exc)
@@ -1892,6 +1998,47 @@ async def _broadcast_room_state(room: GameRoom) -> None:
     )
 
 
+def _room_roster(world_id: str) -> tuple[list[dict], set[str]]:
+    """Return claimed investigators and every member required to be ready."""
+    with session_scope(DATABASE_URL) as db_session:
+        playable_members = {
+            member.user_id
+            for member in db_session.query(WorldMember)
+            .filter(WorldMember.world_id == world_id)
+            .all()
+            if member.role in {"owner", "player"}
+        }
+        claims = (
+            db_session.query(WorldInvestigator)
+            .filter_by(world_id=world_id, status="claimed")
+            .all()
+        )
+        roster = [
+            {
+                "investigator_id": claim.id,
+                "user_id": claim.controller_user_id,
+                "character_ref": dict(claim.character_ref or {}),
+            }
+            for claim in claims
+            if claim.controller_user_id in playable_members
+        ]
+    return roster, playable_members
+
+
+def _room_investigator_id(world_id: str, user_id: str) -> str | None:
+    with session_scope(DATABASE_URL) as db_session:
+        claim = (
+            db_session.query(WorldInvestigator)
+            .filter_by(
+                world_id=world_id,
+                controller_user_id=user_id,
+                status="claimed",
+            )
+            .one_or_none()
+        )
+        return claim.id if claim is not None else None
+
+
 async def _retire_room_after_grace(
     world_id: str, room: GameRoom, idle_seconds: float
 ) -> None:
@@ -2064,6 +2211,68 @@ async def multiplayer_room_ws(ws: WebSocket):
                 )
                 await _broadcast_room_state(room)
                 continue
+            if message_type in {"player_notes_get", "player_notes_update"}:
+                notes_store = PlayerNotesStore(
+                    room.engine.context.world_dir,
+                    user_id=user.id,
+                )
+                try:
+                    if message_type == "player_notes_get":
+                        payload = {"type": "player_notes", **notes_store.load()}
+                    else:
+                        saved = notes_store.save(
+                            data.get("text", ""),
+                            expected_revision=(
+                                int(data["revision"])
+                                if data.get("revision") is not None
+                                else None
+                            ),
+                        )
+                        payload = {"type": "player_notes", "saved": True, **saved}
+                except PlayerNotesConflict as exc:
+                    payload = {
+                        "type": "player_notes_conflict",
+                        "message": str(exc),
+                        **notes_store.load(),
+                    }
+                except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                    payload = {
+                        "type": "player_notes_error",
+                        "message": str(exc) or "玩家笔记保存失败",
+                    }
+                await ws.send_json(payload)
+                continue
+            if message_type in {"suggest_reply", "decision_reply"}:
+                if room.current_actor_user_id != user.id:
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "not_current_actor",
+                            "message": "只有当前行动者可以作出这个决定",
+                        }
+                    )
+                    continue
+            owner_control_types = {
+                "model_settings_update",
+                "save",
+                "save_delete",
+                "save_create",
+                "save_rename",
+                "settle_case",
+                "load",
+                "turn_branch_create",
+                "world_switch",
+                "switch_module",
+            }
+            if message_type in owner_control_types and role != "owner":
+                await ws.send_json(
+                    {
+                        "type": "room_action_rejected",
+                        "code": "owner_required",
+                        "message": "只有房主可以执行房间管理操作",
+                    }
+                )
+                continue
             mutating_turn_types = {
                 "start",
                 "continue",
@@ -2081,6 +2290,35 @@ async def multiplayer_room_ws(ws: WebSocket):
                         }
                     )
                     continue
+                roster, playable_members = _room_roster(world_id)
+                claims_by_user = {
+                    str(item["user_id"]): item for item in roster if item.get("user_id")
+                }
+                actor_id = room.current_actor_user_id or user.id
+                actor_claim = claims_by_user.get(actor_id)
+                if actor_claim is None:
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "investigator_required",
+                            "message": "当前行动者需要先选择调查员",
+                        }
+                    )
+                    continue
+                if message_type == "start":
+                    missing_claims = sorted(playable_members - claims_by_user.keys())
+                    missing_ready = sorted(playable_members - room.ready_users)
+                    if missing_claims or missing_ready:
+                        await ws.send_json(
+                            {
+                                "type": "room_action_rejected",
+                                "code": "room_not_ready",
+                                "message": "所有玩家选择调查员并准备后才能开始",
+                                "missing_claim_user_ids": missing_claims,
+                                "missing_ready_user_ids": missing_ready,
+                            }
+                        )
+                        continue
                 action_id = str(data.get("action_id") or "")
                 try:
                     await room.reserve_action(user.id, action_id)
@@ -2096,6 +2334,9 @@ async def multiplayer_room_ws(ws: WebSocket):
                 if message_type == "start":
                     room.status = "playing"
                     await _broadcast_room_state(room)
+                    data["character_ref"] = actor_claim["character_ref"]
+                    data["_room_roster"] = roster
+                data["_room_investigator_id"] = actor_claim["investigator_id"]
             data["_room_user_id"] = user.id
             data["_room_connection_id"] = connection_id
             try:
