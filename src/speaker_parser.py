@@ -246,41 +246,53 @@ _QUOTED_SPEECH = re.compile(
 )
 
 
-def _known_name_at_start(text: str, aliases: dict[str, str]) -> tuple[str, str] | None:
-    candidate = text.lstrip(" ，,、—-\t")
+def _known_name_in_text(text: str, aliases: dict[str, str]) -> tuple[str, str] | None:
     for name in sorted(aliases, key=len, reverse=True):
-        if candidate.startswith(name):
+        if name in text:
             return name, aliases[name]
     return None
 
 
 def _infer_novel_dialogue_line(
-    line: str, aliases: dict[str, str]
-) -> list[Segment] | None:
+    line: str, aliases: dict[str, str], context_npc_id: str | None = None
+) -> tuple[list[Segment], str] | None:
     """Recognize common Chinese novel dialogue with an explicit known speaker.
 
     Supported forms include ``“台词。”法伦示意……`` and
     ``法伦望向窗外，低声说：“台词。”``. The nearby public name is mandatory;
     unattributed quotations remain keeper narration.
     """
-    quote = _QUOTED_SPEECH.search(line)
-    if not quote:
+    quotes = [
+        quote
+        for quote in _QUOTED_SPEECH.finditer(line)
+        if len(quote.group("body")) >= 18
+        or re.search(r"[，。！？!?；…—]", quote.group("body"))
+    ]
+    if not quotes:
         return None
-    before = line[: quote.start()]
-    after = line[quote.end() :]
-    owner = _known_name_at_start(after, aliases) if not before.strip() else None
-    if owner is None:
-        owner = _known_name_at_start(before, aliases)
-    if owner is None:
+    outside_quotes: list[str] = []
+    cursor = 0
+    for quote in quotes:
+        outside_quotes.append(line[cursor : quote.start()])
+        cursor = quote.end()
+    outside_quotes.append(line[cursor:])
+    attribution = "".join(outside_quotes)
+    owner = _known_name_in_text(attribution, aliases)
+    owner_id = owner[1] if owner else context_npc_id
+    if owner_id is None:
         return None
-    _name, npc_id = owner
     result: list[Segment] = []
-    if before.strip():
-        result.append(Segment(kind="narration", text=before.strip()))
-    result.append(Segment(kind="speech", text=quote.group(0), npc_id=npc_id))
-    if after.strip():
-        result.append(Segment(kind="narration", text=after.strip()))
-    return result
+    cursor = 0
+    for quote in quotes:
+        before = line[cursor : quote.start()].strip()
+        if before:
+            result.append(Segment(kind="narration", text=before))
+        result.append(Segment(kind="speech", text=quote.group(0), npc_id=owner_id))
+        cursor = quote.end()
+    tail = line[cursor:].strip()
+    if tail:
+        result.append(Segment(kind="narration", text=tail))
+    return result, owner_id
 
 
 def infer_named_speech(
@@ -302,6 +314,7 @@ def infer_named_speech(
         if name.strip() and npc_id
     }
     recovered: list[Segment] = []
+    active_npc_id: str | None = None
     for segment in segments:
         if segment.kind != "narration":
             recovered.append(segment)
@@ -323,13 +336,22 @@ def infer_named_speech(
                 recovered.append(
                     Segment(kind="speech", text=match.group("text").strip(), npc_id=npc_id)
                 )
+                active_npc_id = npc_id
                 continue
-            novel_segments = _infer_novel_dialogue_line(line, literal_aliases)
-            if novel_segments:
+            mentioned = _known_name_in_text(line, literal_aliases)
+            novel_result = _infer_novel_dialogue_line(
+                line,
+                literal_aliases,
+                mentioned[1] if mentioned else active_npc_id,
+            )
+            if novel_result:
                 flush_narration()
+                novel_segments, active_npc_id = novel_result
                 recovered.extend(novel_segments)
                 continue
             narration_lines.append(line)
+            if mentioned:
+                active_npc_id = mentioned[1]
         flush_narration()
 
     merged: list[Segment] = []

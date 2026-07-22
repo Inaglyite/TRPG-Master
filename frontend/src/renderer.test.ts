@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  accelerateNarrativeChoices,
   addMsg,
   beginNarrativeReplacement,
   branchSourceTurnId,
@@ -108,6 +109,30 @@ describe("React message renderer adapter", () => {
       vi.advanceTimersByTime(34);
 
       expect(useMessageStore.getState().messages[0].text).toBe("字字字");
+    } finally {
+      revealNarrativeImmediately();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("switches the final action menu to fast playback", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-fast-choices");
+      onNarrativeChunk("正文你可以——1. 去办公室");
+
+      vi.advanceTimersByTime(68);
+      expect(useMessageStore.getState().messages[0].text).toBe("正文");
+      vi.advanceTimersByTime(34);
+      expect(
+        useMessageStore.getState().messages[0].text.length,
+      ).toBeGreaterThan(3);
+
+      onNarrativeChunk("2. 去小屋");
+      accelerateNarrativeChoices(true);
+      vi.runAllTimers();
+      expect(useMessageStore.getState().messages[0].text).toContain("去小屋");
     } finally {
       revealNarrativeImmediately();
       finishNarrativeStream();

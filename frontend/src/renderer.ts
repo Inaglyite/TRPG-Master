@@ -19,6 +19,7 @@ let streamBuffer = "";
 let playbackTimer: number | null = null;
 let networkStreamFinished = false;
 let authoritativeSegments: NarrativeSegment[] | null = null;
+let choiceFastMode = false;
 const presentationCallbacks: Array<() => void> = [];
 const visibilityCallbacks: Array<() => void> = [];
 let replacement: { sourceTurnId: string; targetId: string } | null = null;
@@ -28,7 +29,7 @@ const branchCallbacks = new Map<string, () => void>();
 // ---- 发言者段状态（流式期间实时构建，finalize 由权威段覆盖）----
 let streamSegments: NarrativeSegment[] = [];
 let streamNpc: string | null = null;
-type PlaybackPiece = { chars: string[]; npcId: string | null };
+type PlaybackPiece = { chars: string[]; npcId: string | null; fast?: boolean };
 const playbackQueue: PlaybackPiece[] = [];
 const liveSpeakers = new Map<string, Speaker>();
 
@@ -166,6 +167,7 @@ export function beginNarrativeReplacement(sourceTurnId: string) {
   streamNpc = null;
   networkStreamFinished = false;
   authoritativeSegments = null;
+  choiceFastMode = false;
   replacement = { sourceTurnId, targetId };
   scrollDown(true);
 }
@@ -375,6 +377,7 @@ function finalizePresentedStream() {
   if (!streamMessageId) {
     networkStreamFinished = false;
     authoritativeSegments = null;
+    choiceFastMode = false;
     notifyPresentationComplete();
     return;
   }
@@ -390,6 +393,7 @@ function finalizePresentedStream() {
   streamNpc = null;
   authoritativeSegments = null;
   networkStreamFinished = false;
+  choiceFastMode = false;
   notifyPresentationComplete();
 }
 
@@ -405,6 +409,7 @@ function clearStream() {
   streamNpc = null;
   authoritativeSegments = null;
   networkStreamFinished = false;
+  choiceFastMode = false;
   presentationCallbacks.splice(0);
   visibilityCallbacks.splice(0);
 }
@@ -467,13 +472,19 @@ function queuedCharacterCount() {
   return playbackQueue.reduce((total, piece) => total + piece.chars.length, 0);
 }
 
-function charactersPerTick(backlog: number) {
+function charactersPerTick(backlog: number, fast = false) {
+  if (fast) return 6;
   if (backlog > 500) return 3;
   if (backlog > 160) return 2;
   return 1;
 }
 
-function playbackDelay(lastChar: string, speakerChanged: boolean) {
+function playbackDelay(
+  lastChar: string,
+  speakerChanged: boolean,
+  fast = false,
+) {
+  if (fast) return /[。！？!?]/u.test(lastChar) ? 46 : 18;
   if (speakerChanged) return SPEAKER_PAUSE_MS;
   if (/[。！？!?]/u.test(lastChar)) return SENTENCE_PAUSE_MS;
   if (/[,，、；;：:]/u.test(lastChar)) return COMMA_PAUSE_MS;
@@ -497,7 +508,7 @@ function playbackStep() {
     if (networkStreamFinished) finalizePresentedStream();
     return;
   }
-  const count = charactersPerTick(queuedCharacterCount());
+  const count = charactersPerTick(queuedCharacterCount(), piece.fast);
   const text = piece.chars.splice(0, count).join("");
   renderPlaybackText(text, piece.npcId);
   if (!piece.chars.length) playbackQueue.shift();
@@ -505,7 +516,11 @@ function playbackStep() {
     Boolean(playbackQueue.length) && playbackQueue[0].npcId !== piece.npcId;
   if (playbackQueue.length) {
     schedulePlayback(
-      playbackDelay(Array.from(text).at(-1) || "", speakerChanged),
+      playbackDelay(
+        Array.from(text).at(-1) || "",
+        speakerChanged,
+        playbackQueue[0].fast,
+      ),
     );
   } else if (networkStreamFinished) {
     finalizePresentedStream();
@@ -529,8 +544,49 @@ export function onNarrativeChunk(text: string, npcId?: string | null) {
   if (!text) return;
   removeLoading();
   ensureStreamMessage();
-  playbackQueue.push({ chars: Array.from(text), npcId: npcId || null });
+  const markerIndex = choiceFastMode
+    ? 0
+    : text.search(/你可以|您可以|\n\s*1[.、]/u);
+  if (markerIndex > 0) {
+    playbackQueue.push({
+      chars: Array.from(text.slice(0, markerIndex)),
+      npcId: npcId || null,
+    });
+  }
+  playbackQueue.push({
+    chars: Array.from(markerIndex >= 0 ? text.slice(markerIndex) : text),
+    npcId: npcId || null,
+    fast: choiceFastMode || markerIndex >= 0,
+  });
+  if (markerIndex >= 0) choiceFastMode = true;
+  else accelerateNarrativeChoices();
   schedulePlayback();
+}
+
+export function accelerateNarrativeChoices(force = false) {
+  let tail = "";
+  let choicesStarted = false;
+  let foundMarker = false;
+  for (const piece of playbackQueue) {
+    const text = piece.chars.join("");
+    if (!choicesStarted && /你可以|您可以|\n\s*1[.、]/u.test(tail + text)) {
+      choicesStarted = true;
+      foundMarker = true;
+    }
+    if (choicesStarted) piece.fast = true;
+    tail = (tail + text).slice(-24);
+  }
+  if (!foundMarker && (choiceFastMode || force)) {
+    playbackQueue.forEach((piece) => {
+      piece.fast = true;
+    });
+  }
+  choiceFastMode = choiceFastMode || foundMarker || force;
+  if (choicesStarted && playbackTimer !== null) {
+    window.clearTimeout(playbackTimer);
+    playbackTimer = null;
+    schedulePlayback(18);
+  }
 }
 
 export function revealNarrativeImmediately() {

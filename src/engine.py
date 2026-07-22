@@ -416,6 +416,19 @@ class GameEngine:
         except Exception:
             return {}
         aliases: dict[str, str] = {}
+
+        def add_aliases(name: str, npc_id: str) -> None:
+            name = name.strip()
+            if not name or not npc_id:
+                return
+            aliases[name] = npc_id
+            if "·" in name:
+                short = name.rsplit("·", 1)[-1].strip()
+                if short:
+                    aliases.setdefault(short, npc_id)
+                    for title in ("医生", "教授", "主任", "先生", "女士", "小姐"):
+                        if short.endswith(title) and len(short) > len(title):
+                            aliases.setdefault(short[: -len(title)], npc_id)
         for npc in world.get("npcs", []):
             if not isinstance(npc, dict):
                 continue
@@ -425,13 +438,13 @@ class GameEngine:
             for key in ("name", "display_name"):
                 name = str(npc.get(key) or "").strip()
                 if name:
-                    aliases[name] = npc_id
+                    add_aliases(name, npc_id)
         for npc_id, asset in ((world.get("asset_map") or {}).get("npcs") or {}).items():
             if not isinstance(asset, dict):
                 continue
             name = str(asset.get("label") or asset.get("name") or "").strip()
             if name:
-                aliases[name] = str(npc_id)
+                add_aliases(name, str(npc_id))
         try:
             catalog = json.loads(self.context.initial_state_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -442,7 +455,7 @@ class GameEngine:
             npc_id = str(npc.get("id") or "")
             name = str(npc.get("name") or npc.get("display_name") or "").strip()
             if npc_id and name and self.is_valid_npc_id(npc_id):
-                aliases[name] = npc_id
+                add_aliases(name, npc_id)
         return aliases
 
     def _complete_turn_record(

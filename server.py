@@ -148,6 +148,7 @@ from src.module_registry import (
 from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.runtime import RuntimeContext
+from src.speaker_parser import parse_segments as parse_speaker_segments
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
 from src.ws_router import WsMessageRouter
@@ -360,6 +361,25 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     pending_inline_speakers: dict[str, dict] = {}
     resolve_speaker = SpeakerPayloadResolver(engine)
 
+    def public_chat_events(record: dict) -> list[dict]:
+        """Enrich saved segments and repair legacy/all-narration attribution."""
+        segments = record.get("narrative_segments") or []
+        narrative = str(record.get("narrative") or "")
+        has_speech = any(
+            isinstance(segment, dict) and segment.get("kind") == "speech"
+            for segment in segments
+        )
+        if narrative and not has_speech:
+            reparsed, _clean = parse_speaker_segments(
+                narrative,
+                is_valid_npc=engine.is_valid_npc_id,
+                on_unknown_npc=engine.log_unknown_npc_speaker,
+                speaker_aliases=engine.npc_speaker_aliases(),
+            )
+            if any(segment.kind == "speech" for segment in reparsed):
+                segments = [segment.to_dict() for segment in reparsed]
+        return enrich_narrative_segments(segments, resolve_speaker)
+
     def turn_state_busy() -> bool:
         return session.turn_busy
 
@@ -444,8 +464,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 result = game_app.rewrite_turn.execute(turn_id)
                 result["source_turn_id"] = result.pop("turn_id")
                 result["branch_source_turn_id"] = branch_source_turn_id
-                segments = result.get("narrative_segments") or []
-                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                enriched = public_chat_events(result)
                 result["narrative_segments"] = enriched
                 result["chat_events"] = enriched
                 outbound.end_turn({"type": "turn_rewritten", **result})
@@ -519,7 +538,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 continue
             segments = record.get("narrative_segments")
             if isinstance(segments, list) and segments:
-                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                enriched = public_chat_events(record)
                 record["narrative_segments"] = enriched
                 record["chat_events"] = enriched
             events = record.get("events")
@@ -943,8 +962,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             _set_active_context(branch.context)
             history = engine.turn_journal.public_history()
             for turn in history:
-                segments = turn.get("narrative_segments") or []
-                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                enriched = public_chat_events(turn)
                 turn["narrative_segments"] = enriched
                 turn["chat_events"] = enriched
         except Exception as exc:
@@ -1005,8 +1023,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             _set_active_context(context)
             history = engine.turn_journal.public_history()
             for turn in history:
-                segments = turn.get("narrative_segments") or []
-                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                enriched = public_chat_events(turn)
                 turn["narrative_segments"] = enriched
                 turn["chat_events"] = enriched
             if user_id:

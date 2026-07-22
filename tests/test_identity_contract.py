@@ -174,6 +174,28 @@ class IdentityContractTests(unittest.TestCase):
         self.assertIn("静默执行", engine.messages[-1]["content"])
         self.assertNotIn("[玩家行动]", engine.messages[-1]["content"])
 
+    def test_public_npc_names_generate_safe_short_speaker_aliases(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            initial = Path(temp_dir) / "world_state_initial.json"
+            initial.write_text('{"npcs": []}', encoding="utf-8")
+            world = {
+                "npcs": [
+                    {"id": "bryce_fallon", "name": "布莱斯·法伦"},
+                    {"id": "john_whitcroft", "name": "约翰·惠特克罗夫特医生"},
+                ]
+            }
+            engine = GameEngine.__new__(GameEngine)
+            engine.context = SimpleNamespace(
+                world_store=SimpleNamespace(load=lambda: world),
+                initial_state_file=initial,
+            )
+
+            aliases = engine.npc_speaker_aliases()
+
+        self.assertEqual(aliases["法伦"], "bryce_fallon")
+        self.assertEqual(aliases["惠特克罗夫特医生"], "john_whitcroft")
+        self.assertEqual(aliases["惠特克罗夫特"], "john_whitcroft")
+
     def test_opening_contract_never_authors_player_dialogue_or_evidence_use(self):
         engine = GameEngine.__new__(GameEngine)
         engine.context = SimpleNamespace(

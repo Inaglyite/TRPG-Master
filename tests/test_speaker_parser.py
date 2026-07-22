@@ -85,6 +85,36 @@ class SpeakerParserTests(unittest.TestCase):
 
         self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
 
+    def test_short_alias_and_active_speaker_recover_opening_dialogue(self):
+        text = (
+            "布莱斯·法伦站在窗边，直到门关上才转过身。\n\n"
+            "“黄先生，请坐。”他示意你坐进扶手椅。\n\n"
+            "“但我并不认为事情这么简单。”法伦说这句话时没收起笑容。\n\n"
+            "“查清楚莱特到底是怎么死的。尽快，也尽量别声张。”他顿了顿。\n\n"
+            "“他不是第一个死在这件事上的人。我不希望再有人跟着沉默了。”"
+        )
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={
+                "布莱斯·法伦": "bryce_fallon",
+                "法伦": "bryce_fallon",
+            },
+        )
+
+        speeches = [segment for segment in segments if segment.kind == "speech"]
+        self.assertEqual(len(speeches), 4)
+        self.assertTrue(all(segment.npc_id == "bryce_fallon" for segment in speeches))
+        self.assertIn("黄先生，请坐", speeches[0].text)
+        self.assertIn("不希望再有人", speeches[-1].text)
+
+    def test_short_quoted_terms_stay_inside_narration(self):
+        segments, _ = parse_segments(
+            "布莱斯·法伦解释，档案里写作“柯布家族”，校方称其为“意外”。",
+            speaker_aliases={"布莱斯·法伦": "bryce_fallon", "法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+
     def test_speech_tag_produces_speech_segment(self):
         text = '雨还在下。【npc:bryce_fallon】"莱特生前一直在隐瞒什么。"【/npc】他说完看向抽屉。'
         segments, clean = parse_segments(text, is_valid_npc=npc_ok)

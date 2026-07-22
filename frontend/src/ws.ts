@@ -12,6 +12,7 @@
 import { useAppStore, type ConnectionState } from "./state/app-store";
 import {
   addMsg,
+  accelerateNarrativeChoices,
   attachTurnBranchAction,
   attachTurnRewriteAction,
   branchSourceTurnId,
@@ -551,6 +552,7 @@ function handleMessage(e: MessageEvent) {
       break;
     case "choices":
       pendingChoices = Array.isArray(data.choices) ? data.choices : undefined;
+      accelerateNarrativeChoices(true);
       break;
     case "done":
       const completedTurnId = activeTurnId;
