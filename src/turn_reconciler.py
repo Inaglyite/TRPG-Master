@@ -342,8 +342,11 @@ def turn_needs_model_audit(
     *,
     player_action: str = "",
     narrative: str | None = None,
+    has_authoritative_mutation: bool = False,
 ) -> bool:
     """Audit only stateful prose that reached no authoritative transaction."""
+    if has_authoritative_mutation:
+        return False
     for event in executed_tools or []:
         if event.get("name") not in _AUTHORITATIVE_CHANGE_TOOLS:
             continue

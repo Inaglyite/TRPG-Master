@@ -94,3 +94,12 @@ export function onTurnDiagnostics(payload: TurnDiagnostics | null | undefined) {
     diagnostics: payload || null,
   });
 }
+
+export function onTurnPerformance(performance: TurnDiagnostics["performance"]) {
+  const current = useModelStore.getState().diagnostics;
+  useModelStore.setState({
+    diagnostics: current
+      ? { ...current, performance: performance || {} }
+      : { performance: performance || {} },
+  });
+}

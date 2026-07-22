@@ -40,6 +40,13 @@ export type TurnDiagnostics = {
     trace?: LoreTrace[];
   };
   tool_names?: string[];
+  performance?: {
+    turn_total_ms?: number;
+    first_visible_ms?: number | null;
+    phases_ms?: Record<string, number>;
+    counters?: Record<string, number>;
+  };
+  mutations?: Array<{ source?: string; name?: string; success?: boolean }>;
 };
 
 type ModelState = {

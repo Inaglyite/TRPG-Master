@@ -1,17 +1,29 @@
 """Tool 定义（Function Calling Schema）+ 执行器 + 骰子摘要"""
 
 import base64
+import contextlib
+import io
 import json
 import mimetypes
-import os
-import subprocess
-import sys
+import random
+import threading
 from pathlib import Path
 
+from .combat import (
+    CombatError,
+    combat_action,
+    combat_decide,
+    combat_status,
+    end_combat,
+    start_combat,
+)
 from .consequences import SanitySeverity, classify_sanity_consequence
 from .endings import validate_ending
+from .inventory import InventoryError
+from .inventory import use_item as apply_inventory_use
 from .runtime import RuntimeContext
 from .tool_runtime import ToolRuntime, UnknownToolError
+from .world_store import atomic_write_json
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -754,174 +766,497 @@ COMPLEX_FUNCTIONS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# CLI 执行器
-# ---------------------------------------------------------------------------
-
-def _run_cli(argv: list, context: RuntimeContext) -> str:
-    try:
-        env = {
-            **os.environ,
-            **context.child_process_env(),
-            "PYTHONIOENCODING": "utf-8",
-        }
-        # shell=False + argv 列表：经 CreateProcess 直接启动，exe 路径含
-        # 空格(Program Files)或中文(疯狂宅邸)时不会被 cmd /c 截断。
-        result = subprocess.run(
-            [str(a) for a in argv], shell=False, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=30, cwd=context.project_root, env=env
-        )
-        output = result.stdout.strip()
-        if result.returncode != 0:
-            err = result.stderr.strip()
-            return f"[错误] {err}" if err else f"[返回码 {result.returncode}] {output}"
-        return output if output else "(空)"
-    except subprocess.TimeoutExpired:
-        return "[超时] 命令执行超过 30 秒"
-    except Exception as e:
-        return f"[异常] {e}"
-
-
 TOOL_RUNTIME = ToolRuntime()
 
 
-def _register_cli_tool(name: str, argv_builder) -> None:
-    def handler(args: dict, context: RuntimeContext) -> str:
-        return _run_cli(argv_builder(sys.executable, args), context)
-
-    TOOL_RUNTIME.add(name, handler)
+def _json_result(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False)
 
 
-_CLI_TOOL_BUILDERS = {
-    "dice_roll": lambda exe, args: [exe, "tools/dice.py", args.get("spec", "d20")],
-    "state_get": lambda exe, args: [
-        exe, "tools/state_manager.py", "get", args.get("path", "pc.hp")
-    ],
-    "state_set": lambda exe, args: [
-        exe, "tools/state_manager.py", "set",
-        args.get("path", ""), args.get("value", ""),
-    ],
-    "state_npcs": lambda exe, _args: [exe, "tools/state_manager.py", "npcs"],
-    "state_clues": lambda exe, _args: [exe, "tools/state_manager.py", "clues"],
-    "state_add_item": lambda exe, args: [
-        exe, "tools/state_manager.py", "add-item", args.get("item", "")
-    ],
-    "state_remove_item": lambda exe, args: [
-        exe, "tools/state_manager.py", "remove-item", args.get("item", "")
-    ],
-    "apply_damage": lambda exe, args: [
-        exe, "tools/damage.py", "damage", args.get("target", "pc"),
-        args.get("amount", 0), args.get("damage_type", "物理"),
-    ],
-    "apply_heal": lambda exe, args: [
-        exe, "tools/damage.py", "heal",
-        args.get("target", "pc"), args.get("amount", 0),
-    ],
-    "sanity_loss": lambda exe, args: [
-        exe, "tools/sanity.py", "loss", args.get("severity", "moderate")
-    ],
-    "sanity_restore": lambda exe, args: [
-        exe, "tools/sanity.py", "restore", args.get("amount", 0)
-    ],
-    "sanity_check": lambda exe, _args: [exe, "tools/sanity.py", "check"],
-    "load_character": lambda exe, args: [
-        exe, "tools/character.py", "load", args.get("path", "")
-    ],
-    "use_item": lambda exe, args: [
-        exe, "tools/item.py", json.dumps(args, ensure_ascii=False)
-    ],
-    "combat_start": lambda exe, args: [
-        exe, "tools/combat.py", "start", json.dumps(args, ensure_ascii=False)
-    ],
-    "combat_status": lambda exe, _args: [exe, "tools/combat.py", "status", "{}"],
-    "combat_action": lambda exe, args: [
-        exe, "tools/combat.py", "action", json.dumps(args, ensure_ascii=False)
-    ],
-    "combat_decide": lambda exe, args: [
-        exe, "tools/combat.py", "decide", json.dumps(args, ensure_ascii=False)
-    ],
-    "combat_end": lambda exe, args: [
-        exe, "tools/combat.py", "end", json.dumps(args, ensure_ascii=False)
-    ],
-    "attribute_check": lambda exe, args: [
-        exe, "tools/skill_check.py", args.get("attribute", "STR"),
-        args.get("bonus_dice", 0) or 0, args.get("penalty_dice", 0) or 0,
-    ],
-    "luck_check": lambda exe, _args: [exe, "tools/skill_check.py", "POW"],
-    "psychoanalysis": lambda exe, args: [
-        exe, "tools/sanity.py", "psychoanalysis", args.get("target", "pc")
-    ],
-    "reality_check": lambda exe, _args: [exe, "tools/sanity.py", "reality-check"],
-    "set_psychological_trait": lambda exe, args: [
-        exe, "tools/state_manager.py", "psych-trait",
-        args.get("category", "phobia"), args.get("name", ""),
-        args.get("context", ""),
-    ],
-    "link_clues": lambda exe, args: [
-        exe, "tools/state_manager.py", "link-clues", args.get("from_id", ""),
-        args.get("to_id", ""), args.get("reasoning", ""),
-    ],
-    "npc_reveal": lambda exe, args: [
-        exe, "tools/state_manager.py", "npc-reveal", args.get("npc_id", ""),
-        args.get("tier", 1), args.get("entry_text", ""),
-    ],
-    "get_npc_secret": lambda exe, args: [
-        exe, "tools/state_manager.py", "npc-secret", args.get("npc_id", "")
-    ],
-    "get_private_memory": lambda exe, _args: [
-        exe, "tools/state_manager.py", "private-memory"
-    ],
-    "update_private_memory": lambda exe, args: [
-        exe, "tools/state_manager.py", "private-memory-update",
-        args.get("section", ""), args.get("value", ""),
-    ],
+def _parse_dice_spec(spec: str) -> tuple[int, int, int]:
+    normalized = str(spec or "d20").strip().lower()
+    modifier = 0
+    base = normalized
+    if "+" in normalized:
+        base, raw = normalized.split("+", 1)
+        modifier = int(raw)
+    elif "-" in normalized:
+        base, raw = normalized.rsplit("-", 1)
+        modifier = -int(raw)
+    if "d" not in base:
+        raise ValueError(f"无法解析骰子格式 {spec!r}")
+    raw_count, raw_sides = base.split("d", 1)
+    count = int(raw_count) if raw_count else 1
+    sides = int(raw_sides)
+    if not 1 <= count <= 100 or not 2 <= sides <= 100_000:
+        raise ValueError("骰子数量或面数超出允许范围")
+    return count, sides, modifier
+
+
+@TOOL_RUNTIME.handler("dice_roll")
+def _dice_roll(args: dict, _context: RuntimeContext) -> str:
+    spec = str(args.get("spec", "d20"))
+    try:
+        count, sides, modifier = _parse_dice_spec(spec)
+    except (TypeError, ValueError) as exc:
+        return f"[错误] {exc}"
+    rolls = [random.randint(1, sides) for _ in range(count)]
+    return _json_result({
+        "spec": spec,
+        "sides": sides,
+        "count": count,
+        "modifier": modifier,
+        "advantage": False,
+        "disadvantage": False,
+        "rolls": rolls,
+        "total": sum(rolls) + modifier,
+    })
+
+
+def _roll_check(
+    context: RuntimeContext,
+    check_id: str,
+    bonus: int = 0,
+    penalty: int = 0,
+    push: bool = False,
+) -> str:
+    state = context.world_store.load()
+    attributes = state.get("pc", {}).get("attributes", {})
+    skills = state.get("pc", {}).get("skills", {})
+    value = int(attributes.get(check_id, skills.get(check_id, 50)))
+    tens = random.randint(0, 9)
+    ones = random.randint(0, 9)
+    net = max(-2, min(2, penalty - bonus))
+    extra = [random.randint(0, 9) for _ in range(abs(net))]
+    if net < 0:
+        tens = min([tens, *extra])
+    elif net > 0:
+        tens = max([tens, *extra])
+    roll = 100 if tens == 0 and ones == 0 else tens * 10 + ones
+    if roll <= 1:
+        level = "critical_success"
+    elif roll <= max(1, value // 5):
+        level = "extreme_success"
+    elif roll <= max(1, value // 2):
+        level = "hard_success"
+    elif roll <= value:
+        level = "regular_success"
+    elif (value < 50 and roll >= 96) or roll == 100:
+        level = "fumble"
+    else:
+        level = "failure"
+    try:
+        schema = json.loads((context.project_root / "rules/rule_schema.json").read_text("utf-8"))
+        labels = {item["id"]: item.get("name", item["id"]) for item in schema.get("skills", [])}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        labels = {}
+    return _json_result({
+        "skill": check_id,
+        "skill_name": labels.get(check_id, check_id),
+        "skill_value": value,
+        "d100_roll": roll,
+        "tens_dice": [tens, *extra],
+        "ones_dice": ones,
+        "bonus_dice": bonus,
+        "penalty_dice": penalty,
+        "difficulty_regular": value,
+        "difficulty_hard": max(1, value // 2),
+        "difficulty_extreme": max(1, value // 5),
+        "level": level,
+        "success": level.endswith("success"),
+        "is_push": push,
+    })
+
+
+@TOOL_RUNTIME.handler("attribute_check")
+def _attribute_check(args: dict, context: RuntimeContext) -> str:
+    return _roll_check(
+        context,
+        str(args.get("attribute", "STR")).upper(),
+        int(args.get("bonus_dice", 0) or 0),
+        int(args.get("penalty_dice", 0) or 0),
+    )
+
+
+@TOOL_RUNTIME.handler("luck_check")
+def _luck_check(_args: dict, context: RuntimeContext) -> str:
+    state = context.world_store.load()
+    luck = int(state.get("pc", {}).get("luck", 50))
+    roll = random.randint(1, 100)
+    level = "regular_success" if roll <= luck else "failure"
+    return _json_result({
+        "skill": "luck", "skill_name": "幸运", "skill_value": luck,
+        "d100_roll": roll, "level": level, "success": roll <= luck,
+        "bonus_dice": 0, "penalty_dice": 0, "is_push": False,
+    })
+
+
+def _resolve_state_path(data: object, path: str) -> object:
+    current = data
+    for part in str(path).split("."):
+        if isinstance(current, list):
+            current = current[int(part)]
+        elif isinstance(current, dict):
+            current = current[part]
+        else:
+            raise KeyError(part)
+    return current
+
+
+def _set_state_path(data: dict, path: str, value: object) -> None:
+    parts = str(path).split(".")
+    current: object = data
+    for part in parts[:-1]:
+        if isinstance(current, list):
+            current = current[int(part)]
+        elif isinstance(current, dict):
+            current = current.setdefault(part, {})
+        else:
+            raise KeyError(part)
+    if isinstance(current, list):
+        current[int(parts[-1])] = value
+    elif isinstance(current, dict):
+        current[parts[-1]] = value
+    else:
+        raise KeyError(parts[-1])
+
+
+@TOOL_RUNTIME.handler("state_get")
+def _state_get(args: dict, context: RuntimeContext) -> str:
+    try:
+        return json.dumps(
+            _resolve_state_path(context.world_store.load(), str(args.get("path", "pc.hp"))),
+            ensure_ascii=False,
+            indent=2,
+        )
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        return f"[错误] {exc}"
+
+
+@TOOL_RUNTIME.handler("state_set")
+def _state_set(args: dict, context: RuntimeContext) -> str:
+    path = str(args.get("path", ""))
+    raw = args.get("value", "")
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except json.JSONDecodeError:
+        value = raw
+    context.world_store.update(lambda world: _set_state_path(world, path, value))
+    return _json_result({"ok": True, "path": path, "value": value})
+
+
+@TOOL_RUNTIME.handler("state_npcs")
+def _state_npcs(_args: dict, context: RuntimeContext) -> str:
+    return _json_result(context.world_store.load().get("npcs", []))
+
+
+@TOOL_RUNTIME.handler("state_clues")
+def _state_clues(_args: dict, context: RuntimeContext) -> str:
+    return _json_result(context.world_store.load().get("clues_found", {}))
+
+
+_STATE_COMMAND_LOCK = threading.RLock()
+
+
+def _state_command(context: RuntimeContext, command: str, *args, **kwargs) -> str:
+    """Run a legacy state-manager command against one in-memory DB transaction."""
+    from tools import state_manager
+
+    output = io.StringIO()
+    result_text = ""
+    with _STATE_COMMAND_LOCK:
+        def mutate(world: dict) -> None:
+            nonlocal result_text
+            previous = state_manager._TRANSACTION_STATE
+            state_manager._TRANSACTION_STATE = world
+            try:
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    getattr(state_manager, command)(*args, **kwargs)
+                result_text = output.getvalue().strip()
+            finally:
+                state_manager._TRANSACTION_STATE = previous
+
+        context.world_store.update(mutate)
+    return result_text or "(空)"
+
+
+def _sanity_mutation(context: RuntimeContext, operation) -> str:
+    from tools import sanity
+
+    result: dict = {}
+    with _STATE_COMMAND_LOCK:
+        def mutate(world: dict) -> None:
+            nonlocal result
+            previous = sanity._TRANSACTION_STATE
+            sanity._TRANSACTION_STATE = world
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    value = operation(sanity, world)
+                result = value if isinstance(value, dict) else {}
+            finally:
+                sanity._TRANSACTION_STATE = previous
+
+        context.world_store.update(mutate)
+    return _json_result(result)
+
+
+@TOOL_RUNTIME.handler("sanity_loss")
+def _sanity_loss(args: dict, context: RuntimeContext) -> str:
+    return _sanity_mutation(
+        context,
+        lambda sanity, _world: sanity.apply_sanity_loss(
+            str(args.get("severity", "moderate"))
+        ),
+    )
+
+
+@TOOL_RUNTIME.handler("sanity_restore")
+def _sanity_restore(args: dict, context: RuntimeContext) -> str:
+    amount = max(0, int(args.get("amount", 0)))
+
+    def restore(_sanity, world: dict) -> dict:
+        pc = world["pc"]
+        before = int(pc.get("san", 65))
+        maximum = 99 - int(pc.get("skills", {}).get("cthulhu_mythos", 0))
+        pc["san"] = min(maximum, before + amount)
+        return {"restore": amount, "san_before": before, "san_after": pc["san"],
+                "max_san": maximum}
+
+    return _sanity_mutation(context, restore)
+
+
+@TOOL_RUNTIME.handler("sanity_check")
+def _sanity_check(_args: dict, context: RuntimeContext) -> str:
+    pc = context.world_store.load().get("pc", {})
+    san = int(pc.get("san", 65))
+    maximum = 99 - int(pc.get("skills", {}).get("cthulhu_mythos", 0))
+    return _json_result({"san": san, "max_san": maximum,
+                         "ratio": round(san / maximum, 2) if maximum else 0})
+
+
+@TOOL_RUNTIME.handler("psychoanalysis")
+def _psychoanalysis(args: dict, context: RuntimeContext) -> str:
+    return _sanity_mutation(
+        context,
+        lambda sanity, _world: sanity.psychoanalysis(str(args.get("target", "pc"))),
+    )
+
+
+@TOOL_RUNTIME.handler("reality_check")
+def _reality_check(_args: dict, context: RuntimeContext) -> str:
+    return _sanity_mutation(context, lambda sanity, _world: sanity.reality_check())
+
+
+@TOOL_RUNTIME.handler("state_add_item")
+def _state_add_item(args: dict, context: RuntimeContext) -> str:
+    return _state_command(context, "cmd_add_item", str(args.get("item", "")))
+
+
+@TOOL_RUNTIME.handler("state_remove_item")
+def _state_remove_item(args: dict, context: RuntimeContext) -> str:
+    return _state_command(context, "cmd_remove_item", str(args.get("item", "")))
+
+
+def _damage_or_heal(args: dict, context: RuntimeContext, *, heal: bool) -> str:
+    result: dict = {}
+    target = str(args.get("target", "pc"))
+    amount = max(0, int(args.get("amount", 0)))
+
+    def mutate(world: dict) -> None:
+        nonlocal result
+        hp = int(_resolve_state_path(world, f"{target}.hp"))
+        if heal:
+            maximum = int(_resolve_state_path(world, f"{target}.max_hp"))
+            after = min(maximum, hp + amount)
+            result = {"target": target, "heal_amount": amount, "actual_heal": after - hp,
+                      "hp_before": hp, "hp_after": after}
+        else:
+            after = max(0, hp - amount)
+            result = {"target": target, "damage": amount,
+                      "damage_type": args.get("damage_type", "物理"),
+                      "hp_before": hp, "hp_after": after,
+                      "status": "alive" if after > 0 else "dying"}
+        _set_state_path(world, f"{target}.hp", after)
+
+    context.world_store.update(mutate)
+    return _json_result(result)
+
+
+@TOOL_RUNTIME.handler("apply_damage")
+def _apply_damage(args: dict, context: RuntimeContext) -> str:
+    return _damage_or_heal(args, context, heal=False)
+
+
+@TOOL_RUNTIME.handler("apply_heal")
+def _apply_heal(args: dict, context: RuntimeContext) -> str:
+    return _damage_or_heal(args, context, heal=True)
+
+
+@TOOL_RUNTIME.handler("use_item")
+def _use_item(args: dict, context: RuntimeContext) -> str:
+    result: dict = {}
+    try:
+        def mutate(world: dict) -> None:
+            nonlocal result
+            result = apply_inventory_use(
+                world,
+                item=str(args.get("item", "")),
+                operation=str(args.get("operation", "use")),
+                amount=args.get("amount", 1),
+                reason=str(args.get("reason", "")),
+            )
+
+        context.world_store.update(mutate)
+    except InventoryError as exc:
+        result = {"ok": False, "error": str(exc)}
+    return _json_result(result)
+
+
+def _combat_mutation(context: RuntimeContext, operation) -> str:
+    result: dict = {}
+    try:
+        def mutate(world: dict) -> None:
+            nonlocal result
+            result = operation(world)
+
+        context.world_store.update(mutate)
+    except (CombatError, TypeError, ValueError) as exc:
+        result = {"ok": False, "error": str(exc)}
+    return _json_result(result)
+
+
+@TOOL_RUNTIME.handler("combat_start")
+def _combat_start(args: dict, context: RuntimeContext) -> str:
+    return _combat_mutation(context, lambda world: start_combat(
+        world, args.get("participants", []), str(args.get("reason", "")),
+        args.get("initial_action"),
+    ))
+
+
+@TOOL_RUNTIME.handler("combat_status")
+def _combat_status(_args: dict, context: RuntimeContext) -> str:
+    try:
+        return _json_result(combat_status(context.world_store.load()))
+    except CombatError as exc:
+        return _json_result({"ok": False, "error": str(exc)})
+
+
+@TOOL_RUNTIME.handler("combat_action")
+def _combat_action(args: dict, context: RuntimeContext) -> str:
+    return _combat_mutation(context, lambda world: combat_action(world, **args))
+
+
+@TOOL_RUNTIME.handler("combat_decide")
+def _combat_decide(args: dict, context: RuntimeContext) -> str:
+    return _combat_mutation(context, lambda world: combat_decide(
+        world, str(args.get("decision_id", "")), str(args.get("option_id", ""))
+    ))
+
+
+@TOOL_RUNTIME.handler("combat_end")
+def _combat_end(args: dict, context: RuntimeContext) -> str:
+    return _combat_mutation(context, lambda world: end_combat(
+        world, str(args.get("reason", ""))
+    ))
+
+
+_LEGACY_STATE_HANDLERS = {
+    "set_psychological_trait": ("cmd_psychological_trait", ("category", "name", "context")),
+    "link_clues": ("cmd_link_clues", ("from_id", "to_id", "reasoning")),
+    "npc_reveal": ("cmd_npc_reveal", ("npc_id", "tier", "entry_text")),
+    "update_private_memory": ("cmd_private_memory_update", ("section", "value")),
 }
 
-for _tool_name, _argv_builder in _CLI_TOOL_BUILDERS.items():
-    _register_cli_tool(_tool_name, _argv_builder)
+
+def _register_legacy_state_handler(tool_name: str, command: str, fields: tuple[str, ...]) -> None:
+    def handler(args: dict, context: RuntimeContext) -> str:
+        return _state_command(context, command, *(args.get(field, "") for field in fields))
+
+    TOOL_RUNTIME.add(tool_name, handler)
+
+
+for _name, (_command, _fields) in _LEGACY_STATE_HANDLERS.items():
+    _register_legacy_state_handler(_name, _command, _fields)
+
+
+@TOOL_RUNTIME.handler("get_npc_secret")
+def _get_npc_secret(args: dict, context: RuntimeContext) -> str:
+    world = context.world_store.load()
+    npc_id = str(args.get("npc_id", ""))
+    npc = next((item for item in world.get("npcs", []) if str(item.get("id")) == npc_id), None)
+    return _json_result(npc) if npc else "[错误] NPC 不存在"
+
+
+@TOOL_RUNTIME.handler("get_private_memory")
+def _get_private_memory(_args: dict, context: RuntimeContext) -> str:
+    return _json_result(context.world_store.load().get("private_memory", {}))
 
 
 @TOOL_RUNTIME.handler("skill_check")
 def _skill_check(args: dict, context: RuntimeContext) -> str:
-    argv = [
-        sys.executable,
-        "tools/skill_check.py",
-        args.get("skill", "spot_hidden"),
-        args.get("bonus_dice", 0) or 0,
-        args.get("penalty_dice", 0) or 0,
-    ]
-    if args.get("push", False):
-        argv.append("--push")
-    return _run_cli(argv, context)
+    return _roll_check(
+        context,
+        str(args.get("skill", "spot_hidden")),
+        int(args.get("bonus_dice", 0) or 0),
+        int(args.get("penalty_dice", 0) or 0),
+        bool(args.get("push", False)),
+    )
 
 
 @TOOL_RUNTIME.handler("state_add_clue")
 def _state_add_clue(args: dict, context: RuntimeContext) -> str:
-    argv = [
-        sys.executable,
-        "tools/state_manager.py",
-        "add-clue",
+    return _state_command(
+        context,
+        "cmd_add_clue",
         args.get("text", ""),
         args.get("category", "investigation"),
-    ]
-    asset_id = args.get("asset_id", "") or ""
-    clue_id = args.get("clue_id", "") or ""
-    if asset_id or clue_id:
-        argv.extend([asset_id, clue_id])
-    return _run_cli(argv, context)
+        asset_id=args.get("asset_id", "") or "",
+        clue_id=args.get("clue_id", "") or "",
+    )
 
 
 @TOOL_RUNTIME.handler("create_character")
 def _create_character(args: dict, context: RuntimeContext) -> str:
-    return _run_cli([
-        sys.executable,
-        "tools/character.py",
-        "create",
-        args.get("name", "调查员"),
-        args.get("occupation", "私家侦探"),
-        args.get("violence_stance", "conditional"),
-    ], context)
+    from tools.character import create_character
+
+    character = create_character(
+        str(args.get("name", "调查员")),
+        str(args.get("occupation", "私家侦探")),
+        violence_stance=str(args.get("violence_stance", "conditional")),
+    )
+    if "error" in character:
+        return _json_result(character)
+    directory = context.custom_characters_dir
+    directory.mkdir(parents=True, exist_ok=True)
+    safe_name = "".join(
+        char for char in str(character.get("name", "调查员"))
+        if char.isalnum() or char in "_ "
+    ).strip() or "investigator"
+    path = directory / f"{safe_name}_{str(character.get('created_at', ''))[:10]}.json"
+    atomic_write_json(path, character)
+    return _json_result({
+        "created": True,
+        "name": character["name"],
+        "occupation": character["occupation"],
+        "path": str(path),
+        "attributes": character["attributes"],
+        "hp": character["derived"]["HP"],
+        "san": character["derived"]["SAN"],
+    })
+
+
+@TOOL_RUNTIME.handler("load_character")
+def _load_character(args: dict, context: RuntimeContext) -> str:
+    raw = Path(str(args.get("path", "")))
+    path = raw if raw.is_absolute() else context.custom_characters_dir / raw
+    try:
+        resolved = path.resolve()
+        allowed = (context.custom_characters_dir.resolve(), context.project_root.resolve())
+        if not any(_is_relative_to(resolved, root) for root in allowed):
+            return _json_result({"error": "角色卡路径超出允许范围"})
+        return json.dumps(json.loads(resolved.read_text("utf-8")), ensure_ascii=False, indent=2)
+    except (OSError, json.JSONDecodeError):
+        return _json_result({"error": "文件不存在或角色卡格式错误"})
 
 
 @TOOL_RUNTIME.handler("sanity_trigger")
@@ -1064,16 +1399,13 @@ def _read_file(args: dict, context: RuntimeContext) -> str:
 
 @TOOL_RUNTIME.handler("show_handout")
 def _show_handout(args: dict, context: RuntimeContext) -> str:
-    argv = [
-        sys.executable,
-        "tools/state_manager.py",
-        "show-handout",
+    result = _state_command(
+        context,
+        "cmd_show_handout",
         args.get("entity_type", "npc"),
         args.get("entity_id", ""),
-    ]
-    if args.get("asset_id"):
-        argv.append(args["asset_id"])
-    result = _run_cli(argv, context)
+        args.get("asset_id") or None,
+    )
     try:
         info = json.loads(result)
         if info.get("found") and info.get("file"):

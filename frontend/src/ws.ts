@@ -65,6 +65,7 @@ import {
   onModelSettings,
   onModelSettingsError,
   onTurnDiagnostics,
+  onTurnPerformance,
 } from "./settings";
 import {
   onNotesWorldChanged,
@@ -773,6 +774,9 @@ function handleMessage(e: MessageEvent) {
       break;
     case "turn_diagnostics":
       onTurnDiagnostics(data.diagnostics);
+      break;
+    case "turn_performance":
+      onTurnPerformance(data.metrics);
       break;
     case "save_list":
       onSaveList(data);

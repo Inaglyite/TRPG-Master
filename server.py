@@ -523,6 +523,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     # ---- 同步回调（被引擎在工作线程里同步调用）----
     def on_narrative(text: str, npc_id: str | None = None):
+        engine.mark_first_visible()
         payload = {"type": "narrative_chunk", "text": text}
         if npc_id:
             payload["npc_id"] = npc_id
@@ -541,6 +542,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     def on_narrative_segments(segments: list):
         enriched = enrich_narrative_segments(segments, resolve_speaker)
         emit({"type": "narrative_segments", "segments": enriched})
+
+    def on_performance(metrics: dict):
+        emit({"type": "turn_performance", "metrics": metrics})
 
     def on_tension(text: str, cat: str):
         emit({"type": "tension", "text": text, "category": cat})
@@ -1219,6 +1223,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         on_error=on_error,
         on_speaker_segment=on_speaker_segment,
         on_narrative_segments=on_narrative_segments,
+        on_performance=on_performance,
     )
 
     # 消息循环

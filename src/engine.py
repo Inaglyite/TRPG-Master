@@ -73,6 +73,8 @@ from .tools import (
     dice_summary,
     execute_function,
 )
+from .turn_mutations import TurnMutationLedger
+from .turn_performance import TurnPerformance
 from .turn_reconciler import (
     narrative_body,
     reconcile_narrative_entities,
@@ -138,6 +140,7 @@ class EngineCallbacks:
     on_error: Callable[[str], None] = lambda msg: None           # 错误
     on_speaker_segment: Callable[[str], None] = lambda npc_id: None  # NPC 发言段开始
     on_narrative_segments: Callable[[list], None] = lambda segments: None  # 发言段定稿
+    on_performance: Callable[[dict], None] = lambda metrics: None
 
 
 class GameEngine:
@@ -211,6 +214,8 @@ class GameEngine:
         self._active_turn_id: str | None = None
         self._turn_diagnostics: list[dict] = []
         self._turn_lore_diagnostics: dict = {}
+        self._turn_performance: TurnPerformance | None = None
+        self._turn_mutations = TurnMutationLedger()
         # 摘要策略：按玩家回合静默压缩，避免内部工具消息过多导致频繁打断沉浸。
         self.SUMMARY_PLAYER_TURN_INTERVAL = 50
         self.SUMMARY_KEEP_RECENT_MESSAGES = 24
@@ -360,7 +365,34 @@ class GameEngine:
         self._active_turn_id = turn_id
         self._turn_diagnostics = []
         self._turn_lore_diagnostics = {}
+        self._turn_performance = TurnPerformance()
+        self._turn_mutations = TurnMutationLedger()
         return turn_id
+
+    def performance_span(self, name: str):
+        perf = getattr(self, "_turn_performance", None)
+        if perf is None:
+            from contextlib import nullcontext
+
+            return nullcontext()
+        return perf.span(name)
+
+    def mark_first_visible(self) -> None:
+        perf = getattr(self, "_turn_performance", None)
+        if perf is not None:
+            perf.mark_first_visible()
+
+    def record_model_performance(
+        self, *, elapsed_ms: float, first_token_ms: float | None, tool_count: int
+    ) -> None:
+        perf = getattr(self, "_turn_performance", None)
+        if perf is None:
+            return
+        perf.add_ms("model_total", elapsed_ms)
+        perf.increment("model_call_count")
+        perf.increment("model_tool_call_count", tool_count)
+        if first_token_ms is not None and "model_first_token" not in perf.phases_ms:
+            perf.add_ms("model_first_token", first_token_ms)
 
     def record_turn_event(self, payload: dict) -> None:
         journal = getattr(self, "turn_journal", None)
@@ -390,7 +422,10 @@ class GameEngine:
         journal = getattr(self, "turn_journal", None)
         if turn_id is None or journal is None:
             return None
-        record = journal.complete(
+        perf = getattr(self, "_turn_performance", None)
+        performance = perf.snapshot() if perf is not None else {}
+        with self.performance_span("journal_commit"):
+            record = journal.complete(
             turn_id,
             messages=self.messages,
             world_state=self.context.world_store.load(),
@@ -401,10 +436,25 @@ class GameEngine:
             diagnostics={
                 "model_calls": list(self._turn_diagnostics),
                 "lorebook": dict(self._turn_lore_diagnostics),
+                "performance": performance,
+                "mutations": self._turn_mutations.snapshot(),
             },
             narrative_segments=narrative_segments,
-        )
+            )
+        if perf is not None:
+            performance = perf.snapshot()
+            persisted_performance = (
+                record.get("diagnostics", {}).get("performance", {})
+            )
+            journal_ms = persisted_performance.get("phases_ms", {}).get(
+                "journal_commit"
+            )
+            if journal_ms is not None:
+                performance.setdefault("phases_ms", {})["journal_commit"] = journal_ms
+            record.setdefault("diagnostics", {})["performance"] = performance
+            self.cb.on_performance(performance)
         self._active_turn_id = None
+        self._turn_performance = None
         return record
 
     def finish_turn_record(
@@ -1348,6 +1398,7 @@ class GameEngine:
             executed_tools,
             player_action=player_action,
             narrative=narrative,
+            has_authoritative_mutation=self._turn_mutations.has_authoritative_mutation,
         )
 
     def _resume_pending_combat_decision(self) -> None:
@@ -1956,21 +2007,12 @@ class GameEngine:
                 kind="action" if user_content else "control",
                 player_input=user_content,
             )
+        cache_scope = getattr(self.context.world_store, "turn_cache", None)
+        from contextlib import nullcontext
+
         try:
-            self._resume_pending_combat_decision()
-            if user_content:
-                user_content = self._preflight_player_escalation(user_content)
-                if user_content is None:
-                    self.finish_turn_record(
-                        status="cancelled",
-                        error="玩家在行动发生前取消",
-                    )
-                    self.cb.on_done()
-                    return
-            self._turn_graph.invoke(
-                {"engine": self, "user_content": user_content},
-                config={"recursion_limit": 50},
-            )
+            with cache_scope() if cache_scope else nullcontext():
+                self._handle_action_cached(user_content)
         except TurnCancelledError as exc:
             self.finish_turn_record(
                 status="cancelled",
@@ -1985,3 +2027,22 @@ class GameEngine:
             raise
         finally:
             self._preconfirmed_escalation = None
+
+    def _handle_action_cached(self, user_content: str | None) -> None:
+        self._resume_pending_combat_decision()
+        try:
+            if user_content:
+                user_content = self._preflight_player_escalation(user_content)
+                if user_content is None:
+                    self.finish_turn_record(
+                        status="cancelled",
+                        error="玩家在行动发生前取消",
+                    )
+                    self.cb.on_done()
+                    return
+            self._turn_graph.invoke(
+                {"engine": self, "user_content": user_content},
+                config={"recursion_limit": 50},
+            )
+        except TurnCancelledError:
+            raise

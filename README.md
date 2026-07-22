@@ -34,6 +34,8 @@
 - [开发路线图](docs/ROADMAP.md)：数据库化后的当前基线、多人房间和未来可选 Agent 的进入条件。
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
+- [数据库与账号](docs/DATABASE.md)：迁移、旧世界导入、PostgreSQL、备份与恢复。
+- [回合性能](docs/PERFORMANCE.md)：阶段指标、进程内工具、回合缓存、快照合并与本地基准。
 - [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
 - [模组编辑器规划](docs/MODULE_EDITOR.md)：编辑器需求、技术架构、阶段与验收标准。
 - [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。

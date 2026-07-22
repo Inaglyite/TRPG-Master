@@ -74,6 +74,8 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function Diagnostics({ data }: { data: TurnDiagnostics }) {
   const lore = data.lorebook || {};
+  const performance = data.performance || {};
+  const phases = performance.phases_ms || {};
   return (
     <div id="turn-diagnostics-content">
       <div className="turn-diagnostic-overview">
@@ -84,6 +86,11 @@ function Diagnostics({ data }: { data: TurnDiagnostics }) {
         />
         <Metric label="消息" value={String(data.message_count ?? "--")} />
         <Metric label="世界版本" value={String(data.world_revision ?? "--")} />
+        <Metric label="首段可见" value={seconds(performance.first_visible_ms)} />
+        <Metric label="准备" value={seconds(phases.prepare)} />
+        <Metric label="工具" value={seconds(phases.tool_execution)} />
+        <Metric label="审计" value={seconds(phases.model_audit)} />
+        <Metric label="提交" value={seconds(phases.journal_commit)} />
       </div>
       {(data.model_calls || []).map((call, index) => (
         <div className="turn-diagnostic-call" key={`${call.model}-${index}`}>

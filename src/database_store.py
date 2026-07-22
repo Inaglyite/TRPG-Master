@@ -39,6 +39,8 @@ class DatabaseWorldStore:
         self.world_dir = Path(world_dir).resolve()
         self.state_path = self.world_dir / "world_state.json"
         self._thread_lock = _lock(f"{database_url}:{world_id}")
+        self._cache_depth = 0
+        self._cached_snapshot: WorldSnapshot | None = None
 
     @property
     def exists(self) -> bool:
@@ -49,6 +51,29 @@ class DatabaseWorldStore:
     def locked(self) -> Iterator[None]:
         with self._thread_lock:
             yield
+
+    @contextmanager
+    def turn_cache(self) -> Iterator[None]:
+        """Reuse authoritative reads inside one world-serialized engine turn."""
+        with self._thread_lock:
+            self._cache_depth += 1
+        try:
+            yield
+        finally:
+            with self._thread_lock:
+                self._cache_depth = max(0, self._cache_depth - 1)
+                if self._cache_depth == 0:
+                    self._cached_snapshot = None
+
+    def invalidate_cache(self) -> None:
+        with self._thread_lock:
+            self._cached_snapshot = None
+
+    def _cache(self, snapshot: WorldSnapshot) -> None:
+        if self._cache_depth:
+            self._cached_snapshot = WorldSnapshot(
+                copy.deepcopy(snapshot.state), snapshot.revision
+            )
 
     def _row(self, session, *, for_update: bool = False) -> WorldState:
         statement = select(WorldState).where(WorldState.world_id == self.world_id)
@@ -84,7 +109,9 @@ class DatabaseWorldStore:
                 row.state = state
                 row.updated_at = datetime.now(UTC)
             session.flush()
-            return WorldSnapshot(copy.deepcopy(state), revision)
+            snapshot = WorldSnapshot(copy.deepcopy(state), revision)
+            self._cache(snapshot)
+            return snapshot
 
     def load(self) -> dict:
         return self.snapshot().state
@@ -95,6 +122,11 @@ class DatabaseWorldStore:
 
     def snapshot(self) -> WorldSnapshot:
         with self._thread_lock, session_scope(self.database_url) as session:
+            if self._cache_depth and self._cached_snapshot is not None:
+                return WorldSnapshot(
+                    copy.deepcopy(self._cached_snapshot.state),
+                    self._cached_snapshot.revision,
+                )
             row = self._row(session)
             state, changed = migrate_world_state(copy.deepcopy(row.state))
             if changed:
@@ -104,7 +136,9 @@ class DatabaseWorldStore:
                 row.schema_version = CURRENT_WORLD_SCHEMA_VERSION
                 row.state = state
                 row.updated_at = datetime.now(UTC)
-            return WorldSnapshot(copy.deepcopy(state), int(state["revision"]))
+            snapshot = WorldSnapshot(copy.deepcopy(state), int(state["revision"]))
+            self._cache(snapshot)
+            return snapshot
 
     def update(
         self,
@@ -131,7 +165,9 @@ class DatabaseWorldStore:
             row.schema_version = CURRENT_WORLD_SCHEMA_VERSION
             row.updated_at = datetime.now(UTC)
             session.flush()
-            return WorldSnapshot(copy.deepcopy(working), row.revision)
+            snapshot = WorldSnapshot(copy.deepcopy(working), row.revision)
+            self._cache(snapshot)
+            return snapshot
 
     @contextmanager
     def transaction(self, *, expected_revision: int | None = None) -> Iterator[dict]:
@@ -151,6 +187,7 @@ class DatabaseWorldStore:
                 row.revision = actual + 1
                 row.schema_version = CURRENT_WORLD_SCHEMA_VERSION
                 row.updated_at = datetime.now(UTC)
+                self._cache(WorldSnapshot(copy.deepcopy(working), row.revision))
 
     def restore(
         self,
@@ -185,4 +222,6 @@ class DatabaseWorldStore:
             row.revision = seeded["revision"]
             row.schema_version = CURRENT_WORLD_SCHEMA_VERSION
             row.updated_at = datetime.now(UTC)
-            return WorldSnapshot(copy.deepcopy(seeded), row.revision)
+            snapshot = WorldSnapshot(copy.deepcopy(seeded), row.revision)
+            self._cache(snapshot)
+            return snapshot

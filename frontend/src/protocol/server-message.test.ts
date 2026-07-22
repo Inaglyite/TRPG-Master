@@ -17,4 +17,16 @@ describe("parseServerMessage", () => {
     expect(parseServerMessage({ type: "future_message" })).toBeNull();
     expect(parseServerMessage(null)).toBeNull();
   });
+
+  it("accepts turn performance diagnostics", () => {
+    expect(
+      parseServerMessage({
+        type: "turn_performance",
+        metrics: { first_visible_ms: 120 },
+      }),
+    ).toEqual({
+      type: "turn_performance",
+      metrics: { first_visible_ms: 120 },
+    });
+  });
 });

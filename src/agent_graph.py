@@ -7,6 +7,7 @@ GameEngine 及其现有 helper 负责。
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -72,6 +73,11 @@ def _check_cancelled(engine: Any) -> None:
         callback()
 
 
+def _performance_span(engine: Any, name: str):
+    factory = getattr(engine, "performance_span", None)
+    return factory(name) if factory else nullcontext()
+
+
 def _prepare_turn(state: TurnState) -> dict:
     engine = state["engine"]
     # The resolution is turn-local authority.  Control turns must never inherit
@@ -84,16 +90,29 @@ def _prepare_turn(state: TurnState) -> dict:
     opening_turn = bool(
         control_turn and engine._has_pending_new_game_opening()
     )
-    resolved_discoveries: list[dict] = []
-    lore_selection = None
-    prelude = ""
-
     _emit_phase(
         engine,
         "preparing",
         "正在准备开场……" if opening_turn else "正在整理当前场景……",
     )
 
+    with _performance_span(engine, "prepare"):
+        result = _prepare_turn_inner(
+            state, engine, user_content, control_turn, opening_turn
+        )
+    return result
+
+
+def _prepare_turn_inner(
+    state: TurnState,
+    engine: Any,
+    user_content: str | None,
+    control_turn: bool,
+    opening_turn: bool,
+) -> dict:
+    resolved_discoveries: list[dict] = []
+    lore_selection = None
+    prelude = ""
     if user_content:
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
@@ -107,6 +126,9 @@ def _prepare_turn(state: TurnState) -> dict:
             engine.cb.on_narrative(f"{prelude}\n\n")
         if transition_id:
             engine._resolve_scene_transition(user_content)
+            ledger = getattr(engine, "_turn_mutations", None)
+            if ledger is not None:
+                ledger.record_domain("scene_transition", {"scene_id": transition_id})
             encounter_text = str(
                 getattr(engine, "_encounter_resolution", None).narrative_text
                 if getattr(engine, "_encounter_resolution", None)
@@ -137,6 +159,12 @@ def _prepare_turn(state: TurnState) -> dict:
             discovery_matches,
             check_result,
         )
+        ledger = getattr(engine, "_turn_mutations", None)
+        if ledger is not None and resolved_discoveries:
+            ledger.record_domain(
+                "resolved_discoveries",
+                {"count": len(resolved_discoveries)},
+            )
         authority = engine._authoritative_turn_context(
             check_result,
             resolved_discoveries,
@@ -200,8 +228,9 @@ def _call_story_agent(state: TurnState) -> dict:
         "narrating",
         "守秘人正在展开开场……" if opening_turn else "守秘人正在续写场景……",
     )
-    text, tool_calls = engine._stream_llm(
-        engine.current_model,
+    with _performance_span(engine, "story_model"):
+        text, tool_calls = engine._stream_llm(
+            engine.current_model,
         system_prompt_override=(
             engine._opening_system_prompt() if opening_turn else None
         ),
@@ -211,19 +240,20 @@ def _call_story_agent(state: TurnState) -> dict:
         enable_tools=not opening_turn and not state.get("turn_had_check", False),
         prompt_profile="opening" if opening_turn else None,
         temperature=0.65 if opening_turn else 0.8,
-        buffer_if_tools=False,
-    )
+            buffer_if_tools=False,
+        )
     return {"text": text, "tool_calls": tool_calls}
 
 
 def _call_combat_agent(state: TurnState) -> dict:
     engine = state["engine"]
     _emit_phase(engine, "narrating", "守秘人正在结算战局……")
-    text, tool_calls = engine._stream_llm(
-        getattr(engine, "judgement_model", JUDGEMENT_MODEL),
-        system_overlay=engine._combat_system_overlay(),
-        buffer_if_tools=False,
-    )
+    with _performance_span(engine, "combat_model"):
+        text, tool_calls = engine._stream_llm(
+            getattr(engine, "judgement_model", JUDGEMENT_MODEL),
+            system_overlay=engine._combat_system_overlay(),
+            buffer_if_tools=False,
+        )
     return {"text": text, "tool_calls": tool_calls}
 
 
@@ -299,21 +329,25 @@ def _execute_tools(state: TurnState) -> dict:
             output = prior_checks[fingerprint]
         else:
             try:
-                execute_model_tool = getattr(engine, "_execute_model_tool", None)
-                if execute_model_tool:
-                    output = execute_model_tool(
-                        name,
-                        args,
-                        player_action=state.get("user_content") or "",
-                    )
-                else:
-                    output = engine._execute_tool(name, args)
+                with _performance_span(engine, "tool_execution"):
+                    execute_model_tool = getattr(engine, "_execute_model_tool", None)
+                    if execute_model_tool:
+                        output = execute_model_tool(
+                            name,
+                            args,
+                            player_action=state.get("user_content") or "",
+                        )
+                    else:
+                        output = engine._execute_tool(name, args)
             except Exception as exc:
                 log_error(f"工具 {name} 执行异常: {type(exc).__name__}: {exc}")
                 output = "[错误] 工具执行失败，请检查参数后重试"
             if name in _NON_REPEATABLE_CHECKS:
                 prior_checks[fingerprint] = output
         executed_tools.append({"name": name, "args": args, "output": output})
+        ledger = getattr(engine, "_turn_mutations", None)
+        if ledger is not None and not reused:
+            ledger.record_tool(name, args, output)
         engine.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
         log_tool(name, args)
 
@@ -481,7 +515,8 @@ def _finalize_turn(state: TurnState) -> dict:
         engine.cb.on_error("守秘人陷入了沉思……")
 
     if narrative.strip():
-        engine._reconcile_narrative_entities(narrative)
+        with _performance_span(engine, "entity_reconcile"):
+            engine._reconcile_narrative_entities(narrative)
         if (
             ENABLE_TURN_AUDIT
             and
@@ -492,18 +527,18 @@ def _finalize_turn(state: TurnState) -> dict:
                 narrative=narrative,
             )
         ):
-            engine._reconcile_turn(
-                state.get("user_content") or "",
-                narrative,
-                state.get("executed_tools", []),
-            )
+            with _performance_span(engine, "model_audit"):
+                engine._reconcile_turn(
+                    state.get("user_content") or "",
+                    narrative,
+                    state.get("executed_tools", []),
+                )
         _check_cancelled(engine)
         engine._dispatch_narrative_handouts(narrative)
         if state.get("lore_active"):
             engine._record_lore_usage(tuple(state.get("lore_entry_ids", [])))
 
     _check_cancelled(engine)
-    engine.save("slot_000")
     choices = extract_action_choices(narrative)
     choices_callback = getattr(engine.cb, "on_choices", None)
     if choices_callback and choices:

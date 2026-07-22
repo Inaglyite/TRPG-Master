@@ -10,8 +10,10 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from .config import AUTO_SAVE_SLOT
 from .database import (
     ModelCall,
+    SaveSlot,
     Snapshot,
     Turn,
     TurnEvent,
@@ -216,6 +218,7 @@ class DatabaseTurnJournal:
         diagnostics=None,
         narrative_segments=None,
     ) -> dict:
+        journal_started = time.monotonic()
         with session_scope(self.database_url) as session:
             row = self._row(session, turn_id)
             if row.status == "completed":
@@ -245,7 +248,7 @@ class DatabaseTurnJournal:
                 }
             )
             row.status = "completed"
-            row.record = record
+            row.record = copy.deepcopy(record)
             row.messages = serializable
             snapshot_row = Snapshot(
                 id=new_id("snapshot"),
@@ -258,6 +261,25 @@ class DatabaseTurnJournal:
             session.add(snapshot_row)
             row.snapshot_id = snapshot_row.id
             row.completed_at = _dt(record["completed_at"]) or utcnow()
+            auto_save = (
+                session.query(SaveSlot)
+                .filter_by(world_id=self.world_id, slot_key=AUTO_SAVE_SLOT)
+                .one_or_none()
+            )
+            if auto_save is None:
+                auto_save = SaveSlot(
+                    id=new_id("save"),
+                    world_id=self.world_id,
+                    slot_key=AUTO_SAVE_SLOT,
+                    kind="auto",
+                    snapshot_id=snapshot_row.id,
+                )
+                session.add(auto_save)
+            auto_save.snapshot_id = snapshot_row.id
+            auto_save.messages = serializable
+            auto_save.world_revision = int(world_state.get("revision", 0))
+            auto_save.metadata_json = self._save_metadata(world_state, serializable)
+            auto_save.updated_at = utcnow()
             for sequence, event in enumerate(events):
                 session.add(
                     TurnEvent(
@@ -287,8 +309,53 @@ class DatabaseTurnJournal:
                         details=_json_safe(call),
                     )
                 )
+            session.flush()
+            performance = record.setdefault("diagnostics", {}).setdefault(
+                "performance", {}
+            )
+            performance.setdefault("phases_ms", {})["journal_commit"] = round(
+                (time.monotonic() - journal_started) * 1000, 3
+            )
+            row.record = copy.deepcopy(record)
             self._export_completed(record, serializable, world_state)
+            self._export_auto_save(serializable, world_state, auto_save.metadata_json)
             return copy.deepcopy(record)
+
+    def _save_metadata(self, state: dict, messages: list[dict]) -> dict:
+        pc = state.get("pc", {})
+        scene = state.get("current_scene", {})
+        clues = state.get("clues_found", {})
+        clue_count = (
+            sum(len(items) for items in clues.values())
+            if isinstance(clues, dict)
+            else len(clues) if isinstance(clues, list) else 0
+        )
+        return {
+            "created_at": _now(),
+            "scene_id": scene.get("id", ""),
+            "scene_name": scene.get("name", ""),
+            "character_id": pc.get("character_id", ""),
+            "character_name": pc.get("name", ""),
+            "hp": f"{pc.get('hp', 0)}/{pc.get('max_hp', 0)}",
+            "san": f"{pc.get('san', 0)}/{pc.get('max_san', 0)}",
+            "clue_count": clue_count,
+            "message_count": len(messages),
+            "world_id": self.world_id,
+            "module_name": self.module_name,
+            "world_revision": int(state.get("revision", 0)),
+            "schema_version": int(state.get("schema_version", 0)),
+        }
+
+    def _export_auto_save(self, messages: list[dict], state: dict, metadata: dict) -> None:
+        if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() not in {
+            "1", "true", "yes", "on"
+        }:
+            return
+        slot_dir = self.world_dir / "saves" / AUTO_SAVE_SLOT
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(slot_dir / "messages.json", messages)
+        atomic_write_json(slot_dir / "snapshot.json", state)
+        atomic_write_json(slot_dir / "meta.json", metadata)
 
     def finish_incomplete(self, turn_id: str, *, status: str, error: str = "") -> dict:
         if status not in {"cancelled", "failed", "interrupted"}:
@@ -572,6 +639,8 @@ class DatabaseTurnJournal:
             "message_count": record.get("message_count"),
             "model_calls": copy.deepcopy(calls),
             "lorebook": copy.deepcopy(lorebook),
+            "performance": copy.deepcopy(diagnostics.get("performance") or {}),
+            "mutations": copy.deepcopy(diagnostics.get("mutations") or []),
             "tool_names": tool_names,
             "event_counts": counts,
         }

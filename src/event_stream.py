@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import threading
 from dataclasses import dataclass
@@ -39,6 +40,11 @@ class OrderedTurnEventStream:
         self._sequence = 0
         self._closed = False
         self._send_error: BaseException | None = None
+        self._narrative_batch_seconds = max(
+            0.0,
+            min(0.1, float(os.environ.get("TRPG_STREAM_BATCH_MS", "25")) / 1000),
+        )
+        self._last_narrative_turn: str | None = None
         self._sender_task = loop.create_task(self._send_loop())
 
     async def send(self, payload: dict[str, Any]) -> None:
@@ -136,12 +142,39 @@ class OrderedTurnEventStream:
             self._queue.put_nowait(event)
 
     async def _send_loop(self) -> None:
+        pending: _QueuedEvent | None = None
         while True:
-            event = await self._queue.get()
+            event = pending or await self._queue.get()
+            pending = None
             try:
                 if event.payload is None:
                     return
+                if (
+                    self._narrative_batch_seconds > 0
+                    and event.payload.get("type") == "narrative_chunk"
+                    and event.payload.get("turn_id") == self._last_narrative_turn
+                ):
+                    while True:
+                        try:
+                            following = await asyncio.wait_for(
+                                self._queue.get(), self._narrative_batch_seconds
+                            )
+                        except TimeoutError:
+                            break
+                        if self._can_merge_narrative(event.payload, following.payload):
+                            event.payload["text"] = (
+                                str(event.payload.get("text", ""))
+                                + str(following.payload.get("text", ""))
+                            )
+                            if following.payload and "seq" in following.payload:
+                                event.payload["seq"] = following.payload["seq"]
+                            self._queue.task_done()
+                            continue
+                        pending = following
+                        break
                 await self._websocket.send_json(event.payload)
+                if event.payload.get("type") == "narrative_chunk":
+                    self._last_narrative_turn = event.payload.get("turn_id")
                 if event.delivered is not None and not event.delivered.done():
                     event.delivered.set_result(None)
             except BaseException as exc:
@@ -153,6 +186,17 @@ class OrderedTurnEventStream:
                 return
             finally:
                 self._queue.task_done()
+
+    @staticmethod
+    def _can_merge_narrative(current: dict, following: dict | None) -> bool:
+        if not following or following.get("type") != "narrative_chunk":
+            return False
+        return (
+            current.get("turn_id") == following.get("turn_id")
+            and current.get("npc_id") == following.get("npc_id")
+            and not current.get("speaker")
+            and not following.get("speaker")
+        )
 
     def _fail_pending(self, exc: BaseException) -> None:
         while True:

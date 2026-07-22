@@ -1,5 +1,7 @@
 import asyncio
+import os
 import unittest
+from unittest.mock import patch
 
 from src.event_stream import OrderedTurnEventStream, TurnAlreadyActiveError
 
@@ -14,6 +16,26 @@ class FakeWebSocket:
 
 
 class OrderedTurnEventStreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_batches_adjacent_narrative_chunks_without_crossing_event_boundary(self):
+        websocket = FakeWebSocket()
+        with patch.dict(os.environ, {"TRPG_STREAM_BATCH_MS": "10"}):
+            stream = OrderedTurnEventStream(websocket, asyncio.get_running_loop())
+        await stream.begin_turn("turn-batch")
+        stream.emit({"type": "narrative_chunk", "text": "你听见"})
+        stream.emit({"type": "narrative_chunk", "text": "雨"})
+        stream.emit({"type": "narrative_chunk", "text": "声"})
+        stream.emit({"type": "dice_result", "summary": "检定"})
+        stream.emit({"type": "narrative_chunk", "text": "门开了"})
+        stream.end_turn()
+        await stream.flush()
+        await stream.close()
+
+        self.assertEqual(
+            [message["type"] for message in websocket.messages],
+            ["gm_turn_start", "narrative_chunk", "narrative_chunk", "dice_result", "narrative_chunk", "done"],
+        )
+        self.assertEqual(websocket.messages[1]["text"], "你听见")
+        self.assertEqual(websocket.messages[2]["text"], "雨声")
     async def test_rejects_a_second_active_turn_without_retagging_first(self):
         websocket = FakeWebSocket()
         stream = OrderedTurnEventStream(websocket, asyncio.get_running_loop())

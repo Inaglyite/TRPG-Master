@@ -304,6 +304,13 @@ class ModelStreamer:
 
         elapsed = time.monotonic() - started_at
         first_token = first_token_at - started_at if first_token_at is not None else None
+        record_performance = getattr(host, "record_model_performance", None)
+        if record_performance:
+            record_performance(
+                elapsed_ms=elapsed * 1000,
+                first_token_ms=first_token * 1000 if first_token is not None else None,
+                tool_count=len(tool_calls),
+            )
         self.log_model_call(
             model, request_role, elapsed, first_token, finish_reason, len(tool_calls),
             usage=usage_data, system_chars=system_chars, tool_schema_chars=tool_schema_chars,

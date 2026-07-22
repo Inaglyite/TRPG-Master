@@ -102,7 +102,8 @@ flowchart LR
 | 结局校验 | `src/endings.py` | 按模组结局定义和 `required_flags` 拒绝伪结局 |
 | 性格归一化 | `src/personality.py` | 角色信念、背景/心理特质与暴力立场的兼容读取 |
 | 道具域 | `src/inventory.py`、`tools/item.py` | 持有验证、一次性消耗、弹药/堆叠数量与使用日志 |
-| 工具路由 | `src/tools.py` | Function Calling schema、工具分类、CLI 子进程执行 |
+| 工具路由 | `src/tools.py` | Function Calling schema、工具分类与进程内 handler；`tools/*.py` 仅保留 CLI 入口 |
+| 回合性能 | `src/turn_performance.py`、`src/turn_mutations.py` | 阶段计时、首段可见、权威变更账本与审计跳过依据 |
 | 确定性规则 | `tools/*.py` | 检定、骰子、战斗、状态、伤害、SAN、角色、模组导入 |
 | 持久化 | `src/persistence.py` | system prompt 组装、存档列表、快照迁移与恢复 |
 | 角色服务 | `src/characters.py` | 候选角色、角色复制、案件结算与长期履历 |

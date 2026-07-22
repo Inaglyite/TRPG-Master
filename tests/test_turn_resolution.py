@@ -473,10 +473,9 @@ class FinalizeTurnTests(unittest.TestCase):
             "turn_had_check": False,
         })
 
-        self.assertEqual(events[0], "save")
-        self.assertEqual(events[1][0], "choices")
-        self.assertEqual(events[1][1][0]["label"], "检查门锁")
-        self.assertEqual(events[2], "done")
+        self.assertEqual(events[0][0], "choices")
+        self.assertEqual(events[0][1][0]["label"], "检查门锁")
+        self.assertEqual(events[1], "done")
 
     def test_final_text_is_appended_after_tool_round_narrative(self):
         events: list[str] = []
@@ -510,7 +509,7 @@ class FinalizeTurnTests(unittest.TestCase):
         self.assertEqual(engine.messages[-1]["content"], result["narrative"])
         self.assertEqual(
             events,
-            ["entities", "handouts", "save", "done", "summary"],
+            ["entities", "handouts", "done", "summary"],
         )
 
     def test_opening_prose_never_runs_the_state_auditor(self):
