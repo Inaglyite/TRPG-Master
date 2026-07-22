@@ -185,6 +185,20 @@ def accept_invite(db_url: str, token: str, user_id: str) -> dict:
         )
         if world is None:
             raise MultiplayerError("world_not_found", "房间不存在", 404)
+        # The world row serializes capacity and membership admission. Recheck
+        # after acquiring it because the same account may accept two invites
+        # concurrently in separate tabs.
+        existing = (
+            session.query(WorldMember)
+            .filter_by(world_id=invite.world_id, user_id=user_id)
+            .one_or_none()
+        )
+        if existing is not None:
+            return {
+                "world_id": invite.world_id,
+                "role": existing.role,
+                "already_member": True,
+            }
         if invite.role == "player":
             max_players = max(
                 2,
@@ -301,8 +315,22 @@ def transfer_owner(
     if target_user_id == actor_user_id:
         raise MultiplayerError("already_owner", "该成员已经是房主", 409)
     with session_scope(db_url) as session:
-        world = _require_world(session, world_id)
-        current = _require_owner(session, world_id, actor_user_id)
+        world = (
+            session.query(World)
+            .filter_by(id=world_id, status="active")
+            .with_for_update()
+            .one_or_none()
+        )
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
+        current = (
+            session.query(WorldMember)
+            .filter_by(world_id=world_id, user_id=actor_user_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if current is None or current.role != "owner":
+            raise MultiplayerError("owner_required", "只有房主可以执行此操作", 403)
         target = _require_member(session, world_id, target_user_id)
         current.role = "player"
         target.role = "owner"

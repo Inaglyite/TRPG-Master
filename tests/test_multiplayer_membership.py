@@ -229,6 +229,9 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
                 headers=headers,
             )
             assert invite.status_code == 201
+            listed_invites = owner_client.get(f"/api/worlds/{world_id}/invites")
+            assert listed_invites.status_code == 200
+            assert "token" not in listed_invites.json()["invites"][0]
 
             with TestClient(server.app, base_url="https://testserver") as player_client:
                 assert (
@@ -257,12 +260,25 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
                     headers=headers,
                 )
                 assert claimed.status_code == 200
+                transferred = owner_client.post(
+                    f"/api/worlds/{world_id}/owner",
+                    json={"user_id": claimed.json()["user_id"]},
+                    headers=headers,
+                )
+                assert transferred.status_code == 200
+                assert transferred.json()["owner_user_id"] == claimed.json()["user_id"]
+                assert (
+                    player_client.get(f"/api/worlds/{world_id}/invites").status_code
+                    == 200
+                )
 
             members = owner_client.get(f"/api/worlds/{world_id}/members")
             assert members.status_code == 200
             assert members.json()["metadata"]["name"] == "周五调查团"
             assert len(members.json()["members"]) == 2
             assert any(row["investigator"] for row in members.json()["members"])
+            roles = {row["username"]: row["role"] for row in members.json()["members"]}
+            assert roles == {"http_owner": "player", "http_player": "owner"}
 
 
 def _receive_until(websocket, message_type: str, limit: int = 20):
