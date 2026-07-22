@@ -398,6 +398,10 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                     )
                 elif data.get("type") in {"start", "save_load"}:
                     await transport.send_json({"type": "done"})
+                elif data.get("type") == "save_create":
+                    await transport.send_json(
+                        {"type": "saved", "ok": True, "slot_id": "slot_001"}
+                    )
         except RuntimeError:
             return
 
@@ -524,6 +528,21 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 assert owner_load["_room_user_id"] == owner_id
                 assert owner_load["_room_investigator_id"] == player_claim["id"]
                 assert owner_load["_room_actor_user_id"] == player_id
+                owner_ws.send_json({"type": "save_create"})
+                invalid_control = _receive_until(owner_ws, "room_action_rejected")
+                assert invalid_control["code"] == "invalid_action_id"
+                owner_ws.send_json(
+                    {"type": "save_create", "action_id": "owner-save-create"}
+                )
+                _receive_until(owner_ws, "saved")
+                owner_ws.send_json(
+                    {"type": "save_create", "action_id": "owner-save-create"}
+                )
+                duplicate_control = _receive_until(owner_ws, "room_action_rejected")
+                assert duplicate_control["code"] == "duplicate_action"
+                owner_ws.send_json({"type": "load"})
+                legacy_load = _receive_until(owner_ws, "room_action_rejected")
+                assert legacy_load["code"] == "unsupported_in_room"
                 player_ws.send_json(
                     {
                         "type": "action",

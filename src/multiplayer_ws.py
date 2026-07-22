@@ -31,6 +31,15 @@ from .room_runtime import (
 )
 from .runtime import RuntimeContext
 
+UNSUPPORTED_ROOM_TYPES = frozenset(
+    {"load", "quit", "world_switch", "switch_module", "turn_branch_create", "model_settings_update"}
+)
+OWNER_CONTROL_TYPES = frozenset(
+    {"save", "save_delete", "save_create", "save_rename", "settle_case"}
+)
+MUTATING_TURN_TYPES = frozenset({"start", "continue", "save_load", "action", "turn_rewrite"})
+OWNER_TURN_TYPES = frozenset({"start", "save_load", "turn_rewrite"})
+
 
 @dataclass(frozen=True)
 class MultiplayerWsDependencies:
@@ -554,14 +563,7 @@ class MultiplayerWsController:
                             }
                         )
                         continue
-                unsupported_room_types = {
-                    "quit",
-                    "world_switch",
-                    "switch_module",
-                    "turn_branch_create",
-                    "model_settings_update",
-                }
-                if message_type in unsupported_room_types:
+                if message_type in UNSUPPORTED_ROOM_TYPES:
                     await ws.send_json(
                         {
                             "type": "room_action_rejected",
@@ -570,15 +572,7 @@ class MultiplayerWsController:
                         }
                     )
                     continue
-                owner_control_types = {
-                    "save",
-                    "save_delete",
-                    "save_create",
-                    "save_rename",
-                    "settle_case",
-                    "load",
-                }
-                if message_type in owner_control_types and role != "owner":
+                if message_type in OWNER_CONTROL_TYPES and role != "owner":
                     await ws.send_json(
                         {
                             "type": "room_action_rejected",
@@ -587,16 +581,29 @@ class MultiplayerWsController:
                         }
                     )
                     continue
-                mutating_turn_types = {
-                    "start",
-                    "continue",
-                    "save_load",
-                    "action",
-                    "turn_rewrite",
-                }
-                if message_type in mutating_turn_types:
-                    owner_turn_types = {"start", "save_load", "turn_rewrite"}
-                    if message_type in owner_turn_types and role != "owner":
+                if message_type in OWNER_CONTROL_TYPES:
+                    action_id = str(data.get("action_id") or "")
+                    try:
+                        await room.reserve_control(user.id, action_id)
+                        reserve_room_action(
+                            self.deps.database_url(),
+                            world_id,
+                            action_id,
+                            user.id,
+                            message_type,
+                        )
+                    except (ActionReservationError, MultiplayerError) as exc:
+                        room.release_action()
+                        await ws.send_json(
+                            {
+                                "type": "room_action_rejected",
+                                "code": exc.code,
+                                "message": str(exc),
+                            }
+                        )
+                        continue
+                if message_type in MUTATING_TURN_TYPES:
+                    if message_type in OWNER_TURN_TYPES and role != "owner":
                         await ws.send_json(
                             {
                                 "type": "room_action_rejected",
@@ -650,7 +657,7 @@ class MultiplayerWsController:
                         await room.reserve_action(
                             user.id,
                             action_id,
-                            require_current_actor=message_type not in owner_turn_types,
+                            require_current_actor=message_type not in OWNER_TURN_TYPES,
                         )
                     except ActionReservationError as exc:
                         await ws.send_json(
@@ -688,8 +695,8 @@ class MultiplayerWsController:
                     data["_room_investigator_id"] = actor_claim["investigator_id"]
                     data["_room_actor_user_id"] = actor_id
                 passthrough_types = (
-                    mutating_turn_types
-                    | owner_control_types
+                    MUTATING_TURN_TYPES
+                    | OWNER_CONTROL_TYPES
                     | {
                         "suggest_reply",
                         "decision_reply",

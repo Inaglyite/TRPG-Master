@@ -129,6 +129,22 @@ async def _owner_control_reservation_does_not_require_current_actor():
     assert denied.value.code == "not_current_actor"
 
 
+async def _owner_control_releases_on_terminal_response():
+    room = GameRoom(
+        "world-control-terminal",
+        object(),
+        RoomEventHub("world-control-terminal"),
+        "owner",
+        current_actor_user_id="player",
+    )
+    transport = RoomDriverTransport(room)
+    await room.reserve_control("owner", "save-control-1")
+    assert room.action_active and room.control_action_active
+    await transport.send_json({"type": "saved", "ok": True, "slot_id": "slot_001"})
+    assert not room.action_active
+    assert not room.control_action_active
+
+
 async def _room_is_removed_only_after_empty_idle_grace():
     manager = RoomManager()
     room, _ = await manager.get_or_create(
@@ -229,6 +245,10 @@ def test_action_policy_rejects_wrong_actor_duplicates_and_overlap():
 
 def test_owner_control_reservation_does_not_require_current_actor():
     asyncio.run(_owner_control_reservation_does_not_require_current_actor())
+
+
+def test_owner_control_releases_on_terminal_response():
+    asyncio.run(_owner_control_releases_on_terminal_response())
 
 
 def test_room_is_removed_only_after_empty_idle_grace():

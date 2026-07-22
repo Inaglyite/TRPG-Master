@@ -622,10 +622,13 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
   房间串行锁，但房主不需要同时占用当前行动权；`start` 还要求全体 owner/player 已选调查员、
   在线并 ready；
 - `continue`、`action`：必须携带全局唯一的 `action_id`，且只能由当前行动者提交；
+- `save`、`save_create`、`save_delete`、`save_rename`、`settle_case`：仅房主可用，同样必须携带
+  全局唯一的 `action_id`，并与回合共用房间串行锁；终止响应释放锁；
 - `suggest_reply`、`decision_reply`：只接受当前行动者；对应询问只发送给该用户的全部连接；
 - `player_notes_get`、`player_notes_update`：在连接边界按 Session 用户直接处理，不进入公共广播。
 
 多人第一版只能运行一个 Uvicorn worker；跨进程房间租约和事件总线尚不属于当前协议。
+旧兼容消息 `load` 在多人房间中被拒绝，读档只能使用带幂等 ID 的 `save_load`。
 
 ### 回合生命周期
 

@@ -220,6 +220,14 @@ class RoomDriverTransport:
             elif wire.get("type") == "decision_resolved":
                 room.clear_pending_reply()
         await room.hub.broadcast(wire, visibility=visibility)
+        if room.control_action_active and payload.get("type") in {
+            "saved",
+            "save_deleted",
+            "save_renamed",
+            "case_settled",
+            "error",
+        }:
+            room.release_action()
         if payload.get("type") in {
             "done",
             "turn_rejected",
@@ -264,6 +272,7 @@ class GameRoom:
     pending_reply_kind: str | None = None
     pending_reply_user_id: str | None = None
     pending_reply_request_id: str | None = None
+    control_action_active: bool = False
 
     def member_connected(self, user_id: str) -> bool:
         first_connection = user_id not in self.connected_users
@@ -343,7 +352,16 @@ class GameRoom:
         self._action_ids.append(action_id)
         self._action_id_set.add(action_id)
 
+    async def reserve_control(self, user_id: str, action_id: str) -> None:
+        await self.reserve_action(
+            user_id,
+            action_id,
+            require_current_actor=False,
+        )
+        self.control_action_active = True
+
     def release_action(self) -> None:
+        self.control_action_active = False
         if self._action_lock.locked():
             self._action_lock.release()
 
