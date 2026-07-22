@@ -34,6 +34,7 @@ export type TurnHistoryItem = {
   player_input?: string | null;
   narrative?: string;
   narrative_segments?: NarrativeSegment[];
+  chat_events?: NarrativeSegment[];
   choices?: Array<{ label: string; isFree: boolean }>;
 };
 
@@ -55,6 +56,21 @@ export type DiceRollData = {
 
 function nextId() {
   return `msg-${++messageCounter}`;
+}
+
+function normalizeNarrativeSegment(
+  segment: NarrativeSegment,
+  fallbackEventId: string,
+): NarrativeSegment {
+  return {
+    kind: segment.kind,
+    text: String(segment.text || ""),
+    eventId: segment.eventId || segment.event_id || fallbackEventId,
+    ...(segment.npcId || segment.npc_id
+      ? { npcId: segment.npcId || segment.npc_id }
+      : {}),
+    ...(segment.speaker ? { speaker: segment.speaker } : {}),
+  };
 }
 
 function updateMessages(updater: (messages: ChatMessage[]) => ChatMessage[]) {
@@ -251,19 +267,26 @@ export function renderTurnHistory(
       });
     }
     if (turn.narrative) {
+      const storedEvents = turn.chat_events || turn.narrative_segments || [];
+      const segments = storedEvents.length
+        ? storedEvents.map((segment, segmentIndex) =>
+            normalizeNarrativeSegment(
+              segment,
+              `turn-${turnId}-${segmentIndex}`,
+            ),
+          )
+        : [
+            normalizeNarrativeSegment(
+              { kind: "narration", text: String(turn.narrative) },
+              `turn-${turnId}-legacy`,
+            ),
+          ];
       messages.push({
         id: nextId(),
         kind: "gm",
         text: String(turn.narrative),
         turnId,
-        ...(Array.isArray(turn.narrative_segments) &&
-        turn.narrative_segments.length
-          ? {
-              segments: turn.narrative_segments.map((segment) => ({
-                ...segment,
-              })),
-            }
-          : {}),
+        segments,
       });
     }
   });
@@ -361,6 +384,7 @@ function pushStreamPiece(text: string, npcId: string | null) {
     streamSegments.push({
       kind: npcId ? "speech" : "narration",
       text: "",
+      eventId: `live-${displayTurnId || "turn"}-${streamSegments.length}`,
       ...(npcId ? { npcId } : {}),
       ...(speaker ? { speaker } : {}),
     });
@@ -452,7 +476,12 @@ export function onNarrativeSegments(segments: NarrativeSegment[]) {
         (!displayTurnId || message.turnId === displayTurnId),
     );
     if (index < 0) return messages;
-    const authoritative = segments.map((segment) => ({ ...segment }));
+    const authoritative = segments.map((segment, segmentIndex) =>
+      normalizeNarrativeSegment(
+        segment,
+        `turn-${displayTurnId || messages[index].turnId || "unknown"}-${segmentIndex}`,
+      ),
+    );
     return messages.map((message, current) =>
       current === index ? { ...message, segments: authoritative } : message,
     );

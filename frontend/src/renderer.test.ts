@@ -71,6 +71,23 @@ describe("React message renderer adapter", () => {
     });
   });
 
+  it("migrates legacy narrative-only history into a keeper chat event", () => {
+    renderTurnHistory([
+      { turn_id: "legacy", player_input: "开门", narrative: "旧叙述" },
+    ]);
+
+    const gm = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "gm");
+    expect(gm?.segments).toEqual([
+      expect.objectContaining({
+        eventId: "turn-legacy-legacy",
+        kind: "narration",
+        text: "旧叙述",
+      }),
+    ]);
+  });
+
   it("branches from before the action represented by a result turn", () => {
     expect(
       branchSourceTurnId({ turn_id: "result", parent_turn_id: "decision" }),
@@ -201,5 +218,32 @@ describe("React message renderer adapter", () => {
       .getState()
       .messages.find((message) => message.kind === "gm");
     expect(gm?.segments?.[1].speaker?.name).toBe("旧人");
+  });
+
+  it("prefers authoritative chat events and normalizes wire field names", () => {
+    renderTurnHistory([
+      {
+        turn_id: "t-chat",
+        narrative: "法伦说话。",
+        narrative_segments: [{ kind: "narration", text: "旧兼容段" }],
+        chat_events: [
+          {
+            kind: "speech",
+            text: "黄先生，我需要你查明真相。",
+            event_id: "event-1",
+            npc_id: "bryce_fallon",
+            speaker: { type: "npc", id: "bryce_fallon", name: "法伦" },
+          },
+        ],
+      },
+    ]);
+
+    const segment = useMessageStore.getState().messages[0].segments?.[0];
+    expect(segment).toMatchObject({
+      eventId: "event-1",
+      npcId: "bryce_fallon",
+      speaker: { name: "法伦" },
+    });
+    expect(segment?.text).not.toContain("旧兼容段");
   });
 });

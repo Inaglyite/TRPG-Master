@@ -409,6 +409,42 @@ class GameEngine:
     def log_unknown_npc_speaker(self, npc_id: str) -> None:
         log_error(f"⟦npc⟧ 发言标签引用了未知 NPC id：{npc_id}（已按旁白处理）")
 
+    def npc_speaker_aliases(self) -> dict[str, str]:
+        """Return public NPC names accepted by the deterministic speaker fallback."""
+        try:
+            world = self.context.world_store.load()
+        except Exception:
+            return {}
+        aliases: dict[str, str] = {}
+        for npc in world.get("npcs", []):
+            if not isinstance(npc, dict):
+                continue
+            npc_id = str(npc.get("id") or "")
+            if not npc_id:
+                continue
+            for key in ("name", "display_name"):
+                name = str(npc.get(key) or "").strip()
+                if name:
+                    aliases[name] = npc_id
+        for npc_id, asset in ((world.get("asset_map") or {}).get("npcs") or {}).items():
+            if not isinstance(asset, dict):
+                continue
+            name = str(asset.get("label") or asset.get("name") or "").strip()
+            if name:
+                aliases[name] = str(npc_id)
+        try:
+            catalog = json.loads(self.context.initial_state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            catalog = {}
+        for npc in catalog.get("npcs", []):
+            if not isinstance(npc, dict):
+                continue
+            npc_id = str(npc.get("id") or "")
+            name = str(npc.get("name") or npc.get("display_name") or "").strip()
+            if npc_id and name and self.is_valid_npc_id(npc_id):
+                aliases[name] = npc_id
+        return aliases
+
     def _complete_turn_record(
         self,
         *,
@@ -568,6 +604,7 @@ class GameEngine:
             rewritten,
             is_valid_npc=self.is_valid_npc_id,
             on_unknown_npc=self.log_unknown_npc_speaker,
+            speaker_aliases=self.npc_speaker_aliases(),
         )
         if tool_calls or not rewritten:
             raise RuntimeError("模型没有返回有效的叙事改写")

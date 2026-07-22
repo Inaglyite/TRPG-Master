@@ -502,6 +502,9 @@ def _finalize_turn(state: TurnState) -> dict:
         is_valid_npc=getattr(engine, "is_valid_npc_id", None)
         or (lambda _npc_id: False),
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+        speaker_aliases=(
+            getattr(engine, "npc_speaker_aliases", lambda: {})()
+        ),
     )
     segment_dicts = [s.to_dict() for s in narrative_segments]
     commit_memory = getattr(engine, "_commit_npc_conversations", None)

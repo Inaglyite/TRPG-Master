@@ -106,15 +106,23 @@ class SpeakerPayloadResolver:
                 self.cache[npc_id] = payload
         return self.cache.get(npc_id)
 
+    def clear(self) -> None:
+        self.cache.clear()
+
 
 def enrich_narrative_segments(segments: list, resolve_speaker) -> list[dict]:
     enriched = []
-    for segment in segments:
+    for index, segment in enumerate(segments):
         item = {"kind": segment.get("kind"), "text": segment.get("text", "")}
         npc_id = segment.get("npc_id")
         speaker = resolve_speaker(npc_id) if npc_id else None
+        item["event_id"] = f"narrative_{index}"
+        if npc_id:
+            item["npc_id"] = npc_id
         if speaker:
             item["speaker"] = speaker
+        elif item["kind"] == "narration":
+            item["speaker"] = {"type": "keeper", "name": "守秘人"}
         enriched.append(item)
     return enriched
 

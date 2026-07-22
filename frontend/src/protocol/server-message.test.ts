@@ -29,4 +29,47 @@ describe("parseServerMessage", () => {
       metrics: { first_visible_ms: 120 },
     });
   });
+
+  it("validates and strips private fields from authoritative chat events", () => {
+    expect(
+      parseServerMessage({
+        type: "chat_events",
+        events: [
+          {
+            event_id: "event-1",
+            kind: "speech",
+            text: "黄先生，请坐。",
+            npc_id: "bryce_fallon",
+            private_memory: "绝不能传给玩家",
+            speaker: {
+              type: "npc",
+              id: "bryce_fallon",
+              name: "法伦",
+              secret: "隐藏动机",
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      type: "chat_events",
+      events: [
+        {
+          event_id: "event-1",
+          kind: "speech",
+          text: "黄先生，请坐。",
+          npc_id: "bryce_fallon",
+          speaker: { type: "npc", id: "bryce_fallon", name: "法伦" },
+        },
+      ],
+    });
+  });
+
+  it("rejects malformed chat event payloads", () => {
+    expect(
+      parseServerMessage({
+        type: "chat_events",
+        events: [{ kind: "private_thought", text: "秘密" }],
+      }),
+    ).toBeNull();
+  });
 });

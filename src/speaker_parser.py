@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -222,6 +223,7 @@ def parse_segments(
     full_text: str,
     is_valid_npc: Callable[[str], bool] | None = None,
     on_unknown_npc: Callable[[str], None] | None = None,
+    speaker_aliases: dict[str, str] | None = None,
 ) -> tuple[list[Segment], str]:
     """权威整段解析：返回 (segments, clean_text)。与增量路径同一状态机。"""
     parser = SpeakerStreamParser(
@@ -230,4 +232,64 @@ def parse_segments(
     )
     pieces = parser.feed(full_text) + parser.flush()
     clean_text = "".join(text for kind, text, _ in pieces if kind == "text")
-    return pieces_to_segments(pieces), clean_text
+    segments = pieces_to_segments(pieces)
+    if speaker_aliases:
+        segments = infer_named_speech(segments, speaker_aliases)
+    return segments, clean_text
+
+
+_NAMED_LINE = re.compile(
+    r"^(?P<indent>\s*)(?:\*\*|__)?(?P<name>[^：:\n]{1,40})(?:\*\*|__)?\s*[：:]\s*(?P<text>.+)$"
+)
+
+
+def infer_named_speech(
+    segments: list[Segment], speaker_aliases: dict[str, str]
+) -> list[Segment]:
+    """Recover explicit ``姓名：台词`` lines when the model omitted NPC tags.
+
+    Only server-provided, known public names are accepted. Arbitrary labels are kept as
+    narration, so headings such as ``线索：`` cannot invent a speaker identity.
+    """
+    normalized = {
+        re.sub(r"\s+", "", name).casefold(): npc_id
+        for name, npc_id in speaker_aliases.items()
+        if name and npc_id
+    }
+    recovered: list[Segment] = []
+    for segment in segments:
+        if segment.kind != "narration":
+            recovered.append(segment)
+            continue
+        narration_lines: list[str] = []
+
+        def flush_narration(lines: list[str] = narration_lines) -> None:
+            text = "\n".join(lines).strip("\n")
+            lines.clear()
+            if text.strip():
+                recovered.append(Segment(kind="narration", text=text))
+
+        for line in segment.text.splitlines():
+            match = _NAMED_LINE.match(line)
+            key = re.sub(r"\s+", "", match.group("name")).casefold() if match else ""
+            npc_id = normalized.get(key)
+            if not match or not npc_id:
+                narration_lines.append(line)
+                continue
+            flush_narration()
+            recovered.append(
+                Segment(kind="speech", text=match.group("text").strip(), npc_id=npc_id)
+            )
+        flush_narration()
+
+    merged: list[Segment] = []
+    for segment in recovered:
+        if (
+            merged
+            and merged[-1].kind == segment.kind
+            and merged[-1].npc_id == segment.npc_id
+        ):
+            merged[-1].text = merged[-1].text.rstrip() + "\n\n" + segment.text.lstrip()
+        else:
+            merged.append(segment)
+    return merged

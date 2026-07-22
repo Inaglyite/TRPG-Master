@@ -420,3 +420,16 @@
     min-height: 46px;
   }
 }
+@media (max-width: 720px) {
+  .chat-row {
+    width: 94%;
+  }
+  .chat-row .avatar-disc {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+  .chat-bubble {
+    padding: 10px 12px;
+  }
+}

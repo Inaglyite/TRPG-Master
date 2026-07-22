@@ -21,6 +21,28 @@ class SpeakerParserTests(unittest.TestCase):
         self.assertEqual(clean, "雨水顺着窗户滑落。他看了一眼抽屉。")
         self.assertEqual([s.kind for s in segments], ["narration"])
 
+    def test_known_name_prefix_recovers_speech_without_model_tag(self):
+        segments, clean = parse_segments(
+            "冷风掠过窗沿。\n法伦：黄先生，我需要你查明真相。\n他把文件推过桌面。",
+            is_valid_npc=npc_ok,
+            speaker_aliases={"法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual(clean, "冷风掠过窗沿。\n法伦：黄先生，我需要你查明真相。\n他把文件推过桌面。")
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None), ("speech", "bryce_fallon"), ("narration", None)],
+        )
+        self.assertEqual(segments[1].text, "黄先生，我需要你查明真相。")
+
+    def test_unknown_name_prefix_stays_narration(self):
+        segments, _ = parse_segments(
+            "线索：桌面留有墨迹。\n陌生人：不应被伪造成已知 NPC。",
+            speaker_aliases={"法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+
     def test_speech_tag_produces_speech_segment(self):
         text = '雨还在下。【npc:bryce_fallon】"莱特生前一直在隐瞒什么。"【/npc】他说完看向抽屉。'
         segments, clean = parse_segments(text, is_valid_npc=npc_ok)

@@ -105,12 +105,18 @@ function DiceMessage({ message }: { message: ChatMessage }) {
 function NarrationUnit({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
   return (
-    <>
-      <div className="msg-attribution">
-        守秘人<span>THE KEEPER</span>
+    <div className="chat-row chat-row-keeper">
+      <AvatarDisc name="守秘人" family="keeper" />
+      <div className="chat-speaker-column">
+        <div className="chat-speaker-name keeper-name">
+          守秘人<span>THE KEEPER</span>
+        </div>
+        <div
+          className="chat-bubble keeper-bubble"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       </div>
-      <div dangerouslySetInnerHTML={{ __html: html }} />
-    </>
+    </div>
   );
 }
 
@@ -118,12 +124,12 @@ function SpeechUnit({ segment }: { segment: NarrativeSegment }) {
   const html = useMemo(() => renderMarkdown(segment.text), [segment.text]);
   const name = segment.speaker?.name || "人物";
   return (
-    <div className="speech-unit">
+    <div className="chat-row chat-row-npc speech-unit">
       <AvatarDisc name={name} avatar={segment.speaker?.avatar} family="npc" />
-      <div className="speech-body">
-        <div className="speech-name">{name}</div>
+      <div className="chat-speaker-column speech-body">
+        <div className="chat-speaker-name speech-name">{name}</div>
         <div
-          className="speech-text"
+          className="chat-bubble npc-bubble speech-text"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
@@ -190,13 +196,15 @@ function Message({
           <div className="dice-result">{message.text}</div>
         </>
       ) : hasSegments ? (
-        message.segments!.map((segment, index) =>
-          segment.kind === "speech" ? (
-            <SpeechUnit key={index} segment={segment} />
-          ) : (
-            <NarrationUnit key={index} text={segment.text} />
-          ),
-        )
+        <div className="chat-event-list">
+          {message.segments!.map((segment, index) =>
+            segment.kind === "speech" ? (
+              <SpeechUnit key={segment.eventId || index} segment={segment} />
+            ) : (
+              <NarrationUnit key={segment.eventId || index} text={segment.text} />
+            ),
+          )}
+        </div>
       ) : (
         <div dangerouslySetInnerHTML={{ __html: html }} />
       )}

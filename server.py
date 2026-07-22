@@ -444,6 +444,10 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 result = game_app.rewrite_turn.execute(turn_id)
                 result["source_turn_id"] = result.pop("turn_id")
                 result["branch_source_turn_id"] = branch_source_turn_id
+                segments = result.get("narrative_segments") or []
+                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                result["narrative_segments"] = enriched
+                result["chat_events"] = enriched
                 outbound.end_turn({"type": "turn_rewritten", **result})
             except Exception as exc:
                 log_message = f"{type(exc).__name__}: {exc}"
@@ -513,6 +517,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             record = payload.get(key)
             if not isinstance(record, dict):
                 continue
+            segments = record.get("narrative_segments")
+            if isinstance(segments, list) and segments:
+                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                record["narrative_segments"] = enriched
+                record["chat_events"] = enriched
             events = record.get("events")
             if not isinstance(events, list):
                 continue
@@ -541,7 +550,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     def on_narrative_segments(segments: list):
         enriched = enrich_narrative_segments(segments, resolve_speaker)
-        emit({"type": "narrative_segments", "segments": enriched})
+        emit({"type": "chat_events", "events": enriched})
 
     def on_performance(metrics: dict):
         emit({"type": "turn_performance", "metrics": metrics})
@@ -928,10 +937,16 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     details={"source_turn_id": turn_id},
                 )
             engine.switch_context(branch.context)
+            resolve_speaker.clear()
             engine.adopt_message_history(branch.messages)
             turn_gate.rebind_world(_world_turn_lock(branch.context))
             _set_active_context(branch.context)
             history = engine.turn_journal.public_history()
+            for turn in history:
+                segments = turn.get("narrative_segments") or []
+                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                turn["narrative_segments"] = enriched
+                turn["chat_events"] = enriched
         except Exception as exc:
             release_turn()
             await outbound.send(
@@ -983,11 +998,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             target_lock_acquired = True
             messages, _snapshot = load_game(AUTO_SAVE_SLOT, context=context)
             engine.switch_context(context)
+            resolve_speaker.clear()
             if messages is not None:
                 engine.adopt_message_history(messages)
             turn_gate.rebind_world(target_lock)
             _set_active_context(context)
             history = engine.turn_journal.public_history()
+            for turn in history:
+                segments = turn.get("narrative_segments") or []
+                enriched = enrich_narrative_segments(segments, resolve_speaker)
+                turn["narrative_segments"] = enriched
+                turn["chat_events"] = enriched
             if user_id:
                 audit(
                     DATABASE_URL,

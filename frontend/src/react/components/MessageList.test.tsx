@@ -106,6 +106,9 @@ describe("MessageList", () => {
     expect(screen.getByText("守秘人")).toBeInTheDocument();
     expect(screen.getByText("布莱斯·法伦")).toBeInTheDocument();
     expect(screen.getByText(/莱特生前一直在隐瞒什么/)).toBeInTheDocument();
+    expect(document.querySelectorAll(".chat-row")).toHaveLength(2);
+    expect(document.querySelector(".keeper-bubble")).toBeInTheDocument();
+    expect(document.querySelector(".npc-bubble")).toBeInTheDocument();
   });
 
   it("renders plain gm messages without segments unchanged", () => {

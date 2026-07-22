@@ -363,6 +363,7 @@ type PublicTurnRecord = {
   status?: string;
   narrative?: string;
   narrative_segments?: import("./state/message-store").NarrativeSegment[];
+  chat_events?: import("./state/message-store").ChatEvent[];
   choices?: ActionChoice[];
   events?: any[];
 };
@@ -416,10 +417,10 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
     onNarrativeChunk(record.narrative);
   }
   if (
-    Array.isArray(record.narrative_segments) &&
-    record.narrative_segments.length
+    (Array.isArray(record.chat_events) && record.chat_events.length) ||
+    (Array.isArray(record.narrative_segments) && record.narrative_segments.length)
   ) {
-    onNarrativeSegments(record.narrative_segments);
+    onNarrativeSegments(record.chat_events || record.narrative_segments || []);
   }
   onDone(pendingChoices);
   const branchSourceId = String(record.parent_turn_id || turnId);
@@ -517,6 +518,9 @@ function handleMessage(e: MessageEvent) {
     case "narrative_segments":
       onNarrativeSegments(data.segments);
       break;
+    case "chat_events":
+      onNarrativeSegments(data.events);
+      break;
     case "tension":
       onTension(data.text);
       break;
@@ -574,10 +578,10 @@ function handleMessage(e: MessageEvent) {
       );
       if (sourceTurnId) completeNarrativeReplacement(sourceTurnId);
       if (
-        Array.isArray(data.narrative_segments) &&
-        data.narrative_segments.length
+        (Array.isArray(data.chat_events) && data.chat_events.length) ||
+        (Array.isArray(data.narrative_segments) && data.narrative_segments.length)
       ) {
-        onNarrativeSegments(data.narrative_segments);
+        onNarrativeSegments(data.chat_events || data.narrative_segments);
       }
       pendingChoices = Array.isArray(data.choices)
         ? data.choices

@@ -111,6 +111,19 @@
 .msg.gm:has(.turn-message-actions) {
   padding-right: 88px;
 }
+.msg.gm:has(.chat-event-list) {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  text-shadow: none;
+}
+.msg.gm:has(.chat-event-list):has(.turn-message-actions) {
+  padding-right: 0;
+  padding-bottom: 36px;
+}
 /* 说话人抬头（档案信头式） */
 .msg-attribution {
   display: flex;
@@ -186,30 +199,84 @@
   background: color-mix(in srgb, var(--blue) 16%, var(--bg2));
 }
 
-/* ---- NPC 发言单元（叙事块内，不做气泡） ---- */
-.speech-unit {
+/* ---- 权威聊天事件：案卷旁白 + 人物气泡 ---- */
+.chat-event-list {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+.chat-row {
+  display: flex;
   align-items: flex-start;
-  margin: 10px 0 12px;
-  padding-left: 2px;
+  gap: 11px;
+  width: min(84%, 780px);
+}
+.chat-speaker-column {
+  min-width: 0;
+  flex: 1;
+}
+.chat-speaker-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px 2px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.chat-speaker-name span {
+  color: var(--text-faint);
+  font: 400 8px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+}
+.keeper-name {
+  color: var(--gold);
+}
+.chat-bubble {
+  position: relative;
+  padding: 11px 15px;
+  border-radius: 4px 12px 12px 12px;
+  color: var(--text);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.24);
+}
+.keeper-bubble {
+  max-width: 780px;
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, var(--border));
+  border-left: 3px solid var(--gold);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--gold) 6%, transparent),
+      transparent 34%
+    ),
+    color-mix(in srgb, var(--bg2) 96%, black);
+}
+.npc-bubble {
+  width: fit-content;
+  max-width: 680px;
+  border: 1px solid color-mix(in srgb, var(--crimson) 44%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--crimson) 14%, var(--bg2)),
+    color-mix(in srgb, var(--bg2) 96%, black)
+  );
+}
+.speech-unit {
+  margin: 0;
 }
 .speech-body {
   min-width: 0;
   flex: 1;
 }
 .speech-name {
-  margin-bottom: 2px;
   color: var(--crimson-bright);
-  font-family: var(--font-display);
-  font-size: 13.5px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
 }
 .speech-text {
   color: var(--text);
-  line-height: 1.75;
-  overflow-wrap: anywhere;
 }
 .speech-text p {
   margin: 0 0 6px;
@@ -283,6 +350,7 @@
   color: var(--gold-bright);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
   box-shadow: var(--shadow);
+  border-radius: 12px 4px 12px 12px;
 }
 /* 系统消息：居中分隔饰，不用框线 */
 .msg.system {
