@@ -126,7 +126,10 @@ class RoomEventHub:
             if connection is None:
                 return {"gap": True, "events": [], "latest_event_id": self._event_id}
             oldest = self._events[0].event_id if self._events else self._event_id + 1
-            gap = after_event_id < oldest - 1
+            # A value ahead of the server is not "fully caught up": it means
+            # the client crossed a process restart/event epoch and must replace
+            # its old cursor from a personalized full-state image.
+            gap = after_event_id < oldest - 1 or after_event_id > self._event_id
             events = (
                 []
                 if gap

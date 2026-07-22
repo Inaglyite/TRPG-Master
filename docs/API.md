@@ -591,6 +591,9 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 
 房间广播事件带单调 `room_event_id`。客户端发送 `room_ack {event_id}` 确认，重连后用
 `room_sync {after_event_id}` 请求增量；私人事件不出现在无权连接的实时流或补发结果中。
+若 `after_event_id` 早于缓冲区最旧事件，或大于服务端最新事件（通常表示服务进程已重启、事件纪元
+已更换），服务端均返回 `room_event_gap` 并紧接个性化 `room_full_state`。客户端必须用其中的
+`latest_event_id` 替换旧游标，不能继续拿旧游标循环请求同步。
 
 `room_full_state.private_state` 的结构为：
 

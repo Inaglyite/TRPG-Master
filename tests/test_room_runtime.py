@@ -76,6 +76,12 @@ async def _event_visibility_ack_and_replay_are_connection_scoped():
     assert await hub.acknowledge("alice-tab", public_id)
     replay = await hub.replay_after("alice-tab", public_id)
     assert [item["type"] for item in replay["events"]] == ["private_clue"]
+    restarted_epoch = await hub.replay_after("alice-tab", 9999)
+    assert restarted_epoch == {
+        "gap": True,
+        "events": [],
+        "latest_event_id": await hub.latest_event_id(),
+    }
 
 
 async def _action_policy_rejects_wrong_actor_duplicates_and_overlap():
