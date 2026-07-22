@@ -23,6 +23,10 @@ def test_backup_script_rejects_paths_outside_managed_roots() -> None:
     assert result.returncode == 2
     assert "unsafe backup root" in result.stderr
 
+    script_text = script.read_text(encoding="utf-8")
+    assert 'GNUPGHOME="${GNUPGHOME:-$work/gnupg}"' in script_text
+    assert "--pinentry-mode loopback" in script_text
+
 
 def test_staging_release_contains_isolated_backup_units() -> None:
     workflow = (

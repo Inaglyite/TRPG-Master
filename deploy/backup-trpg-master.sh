@@ -26,6 +26,8 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -m 0700 "$backup_root"
 work="$(mktemp -d "$backup_root/.backup-$stamp-XXXXXX")"
 trap 'rm -rf -- "$work"' EXIT
+export GNUPGHOME="${GNUPGHOME:-$work/gnupg}"
+install -d -m 0700 "$GNUPGHOME"
 
 : "${TRPG_DATABASE_URL:?TRPG_DATABASE_URL is required}"
 : "${TRPG_BACKUP_PASSPHRASE_FILE:?TRPG_BACKUP_PASSPHRASE_FILE is required}"
@@ -36,7 +38,7 @@ tar --create --gzip --file "$work/runtime.tar.gz" \
     --exclude='trpg-master.db*' --directory "$runtime_root" .
 sha256sum "$work/database.dump" "$work/runtime.tar.gz" > "$work/SHA256SUMS"
 tar --create --file - --directory "$work" database.dump runtime.tar.gz SHA256SUMS \
-    | gpg --batch --yes --symmetric --cipher-algo AES256 \
+    | gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
         --passphrase-file "$TRPG_BACKUP_PASSPHRASE_FILE" \
         --output "$backup_root/$backup_prefix-$stamp.tar.gpg"
 find "$backup_root" -maxdepth 1 -type f -name "$backup_prefix-*.tar.gpg" \
