@@ -4,7 +4,17 @@
 React 只管理客户端展示与交互；未来地图通过版本化协议接入 React Three Fiber，不允许
 AI 直接生成可执行前端代码。
 
-## 依赖方向
+## 阅读前提
+
+本文引用的路径相对 `frontend/` 目录，显式注明为后端的除外（如 `src/speaker_parser.py`
+是仓库根 `src/` 下的后端文件）。两个从后端借来的术语：
+
+- `keeper_npc.skill`：`skills/keeper/` 下的守秘人 NPC 约束文件，规定模型以
+  `【npc:<id>】…【/npc】` 包裹 NPC 直接引语，服务端据此做发言归因。
+- 模组 spine：模组内首行声明 `<!-- trpg-master:prompt-role=spine -->` 的 skill 文件，
+  即该模组的剧情脊柱 prompt（见 `docs/ARCHITECTURE.md`），承载模组级叙事契约。
+
+## 依赖方向与渲染契约
 
 ```text
 React components
@@ -20,18 +30,11 @@ FastAPI authoritative world state
 提交 DOM 后由 `App` 启动。业务状态写入 Zustand，视图只由 React 组件渲染；主题服务仅在
 平台边界写入 CSS 变量和窗口标题。禁止新增直接 `document.getElementById` 渲染逻辑。
 
-React 已覆盖：
-
-- React 应用入口和完整 JSX 元素树；
-- 顶栏、主题标题和连接状态；
-- 角色属性、HP/SAN、物品与分类线索册；
-- 玩家输入、结构化行动选项、检定确认、多选决定与结局确认；
-- 聊天历史、流式叙事、等待/判定状态、骰子动画和回合改写/分支操作；
-- 调查笔记、revision 冲突状态、自动保存和快捷行动；
-- Handout、线索提示、角色面板、快速存档、存档重命名与时间线切换；
-- 模型路由预设、受控模型 ID 输入和完整回合/Lorebook 诊断；
-- 开始菜单、模组选择、调查员档案、新游戏重试、读档入口与 `.trpgmod` 导入；
-- WebSocket 消息类型白名单和畸形消息安全拒绝。
+React 覆盖范围按原则约定：玩家可见的全部界面区域——开始菜单与模组选择、角色/线索/
+笔记面板、聊天历史与流式叙事、行动输入与检定确认、覆盖层（handout、存档、诊断等）、
+顶栏与连接状态——必须由 React 组件渲染，实现集中于 `src/react/`（`App.tsx` 入口、
+`GameShell.tsx` 组合、`components/` 按区域拆分），具体清单以该目录为准。新地图、面板
+或业务交互必须直接实现为 React 组件和类型化状态，不得引入命令式 DOM 渲染 adapter。
 
 ## 状态与服务边界
 
@@ -46,12 +49,37 @@ React 已覆盖：
 “回到本次行动之前尝试另一选择”，而不是“复制当前结果之后的状态”。历史回放、实时回合、
 断线恢复和重新叙述必须使用同一个锚点规则。
 
+## 协议入口约定
+
+### 断线重连
+
+`ws.ts` 持有唯一连接。连接关闭时置连接状态为 `disconnected` 并按有界指数退避重连：
+退避序列为 1/2/5/10/30 秒（`RECONNECT_DELAYS`），30 秒封顶、不限次数重试；用户主动
+断开（`disconnectCleanly`）不触发重连。重连成功后重置退避计数、排空离线发送队列并
+重新请求角色状态；若断线发生在活动回合中，前端停止 loading、关闭失效决定，重连后
+以原 `turn_id` 发送 `turn_recovery_get` 核对回合提交状态。整个断线过程只更新 Zustand
+中的一条连接状态提示。
+
+### 入口消息校验
+
+所有服务端消息必须经 `protocol/server-message.ts` 的 `parseServerMessage` 入口校验
+后才进入分发：
+
+- `type` 必须落在 `serverMessageTypes` 白名单枚举内；未知消息类型、非法 JSON、
+  schema 校验失败一律安全拒绝——界面显示“无法识别的协议消息，已安全忽略”，
+  消息不进入任何业务处理器。
+- 通用信封使用宽松对象：白名单内消息的未知字段原样透传，载荷校验由各域处理器负责。
+- `chat_events` 使用严格 schema，仅保留公开展示字段，额外字段被剥离。
+- 最后防线：任何包含 DSML 工具协议文本的消息直接丢弃，后端回归也不得把工具调用
+  文本渲染进 Electron 界面。
+
 ## 样式与主题契约
 
 样式全部位于 `src/styles/`（全局作用域，无 CSS Modules）：`tokens.css` 保存设计令牌
-与 `--ui-*` 贴图变量，`base.css` 为 reset/滚动条/选区/焦点，`effects.css` 为氛围层
-（胶片噪点、暗角、烛光呼吸），`layout.css` 为页面骨架，`components/` 按界面区域
-拆分，`index.css` 按级联顺序 `@import` 汇总，由 `react-main.tsx` 引入。
+与 `--ui-*` 贴图变量，`base.css` 为 reset/滚动条/选区/焦点，`buttons.css` 为按钮体系，
+`effects.css` 为氛围层（胶片噪点、暗角、烛光呼吸），`layout.css` 为页面骨架，
+`components/` 按界面区域拆分，`index.css` 按级联顺序 `@import` 汇总，由
+`react-main.tsx` 引入。
 
 模组 `theme.json` 经 WS `theme` 消息原样透传，由 `src/theme.ts` 安全校验后注入：
 
@@ -92,34 +120,61 @@ HTTPS 页面自动切换到 HTTPS/WSS，反向代理或非默认部署通过 `VI
 ## 发言者身份与头像
 
 玩家可见叙述以「段」为结构：旁白段归属守秘人，发言段归属具体 NPC。归因完全由服务端
-确定——模型按叙述契约以 `【npc:<id>】…【/npc】` 包裹直接引语（`keeper_npc.skill`、
-模组 spine 技能、开场/改写契约、回合级用户消息提示），`src/speaker_parser.py` 增量
-解析并剥离标签；NPC 仅被提及、在场或关联线索时不产生发言段，未闭合/未知 id 一律
-按旁白处理。定稿阶段另有白名单恢复：仅当一行以当前世界的公开 NPC 姓名和冒号开头
-时，或中文小说式引号前后明确出现该 NPC 姓名时，补为发言。因此漏标签不会丢头像；
-无归属引文、任意标题或陌生姓名不能伪造身份。
+确定，前端不得从正文推断或接受模型自报身份。
 
-协议：`narrative_chunk` 增量可带 `npc_id`；`narrative_segment` 在发言段开始时下
-发（含名称与头像）；`chat_events` 在 `done` 前下发经过 schema 白名单过滤的权威事件。
-回合记录持久化兼容字段 `narrative_segments`，分支/恢复/回放同时携带 `chat_events`；
-无段结构的旧消息按单段守秘人叙述渲染。头像来自模组 `asset_map.npcs[id]`（NPC）或角色 JSON 的 `portrait` 字段（调查
-员，相对模组 assets 解析），无素材时前端显示姓名首字徽章。
+### 协议层
 
-前端：`renderer.ts` 流式期间实时构建段并在定稿时以权威段覆盖；`MessageList` 把段
-渲染为群聊事件流。守秘人与 NPC 位于左侧，调查员行动位于右侧；守秘人采用较宽的
-案卷式叙事气泡，NPC 使用人物气泡，避免所有内容退化成同一种即时通信样式。系统、
-骰点、线索和错误消息继续使用居中的专用事件卡，不参与发言者体系。
+- `narrative_chunk` 增量可带 `npc_id`：属于某个 NPC 发言段时携带，旁白增量不携带；
+  没有 `npc_id` 的增量一律视为守秘人叙述。
+- `narrative_segment` 在某个 NPC 的发言段开始时下发（旁白段为默认，不单独发送），
+  `segment.speaker` 含 `type/id/name/avatar`。
+- `chat_events` 在 `done` 前下发一次，给出经过严格 schema 过滤的权威聊天事件；
+  客户端必须以它覆盖流式期间的临时布局。
+- 回合记录持久化兼容字段 `narrative_segments`，分支/恢复/回放同时携带同内容的
+  `chat_events`；无段结构的旧消息按单段守秘人叙述渲染。
 
-模型网络流与可见播放相互解耦：`renderer.ts` 全速接收增量并写入内存队列，默认约每
-34ms 展示一个字符；逗号停顿 72ms、句末停顿 185ms、人物切换停顿 240ms。积压超过
-160/500 字时每拍展示 2/3 字，避免供应商已结束而界面长时间落后。服务端 `done` 只代表
-网络完成，输入框和行动选项等待播放队列排空；点击当前聊天流或“显示全文”可立即排空。
-检测到“你可以”或结构化 `choices` 后，剩余行动菜单切到每拍 6 字、18ms 间隔的快速
-收尾，避免选项已经确定却仍按正文速度等待。
-`prefers-reduced-motion` 下不播放逐字动画。权威 `chat_events` 在队列结束时覆盖临时段，
-素材至少等第一段文字真实可见后展示，避免事件越过叙事。
+服务端归因规则（后端 `src/speaker_parser.py`）：模型按叙述契约以 `【npc:<id>】…【/npc】`
+包裹直接引语（契约来自 `keeper_npc.skill`、模组 spine、开场/改写契约与回合级用户消息
+提示），服务端增量解析并剥离标签；NPC 仅被提及、在场或关联线索时不产生发言段，
+未闭合/未知 id 一律按旁白处理。定稿阶段另有白名单恢复：仅当一行以当前世界的公开
+NPC 姓名和冒号开头，或中文小说式引号前后明确出现该 NPC 姓名时，补为发言。因此漏标签
+不会丢头像；无归属引文、任意标题或陌生姓名不能伪造身份。
 
-## 扩展约束
+### 状态层
 
-新地图、面板或业务交互必须直接实现为 React 组件和类型化状态，不得引入命令式 DOM
-渲染 adapter。
+`state/message-store.ts` 的 `ChatMessage.segments` 保存段结构（`NarrativeSegment[]`，
+`ChatEvent` 为其兼容别名），段携带 `kind/npcId/speaker`。`renderer.ts` 流式期间按
+`npc_id` 实时构建段并写入 store，权威 `chat_events` 到达时整体覆盖临时段。头像数据
+一律来自服务端 `speaker.avatar`（`asset_url` 或 `asset_data_uri`）：NPC 头像出自模组
+`asset_map.npcs[id]`，调查员头像出自角色卡 `portrait` 字段（后端 `src/asset_payload.py`
+相对模组 assets 解析）。
+
+### 渲染层
+
+`MessageList` 把段渲染为群聊事件流。守秘人与 NPC 位于左侧，调查员行动位于右侧；
+守秘人采用较宽的案卷式叙事气泡，NPC 使用人物气泡，避免所有内容退化成同一种即时通信
+样式。无头像素材时 `AvatarDisc` 显示姓名首字徽章。系统、骰点、线索和错误消息继续使用
+居中的专用事件卡，不参与发言者体系。
+
+### 流式播放节奏
+
+模型网络流与可见播放相互解耦：`renderer.ts` 全速接收增量并写入内存队列，逐字播放。
+服务端 `done` 只代表网络完成，输入框和行动选项必须等待播放队列排空；点击当前聊天流
+或“显示全文”可立即排空。检测到“你可以/您可以”或结构化 `choices` 后，剩余行动菜单
+切到快速收尾节奏，避免选项已定却仍按正文速度等待。`prefers-reduced-motion` 下不播放
+逐字动画。权威 `chat_events` 在队列排空时覆盖临时段；素材至少等第一段文字真实可见后
+展示，避免事件越过叙事。
+
+以下播放节奏为当前调参值（易变实现细节，以 `src/renderer.ts` 顶部常量为准，
+调整它们不属于契约变更）：
+
+| 参数 | 当前值 | 出处（`src/renderer.ts`） |
+| --- | --- | --- |
+| 基础节拍 | 每 34ms 展示 1 字 | `BASE_TICK_MS` |
+| 逗号/顿号/分号/冒号后停顿 | 72ms | `COMMA_PAUSE_MS` |
+| 句末（。！？!?）停顿 | 185ms | `SENTENCE_PAUSE_MS` |
+| 换行停顿 | 110ms | `playbackDelay` |
+| 发言者切换停顿 | 240ms | `SPEAKER_PAUSE_MS` |
+| 积压超过 160 字 | 每拍 2 字 | `charactersPerTick` |
+| 积压超过 500 字 | 每拍 3 字 | `charactersPerTick` |
+| 选项收尾（fast） | 每拍 6 字、18ms（句末 46ms） | `charactersPerTick` / `playbackDelay` |

@@ -1,7 +1,10 @@
 # 模组编辑器需求与技术规划
 
+> **注意**：本文是模组编辑器的内部技术规划，记录 2026-07 时的设计目标；不是编辑器
+> 使用手册。实现状态以代码为准，最后对账日期：2026-07-22。
+
 本文定义 TRPG Master 模组编辑器的产品目标、MVP 范围、技术架构和验收标准。编辑器以
-[模组格式 v1](MODULE_FORMAT.md) 为唯一交换契约，不维护第二套私有数据格式。
+[模组格式 v1/v2](MODULE_FORMAT.md) 为唯一交换契约，不维护第二套私有数据格式。
 
 ## 1. 产品目标
 
@@ -22,7 +25,6 @@
 | 初次创作者 | 表单、模板、默认值和清晰错误，不需要理解 JSON |
 | 熟练模组作者 | 快速批量编辑、Markdown、复制实体、稳定 ID |
 | 技术作者 | JSON 源码查看、扩展字段、Schema 与 CLI |
-| 测试玩家 | 一键导出安装、开局检查和问题报告 |
 
 ## 3. 核心工作流
 
@@ -192,13 +194,16 @@ connectScenes
 
 ## 8. 后端模块划分
 
-建议新增：
+实现现状（截至 2026-07-22）：
 
-| 模块 | 职责 |
-|---|---|
-| `src/module_workspace.py` | 工程打开、保存、自动恢复和路径权限 |
-| `src/module_preview.py` | 玩家视角与守秘人视角的脱敏预览 |
-| `frontend/editor/` | 独立编辑器应用 |
+- 编辑器后端集中在 `src/editor_api.py` 与 `src/editor_projects.py`。
+  `EditorProjectStore` 把每个编辑会话持久化为运行时目录 `.editor-projects/` 下的
+  JSON 文件，提供创建、读取、列表、带 `expected_revision` 冲突检查的更新和删除；
+  `create_editor_router` 在 `server.py` 中挂载为 `/api/editor/projects` 路由。
+- 本节原提议新增的 `src/module_workspace.py`（工程打开、保存、自动恢复和路径权限）与
+  `src/module_preview.py`（玩家/守秘人视角脱敏预览）未按该形式落地：会话持久化职责
+  已由 `EditorProjectStore` 承担，工程目录管理与脱敏预览尚无对应实现。
+- 独立编辑器前端 `frontend/editor/` 尚未建立。
 
 已经具备并应直接复用：
 
@@ -214,20 +219,25 @@ connectScenes
 `manifest`、`module`、`keeperDocument` 与可选 `lorebook` 发送到 `/api/modules/compile`，以 Python 返回的
 `CompilationResult` 为权威。诊断 `path` 可直接关联表单字段，`trace` 可用于编译结果检查器。
 
-## 9. 工程 API 草案
+## 9. 工程 API 对账
 
-| 方法 | 路径 | 作用 |
-|---|---|---|
-| `POST` | `/api/editor/projects` | 新建工程 |
-| `POST` | `/api/editor/projects/open` | 打开允许目录内的工程 |
-| `GET` | `/api/editor/projects/{session}` | 读取完整编辑会话 |
-| `PATCH` | `/api/editor/projects/{session}` | 带 revision 保存变更 |
-| `POST` | `/api/editor/projects/{session}/validate` | 完整语义校验 |
-| `POST` | `/api/editor/projects/{session}/preview` | 编译预览 |
-| `POST` | `/api/editor/projects/{session}/export` | 导出 `.trpgmod` |
-| `POST` | `/api/editor/projects/{session}/playtest` | 安装并创建隔离试玩世界 |
+下表把原草案端点与 `src/editor_api.py` 的真实路由对账（截至 2026-07-22）：
 
-工程保存请求携带 `expected_revision`，避免两个编辑器窗口静默覆盖。
+| 方法 | 路径 | 作用 | 实现状态 |
+|---|---|---|---|
+| `POST` | `/api/editor/projects` | 新建工程 | 已实现：`POST /api/editor/projects` |
+| `POST` | `/api/editor/projects/open` | 打开允许目录内的工程 | 未实现 |
+| `GET` | `/api/editor/projects/{session}` | 读取完整编辑会话 | 已实现：`GET /api/editor/projects/{session_id}` |
+| `PATCH` | `/api/editor/projects/{session}` | 带 revision 保存变更 | 已实现：`PATCH /api/editor/projects/{session_id}` |
+| `POST` | `/api/editor/projects/{session}/validate` | 完整语义校验 | 未实现 |
+| `POST` | `/api/editor/projects/{session}/preview` | 编译预览 | 未实现 |
+| `POST` | `/api/editor/projects/{session}/export` | 导出 `.trpgmod` | 未实现 |
+| `POST` | `/api/editor/projects/{session}/playtest` | 安装并创建隔离试玩世界 | 未实现 |
+| `GET` | `/api/editor/projects` | 列出已有工程会话 | 已实现（草案未列出） |
+| `DELETE` | `/api/editor/projects/{session}` | 删除工程会话 | 已实现（草案未列出） |
+
+工程保存请求携带 `expected_revision` 避免两个编辑器窗口静默覆盖，已实现：revision 不匹配
+时返回 409 与当前工程内容。
 其中项目级 preview 应委托现有 `/api/modules/compile`，只额外负责从 session 读取工程数据和生成
 玩家/守秘人视角，不再实现另一套运行时转换。
 

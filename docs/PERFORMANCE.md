@@ -1,7 +1,8 @@
 # 回合性能
 
-本页描述 `perf/optimization` 分支实现的回合延迟优化。目标是降低玩家提交动作到首段可见叙事
-（TTFV）及完整提交耗时；不依赖缩短 system prompt 或关键词 Skill 路由。
+本页描述当前架构在服务端回合链路上的性能设计：目标是降低玩家提交动作到首段可见叙事
+（TTFV, Time To First Visible narrative）及完整提交耗时，且不依赖缩短 system prompt
+或关键词 Skill 路由。下列优化均已合入主线并默认生效。
 
 ## 已实现
 
@@ -49,15 +50,13 @@
 
 ## 本地基准
 
-基准不调用模型，不写入项目数据库：
+基准不调用模型，不写入项目数据库（在临时目录中运行）：
 
 ```bash
 venv/bin/python tools/benchmark_turn_performance.py 100
 ```
 
-2026-07-22 在开发机上的一次 100 轮结果：进程内 `2d6+1` 平均约 0.009ms；普通 SQLite
-世界读取平均约 0.618ms；turn cache 读取平均约 0.125ms。数值只用于同机版本比较，不作为其他
-硬件的绝对承诺。
+参数为迭代次数（默认 100，最小 10），输出 JSON，包含各操作的 mean/p50/p95/max 毫秒数。
 
 ## 配置与回退
 
@@ -67,3 +66,9 @@ venv/bin/python tools/benchmark_turn_performance.py 100
 
 性能改动的回归覆盖见 `tests/test_performance_optimization.py`、`tests/test_event_stream.py`、
 `tests/test_database_persistence.py` 和 `tests/test_turn_resolution.py`。
+
+## 历史基准
+
+2026-07-22 单次开发机跑分（100 轮），仅供同机版本对比，不作为其他硬件的绝对承诺：
+进程内 `2d6+1` 平均约 0.009ms；普通 SQLite 世界读取平均约 0.618ms；turn cache 读取
+平均约 0.125ms。更早的 v6/v7 回合基准见 [docs/archive/benchmarks_2026-07.md](archive/benchmarks_2026-07.md)。

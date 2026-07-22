@@ -1,9 +1,11 @@
 # 数据库与账号系统
 
 服务端的事实来源是关系型数据库：生产环境使用 PostgreSQL，桌面环境默认使用 SQLite。
-桌面环境未设置 `TRPG_DATABASE_URL` 时使用 `TRPG_RUNTIME_ROOT/trpg-master.db`，但仍经过同一套
-SQLAlchemy Repository；运行时不再读取
-`world_state.json`、`turns/`、`saves/` 或 `player_notes.json`。
+未设置 `TRPG_DATABASE_URL` 时，数据库文件默认位于 `TRPG_RUNTIME_ROOT/trpg-master.db`；
+从源码运行时 `TRPG_RUNTIME_ROOT` 默认即项目根目录（见 `src/config.py`），因此桌面数据库就是
+项目根目录下的 `trpg-master.db`，该文件已被 `.gitignore` 排除。两种环境都经过同一套
+SQLAlchemy Repository；运行时不再读取 `world_state.json`、`turns/`、`saves/` 或
+`player_notes.json`。
 
 ## 桌面启动与自动迁移
 
@@ -16,7 +18,7 @@ bash start_desktop.sh
 脚本会自动同步 `requirements.txt` 中缺失的后端依赖，设置桌面 SQLite URL，执行 Alembic，然后运行：
 
 ```bash
-python tools/import_worlds_to_database.py \
+venv/bin/python tools/import_worlds_to_database.py \
   --runtime-root "$TRPG_RUNTIME_ROOT" \
   --once --replace
 ```
@@ -28,12 +30,9 @@ python tools/import_worlds_to_database.py \
 遇到新增依赖缺失时可手动修复：
 
 ```bash
-source venv/bin/activate
-python -m pip install -r requirements.txt
-python -c 'import alembic, argon2, psycopg, sqlalchemy'
+venv/bin/python -m pip install -r requirements.txt
+venv/bin/python -c 'import alembic, argon2, psycopg, sqlalchemy'
 ```
-
-当前桌面数据库默认位置是项目根目录的 `trpg-master.db`，该文件已被 `.gitignore` 排除。
 
 ## PostgreSQL 生产部署
 
@@ -55,14 +54,14 @@ TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/backup-passphrase
 升级生产数据库：
 
 ```bash
-alembic upgrade head
+venv/bin/python -m alembic upgrade head
 ```
 
 首次导入云端旧世界（先创建 owner 账号）：
 
 ```bash
-python tools/manage_users.py create account_name
-python tools/import_worlds_to_database.py \
+venv/bin/python tools/manage_users.py create account_name
+venv/bin/python tools/import_worlds_to_database.py \
   --runtime-root /var/lib/trpg-master \
   --owner account_name \
   --once --replace

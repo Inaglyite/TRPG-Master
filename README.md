@@ -1,57 +1,37 @@
 # TRPG Master
 
-一个支持本地桌面与账号化云端部署的 AI 守秘人应用。项目把叙事模型、CoC 7e 风格规则、确定性工具、模组状态和 Electron 界面拆成独立层，通过 FastAPI WebSocket 传递流式叙事与结构化游戏事件。
+**[中文版 README](README.zh-CN.md)**
 
-当前仓库内置两个可游玩模组：`mansion_of_madness`（疯狂宅邸）与 `猩红文档`。目前的产品体验仍是单机、单玩家，但底层世界已经按 `world_id` 隔离，可并行运行多个实例；共享 GM 历史、房间身份和事件广播将在下一阶段实现。
+An AI Keeper (game master) for Call-of-Cthulhu-style tabletop role-playing. TRPG Master pairs an LLM narrator with deterministic d100 rules tooling: the model writes the story and interprets your intent, while Python code rolls the dice, tracks the world, and enforces the rules. It runs as a local desktop app (Electron) or as a self-hosted, account-based server.
 
-## 主要能力
+Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **猩红文档** (The Scarlet Documents). The game UI and narrative are in Chinese.
 
-- Electron 桌面端与浏览器前端，共用 React + Vite + TypeScript 渲染层；Zustand 管理客户端状态，Zod 校验 WebSocket 消息入口。
-- OpenAI 兼容接口，默认配置面向 DeepSeek，可自定义请求地址和模型名。
-- 单引擎 LangGraph 工作流：同一 `GameEngine` 和消息历史在普通叙事节点与战斗职责节点之间路由；当前不是多 Agent 系统。
-- 服务端权威战斗状态机，负责先攻、回合、d100 对抗、伤害、枪械弹药与玩家防御确认。
-- 非敌对 NPC 的首次不可逆攻击和武力威胁会在 GM 叙事前确认；取消时场景完全不变，确认后仍承担正常后果。
-- 统一道具使用层：验证耐用品、消耗一次性物品，并让战斗内外的真实开枪共用余弹结算。
-- d100 技能检定、属性检定、伤害、SAN 与心理状态等确定性工具。
-- 模组切换、调查员选择、长期角色履历和按世界实例隔离的多槽位存档。
-- `.trpgmod` 模组包预检、一键导入、版本并存、JSON Schema 与安全安装。
-- Character Card V3 Lorebook：按场景、人物、已知线索和 flags 本地检索叙事素材，带预算、分组与跨存档冷却。
-- 持久回合日志：把最终叙事、结构化选项、可重放事件、消息和世界快照绑定到同一个 `turn_id`，断线后可确认并恢复完整回合。
-- 回合级上下文诊断：查看模型首 token/总耗时、prompt 分区估算、工具名和 Lorebook 逐条筛选原因，不暴露私有提示正文。
-- 无副作用重新叙述：只替换最后一轮文字表达，不重跑工具、骰子、判定、线索或资源变化。
-- 决策点时间线分支：结果消息上的分支操作自动锚定到本次行动前的父回合，恢复当时的世界快照、聊天和结构化选项，并在存档页切换主时间线与分支。
-- 私人调查笔记与快捷行动：笔记按世界和账号写入数据库且不注入模型；快捷行动仍走普通可见玩家行动协议。
-- `RuntimeContext + DatabaseWorldStore`：桌面 SQLite / 生产 PostgreSQL 的 JSON 世界状态、revision 乐观并发、事务恢复和旧存档迁移。
-- 账号控制平面：Argon2id、可撤销服务端 Session、世界成员权限、审计事件与 WebSocket Origin 校验。
-- 图片线索、人物档案、场景展示材料与线索加入提示。
-- 模组声明式发现规则，在叙事前可靠结算线索、SAN、人物揭示、图片与旗标效果。
-- 每 50 个玩家回合静默压缩旧上下文，保留最近 24 条消息。
-- TIER 信息边界、NPC 揭示记录和私有工作记忆，降低模型提前剧透的概率。
-- Windows 安装包/便携版构建，以及 Linux 源码桌面启动脚本。
+<p align="center">
+  <img src="docs/screenshots/menu.png" alt="Start menu with module selection" width="48%"/>
+  <img src="docs/screenshots/character-select.png" alt="Investigator selection" width="48%"/>
+  <img src="docs/screenshots/gameplay.png" alt="A keeper narrative turn with structured choices" width="48%"/>
+  <img src="docs/screenshots/character-panel.png" alt="Gameplay with the investigator panel open" width="48%"/>
+</p>
 
-## 文档
+## Features
 
-- [开发路线图](docs/ROADMAP.md)：数据库化后的当前基线、多人房间和未来可选 Agent 的进入条件。
-- [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
-- [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
-- [数据库与账号](docs/DATABASE.md)：迁移、旧世界导入、PostgreSQL、备份与恢复。
-- [回合性能](docs/PERFORMANCE.md)：阶段指标、进程内工具、回合缓存、快照合并与本地基准。
-- [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
-- [模组编辑器规划](docs/MODULE_EDITOR.md)：编辑器需求、技术架构、阶段与验收标准。
-- [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。
-- [历史开发交接](docs/HANDOFF_2026-07-16.md)：2026-07-16 的提交与验证快照，不作为现行架构说明。
-- [模组工程模板](examples/module-template/manifest.json)：可直接打包的 v1 示例。
+- **LLM narrates, Python decides.** The model handles prose and intent; skill checks, dice, damage, SAN loss, world state, saves and asset reveals are all resolved by deterministic tools — no hallucinated rules.
+- **Server-authoritative combat.** A dedicated state machine handles initiative, opposed d100 rolls, damage, firearm ammo and player defense choices. First lethal aggression against non-hostile NPCs is confirmed with you before the story commits.
+- **Modules you can write and share.** Modules are safe, sandboxed `.trpgmod` ZIP packages (JSON + Markdown + assets) with JSON Schema validation, one-click import, side-by-side versions and a v2 format that guarantees the main investigation can never dead-end on a failed roll. A ready-to-copy [template](examples/module-template/manifest.json) is included.
+- **Lorebook-powered context.** Character Card V3 lorebooks retrieve module lore per turn with budgets, groups and cooldowns; tiered information boundaries keep the model from spoiling secrets it shouldn't know yet.
+- **Saves, journals and timeline branches.** Per-world save slots, a persistent turn journal that survives disconnects, and branching timelines: rewind to any decision point and play out a different choice without rerolling the past.
+- **Desktop or self-hosted.** Electron app for Linux/Windows out of the box; for a server deployment you get Argon2id accounts, revocable sessions, per-world permissions, audit events and PostgreSQL persistence.
 
-## 快速开始
+## Quick Start
 
-### 环境要求
+### Requirements
 
 - Python 3.10+
-- Node.js 20 LTS 或更新版本
-- 一个 OpenAI 兼容 API Key
-- 可选：智谱 GLM API Key，用于快速摘要与上下文压缩
+- Node.js 20 LTS or newer
+- An API key for any OpenAI-compatible endpoint (DeepSeek by default)
+- Optional: a Zhipu GLM API key for fast summaries and context compression
 
-### 安装依赖
+### Install
 
 ```bash
 python3 -m venv venv
@@ -64,15 +44,15 @@ npm run build
 cd ..
 ```
 
-### 配置模型
+### Configure the model
 
-交互式写入项目根目录的 `.env.json`：
+Interactive setup (writes `.env.json` in the project root; the file is git-ignored):
 
 ```bash
 python3 start.py --config
 ```
 
-也可以手动创建：
+Or create `.env.json` manually — only the first two fields are strictly required:
 
 ```json
 {
@@ -82,259 +62,96 @@ python3 start.py --config
   "pro_model": "deepseek-v4-pro",
   "narrative_model": "deepseek-v4-pro",
   "judgement_model": "deepseek-v4-pro",
-  "glm_api_key": "optional-glm-key",
-  "glm_base_url": "https://open.bigmodel.cn/api/paas/v4/",
-  "glm_model": "glm-4-flash-250414"
+  "glm_api_key": "optional-glm-key"
 }
 ```
 
-`.env.json` 已被 Git 忽略，不会进入版本库。系统环境变量优先于文件配置：
+Environment variables take precedence over the file. The full list — model-role presets, lorebook/prompt toggles, database URL, auth and origins for server deployments — is in the fold-out below.
 
-| 环境变量 | 用途 | 默认值 |
+<details>
+<summary><strong>Full environment variable reference</strong></summary>
+
+| Variable | Purpose | Default |
 |---|---|---|
-| `OPENAI_API_KEY` | 主模型 API Key | 空 |
-| `OPENAI_BASE_URL` | OpenAI 兼容请求地址 | `https://api.deepseek.com` |
-| `TRPG_FLASH_MODEL` | 设置页“Flash”预设对应的模型 ID | `deepseek-v4-flash` |
-| `TRPG_PRO_MODEL` | 设置页“Pro”预设对应的模型 ID | `deepseek-v4-pro` |
-| `TRPG_NARRATIVE_MODEL` | 探索、社交和开场叙述模型 | `deepseek-v4-pro` |
-| `TRPG_JUDGEMENT_MODEL` | 战斗、复杂工具后续、模型审计和摘要兜底模型 | `deepseek-v4-pro` |
-| `TRPG_FORCE_PRO` | 旧版兼容开关；显式设为 `0/false/no/off` 且未指定角色模型时，两者改用 Flash | 未设置 |
-| `TRPG_ENABLE_TURN_AUDIT` | 诊断用回合模型审计，支持 `1/true/yes` | 关闭 |
-| `TRPG_ENABLE_LOREBOOK` | 启用模组 Lorebook 本地检索，支持 `0/false/no/off` 关闭 | 开启 |
-| `TRPG_PROMPT_PROFILE` | `hybrid` 使用模组剧情脊柱，缺失时自动回退 `full` | `hybrid` |
-| `TRPG_DYNAMIC_TOOLS` | 按回合只发送相关工具 Schema | 开启 |
-| `TRPG_STORY_THINKING` | 叙述请求思考模式：`auto/disabled/enabled/provider` | `auto` |
-| `GLM_API_KEY` | 可选摘要模型 API Key | 空 |
-| `GLM_BASE_URL` | GLM 请求地址 | `https://open.bigmodel.cn/api/paas/v4/` |
-| `GLM_MODEL` | GLM 模型名 | `glm-4-flash-250414` |
-| `TRPG_MODULE` | 启动时使用的模组目录名 | `mansion_of_madness` |
-| `TRPG_PROJECT_ROOT` | 模组、规则与 Skill 的只读定义根目录 | 自动识别 |
-| `TRPG_RUNTIME_ROOT` | `worlds/`、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；打包模式为后端目录 |
-| `TRPG_DATABASE_URL` | SQLAlchemy 数据库 URL；云端必须使用 PostgreSQL | 桌面模式默认使用 `TRPG_RUNTIME_ROOT/trpg-master.db` |
-| `TRPG_REQUIRE_AUTH` | 启用账号、HTTP 与 WebSocket 权限门禁 | `0`；生产 service 设置为 `1` |
-| `TRPG_ALLOWED_ORIGINS` | 允许携带登录 Cookie 的 HTTP/WebSocket Origin | 生产环境必须显式配置 |
-| `TRPG_WORLD_ID` | 工具子进程打开的世界实例；通常由引擎自动注入 | 当前模组的默认本地世界 |
+| `OPENAI_API_KEY` | Main model API key | empty |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint | `https://api.deepseek.com` |
+| `TRPG_FLASH_MODEL` | Model ID for the "Flash" preset in settings | `deepseek-v4-flash` |
+| `TRPG_PRO_MODEL` | Model ID for the "Pro" preset in settings | `deepseek-v4-pro` |
+| `TRPG_NARRATIVE_MODEL` | Exploration, social and opening narration | `deepseek-v4-pro` |
+| `TRPG_JUDGEMENT_MODEL` | Combat, complex tool follow-ups, audits and summary fallback | `deepseek-v4-pro` |
+| `TRPG_FORCE_PRO` | Legacy switch; explicitly `0/false/no/off` with no role models set makes both roles use Flash | unset |
+| `TRPG_ENABLE_TURN_AUDIT` | Per-turn model audit for diagnostics, `1/true/yes` | off |
+| `TRPG_ENABLE_LOREBOOK` | Module lorebook retrieval, `0/false/no/off` to disable | on |
+| `TRPG_PROMPT_PROFILE` | `hybrid` uses the module's story spine, falls back to `full` when absent | `hybrid` |
+| `TRPG_DYNAMIC_TOOLS` | Send only relevant tool schemas per turn | on |
+| `TRPG_STORY_THINKING` | Narration thinking mode: `auto/disabled/enabled/provider` | `auto` |
+| `GLM_API_KEY` | Optional summary model API key | empty |
+| `GLM_BASE_URL` | GLM endpoint | `https://open.bigmodel.cn/api/paas/v4/` |
+| `GLM_MODEL` | GLM model name | `glm-4-flash-250414` |
+| `TRPG_MODULE` | Module directory used at startup | `mansion_of_madness` |
+| `TRPG_PROJECT_ROOT` | Read-only root for modules, rules and skills | auto-detected |
+| `TRPG_RUNTIME_ROOT` | Writable root for `worlds/`, custom characters and profiles | project root in source mode; backend dir when packaged |
+| `TRPG_DATABASE_URL` | SQLAlchemy database URL; PostgreSQL required for cloud deployments | desktop defaults to SQLite at `TRPG_RUNTIME_ROOT/trpg-master.db` |
+| `TRPG_REQUIRE_AUTH` | Enable account, HTTP and WebSocket permission gates | `0`; the production service sets `1` |
+| `TRPG_ALLOWED_ORIGINS` | Origins allowed to carry the login cookie over HTTP/WebSocket | must be set explicitly in production |
+| `TRPG_WORLD_ID` | World instance opened by tool subprocesses; usually injected by the engine | the current module's default local world |
 
-### 启动桌面版
+</details>
 
-从终端启动并查看实时日志：
+### Run the desktop app
 
 ```bash
 ./start_desktop.sh
 ```
 
-启动脚本会在打开后端前依次执行：
+The launcher activates the venv, installs missing backend dependencies, applies database migrations, and imports legacy save data on first run, then starts the backend and the Electron window. Closing the last window stops the backend automatically.
 
-1. 优先激活项目的 `venv`，不存在时回退 `.venv`；
-2. 检查 SQLAlchemy、Alembic、psycopg 和 Argon2 等后端依赖，缺失时自动执行 `pip install -r requirements.txt`；
-3. 对桌面 SQLite 数据库执行 `alembic upgrade head`；
-4. 第一次数据库化启动时，把旧 `worlds/` 中的世界、回合、存档和笔记导入数据库。
-
-一次性导入成功后会在数据库的 `audit_events` 中写入 `legacy_import_completed`。后续启动只返回
-`already_imported`，不会再用旧 JSON 覆盖数据库状态。不要删除旧 `worlds/`，直到确认数据库中的
-世界和存档均可正常打开并完成备份。
-
-无终端桌面入口应使用 `Terminal=false` 的 `.desktop` 文件调用：
-
-```text
-Exec=/absolute/path/to/trpg-master/start_desktop.sh --desktop
-Terminal=false
-```
-
-桌面模式日志写入 `/tmp/trpg-desktop.log`，后端日志写入 `/tmp/trpg-server.log`。Electron 最后一个窗口关闭后，启动脚本会自动停止后端并释放 `8765` 端口。
-
-若出现 `ModuleNotFoundError: argon2`、`sqlalchemy` 或 `psycopg`，通常表示绕过了启动脚本，或
-虚拟环境尚未同步。可执行：
-
-```bash
-source venv/bin/activate
-python -m pip install -r requirements.txt
-bash start_desktop.sh
-```
-
-### 启动终端版
+### Run in the terminal
 
 ```bash
 python3 start.py
 ```
 
-### 前端开发模式
-
-分别启动后端、Vite 和 Electron：
+### Frontend development mode
 
 ```bash
-# 终端 1
+# Terminal 1 — backend on http://127.0.0.1:8765 (WebSocket: ws://127.0.0.1:8765/ws)
 source venv/bin/activate
 python3 server.py
 
-# 终端 2
-cd frontend
-npm run dev
+# Terminal 2 — Vite dev server on http://127.0.0.1:5173
+cd frontend && npm run dev
 
-# 终端 3
-cd frontend
-npm run electron:dev
+# Terminal 3 — Electron shell
+cd frontend && npm run electron:dev
 ```
 
-后端默认地址为 `http://127.0.0.1:8765`，WebSocket 为 `ws://127.0.0.1:8765/ws`。Vite 开发服务器默认使用 `http://127.0.0.1:5173`。
+## Playing the Game
 
-## 游戏内操作
+- **Quick save** overwrites the auto slot `slot_000` of the current world; every completed keeper turn also updates it.
+- **Save manager** handles manual slots: load, create, rename, delete.
+- **Character / clues** shows your investigator's stats, items, clues and revealed handouts.
+- **Model settings** picks narration and judgement models independently (all-Pro, balanced, all-Flash, or custom model IDs).
+- **New game** returns to the module and investigator selection flow.
 
-- `快速存档`：直接覆盖当前世界的自动槽 `slot_000`。
-- `存档管理`：读取、新建手动存档、重命名和删除手动槽。
-- `角色/线索`：查看当前调查员状态、物品、线索和已发放图片。
-- `模型设置`：分别选择叙述模型和判定模型，支持全 Pro、均衡、全 Flash 与自定义模型 ID。
-- `新游戏`：返回开始流程，重新选择模组与调查员。
+## Documentation
 
-每个 GM 回合完成时也会更新自动槽。退出确认窗口仍建议玩家先快速存档，以免在正在生成的回合中途关闭。
+The project documentation is written in Chinese:
 
-## 项目结构
+- [架构文档](docs/ARCHITECTURE.md) — processes, modules, turn lifecycle, data ownership, extension points
+- [接口文档](docs/API.md) — HTTP routes, WebSocket protocol, event ordering, payload schemas
+- [数据库与账号](docs/DATABASE.md) — migrations, legacy import, PostgreSQL, backup & restore
+- [模组格式](docs/MODULE_FORMAT.md) — the `.trpgmod` v1/v2 package specification for module authors
+- [前端架构](docs/FRONTEND_ARCHITECTURE.md) — React components, Zustand stores, protocol boundaries
+- [回合性能](docs/PERFORMANCE.md) — turn latency design, metrics and benchmarking
+- [开发路线图](docs/ROADMAP.md) — current baseline and the path to multiplayer rooms
+- [模组编辑器规划](docs/MODULE_EDITOR_PLAN.md) — internal plan for the module editor (not a user manual)
+- [设计依据](docs/DESIGN_RATIONALE.md) — external references behind key design choices
+- Historical handoffs and playtest reports live in [docs/archive/](docs/archive/).
 
-```text
-trpg-master/
-├── server.py                 # FastAPI HTTP + WebSocket 适配层
-├── game_loop.py              # 终端版入口
-├── start.py                  # 配置与终端启动器
-├── start_desktop.sh          # Linux 桌面进程托管脚本
-├── requirements.txt
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── API.md
-│   ├── MODULE_FORMAT.md
-│   └── MODULE_EDITOR.md
-├── src/
-│   ├── engine.py             # GameEngine、模型调用、记忆与回调
-│   ├── agent_graph.py        # 单引擎 LangGraph 回合工作流
-│   ├── combat_agent.py       # 同一模型会话的临时战斗职责提示词
-│   ├── combat.py             # 权威战斗状态与确定性结算
-│   ├── inventory.py          # 道具验证、消耗与资源数量结算
-│   ├── tools.py              # Function Calling schema 与工具分发
-│   ├── persistence.py        # Skill 组装、存档与快照恢复
-│   ├── characters.py         # 调查员选择与长期履历
-│   ├── runtime.py            # RuntimeContext、world_id 路径与旧数据迁移
-│   ├── module_format.py      # v1 模组领域模型、引用校验与 Schema
-│   ├── lorebook.py           # Lorebook v3 模型、门槛、检索与冷却记忆
-│   ├── turn_journal.py        # 持久回合提交、恢复、诊断与叙事变体
-│   ├── world_branches.py      # 世界快照分支、时间线发现与切换上下文
-│   ├── player_notes.py        # 不进入 prompt 的玩家笔记与 revision
-│   ├── event_stream.py        # 有序 turn_id/seq WebSocket 事件流
-│   ├── module_compiler.py    # 无副作用编译、编译产物与字段来源追踪
-│   ├── module_diagnostics.py # 结构化错误、警告与作者建议
-│   ├── module_registry.py    # 内置/用户模组发现及安全包安装
-│   ├── world_store.py        # revision、房间锁、原子写与备份恢复
-│   ├── world_migrations.py   # 世界 schema 迁移注册表
-│   ├── config.py             # 默认路径、模型和 Skill 配置
-│   └── llm.py                # GLM 辅助摘要
-├── tools/                    # 骰子、状态、战斗、伤害、SAN 等确定性 CLI 工具
-├── skills/                   # 常驻与按需加载的守秘人约束
-├── rules/                    # 结构化规则数据
-├── mod/<module>/             # 模组定义、初始模板、主题、素材和专属 skill
-├── modules/<id>/<version>/   # 用户导入模组（运行时生成）
-├── schemas/trpgmod/          # 编辑器与第三方工具共享的 JSON Schema
-├── examples/module-template/ # v1 模组工程模板
-├── characters/               # 默认与自定义调查员
-├── profiles/                 # 长期角色履历（运行时生成）
-├── worlds/<world_id>/        # 旧数据导入源与可选桌面兼容导出；不是运行时事实来源
-├── frontend/
-│   ├── electron/main.cjs     # Electron 主进程与打包后端托管
-│   ├── src/                  # TypeScript UI
-│   └── package.json
-└── packaging/                # PyInstaller 与 Windows 构建脚本
-```
+## Development
 
-## 运行链路
-
-```text
-玩家
-  -> Electron / Browser
-  -> WebSocket server.py
-  -> GameEngine
-  -> LangGraph 回合图
-  -> OpenAI 兼容模型 / Python 工具
-  -> RuntimeContext
-  -> PostgreSQL world_states.state(JSONB) + turns/snapshots/save_slots
-```
-
-模型负责叙事和决定行动意图：非战斗回合走普通叙事节点，战斗激活后在同一个 `GameEngine`、同一份消息历史上切换到战斗职责节点。这里没有两个独立 Agent；节点只是选择模型和临时提示的工作流分支。骰子、先攻、回合推进、技能值、伤害、SAN、世界状态、存档和素材发放均由 Python 代码执行。详细线程模型与数据流见 [架构文档](docs/ARCHITECTURE.md)。
-
-## 存档与角色数据
-
-存档按世界实例隔离并事务化保存：
-
-```text
-save_slots                    # 自动槽 slot_000 与手动槽元数据、消息
-└── snapshots                 # 不可变 JSONB 世界快照
-```
-
-桌面兼容模式可导出旧目录格式，但服务端不会从导出文件读取运行状态；生产 service 已关闭兼容导出。
-
-调查员数据分为三层：
-
-| 层 | 路径 | 作用 |
-|---|---|---|
-| 角色模板 | `characters/default`、`characters/custom`、`mod/*/characters` | 新游戏的候选调查员 |
-| 当前案件 | `world_states.state.pc` | 当前 HP、SAN、物品、心理状态与案件内成长 |
-| 长期履历 | `profiles/player_profile.json` | 已完成模组、结局、声望、人脉与最后状态 |
-
-运行时数据和 API Key 均已加入 `.gitignore`。旧版 `mod/<module>/world_state.json` 只作为首次迁移来源保留；新游戏与工具调用不会再写入模组目录。
-
-## 模组开发与导入
-
-新模组使用 `.trpgmod` v1。它是经过安全限制的 ZIP 包，至少包含：
-
-```text
-module-project/
-├── manifest.json
-├── module.json
-├── keeper.md                 # 可选
-├── theme.json                # 可选
-├── lorebook.json             # 可选，Character Card V3 Lorebook
-├── skills/                   # 可选，需声明 custom_skills
-├── characters/               # 可选，需声明 bundled_characters
-├── scenes/                   # 可选，需声明 scene_documents
-└── assets/                   # 可选，图片与音频
-```
-
-编译预览、生成、检查和导入：
-
-```bash
-venv/bin/python tools/module_packager.py compile examples/module-template
-venv/bin/python tools/module_packager.py compile examples/module-template \
-  --output /tmp/example-compiled
-venv/bin/python tools/module_packager.py pack \
-  examples/module-template /tmp/example.trpgmod
-venv/bin/python tools/module_packager.py validate /tmp/example.trpgmod
-```
-
-`compile` 直接调用游戏安装流程使用的编译内核，返回字段级诊断和输入到输出的来源追踪；不传
-`--output` 时不会写文件。编辑器也可调用 `POST /api/modules/compile` 获得同样的结果。
-
-游戏开始页的“导入”按钮会先做格式、安全和引用预检，确认后安装到
-`<runtime>/modules/<id>/<version>/` 并自动切换。安装过程生成兼容当前引擎的 `module.md` 和
-`world_state_initial.json`；作者工程与玩家运行状态始终分离。
-
-完整字段、大小限制、版本兼容和错误规则见 [模组格式](docs/MODULE_FORMAT.md)。旧式
-`mod/<name>/module.md` 仍可运行，`tools/module_loader.py` 只作为有损兼容入口保留。
-
-## Windows 打包
-
-在 Windows PowerShell 中执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
-```
-
-脚本会：
-
-1. 安装/检查 Python 与 Node.js 依赖。
-2. 用 PyInstaller 构建 `trpg-server.exe`。
-3. 用 electron-builder 构建 NSIS 安装版和便携版。
-
-输出位于 `frontend/release/`。`.env.json` 不会被打进安装包；首次运行时由 Electron 配置窗口收集 API 地址和 Key。
-
-## 开发校验
-
-后端包含世界隔离、并发、战斗、道具、旧存档和恢复测试。提交前运行：
+Run these checks before submitting changes:
 
 ```bash
 venv/bin/python -m unittest discover -s tests -v
@@ -347,11 +164,43 @@ npm run build
 bash -n ../start_desktop.sh
 ```
 
-接口变化还应同步更新 [接口文档](docs/API.md)。修改存档、角色或模组状态结构时，应同时更新 [架构文档](docs/ARCHITECTURE.md) 的数据所有权章节。
+Protocol changes must be reflected in [docs/API.md](docs/API.md); changes to save, character or module state structures belong in the data-ownership chapter of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 当前边界
+### Project structure (top level)
 
-- 桌面模式默认关闭账号门禁，不应直接暴露到公网；云端必须设置 `TRPG_REQUIRE_AUTH=1`、TLS 和允许的 Origin。
-- 不同 `world_id` 已隔离；同一世界的写入由 `DatabaseWorldStore` 通过数据库事务、行锁和 revision 保护。
-- 每条 WebSocket 仍拥有独立 `GameEngine.messages`；多个连接尚不能作为一个共享 GM 房间。
-- 多人模式下一步需要 `RoomManager`、共享引擎、行动队列、角色占用和事件广播；账号与世界成员权限已经存在。
+```text
+trpg-master/
+├── server.py        # FastAPI HTTP + WebSocket adapter
+├── src/             # engine, LangGraph turn workflow, combat, persistence, module tooling
+├── tools/           # deterministic CLI tools (dice, combat, damage, SAN, module packager)
+├── skills/          # keeper constraint prompts, loaded on demand
+├── rules/           # structured rules data
+├── mod/             # bundled modules
+├── schemas/trpgmod/ # shared JSON Schemas for the module format
+├── examples/        # module project template
+├── frontend/        # React + Vite + TypeScript UI and Electron shell
+└── docs/            # project documentation (Chinese)
+```
+
+The full module map lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Windows packaging
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
+```
+
+Builds `trpg-server.exe` with PyInstaller, then the NSIS installer and portable builds with electron-builder. Output lands in `frontend/release/`. `.env.json` is never bundled — the Electron setup window collects the endpoint and key on first run.
+
+## Current Limitations
+
+- Single player per world today. Worlds are isolated by `world_id`, but each WebSocket connection still owns a private keeper history; shared GM rooms are the next milestone (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+- Desktop mode ships with auth disabled and must not be exposed to the public internet as-is. Server deployments must set `TRPG_REQUIRE_AUTH=1`, TLS and explicit allowed origins (see [docs/DATABASE.md](docs/DATABASE.md)).
+
+## Contributing
+
+Contributions are welcome. Please keep protocol, architecture and module-format documentation in sync with code changes, and make sure the checks above pass before opening a PR. Note that the codebase, in-game content and most documentation are in Chinese.
+
+## License
+
+Code is released under the [MIT License](LICENSE). Bundled module content (narrative text and assets under `mod/`) is included for play and study; check each module's own `license` field before redistributing it.
