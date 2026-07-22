@@ -647,7 +647,62 @@ export function onNarrativeSegments(segments: NarrativeSegment[]) {
       `turn-${displayTurnId || "unknown"}-${segmentIndex}`,
     ),
   );
-  if (!playbackQueue.length) applyAuthoritativeSegments();
+  if (streamMessageId && playbackQueue.length) {
+    rebasePlaybackOnAuthoritativeSegments(authoritativeSegments);
+  } else if (!playbackQueue.length) {
+    applyAuthoritativeSegments();
+  }
+}
+
+/**
+ * The provider may return one large untagged chunk.  Speaker inference then
+ * completes while the presentation queue is still typing.  Rebase both the
+ * visible prefix and the unplayed suffix onto the authoritative speaker map so
+ * bubbles change during playback instead of jumping only at turn completion.
+ */
+function rebasePlaybackOnAuthoritativeSegments(segments: NarrativeSegment[]) {
+  const consumedChars = Array.from(streamBuffer).length;
+  let remainingConsumed = consumedChars;
+  const presented: NarrativeSegment[] = [];
+  const queued: PlaybackPiece[] = [];
+
+  for (const segment of segments) {
+    const chars = Array.from(segment.text);
+    const consumedHere = Math.min(remainingConsumed, chars.length);
+    if (consumedHere > 0) {
+      presented.push({
+        ...segment,
+        text: chars.slice(0, consumedHere).join(""),
+      });
+      remainingConsumed -= consumedHere;
+    }
+    const rest = chars.slice(consumedHere);
+    if (rest.length) {
+      const npcId =
+        segment.kind === "speech"
+          ? segment.npcId || segment.npc_id || segment.speaker?.id || null
+          : null;
+      if (npcId && segment.speaker) liveSpeakers.set(npcId, segment.speaker);
+      queued.push({ chars: rest, npcId, fast: choiceFastMode });
+    }
+  }
+
+  streamSegments = presented;
+  streamNpc =
+    presented.at(-1)?.kind === "speech"
+      ? presented.at(-1)?.npcId || presented.at(-1)?.npc_id || null
+      : null;
+  playbackQueue.splice(0, playbackQueue.length, ...queued);
+  const targetId = streamMessageId;
+  updateMessages((messages) =>
+    messages.map((message) =>
+      message.id === targetId
+        ? { ...message, segments: presented.map((segment) => ({ ...segment })) }
+        : message,
+    ),
+  );
+  authoritativeSegments = null;
+  accelerateNarrativeChoices(choiceFastMode);
 }
 
 function applyAuthoritativeSegments() {

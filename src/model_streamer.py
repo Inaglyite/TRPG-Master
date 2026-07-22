@@ -12,7 +12,7 @@ from typing import Any
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
 from .speaker_parser import SpeakerStreamParser
-from .tool_protocol import ToolProtocolFilter
+from .tool_protocol import ToolProtocolFilter, strip_tool_protocol
 from .tools import MODEL_TOOLS, model_tools_for
 
 _INTERNAL_NARRATIVE_PATTERNS = (
@@ -30,6 +30,7 @@ _INTERNAL_NARRATIVE_PATTERNS = (
 
 
 def sanitize_visible_narrative(text: str) -> str:
+    text = strip_tool_protocol(text)
     for pattern in _INTERNAL_NARRATIVE_PATTERNS:
         text = pattern.sub("", text)
     return re.sub(r"\n{3,}", "\n\n", text)

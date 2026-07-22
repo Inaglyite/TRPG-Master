@@ -782,6 +782,42 @@ class IdentityContractTests(unittest.TestCase):
         self.assertNotIn("绝密内容", "".join(visible))
         self.assertEqual(tool_calls, [])
 
+    def test_repeated_fullwidth_bar_dsml_is_parsed_without_leaking(self):
+        secret = "法伦知道真相但没有公开。"
+        protocol = (
+            '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="npc_reveal">'
+            '<｜｜DSML｜｜parameter name="npc_id" string="true">bryce_fallon'
+            '</｜｜DSML｜｜parameter><｜｜DSML｜｜parameter name="tier" integer="true">2'
+            '</｜｜DSML｜｜parameter><｜｜DSML｜｜parameter name="entry_text" string="true">'
+            f'{secret}</｜｜DSML｜｜parameter></｜｜DSML｜｜invoke>'
+            '</｜｜DSML｜｜tool_calls>'
+        )
+        chunks = [stream_chunk(content=char) for char in "公开叙事。" + protocol]
+        chunks.append(stream_chunk(finish_reason="stop"))
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
+            )
+        )
+        engine.messages = []
+        visible = []
+        engine.cb = SimpleNamespace(
+            on_narrative=visible.append,
+            on_error=lambda _message: None,
+        )
+
+        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        self.assertEqual(text, "公开叙事。")
+        self.assertEqual("".join(visible), text)
+        self.assertNotIn(secret, "".join(visible))
+        self.assertEqual(tool_calls[0]["function"]["name"], "npc_reveal")
+        arguments = json.loads(tool_calls[0]["function"]["arguments"])
+        self.assertEqual(arguments["tier"], 2)
+        self.assertEqual(arguments["entry_text"], secret)
+
     def test_speech_start_callback_receives_npc_id_not_empty_piece_slot(self):
         chunks = [
             stream_chunk(content="【npc:bryce_fallon】“请坐。”【/npc】"),

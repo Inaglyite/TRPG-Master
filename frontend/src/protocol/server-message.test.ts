@@ -72,4 +72,13 @@ describe("parseServerMessage", () => {
       }),
     ).toBeNull();
   });
+
+  it("rejects textual DSML tool protocols with repeated full-width bars", () => {
+    expect(
+      parseServerMessage({
+        type: "narrative_chunk",
+        text: '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="npc_reveal">秘密',
+      }),
+    ).toBeNull();
+  });
 });

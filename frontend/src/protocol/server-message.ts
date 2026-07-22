@@ -86,6 +86,19 @@ export type ServerMessageType = (typeof serverMessageTypes)[number];
 // discriminants; payload schemas can be tightened one message family at a time.
 export type ServerMessage = { type: ServerMessageType; [key: string]: any };
 
+const dsmlProtocol = /<\s*(?:[|｜]\s*)+DSML(?:\s*[|｜])+\s*\w+/iu;
+
+function containsToolProtocol(value: unknown): boolean {
+  if (typeof value === "string") return dsmlProtocol.test(value);
+  if (Array.isArray(value)) return value.some(containsToolProtocol);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some(
+      containsToolProtocol,
+    );
+  }
+  return false;
+}
+
 export function parseServerMessage(raw: unknown): ServerMessage | null {
   let decoded: unknown;
   try {
@@ -95,6 +108,9 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   }
   const result = serverMessageSchema.safeParse(decoded);
   if (!result.success) return null;
+  // Last-resort display boundary: a backend regression must still never render
+  // textual tool calls or their private arguments in Electron.
+  if (containsToolProtocol(decoded)) return null;
   if (result.data.type === "chat_events") {
     const chatResult = chatEventsMessageSchema.safeParse(decoded);
     return chatResult.success ? (chatResult.data as ServerMessage) : null;

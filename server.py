@@ -149,6 +149,7 @@ from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.runtime import RuntimeContext
 from src.speaker_parser import parse_segments as parse_speaker_segments
+from src.tool_protocol import strip_tool_protocol
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
 from src.ws_router import WsMessageRouter
@@ -364,7 +365,22 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     def public_chat_events(record: dict) -> list[dict]:
         """Enrich saved segments and repair legacy/all-narration attribution."""
         segments = record.get("narrative_segments") or []
-        narrative = str(record.get("narrative") or "")
+        narrative = strip_tool_protocol(str(record.get("narrative") or ""))
+        record["narrative"] = narrative
+        clean_segments = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            clean = dict(segment)
+            clean["text"] = strip_tool_protocol(str(clean.get("text") or ""))
+            if clean["text"].strip():
+                clean_segments.append(clean)
+        segments = clean_segments
+        events = record.get("events")
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, dict) and event.get("type") == "narrative_chunk":
+                    event["text"] = strip_tool_protocol(str(event.get("text") or ""))
         has_speech = any(
             isinstance(segment, dict) and segment.get("kind") == "speech"
             for segment in segments

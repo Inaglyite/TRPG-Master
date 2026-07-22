@@ -7,21 +7,23 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
-_START_MARKERS = ("<｜DSML｜tool_calls", "<|DSML|tool_calls")
-_END_MARKERS = ("</｜DSML｜tool_calls>", "</|DSML|tool_calls>")
-_DSML_TAG = re.compile(r"(<\s*/?)\s*(?:｜DSML｜|\|DSML\|)([A-Za-z_][\w-]*)")
+# Providers have emitted both ASCII/full-width bars, sometimes duplicated, and
+# may split the tag at any character boundary.  Match the grammar, not a fixed
+# spelling of the delimiter.
+_BAR = r"[|｜]"
+_START_TAG = re.compile(
+    rf"<\s*(?:{_BAR}\s*)+DSML(?:\s*{_BAR})+\s*tool_calls\b[^>]*>", re.IGNORECASE
+)
+_END_TAG = re.compile(
+    rf"</\s*(?:{_BAR}\s*)+DSML(?:\s*{_BAR})+\s*tool_calls\s*>", re.IGNORECASE
+)
+_DSML_TAG = re.compile(
+    rf"(<\s*/?)\s*(?:{_BAR}\s*)+DSML(?:\s*{_BAR})+\s*([A-Za-z_][\w-]*)",
+    re.IGNORECASE,
+)
 _SAFE_TOOL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 _MAX_PROTOCOL_CHARS = 262_144
-
-
-def _partial_marker_suffix(text: str) -> int:
-    """Return suffix length which may be the start of a protocol marker."""
-    limit = min(len(text), max(map(len, _START_MARKERS)) - 1)
-    for size in range(limit, 0, -1):
-        suffix = text[-size:]
-        if any(marker.startswith(suffix) for marker in _START_MARKERS):
-            return size
-    return 0
+_MAX_TAG_CHARS = 1024
 
 
 def _typed_parameter(element: ET.Element) -> object:
@@ -41,10 +43,7 @@ def _typed_parameter(element: ET.Element) -> object:
 
 
 def parse_dsml_tool_calls(block: str) -> list[dict]:
-    """Convert a complete DSML block into normalized tool calls.
-
-    Invalid protocol is intentionally discarded rather than exposed to players.
-    """
+    """Convert a complete DSML block into normalized tool calls."""
     normalized = _DSML_TAG.sub(r"\1\2", block)
     try:
         root = ET.fromstring(normalized)
@@ -88,46 +87,43 @@ class ToolProtocolFilter:
         visible: list[str] = []
         while self.pending:
             if self.hidden is not None:
-                end_positions = [
-                    (self.pending.find(marker), marker)
-                    for marker in _END_MARKERS
-                    if self.pending.find(marker) >= 0
-                ]
-                if not end_positions:
-                    keep = max(map(len, _END_MARKERS)) - 1
-                    if len(self.pending) > keep:
-                        self.hidden += self.pending[:-keep]
-                        self.pending = self.pending[-keep:]
-                    if len(self.hidden) > _MAX_PROTOCOL_CHARS:
-                        self.hidden = ""
-                        self.malformed = True
-                    break
-                position, marker = min(end_positions, key=lambda item: item[0])
-                self.hidden += self.pending[:position + len(marker)]
-                self.blocks.append(self.hidden)
-                self.hidden = None
-                self.pending = self.pending[position + len(marker):]
-                continue
+                combined = self.hidden + self.pending
+                end = _END_TAG.search(combined)
+                if end:
+                    self.blocks.append(combined[:end.end()])
+                    self.hidden = None
+                    self.pending = combined[end.end():]
+                    continue
+                # Keep the whole hidden block until its closing tag arrives.
+                self.hidden = combined
+                self.pending = ""
+                if len(self.hidden) > _MAX_PROTOCOL_CHARS:
+                    self.hidden = ""
+                    self.malformed = True
+                break
 
-            starts = [
-                (self.pending.find(marker), marker)
-                for marker in _START_MARKERS
-                if self.pending.find(marker) >= 0
-            ]
-            if starts:
-                position, _marker = min(starts, key=lambda item: item[0])
-                visible.append(self.pending[:position])
-                self.hidden = ""
-                self.pending = self.pending[position:]
-                continue
-            suffix_size = _partial_marker_suffix(self.pending)
-            if suffix_size:
-                visible.append(self.pending[:-suffix_size])
-                self.pending = self.pending[-suffix_size:]
-            else:
+            opening = self.pending.find("<")
+            if opening < 0:
                 visible.append(self.pending)
                 self.pending = ""
-            break
+                break
+            visible.append(self.pending[:opening])
+            self.pending = self.pending[opening:]
+            tag_end = self.pending.find(">")
+            if tag_end < 0:
+                # A possible protocol tag must never be emitted prematurely.
+                if len(self.pending) > _MAX_TAG_CHARS:
+                    visible.append(self.pending[0])
+                    self.pending = self.pending[1:]
+                    continue
+                break
+            candidate = self.pending[:tag_end + 1]
+            if _START_TAG.fullmatch(candidate):
+                self.hidden = candidate
+                self.pending = self.pending[tag_end + 1:]
+                continue
+            visible.append(candidate)
+            self.pending = self.pending[tag_end + 1:]
         return "".join(visible)
 
     def flush(self) -> str:
@@ -144,3 +140,9 @@ class ToolProtocolFilter:
         for block in self.blocks:
             calls.extend(parse_dsml_tool_calls(block))
         return calls
+
+
+def strip_tool_protocol(text: str) -> str:
+    """Remove protocol blocks from already assembled or persisted narrative."""
+    firewall = ToolProtocolFilter()
+    return firewall.feed(text) + firewall.flush()

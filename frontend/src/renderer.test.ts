@@ -286,6 +286,38 @@ describe("React message renderer adapter", () => {
     expect(gm?.segments?.[1].speaker?.name).toBe("某人");
   });
 
+  it("uses late authoritative speakers while paced text is still playing", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-rebased-speakers");
+      onNarrativeChunk("雨声。“请坐。”门关上了。");
+      onNarrativeSegments([
+        { kind: "narration", text: "雨声。" },
+        {
+          kind: "speech",
+          text: "“请坐。”",
+          npc_id: "fallon",
+          speaker: { type: "npc", id: "fallon", name: "法伦" },
+        },
+        { kind: "narration", text: "门关上了。" },
+      ]);
+
+      vi.runAllTimers();
+      const gm = useMessageStore.getState().messages[0];
+      expect(gm.segments?.map((segment) => segment.kind)).toEqual([
+        "narration",
+        "speech",
+        "narration",
+      ]);
+      expect(gm.segments?.[1].speaker?.name).toBe("法伦");
+      expect(gm.text).toBe("雨声。“请坐。”门关上了。");
+    } finally {
+      revealNarrativeImmediately();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
+
   it("carries segments through turn history replay", () => {
     renderTurnHistory([
       {
