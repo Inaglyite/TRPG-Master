@@ -189,8 +189,12 @@ class RoomDriverTransport:
         room = self.room
         if room is None:
             return
+        wire = dict(payload)
         visibility = "public"
-        if payload.get("type") in {
+        if wire.get("type") == "private_event":
+            target_user_id = str(wire.pop("target_user_id", ""))
+            visibility = f"player:{target_user_id}" if target_user_id else "server_only"
+        elif wire.get("type") in {
             "suggest_check",
             "decision_request",
             "decision_resolved",
@@ -199,7 +203,7 @@ class RoomDriverTransport:
             visibility = (
                 f"player:{actor_user_id}" if actor_user_id else "server_only"
             )
-        await room.hub.broadcast(payload, visibility=visibility)
+        await room.hub.broadcast(wire, visibility=visibility)
         if payload.get("type") in {
             "done",
             "turn_rejected",

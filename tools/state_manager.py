@@ -272,7 +272,8 @@ def _apply_clue_flag_effects(data: dict, catalog_entry: dict | None) -> dict:
 
 def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
                   source=None, related_npcs="", related_scenes="", asset_file=None,
-                  asset_id=None, clue_id=None):
+                  asset_id=None, clue_id=None, visibility="public",
+                  owner_investigator_id=None):
     """添加线索。向后兼容旧版纯 text 调用。"""
     data = _load()
     _migrate_old_clue_format(data)
@@ -385,6 +386,11 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
         "discovered_at": __import__("datetime").datetime.now().isoformat(),
         "asset": asset
     }
+    if visibility == "private" and owner_investigator_id:
+        clue["visibility"] = "private"
+        clue["owner_investigator_id"] = str(owner_investigator_id)
+    else:
+        clue["visibility"] = "public"
     if clue_id:
         clue["catalog_id"] = clue_id
     data["clues_found"][category].append(clue)

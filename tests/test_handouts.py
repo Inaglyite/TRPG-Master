@@ -376,6 +376,43 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["asset_id"], "wright_body")
 
+    def test_private_clue_targets_active_investigator_controller(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, handouts = self._engine(Path(temp_dir))
+            private_events: list[dict] = []
+            engine.context.world_store.update(
+                lambda state: state["pc"].update(
+                    {
+                        "investigator_id": "investigator-alice",
+                        "controller_user_id": "user-alice",
+                    }
+                )
+            )
+            engine.cb = EngineCallbacks(
+                on_handout=handouts.append,
+                on_private_event=private_events.append,
+            )
+
+            result = json.loads(
+                engine._execute_tool(
+                    "state_add_clue",
+                    {
+                        "text": "只有 Alice 听见的低语。",
+                        "category": "investigation",
+                        "visibility": "private",
+                    },
+                )
+            )
+
+            self.assertEqual(result["clue"]["visibility"], "private")
+            self.assertEqual(
+                result["clue"]["owner_investigator_id"],
+                "investigator-alice",
+            )
+            self.assertEqual(private_events[0]["target_user_id"], "user-alice")
+            self.assertEqual(private_events[0]["clue"]["text"], "只有 Alice 听见的低语。")
+            self.assertEqual(handouts, [])
+
     def test_asset_name_as_free_clue_id_cannot_bypass_handout_gate(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine, events = self._engine(Path(temp_dir))

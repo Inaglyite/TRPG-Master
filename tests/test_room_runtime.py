@@ -116,6 +116,14 @@ async def _driver_sends_decisions_only_to_current_actor():
     transport = RoomDriverTransport(room)
 
     await transport.send_json({"type": "decision_request", "id": "decision-1"})
+    await transport.send_json(
+        {
+            "type": "private_event",
+            "target_user_id": "bob",
+            "kind": "clue",
+            "clue": {"text": "只有 Bob 看见"},
+        }
+    )
     await transport.send_json({"type": "narrative_chunk", "text": "公开叙述"})
 
     assert [message["type"] for message in alice_socket.messages] == [
@@ -123,8 +131,10 @@ async def _driver_sends_decisions_only_to_current_actor():
         "narrative_chunk",
     ]
     assert [message["type"] for message in bob_socket.messages] == [
+        "private_event",
         "narrative_chunk"
     ]
+    assert "target_user_id" not in bob_socket.messages[0]
 
 
 def test_room_manager_single_flights_concurrent_creation():

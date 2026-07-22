@@ -9,6 +9,7 @@ from src.investigators import (
     initialize_investigator_roster,
     public_investigator_roster,
     sync_active_investigator,
+    visible_clues_for_investigator,
 )
 
 
@@ -79,3 +80,24 @@ def test_roster_switches_legacy_pc_projection_without_losing_mutations(tmp_path:
     assert context.world_store.state["investigators"]["inv-b"]["san"] == 42
     public = public_investigator_roster(context.world_store.state)
     assert {item["name"] for item in public} == {"Alice", "Bob"}
+
+
+def test_private_clues_are_visible_only_to_the_bound_investigator():
+    clues = {
+        "investigation": [
+            {"id": "public", "text": "所有人可见", "visibility": "public"},
+            {
+                "id": "alice-only",
+                "text": "Alice 的耳语",
+                "visibility": "private",
+                "owner_investigator_id": "inv-a",
+            },
+        ]
+    }
+    alice = visible_clues_for_investigator(clues, "inv-a")
+    bob = visible_clues_for_investigator(clues, "inv-b")
+    assert [item["id"] for item in alice["investigation"]] == [
+        "public",
+        "alice-only",
+    ]
+    assert [item["id"] for item in bob["investigation"]] == ["public"]

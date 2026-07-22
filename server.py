@@ -143,6 +143,7 @@ from src.investigators import (
     initialize_investigator_roster,
     public_investigator_roster,
     sync_active_investigator,
+    visible_clues_for_investigator,
 )
 from src.lorebook import lorebook_json_schema
 from src.model_settings import ModelSettings, persist_model_settings
@@ -635,6 +636,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     def on_glm_summary(text: str):
         emit({"type": "glm_summary", "text": text})
+
+    def on_private_event(info: dict):
+        emit({"type": "private_event", **info})
 
     def on_suggest(info: dict) -> bool:
         """向客户端发起检定确认，工作线程经 threading.Event 阻塞等待回复。"""
@@ -1357,6 +1361,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         on_speaker_segment=on_speaker_segment,
         on_narrative_segments=on_narrative_segments,
         on_performance=on_performance,
+        on_private_event=on_private_event,
     )
 
     # 消息循环
@@ -2369,6 +2374,46 @@ async def multiplayer_room_ws(ws: WebSocket):
                         "message": str(exc) or "玩家笔记保存失败",
                     }
                 await ws.send_json(payload)
+                continue
+            if message_type == "state":
+                try:
+                    world_state = room.engine.context.world_store.load()
+                    controllers = world_state.get("investigator_controllers", {})
+                    investigators = world_state.get("investigators", {})
+                    investigator_id = (
+                        controllers.get(user.id) if isinstance(controllers, dict) else None
+                    )
+                    own_pc = (
+                        investigators.get(investigator_id, {})
+                        if isinstance(investigators, dict)
+                        else {}
+                    )
+                    if not own_pc and user.id == room.owner_user_id:
+                        own_pc = world_state.get("pc", {})
+                    pc_data = enrich_pc_for_frontend(
+                        own_pc if isinstance(own_pc, dict) else {},
+                        room.engine.context,
+                    )
+                    clues_data = _enrich_clues_for_frontend(
+                        visible_clues_for_investigator(
+                            world_state.get("clues_found", {}),
+                            investigator_id,
+                        ),
+                        world_state,
+                        room.engine.context,
+                    )
+                except Exception:
+                    pc_data, clues_data = {}, {}
+                await ws.send_json(
+                    {
+                        "type": "state_data",
+                        "data": json.dumps(pc_data, ensure_ascii=False),
+                        "clues": json.dumps(clues_data, ensure_ascii=False),
+                    }
+                )
+                continue
+            if message_type == "turn_recovery_get":
+                await ws.send_json(await _room_full_recovery_payload(room))
                 continue
             if message_type in {"suggest_reply", "decision_reply"}:
                 if room.current_actor_user_id != user.id:

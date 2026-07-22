@@ -289,6 +289,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
     origin = {"origin": "https://testserver"}
     manager = RoomManager()
     created_engines = []
+    submitted_messages = []
 
     class FakeEngine:
         def __init__(self, context):
@@ -316,10 +317,13 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
         try:
             while True:
                 data = json.loads(await transport.receive_text())
+                submitted_messages.append(data)
                 if data.get("type") == "action":
                     await transport.send_json(
                         {"type": "gm_turn_start", "turn_id": "test-turn", "seq": 1}
                     )
+                elif data.get("type") == "start":
+                    await transport.send_json({"type": "done"})
         except RuntimeError:
             return
 
@@ -358,14 +362,14 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
             f"/api/invites/{invite}/accept",
             headers=origin,
         )
-        claim_investigator(
+        owner_claim = claim_investigator(
             url,
             world_id,
             "owner-character",
             owner_id,
             character_ref={"type": "inline", "data": {"name": "房主调查员"}},
         )
-        claim_investigator(
+        player_claim = claim_investigator(
             url,
             world_id,
             "player-character",
@@ -389,12 +393,51 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 denied = _receive_until(player_ws, "room_action_rejected")
                 assert denied["code"] == "owner_required"
 
+                player_ws.send_json(
+                    {
+                        "type": "player_notes_update",
+                        "revision": 0,
+                        "text": "只属于玩家的秘密笔记",
+                    }
+                )
+                player_note = _receive_until(player_ws, "player_notes")
+                assert player_note["text"] == "只属于玩家的秘密笔记"
+                owner_ws.send_json({"type": "player_notes_get"})
+                owner_note = _receive_until(owner_ws, "player_notes")
+                assert owner_note["text"] == ""
+
+                owner_ws.send_json({"type": "start", "action_id": "start-before-ready"})
+                not_ready = _receive_until(owner_ws, "room_action_rejected")
+                assert not_ready["code"] == "room_not_ready"
+                owner_ws.send_json({"type": "room_ready", "ready": True})
+                player_ws.send_json({"type": "room_ready", "ready": True})
+                _receive_until(owner_ws, "room_state")
+                owner_ws.send_json({"type": "start", "action_id": "start-ready"})
+                _receive_until(owner_ws, "done")
+                start_message = next(
+                    item for item in submitted_messages if item["type"] == "start"
+                )
+                assert start_message["_room_investigator_id"] == owner_claim["id"]
+                assert len(start_message["_room_roster"]) == 2
+
                 owner_ws.send_json({"type": "actor_assign", "user_id": player_id})
                 changed = _receive_until(player_ws, "actor_changed")
                 assert changed["user_id"] == player_id
                 player_ws.send_json(
-                    {"type": "action", "action_id": "action-1", "content": "检查门锁"}
+                    {
+                        "type": "action",
+                        "action_id": "action-1",
+                        "content": "检查门锁",
+                        "_room_user_id": owner_id,
+                        "_room_investigator_id": owner_claim["id"],
+                    }
                 )
+                _receive_until(player_ws, "gm_turn_start")
+                action_message = next(
+                    item for item in submitted_messages if item["type"] == "action"
+                )
+                assert action_message["_room_user_id"] == player_id
+                assert action_message["_room_investigator_id"] == player_claim["id"]
                 # The shared driver must accept the actor at the room boundary;
                 # the model itself is intentionally not awaited in this contract test.
                 player_ws.send_json(

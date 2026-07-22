@@ -141,6 +141,7 @@ class EngineCallbacks:
     on_speaker_segment: Callable[[str], None] = lambda npc_id: None  # NPC 发言段开始
     on_narrative_segments: Callable[[list], None] = lambda segments: None  # 发言段定稿
     on_performance: Callable[[dict], None] = lambda metrics: None
+    on_private_event: Callable[[dict], None] = lambda info: None
 
 
 class GameEngine:
@@ -1869,6 +1870,23 @@ class GameEngine:
 
         if name == "state_add_clue" and data.get("ok"):
             clue = data.get("clue") or {}
+            if clue.get("visibility") == "private":
+                state = self.context.world_store.load()
+                pc = state.get("pc", {}) if isinstance(state, dict) else {}
+                controller_user_id = pc.get("controller_user_id")
+                if controller_user_id:
+                    self.cb.on_private_event(
+                        {
+                            "kind": "clue",
+                            "target_user_id": controller_user_id,
+                            "clue": {
+                                "id": clue.get("id"),
+                                "text": clue.get("text", ""),
+                                "category": args.get("category", "investigation"),
+                            },
+                        }
+                    )
+                return
             asset = clue.get("asset") or {}
             clue_id = str(clue.get("catalog_id") or clue.get("id") or "")
             if asset.get("id") and asset.get("file"):

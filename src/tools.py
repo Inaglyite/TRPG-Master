@@ -149,6 +149,11 @@ TOOLS = [
                     "clue_id": {
                         "type": "string",
                         "description": "可选。对应 world_state.clue_catalog 的稳定线索 ID；匹配预设线索时优先填写，以使用作者配置的分类、关联与素材触发。"
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "enum": ["public", "private"],
+                        "description": "默认 public。只有线索明确仅由当前调查员察觉时使用 private；私人线索只发送给该调查员的控制者。"
                     }
                 },
                 "required": ["text", "category"]
@@ -1205,6 +1210,9 @@ def _skill_check(args: dict, context: RuntimeContext) -> str:
 
 @TOOL_RUNTIME.handler("state_add_clue")
 def _state_add_clue(args: dict, context: RuntimeContext) -> str:
+    state = context.world_store.load()
+    pc = state.get("pc", {}) if isinstance(state, dict) else {}
+    visibility = "private" if args.get("visibility") == "private" else "public"
     return _state_command(
         context,
         "cmd_add_clue",
@@ -1212,6 +1220,10 @@ def _state_add_clue(args: dict, context: RuntimeContext) -> str:
         args.get("category", "investigation"),
         asset_id=args.get("asset_id", "") or "",
         clue_id=args.get("clue_id", "") or "",
+        visibility=visibility,
+        owner_investigator_id=(
+            pc.get("investigator_id") if visibility == "private" else None
+        ),
     )
 
 

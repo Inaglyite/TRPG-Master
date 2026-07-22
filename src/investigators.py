@@ -110,3 +110,22 @@ def public_investigator_roster(state: dict) -> list[dict]:
         for investigator_id, pc in investigators.items()
         if isinstance(pc, dict)
     ]
+
+
+def visible_clues_for_investigator(clues: Any, investigator_id: str | None) -> dict:
+    """Filter private clue records before building a player-facing state payload."""
+    if not isinstance(clues, dict):
+        return {}
+    visible: dict[str, Any] = {}
+    for category, entries in clues.items():
+        if not isinstance(entries, list):
+            visible[category] = copy.deepcopy(entries)
+            continue
+        visible[category] = [
+            copy.deepcopy(clue)
+            for clue in entries
+            if not isinstance(clue, dict)
+            or clue.get("visibility") != "private"
+            or clue.get("owner_investigator_id") == investigator_id
+        ]
+    return visible
