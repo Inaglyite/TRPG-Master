@@ -43,6 +43,48 @@ class SpeakerParserTests(unittest.TestCase):
 
         self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
 
+    def test_novel_dialogue_with_trailing_known_speaker_is_recovered(self):
+        text = (
+            "你推门进去时，他正站在窗边。\n"
+            "“黄先生，感谢你冒雨前来。”法伦示意你坐下，自己绕过办公桌。\n"
+            "他沉默了几秒。"
+        )
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={"法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+            ],
+        )
+        self.assertEqual(segments[1].text, "“黄先生，感谢你冒雨前来。”")
+        self.assertIn("法伦示意你坐下", segments[2].text)
+
+    def test_novel_dialogue_with_leading_known_speaker_is_recovered(self):
+        segments, _ = parse_segments(
+            "法伦望向窗外，低声说：“莱特并没有告诉我全部真相。”",
+            speaker_aliases={"法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None), ("speech", "bryce_fallon")],
+        )
+        self.assertEqual(segments[1].text, "“莱特并没有告诉我全部真相。”")
+
+    def test_unattributed_quotation_remains_keeper_narration(self):
+        segments, _ = parse_segments(
+            "档案首页写着：“此件不得外借。”",
+            speaker_aliases={"法伦": "bryce_fallon"},
+        )
+
+        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+
     def test_speech_tag_produces_speech_segment(self):
         text = '雨还在下。【npc:bryce_fallon】"莱特生前一直在隐瞒什么。"【/npc】他说完看向抽屉。'
         segments, clean = parse_segments(text, is_valid_npc=npc_ok)

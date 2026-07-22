@@ -241,6 +241,46 @@ def parse_segments(
 _NAMED_LINE = re.compile(
     r"^(?P<indent>\s*)(?:\*\*|__)?(?P<name>[^：:\n]{1,40})(?:\*\*|__)?\s*[：:]\s*(?P<text>.+)$"
 )
+_QUOTED_SPEECH = re.compile(
+    r"(?P<quote>[“「『\"])(?P<body>.+?)(?P<close>[”」』\"])",
+)
+
+
+def _known_name_at_start(text: str, aliases: dict[str, str]) -> tuple[str, str] | None:
+    candidate = text.lstrip(" ，,、—-\t")
+    for name in sorted(aliases, key=len, reverse=True):
+        if candidate.startswith(name):
+            return name, aliases[name]
+    return None
+
+
+def _infer_novel_dialogue_line(
+    line: str, aliases: dict[str, str]
+) -> list[Segment] | None:
+    """Recognize common Chinese novel dialogue with an explicit known speaker.
+
+    Supported forms include ``“台词。”法伦示意……`` and
+    ``法伦望向窗外，低声说：“台词。”``. The nearby public name is mandatory;
+    unattributed quotations remain keeper narration.
+    """
+    quote = _QUOTED_SPEECH.search(line)
+    if not quote:
+        return None
+    before = line[: quote.start()]
+    after = line[quote.end() :]
+    owner = _known_name_at_start(after, aliases) if not before.strip() else None
+    if owner is None:
+        owner = _known_name_at_start(before, aliases)
+    if owner is None:
+        return None
+    _name, npc_id = owner
+    result: list[Segment] = []
+    if before.strip():
+        result.append(Segment(kind="narration", text=before.strip()))
+    result.append(Segment(kind="speech", text=quote.group(0), npc_id=npc_id))
+    if after.strip():
+        result.append(Segment(kind="narration", text=after.strip()))
+    return result
 
 
 def infer_named_speech(
@@ -255,6 +295,11 @@ def infer_named_speech(
         re.sub(r"\s+", "", name).casefold(): npc_id
         for name, npc_id in speaker_aliases.items()
         if name and npc_id
+    }
+    literal_aliases = {
+        name.strip(): npc_id
+        for name, npc_id in speaker_aliases.items()
+        if name.strip() and npc_id
     }
     recovered: list[Segment] = []
     for segment in segments:
@@ -273,13 +318,18 @@ def infer_named_speech(
             match = _NAMED_LINE.match(line)
             key = re.sub(r"\s+", "", match.group("name")).casefold() if match else ""
             npc_id = normalized.get(key)
-            if not match or not npc_id:
-                narration_lines.append(line)
+            if match and npc_id:
+                flush_narration()
+                recovered.append(
+                    Segment(kind="speech", text=match.group("text").strip(), npc_id=npc_id)
+                )
                 continue
-            flush_narration()
-            recovered.append(
-                Segment(kind="speech", text=match.group("text").strip(), npc_id=npc_id)
-            )
+            novel_segments = _infer_novel_dialogue_line(line, literal_aliases)
+            if novel_segments:
+                flush_narration()
+                recovered.extend(novel_segments)
+                continue
+            narration_lines.append(line)
         flush_narration()
 
     merged: list[Segment] = []
