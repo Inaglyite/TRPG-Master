@@ -2171,14 +2171,39 @@ async def _retire_room_after_grace(
     world_id: str, room: GameRoom, idle_seconds: float
 ) -> None:
     await asyncio.sleep(idle_seconds)
-    if await ROOM_MANAGER.remove_if_idle(world_id, idle_seconds=idle_seconds):
-        if room.driver_transport is not None:
-            await room.driver_transport.close_input()
-        if room.driver_task is not None:
-            try:
-                await room.driver_task
-            except (RuntimeError, asyncio.CancelledError):
-                pass
+    while not room.connected_users:
+        if await ROOM_MANAGER.remove_if_idle(world_id, idle_seconds=idle_seconds):
+            if room.driver_transport is not None:
+                await room.driver_transport.close_input()
+            if room.driver_task is not None:
+                try:
+                    await room.driver_task
+                except (RuntimeError, asyncio.CancelledError):
+                    pass
+            return
+        if not room.action_active:
+            return
+        # A turn keeps running when its last viewer disconnects. Retire as soon
+        # as the authoritative commit releases the room action lock.
+        await asyncio.sleep(0.5)
+
+
+async def _report_room_driver_exit(room: GameRoom, task: asyncio.Task) -> None:
+    room.release_action()
+    if task.cancelled() or not room.connected_users:
+        return
+    try:
+        error = task.exception()
+    except (asyncio.CancelledError, RuntimeError):
+        return
+    if error is not None:
+        await room.hub.broadcast(
+            {
+                "type": "room_error",
+                "code": "room_driver_stopped",
+                "message": "房间运行时意外停止，请重新进入房间",
+            }
+        )
 
 
 @app.websocket("/ws/room")
@@ -2247,6 +2272,9 @@ async def multiplayer_room_ws(ws: WebSocket):
         if created:
             room.driver_task = asyncio.create_task(
                 run_ws_session(room.driver_transport, room.engine, user_id=owner_user_id)
+            )
+            room.driver_task.add_done_callback(
+                lambda task: asyncio.create_task(_report_room_driver_exit(room, task))
             )
         else:
             await _room_bootstrap(ws, room)
@@ -2426,6 +2454,60 @@ async def multiplayer_room_ws(ws: WebSocket):
             if message_type == "turn_recovery_get":
                 await ws.send_json(await _room_full_recovery_payload(room))
                 continue
+            if message_type == "module_list":
+                await ws.send_json(
+                    {
+                        "type": "module_list",
+                        "modules": _list_mods(),
+                        "active": room.engine.context.module_name,
+                    }
+                )
+                continue
+            if message_type == "character_list":
+                await ws.send_json(
+                    {
+                        "type": "character_list",
+                        **list_character_options(
+                            room.engine.context.module_name,
+                            context=room.engine.context,
+                        ),
+                    }
+                )
+                continue
+            if message_type == "save_list":
+                await ws.send_json(
+                    {"type": "save_list", "saves": room.engine.list_saves()}
+                )
+                continue
+            if message_type == "model_settings_get":
+                await ws.send_json(
+                    _model_settings_payload(
+                        ModelSettings.validated(
+                            room.engine.narrative_model,
+                            room.engine.judgement_model,
+                        )
+                    )
+                )
+                continue
+            if message_type == "turn_diagnostics_get":
+                if role != "owner":
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "owner_required",
+                            "message": "只有房主可以查看回合诊断",
+                        }
+                    )
+                else:
+                    await ws.send_json(
+                        {
+                            "type": "turn_diagnostics",
+                            "diagnostics": room.engine.turn_diagnostics(
+                                data.get("turn_id")
+                            ),
+                        }
+                    )
+                continue
             if message_type in {"suggest_reply", "decision_reply"}:
                 if room.current_actor_user_id != user.id:
                     await ws.send_json(
@@ -2436,17 +2518,29 @@ async def multiplayer_room_ws(ws: WebSocket):
                         }
                     )
                     continue
-            owner_control_types = {
+            unsupported_room_types = {
+                "quit",
+                "world_switch",
+                "switch_module",
+                "turn_branch_create",
                 "model_settings_update",
+            }
+            if message_type in unsupported_room_types:
+                await ws.send_json(
+                    {
+                        "type": "room_action_rejected",
+                        "code": "unsupported_in_room",
+                        "message": "该操作不能在共享房间中执行",
+                    }
+                )
+                continue
+            owner_control_types = {
                 "save",
                 "save_delete",
                 "save_create",
                 "save_rename",
                 "settle_case",
                 "load",
-                "turn_branch_create",
-                "world_switch",
-                "switch_module",
             }
             if message_type in owner_control_types and role != "owner":
                 await ws.send_json(
@@ -2465,7 +2559,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                 "turn_rewrite",
             }
             if message_type in mutating_turn_types:
-                if message_type == "start" and role != "owner":
+                if message_type in {"start", "turn_rewrite"} and role != "owner":
                     await ws.send_json(
                         {
                             "type": "room_action_rejected",
@@ -2553,6 +2647,19 @@ async def multiplayer_room_ws(ws: WebSocket):
                     data["character_ref"] = actor_claim["character_ref"]
                     data["_room_roster"] = roster
                 data["_room_investigator_id"] = actor_claim["investigator_id"]
+            passthrough_types = mutating_turn_types | owner_control_types | {
+                "suggest_reply",
+                "decision_reply",
+            }
+            if message_type not in passthrough_types:
+                await ws.send_json(
+                    {
+                        "type": "protocol_error",
+                        "code": "unsupported_room_message",
+                        "message_type": message_type,
+                    }
+                )
+                continue
             data["_room_user_id"] = user.id
             data["_room_connection_id"] = connection_id
             try:

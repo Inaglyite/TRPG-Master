@@ -405,6 +405,14 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 owner_ws.send_json({"type": "player_notes_get"})
                 owner_note = _receive_until(owner_ws, "player_notes")
                 assert owner_note["text"] == ""
+                player_ws.send_json({"type": "world_list"})
+                unsupported = _receive_until(player_ws, "protocol_error")
+                assert unsupported["code"] == "unsupported_room_message"
+                player_ws.send_json({"type": "turn_diagnostics_get"})
+                diagnostics_denied = _receive_until(
+                    player_ws, "room_action_rejected"
+                )
+                assert diagnostics_denied["code"] == "owner_required"
 
                 owner_ws.send_json({"type": "start", "action_id": "start-before-ready"})
                 not_ready = _receive_until(owner_ws, "room_action_rejected")
