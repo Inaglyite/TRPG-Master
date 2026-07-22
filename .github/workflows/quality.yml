@@ -16,7 +16,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: python tools/check_architecture.py
-      - run: python -m unittest discover -s tests
+      - run: python -m pytest -q
 
   frontend:
     runs-on: ubuntu-latest

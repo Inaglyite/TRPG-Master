@@ -156,7 +156,7 @@ The project documentation is written in Chinese:
 Run these checks before submitting changes:
 
 ```bash
-venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m pytest -q
 venv/bin/python -m ruff check src server.py tools tests
 venv/bin/python -m compileall -q src tools server.py tests
 cd frontend
