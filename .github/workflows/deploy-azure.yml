@@ -57,8 +57,8 @@ jobs:
         run: |
           tar -czf /tmp/trpg-master-release.tar.gz \
             --exclude='**/__pycache__' \
-            server.py requirements.txt pyproject.toml \
-            src skills mod characters frontend/dist
+            server.py requirements.txt pyproject.toml alembic.ini \
+            src tools skills mod characters migrations schemas frontend/dist
 
       - name: Configure SSH
         env:

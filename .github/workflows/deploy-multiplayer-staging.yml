@@ -1,0 +1,58 @@
+name: deploy-multiplayer-staging
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: azure-multiplayer-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: azure-staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build same-origin frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Package complete runtime
+        run: |
+          tar -czf /tmp/trpg-master-staging.tar.gz \
+            --exclude='**/__pycache__' \
+            server.py requirements.txt pyproject.toml alembic.ini \
+            src tools skills mod characters migrations schemas frontend/dist
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and activate staging release
+        env:
+          HOST: ${{ secrets.AZURE_VM_HOST }}
+          USER: ${{ secrets.AZURE_VM_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          scp /tmp/trpg-master-staging.tar.gz "$USER@$HOST:/tmp/trpg-staging-$RELEASE_SHA.tar.gz"
+          ssh "$USER@$HOST" \
+            "sudo /usr/local/sbin/trpg-install-staging-release '$RELEASE_SHA' '/tmp/trpg-staging-$RELEASE_SHA.tar.gz'"
