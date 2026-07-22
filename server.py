@@ -158,6 +158,14 @@ from src.multiplayer import (
 )
 from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
+from src.room_runtime import (
+    ActionReservationError,
+    GameRoom,
+    RoomConnection,
+    RoomDriverTransport,
+    RoomEventHub,
+    RoomManager,
+)
 from src.runtime import RuntimeContext
 from src.speaker_parser import parse_segments as parse_speaker_segments
 from src.tool_protocol import strip_tool_protocol
@@ -183,6 +191,7 @@ _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
 _active_model_settings = ModelSettings.validated(NARRATIVE_MODEL, JUDGEMENT_MODEL)
 _world_turn_locks: dict[str, threading.Lock] = {}
 _world_turn_locks_guard = threading.Lock()
+ROOM_MANAGER = RoomManager()
 
 
 @app.middleware("http")
@@ -1841,6 +1850,274 @@ async def game_ws(ws: WebSocket):
             await ws.close(code=4403, reason="连接被拒绝")
         return
     await run_ws_session(ws, engine, user_id=user.id if user else None)
+
+
+async def _room_bootstrap(ws: WebSocket, room: GameRoom) -> None:
+    engine = room.engine
+    await ws.send_json(
+        {
+            "type": "module_list",
+            "modules": _list_mods(),
+            "active": engine.context.module_name,
+            "world_id": engine.context.world_id,
+            "module_name": engine.context.module_name,
+        }
+    )
+    await ws.send_json(
+        {
+            "type": "character_list",
+            **list_character_options(engine.context.module_name, context=engine.context),
+        }
+    )
+    await ws.send_json({"type": "theme", "theme": _load_theme(engine.context)})
+    await ws.send_json(
+        _model_settings_payload(
+            ModelSettings.validated(engine.narrative_model, engine.judgement_model)
+        )
+    )
+    await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
+
+
+async def _broadcast_room_state(room: GameRoom) -> None:
+    connections = await room.hub.connection_snapshot()
+    await room.hub.broadcast(
+        {
+            "type": "room_state",
+            "status": room.status,
+            "owner_user_id": room.owner_user_id,
+            "current_actor_user_id": room.current_actor_user_id,
+            "ready_user_ids": sorted(room.ready_users),
+            "online_user_ids": sorted({item["user_id"] for item in connections}),
+        }
+    )
+
+
+async def _retire_room_after_grace(
+    world_id: str, room: GameRoom, idle_seconds: float
+) -> None:
+    await asyncio.sleep(idle_seconds)
+    if await ROOM_MANAGER.remove_if_idle(world_id, idle_seconds=idle_seconds):
+        if room.driver_transport is not None:
+            await room.driver_transport.close_input()
+        if room.driver_task is not None:
+            try:
+                await room.driver_task
+            except (RuntimeError, asyncio.CancelledError):
+                pass
+
+
+@app.websocket("/ws/room")
+async def multiplayer_room_ws(ws: WebSocket):
+    """Join one authoritative shared engine using the authenticated user session."""
+    try:
+        validate_websocket_origin(ws)
+        user = websocket_user(ws, DATABASE_URL)
+        if user is None:
+            await ws.close(code=4401, reason="未登录或会话已过期")
+            return
+        world_id = str(ws.query_params.get("world_id") or "")
+        if not world_id:
+            await ws.close(code=4400, reason="缺少房间 ID")
+            return
+        role = authorize_world(DATABASE_URL, user.id, world_id, "read")
+        with session_scope(DATABASE_URL) as db_session:
+            world = db_session.get(World, world_id)
+            if world is None or world.status != "active":
+                await ws.close(code=4404, reason="房间不存在")
+                return
+            module_name = world.module_name
+            owner_member = (
+                db_session.query(WorldMember)
+                .filter_by(world_id=world_id, role="owner")
+                .one_or_none()
+            )
+            if owner_member is None:
+                await ws.close(code=4403, reason="房间没有有效房主")
+                return
+            owner_user_id = owner_member.user_id
+
+        def create_room() -> GameRoom:
+            context = RuntimeContext.create(
+                world_id,
+                module_name,
+                project_root=PROJECT_ROOT,
+                runtime_root=RUNTIME_ROOT,
+            )
+            engine = GameEngine(context)
+            engine.configure_models(
+                _active_model_settings.narrative_model,
+                _active_model_settings.judgement_model,
+            )
+            engine.prepare_session()
+            room = GameRoom(
+                world_id,
+                engine,
+                RoomEventHub(world_id),
+                owner_user_id,
+                current_actor_user_id=owner_user_id,
+            )
+            transport = RoomDriverTransport(room)
+            room.driver_transport = transport
+            return room
+
+        room, created = await ROOM_MANAGER.get_or_create(world_id, create_room)
+        await ws.accept()
+        connection_id = f"connection_{secrets.token_hex(12)}"
+        await room.hub.attach(RoomConnection(connection_id, user.id, role, ws))
+        room.member_connected(user.id)
+        if created:
+            room.driver_task = asyncio.create_task(
+                run_ws_session(room.driver_transport, room.engine, user_id=owner_user_id)
+            )
+        else:
+            await _room_bootstrap(ws, room)
+        await room.hub.broadcast(
+            {
+                "type": "member_joined",
+                "user_id": user.id,
+                "role": role,
+            }
+        )
+        await _broadcast_room_state(room)
+    except Exception as exc:
+        if ws.client_state.name == "CONNECTED":
+            await ws.close(code=4403, reason=str(exc)[:120] or "连接被拒绝")
+        return
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            message_type = str(data.get("type") or "")
+            if message_type == "ping":
+                await ws.send_json({"type": "pong"})
+                continue
+            if message_type == "room_ack":
+                accepted = await room.hub.acknowledge(
+                    connection_id, int(data.get("event_id") or 0)
+                )
+                if not accepted:
+                    await ws.send_json(
+                        {"type": "protocol_error", "code": "invalid_room_ack"}
+                    )
+                continue
+            if message_type == "room_sync":
+                replay = await room.hub.replay_after(
+                    connection_id, int(data.get("after_event_id") or 0)
+                )
+                if replay["gap"]:
+                    await ws.send_json(
+                        {
+                            "type": "room_event_gap",
+                            "latest_event_id": replay["latest_event_id"],
+                        }
+                    )
+                else:
+                    for event in replay["events"]:
+                        await ws.send_json(event)
+                continue
+            if message_type == "room_ready":
+                if role == "viewer":
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "player_required",
+                            "message": "旁观者不能准备游戏",
+                        }
+                    )
+                    continue
+                room.set_ready(user.id, bool(data.get("ready", True)))
+                await _broadcast_room_state(room)
+                continue
+            if message_type == "actor_assign":
+                if role != "owner":
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "owner_required",
+                            "message": "只有房主可以指定行动者",
+                        }
+                    )
+                    continue
+                target_user_id = str(data.get("user_id") or "")
+                member_state = room_members(DATABASE_URL, world_id, user.id)
+                eligible = {
+                    member["user_id"]
+                    for member in member_state["members"]
+                    if member["role"] in {"owner", "player"}
+                }
+                if target_user_id not in eligible:
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "invalid_actor",
+                            "message": "目标成员不能成为行动者",
+                        }
+                    )
+                    continue
+                room.assign_actor(target_user_id)
+                await room.hub.broadcast(
+                    {"type": "actor_changed", "user_id": target_user_id}
+                )
+                await _broadcast_room_state(room)
+                continue
+            mutating_turn_types = {
+                "start",
+                "continue",
+                "save_load",
+                "action",
+                "turn_rewrite",
+            }
+            if message_type in mutating_turn_types:
+                if message_type == "start" and role != "owner":
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": "owner_required",
+                            "message": "只有房主可以开始游戏",
+                        }
+                    )
+                    continue
+                action_id = str(data.get("action_id") or "")
+                try:
+                    await room.reserve_action(user.id, action_id)
+                except ActionReservationError as exc:
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": exc.code,
+                            "message": str(exc),
+                        }
+                    )
+                    continue
+                if message_type == "start":
+                    room.status = "playing"
+                    await _broadcast_room_state(room)
+            data["_room_user_id"] = user.id
+            data["_room_connection_id"] = connection_id
+            try:
+                await room.driver_transport.submit(json.dumps(data, ensure_ascii=False))
+            except Exception:
+                room.release_action()
+                raise
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        await room.hub.detach(connection_id)
+        room.member_disconnected(user.id)
+        if user.id not in room.connected_users:
+            await room.hub.broadcast({"type": "member_left", "user_id": user.id})
+        await _broadcast_room_state(room)
+        if not room.connected_users:
+            idle_seconds = max(
+                0.0, float(os.environ.get("TRPG_ROOM_IDLE_SECONDS", "30"))
+            )
+            asyncio.create_task(
+                _retire_room_after_grace(world_id, room, idle_seconds)
+            )
 
 
 # ---- 资产文件 ----

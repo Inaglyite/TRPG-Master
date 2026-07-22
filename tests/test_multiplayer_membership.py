@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -29,6 +30,7 @@ from src.multiplayer import (
     room_members,
     update_member_role,
 )
+from src.room_runtime import RoomManager
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -141,6 +143,7 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
         "TRPG_ALLOW_REGISTRATION": "1",
         "TRPG_ALLOWED_ORIGINS": "https://testserver",
         "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
     }
     headers = {"origin": "https://testserver"}
     with patch.dict(os.environ, env), patch.object(server, "DATABASE_URL", url):
@@ -194,3 +197,128 @@ def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
             assert members.json()["metadata"]["name"] == "周五调查团"
             assert len(members.json()["members"]) == 2
             assert any(row["investigator"] for row in members.json()["members"])
+
+
+def _receive_until(websocket, message_type: str, limit: int = 20):
+    for _ in range(limit):
+        message = websocket.receive_json()
+        if message.get("type") == message_type:
+            return message
+    raise AssertionError(f"did not receive {message_type}")
+
+
+def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: Path):
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    env = {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_REQUIRE_AUTH": "1",
+        "TRPG_ALLOW_REGISTRATION": "1",
+        "TRPG_ALLOWED_ORIGINS": "https://testserver",
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
+    }
+    origin = {"origin": "https://testserver"}
+    manager = RoomManager()
+    created_engines = []
+
+    class FakeEngine:
+        def __init__(self, context):
+            self.context = context
+            self.narrative_model = "test-narrative"
+            self.judgement_model = "test-judgement"
+
+        def configure_models(self, narrative, judgement):
+            self.narrative_model = narrative
+            self.judgement_model = judgement
+
+        def prepare_session(self):
+            return None
+
+        def list_saves(self):
+            return []
+
+    def engine_factory(*args, **_kwargs):
+        engine = FakeEngine(*args)
+        created_engines.append(engine)
+        return engine
+
+    async def fake_room_driver(transport, _engine, *, user_id=None):
+        del user_id
+        try:
+            while True:
+                data = json.loads(await transport.receive_text())
+                if data.get("type") == "action":
+                    await transport.send_json(
+                        {"type": "gm_turn_start", "turn_id": "test-turn", "seq": 1}
+                    )
+        except RuntimeError:
+            return
+
+    with (
+        patch.dict(os.environ, env),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        patch.object(server, "GameEngine", side_effect=engine_factory),
+        patch.object(server, "run_ws_session", new=fake_room_driver),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        owner = client.post(
+            "/api/auth/register",
+            json={"username": "socket_owner", "password": "owner password 123"},
+        )
+        owner_id = owner.json()["id"]
+        owner_cookie = client.cookies.get("trpg_session")
+        created = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "name": "共享引擎房"},
+            headers=origin,
+        )
+        world_id = created.json()["world_id"]
+        invite = client.post(
+            f"/api/worlds/{world_id}/invites",
+            json={"max_uses": 1},
+            headers=origin,
+        ).json()["token"]
+        player = client.post(
+            "/api/auth/register",
+            json={"username": "socket_player", "password": "player password 123"},
+        )
+        player_id = player.json()["id"]
+        player_cookie = client.cookies.get("trpg_session")
+        client.post(
+            f"/api/invites/{invite}/accept",
+            headers=origin,
+        )
+
+        with client.websocket_connect(
+            f"/ws/room?world_id={world_id}",
+            headers={**origin, "cookie": f"trpg_session={owner_cookie}"},
+        ) as owner_ws:
+            owner_state = _receive_until(owner_ws, "room_state")
+            assert owner_state["current_actor_user_id"] == owner_id
+            with client.websocket_connect(
+                f"/ws/room?world_id={world_id}",
+                headers={**origin, "cookie": f"trpg_session={player_cookie}"},
+            ) as player_ws:
+                _receive_until(player_ws, "room_state")
+                assert len(created_engines) == 1
+                player_ws.send_json({"type": "actor_assign", "user_id": player_id})
+                denied = _receive_until(player_ws, "room_action_rejected")
+                assert denied["code"] == "owner_required"
+
+                owner_ws.send_json({"type": "actor_assign", "user_id": player_id})
+                changed = _receive_until(player_ws, "actor_changed")
+                assert changed["user_id"] == player_id
+                player_ws.send_json(
+                    {"type": "action", "action_id": "action-1", "content": "检查门锁"}
+                )
+                # The shared driver must accept the actor at the room boundary;
+                # the model itself is intentionally not awaited in this contract test.
+                player_ws.send_json(
+                    {"type": "action", "action_id": "action-1", "content": "重复提交"}
+                )
+                duplicate = _receive_until(player_ws, "room_action_rejected")
+                assert duplicate["code"] == "duplicate_action"
