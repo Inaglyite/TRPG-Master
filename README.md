@@ -146,6 +146,7 @@ The project documentation is written in Chinese:
 - [回合性能](docs/PERFORMANCE.md) — turn latency design, metrics and benchmarking
 - [开发路线图](docs/ROADMAP.md) — current baseline and the path to multiplayer rooms
 - [联机实施计划](docs/MULTIPLAYER_PLAN.md) — authoritative server, shared rooms, protocol, phases and acceptance criteria
+- [多人交付约定](docs/MULTIPLAYER_DELIVERY_BRIEF.md) — complete product scope, Electron dual mode, collaboration and definition of done
 - [模组编辑器规划](docs/MODULE_EDITOR_PLAN.md) — internal plan for the module editor (not a user manual)
 - [设计依据](docs/DESIGN_RATIONALE.md) — external references behind key design choices
 - Historical handoffs and playtest reports live in [docs/archive/](docs/archive/).

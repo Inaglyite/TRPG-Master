@@ -2,7 +2,10 @@
 
 更新日期：2026-07-22。本文是 `feat/multiplayer` 分支的实施依据，描述从当前单连接游戏演进到
 2–4 人共享房间的目标架构、阶段、数据契约、测试和上线条件。总体路线图见
-[`ROADMAP.md`](ROADMAP.md)，现有运行结构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+[`ROADMAP.md`](ROADMAP.md)，现有运行结构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。用户确认的完整
+产品范围、Electron 双模式、前端交互要求、协作分工和最终完成定义见
+[`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md)；该文件是执行期不可自行缩减的
+交付基线。
 
 ## 1. 结论
 
@@ -344,4 +347,3 @@ Uvicorn worker，否则同一世界可能落到不同进程并创建多个房间
 每次数据库变化必须包含 Alembic、SQLite/PostgreSQL 测试和 [`DATABASE.md`](DATABASE.md) 更新；
 每次 HTTP/WS 变化必须更新 [`API.md`](API.md)；运行时所有权变化必须更新
 [`ARCHITECTURE.md`](ARCHITECTURE.md)。在 Phase 4 之前不把功能称为可用联机版本。
-
