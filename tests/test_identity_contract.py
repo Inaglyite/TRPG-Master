@@ -690,6 +690,76 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(visible, ["雨落在阿卡姆。", "你", "推开", "了门。"])
         self.assertEqual(tool_calls, [])
 
+    def test_dsml_tool_protocol_is_parsed_without_leaking_private_arguments(self):
+        secret = "法伦私下调查死因，不愿让玩家知道。"
+        protocol = (
+            '<｜DSML｜tool_calls><｜DSML｜invoke name="npc_reveal">'
+            '<｜DSML｜parameter name="npc_id" string="true">bryce_fallon'
+            '</｜DSML｜parameter><｜DSML｜parameter name="tier" integer="1">1'
+            '</｜DSML｜parameter><｜DSML｜parameter name="entry_text" string="true">'
+            f'{secret}</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+        )
+        # Every boundary is deliberately hostile, including a split start marker.
+        chunks = [stream_chunk(content="门外仍在下雨。<｜DS")]
+        chunks.extend(stream_chunk(content=char) for char in protocol[len("<｜DS"):])
+        chunks.extend([
+            stream_chunk(content="你听见走廊尽头传来脚步声。"),
+            stream_chunk(finish_reason="stop"),
+        ])
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
+            )
+        )
+        engine.messages = []
+        visible = []
+        engine.cb = SimpleNamespace(
+            on_narrative=visible.append,
+            on_error=lambda _message: None,
+        )
+
+        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        rendered = "".join(visible)
+        self.assertEqual(text, "门外仍在下雨。你听见走廊尽头传来脚步声。")
+        self.assertEqual(rendered, text)
+        self.assertNotIn("DSML", rendered)
+        self.assertNotIn(secret, rendered)
+        self.assertEqual(tool_calls[0]["function"]["name"], "npc_reveal")
+        arguments = json.loads(tool_calls[0]["function"]["arguments"])
+        self.assertEqual(arguments["npc_id"], "bryce_fallon")
+        self.assertEqual(arguments["tier"], 1)
+        self.assertEqual(arguments["entry_text"], secret)
+
+    def test_unclosed_dsml_protocol_is_dropped_instead_of_rendered(self):
+        chunks = [
+            stream_chunk(content="公开文本。<|DSML|tool_calls>"),
+            stream_chunk(content='<|DSML|invoke name="npc_reveal">绝密内容'),
+            stream_chunk(finish_reason="stop"),
+        ]
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
+            )
+        )
+        engine.messages = []
+        visible = []
+        engine.cb = SimpleNamespace(
+            on_narrative=visible.append,
+            on_error=lambda _message: None,
+        )
+
+        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        self.assertEqual(text, "公开文本。")
+        self.assertEqual("".join(visible), text)
+        self.assertNotIn("绝密内容", "".join(visible))
+        self.assertEqual(tool_calls, [])
+
     def test_speech_start_callback_receives_npc_id_not_empty_piece_slot(self):
         chunks = [
             stream_chunk(content="【npc:bryce_fallon】“请坐。”【/npc】"),

@@ -12,6 +12,7 @@ from typing import Any
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
 from .speaker_parser import SpeakerStreamParser
+from .tool_protocol import ToolProtocolFilter
 from .tools import MODEL_TOOLS, model_tools_for
 
 _INTERNAL_NARRATIVE_PATTERNS = (
@@ -185,6 +186,7 @@ class ModelStreamer:
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
         usage_data: dict = {}
+        protocol_filter = ToolProtocolFilter()
 
         # ⟦npc:id⟧ 发言标签增量解析：标签剥离后文本照常流出，
         # speech_start 触发 on_speaker_segment，发言文本带 npc_id 上下文。
@@ -228,12 +230,13 @@ class ModelStreamer:
                 if first_token_at is None and (delta.content or delta.tool_calls):
                     first_token_at = time.monotonic()
                 if delta.content:
-                    full_text += delta.content
+                    public_content = protocol_filter.feed(delta.content)
+                    full_text += public_content
                     if not buffer_if_tools:
                         if initial_sentence_released:
-                            emit_visible(delta.content)
+                            emit_visible(public_content)
                         else:
-                            pending_visible += delta.content
+                            pending_visible += public_content
                             complete, _ = take_complete_sentences(pending_visible)
                             if complete:
                                 emit_visible(pending_visible)
@@ -269,6 +272,25 @@ class ModelStreamer:
         finally:
             host._clear_active_stream(provider_stream)
 
+        trailing_public = protocol_filter.flush()
+        full_text += trailing_public
+        if not buffer_if_tools:
+            if initial_sentence_released:
+                emit_visible(trailing_public)
+            else:
+                pending_visible += trailing_public
+        text_tool_calls = protocol_filter.tool_calls()
+        if text_tool_calls and tool_calls_acc:
+            # A provider must not execute the same call twice if it emitted both forms.
+            self.log_error("模型同时返回结构化和文本工具协议；已忽略文本协议")
+            text_tool_calls = []
+        elif protocol_filter.blocks:
+            self.log_error(
+                f"已隔离模型文本工具协议（{len(protocol_filter.blocks)} 个区块）"
+            )
+        if protocol_filter.malformed:
+            self.log_error("已丢弃未闭合或过长的模型文本工具协议")
+
         full_text = sanitize_visible_narrative(full_text)
         if not buffer_if_tools:
             if pending_visible:
@@ -283,9 +305,9 @@ class ModelStreamer:
                             host.cb.on_narrative(visible)
                 elif kind == "speech_start":
                     host.cb.on_speaker_segment(text)
-        if finish_reason == "length" and not tool_calls_acc:
+        if finish_reason == "length" and not tool_calls_acc and not text_tool_calls:
             host.cb.on_error("（叙述过长被截断，请重试或继续）")
-        tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+        tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
         if buffer_if_tools:
             if tool_calls:
                 full_text = ""
