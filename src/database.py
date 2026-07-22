@@ -140,6 +140,25 @@ class WorldInvestigator(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RoomAction(Base):
+    __tablename__ = "room_actions"
+    __table_args__ = (
+        UniqueConstraint("world_id", "action_id", name="uq_room_action_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    action_id: Mapped[str] = mapped_column(String(160))
+    submitted_by: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    action_type: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="accepted", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WorldState(Base):
     __tablename__ = "world_states"
 

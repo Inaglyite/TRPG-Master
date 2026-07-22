@@ -25,9 +25,12 @@ from src.multiplayer import (
     accept_invite,
     claim_investigator,
     create_invite,
+    list_invites,
     release_investigator,
     remove_member,
+    reserve_room_action,
     room_members,
+    transfer_owner,
     update_member_role,
 )
 from src.room_runtime import RoomManager
@@ -82,6 +85,53 @@ def test_invitation_is_hashed_limited_and_idempotent_for_members(tmp_path: Path)
     with pytest.raises(MultiplayerError, match="使用次数") as exhausted:
         accept_invite(url, invite["token"], stranger.id)
     assert exhausted.value.code == "invite_exhausted"
+
+
+def test_invite_listing_hides_tokens_and_owner_can_be_transferred(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    owner, player, stranger = seed_accounts_and_world(url)
+    invite = create_invite(url, "world-room", owner.id, max_uses=2)
+    accept_invite(url, invite["token"], player.id)
+
+    listed = list_invites(url, "world-room", owner.id)
+    assert listed["invites"][0]["invite_id"] == invite["invite_id"]
+    assert "token" not in listed["invites"][0]
+    with pytest.raises(MultiplayerError) as forbidden:
+        list_invites(url, "world-room", player.id)
+    assert forbidden.value.code == "owner_required"
+
+    transferred = transfer_owner(url, "world-room", player.id, owner.id)
+    assert transferred["owner_user_id"] == player.id
+    state = room_members(url, "world-room", player.id)
+    roles = {member["user_id"]: member["role"] for member in state["members"]}
+    assert roles == {owner.id: "player", player.id: "owner"}
+    with session_scope(url) as session:
+        assert session.get(World, "world-room").created_by == player.id
+    with pytest.raises(MultiplayerError) as former_owner:
+        transfer_owner(url, "world-room", stranger.id, owner.id)
+    assert former_owner.value.code == "owner_required"
+
+
+def test_player_invite_respects_room_capacity(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    owner, player, stranger = seed_accounts_and_world(url)
+    with session_scope(url) as session:
+        world = session.get(World, "world-room")
+        world.metadata_json = {**world.metadata_json, "max_players": 2}
+    invite = create_invite(url, "world-room", owner.id, max_uses=2)
+    accept_invite(url, invite["token"], player.id)
+    with pytest.raises(MultiplayerError) as full:
+        accept_invite(url, invite["token"], stranger.id)
+    assert full.value.code == "world_full"
+
+
+def test_room_action_idempotency_survives_room_runtime_recreation(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    owner, _player, _stranger = seed_accounts_and_world(url)
+    reserve_room_action(url, "world-room", "stable-action-1", owner.id, "action")
+    with pytest.raises(MultiplayerError) as duplicate:
+        reserve_room_action(url, "world-room", "stable-action-1", owner.id, "action")
+    assert duplicate.value.code == "duplicate_action"
 
 
 def test_member_roles_and_investigator_claims_are_authoritative(tmp_path: Path):

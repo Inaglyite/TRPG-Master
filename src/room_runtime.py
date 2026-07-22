@@ -48,6 +48,30 @@ class RoomEventHub:
         async with self._lock:
             return self._connections.pop(connection_id, None)
 
+    async def update_user_role(self, user_id: str, role: str) -> None:
+        async with self._lock:
+            for connection in self._connections.values():
+                if connection.user_id == user_id:
+                    connection.role = role
+
+    async def disconnect_user(self, user_id: str, *, code: int = 4403) -> int:
+        async with self._lock:
+            removed = [
+                connection
+                for connection in self._connections.values()
+                if connection.user_id == user_id
+            ]
+            for connection in removed:
+                self._connections.pop(connection.connection_id, None)
+        for connection in removed:
+            close = getattr(connection.socket, "close", None)
+            if close is not None:
+                try:
+                    await close(code=code, reason="房间成员权限已被移除")
+                except Exception:
+                    pass
+        return len(removed)
+
     async def send_json(self, payload: dict[str, Any]) -> None:
         """Compatibility target for OrderedTurnEventStream; broadcasts publicly."""
         await self.broadcast(payload)
@@ -126,6 +150,10 @@ class RoomEventHub:
                 }
                 for item in self._connections.values()
             ]
+
+    async def latest_event_id(self) -> int:
+        async with self._lock:
+            return self._event_id
 
     @staticmethod
     def _can_receive(connection: RoomConnection, visibility: str) -> bool:

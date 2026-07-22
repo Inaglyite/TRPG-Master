@@ -10,6 +10,7 @@ from datetime import UTC, timedelta
 from sqlalchemy.exc import IntegrityError
 
 from .database import (
+    RoomAction,
     User,
     World,
     WorldInvestigator,
@@ -110,6 +111,43 @@ def revoke_invite(db_url: str, world_id: str, invite_id: str, user_id: str) -> N
             invite.revoked_at = utcnow()
 
 
+def list_invites(db_url: str, world_id: str, user_id: str) -> dict:
+    """List invitation metadata without ever returning stored token material."""
+    now = utcnow()
+    with session_scope(db_url) as session:
+        _require_owner(session, world_id, user_id)
+        rows = (
+            session.query(WorldInvite)
+            .filter_by(world_id=world_id)
+            .order_by(WorldInvite.created_at.desc(), WorldInvite.id.desc())
+            .all()
+        )
+        invites = []
+        for invite in rows:
+            expires_at = invite.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            status = "active"
+            if invite.revoked_at is not None:
+                status = "revoked"
+            elif expires_at <= now:
+                status = "expired"
+            elif invite.used_count >= invite.max_uses:
+                status = "exhausted"
+            invites.append(
+                {
+                    "invite_id": invite.id,
+                    "role": invite.role,
+                    "expires_at": expires_at.isoformat(),
+                    "max_uses": invite.max_uses,
+                    "used_count": invite.used_count,
+                    "status": status,
+                    "created_at": invite.created_at.isoformat(),
+                }
+            )
+        return {"world_id": world_id, "invites": invites}
+
+
 def accept_invite(db_url: str, token: str, user_id: str) -> dict:
     if not token or len(token) > 256:
         raise MultiplayerError("invite_invalid", "邀请码无效", 404)
@@ -139,7 +177,29 @@ def accept_invite(db_url: str, token: str, user_id: str) -> dict:
             return {"world_id": invite.world_id, "role": existing.role, "already_member": True}
         if invite.used_count >= invite.max_uses:
             raise MultiplayerError("invite_exhausted", "邀请使用次数已用完", 410)
-        _require_world(session, invite.world_id)
+        world = (
+            session.query(World)
+            .filter_by(id=invite.world_id, status="active")
+            .with_for_update()
+            .one_or_none()
+        )
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
+        if invite.role == "player":
+            max_players = max(
+                2,
+                min(int((world.metadata_json or {}).get("max_players") or 4), 4),
+            )
+            player_count = (
+                session.query(WorldMember)
+                .filter(
+                    WorldMember.world_id == invite.world_id,
+                    WorldMember.role.in_(("owner", "player")),
+                )
+                .count()
+            )
+            if player_count >= max_players:
+                raise MultiplayerError("world_full", "房间玩家人数已满", 409)
         session.add(
             WorldMember(
                 id=new_id("member"),
@@ -214,6 +274,55 @@ def update_member_role(
                 claim.status = "available"
                 claim.updated_at = utcnow()
         return {"user_id": target_user_id, "role": role}
+
+
+def transfer_owner(
+    db_url: str,
+    world_id: str,
+    target_user_id: str,
+    actor_user_id: str,
+) -> dict:
+    if target_user_id == actor_user_id:
+        raise MultiplayerError("already_owner", "该成员已经是房主", 409)
+    with session_scope(db_url) as session:
+        world = _require_world(session, world_id)
+        current = _require_owner(session, world_id, actor_user_id)
+        target = _require_member(session, world_id, target_user_id)
+        current.role = "player"
+        target.role = "owner"
+        world.created_by = target_user_id
+        world.updated_at = utcnow()
+        return {
+            "world_id": world_id,
+            "previous_owner_user_id": actor_user_id,
+            "owner_user_id": target_user_id,
+        }
+
+
+def reserve_room_action(
+    db_url: str,
+    world_id: str,
+    action_id: str,
+    user_id: str,
+    action_type: str,
+) -> None:
+    """Persist idempotency before an action reaches the shared engine."""
+    try:
+        with session_scope(db_url) as session:
+            _require_member(session, world_id, user_id)
+            session.add(
+                RoomAction(
+                    id=new_id("room_action"),
+                    world_id=world_id,
+                    action_id=action_id,
+                    submitted_by=user_id,
+                    action_type=str(action_type or "action")[:40],
+                    status="accepted",
+                )
+            )
+            session.flush()
+    except IntegrityError as exc:
+        raise MultiplayerError("duplicate_action", "该行动已经提交", 409) from exc
 
 
 def remove_member(db_url: str, world_id: str, target_user_id: str, actor_user_id: str) -> None:

@@ -126,6 +126,7 @@ from src.database import (
     database_url,
     new_id,
     session_scope,
+    utcnow,
 )
 from src.editor_api import create_editor_router
 from src.editor_projects import EditorProjectStore
@@ -163,10 +164,13 @@ from src.multiplayer import (
     accept_invite,
     claim_investigator,
     create_invite,
+    list_invites,
     release_investigator,
     remove_member,
+    reserve_room_action,
     revoke_invite,
     room_members,
+    transfer_owner,
     update_member_role,
 )
 from src.persistence import delete_save, load_game
@@ -1562,6 +1566,17 @@ async def create_world_invite(world_id: str, data: dict, request: Request):
     return result
 
 
+@app.get("/api/worlds/{world_id}/invites")
+async def get_world_invites(world_id: str, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    try:
+        return list_invites(DATABASE_URL, world_id, user.id)
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+
+
 @app.delete("/api/worlds/{world_id}/invites/{invite_id}", status_code=204)
 async def delete_world_invite(world_id: str, invite_id: str, request: Request):
     user = request_user(request, DATABASE_URL)
@@ -1643,12 +1658,62 @@ async def patch_world_member(
         )
     except MultiplayerError as exc:
         return _multiplayer_error(exc)
+    room = await ROOM_MANAGER.get(world_id)
+    if room is not None:
+        await room.hub.update_user_role(target_user_id, result["role"])
+        if result["role"] == "viewer":
+            room.set_ready(target_user_id, False)
+            if room.current_actor_user_id == target_user_id:
+                room.assign_actor(room.owner_user_id)
+                _persist_room_control(room)
+        await _broadcast_room_state(room)
     audit(
         DATABASE_URL,
         "world_member_role_changed",
         user_id=user.id,
         world_id=world_id,
         details={"target_user_id": target_user_id, "role": result["role"]},
+    )
+    return result
+
+
+@app.post("/api/worlds/{world_id}/owner")
+async def transfer_world_owner(world_id: str, data: dict, request: Request):
+    user = request_user(request, DATABASE_URL)
+    if user is None:
+        return JSONResponse({"detail": "未登录"}, status_code=401)
+    target_user_id = str(data.get("user_id") or "")
+    try:
+        result = transfer_owner(
+            DATABASE_URL,
+            world_id,
+            target_user_id,
+            user.id,
+        )
+    except MultiplayerError as exc:
+        return _multiplayer_error(exc)
+    room = await ROOM_MANAGER.get(world_id)
+    if room is not None:
+        room.owner_user_id = target_user_id
+        await room.hub.update_user_role(user.id, "player")
+        await room.hub.update_user_role(target_user_id, "owner")
+        if room.current_actor_user_id is None:
+            room.assign_actor(target_user_id)
+        _persist_room_control(room)
+        await room.hub.broadcast(
+            {
+                "type": "owner_changed",
+                "previous_owner_user_id": user.id,
+                "owner_user_id": target_user_id,
+            }
+        )
+        await _broadcast_room_state(room)
+    audit(
+        DATABASE_URL,
+        "world_owner_transferred",
+        user_id=user.id,
+        world_id=world_id,
+        details={"owner_user_id": target_user_id},
     )
     return result
 
@@ -1662,6 +1727,18 @@ async def delete_world_member(world_id: str, target_user_id: str, request: Reque
         remove_member(DATABASE_URL, world_id, target_user_id, user.id)
     except MultiplayerError as exc:
         return _multiplayer_error(exc)
+    room = await ROOM_MANAGER.get(world_id)
+    if room is not None:
+        room.set_ready(target_user_id, False)
+        if room.current_actor_user_id == target_user_id:
+            room.assign_actor(room.owner_user_id)
+            _persist_room_control(room)
+        await room.hub.disconnect_user(target_user_id)
+        room.connected_users.pop(target_user_id, None)
+        await room.hub.broadcast(
+            {"type": "member_removed", "user_id": target_user_id}
+        )
+        await _broadcast_room_state(room)
     audit(
         DATABASE_URL,
         "world_member_removed",
@@ -1984,6 +2061,33 @@ async def _room_bootstrap(ws: WebSocket, room: GameRoom) -> None:
     await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
 
 
+async def _room_full_recovery_payload(room: GameRoom) -> dict:
+    """Build a public-only recovery image after restart or replay-buffer gaps."""
+    try:
+        history = room.engine.turn_journal.public_history()
+    except Exception:
+        history = []
+    try:
+        state = room.engine.context.world_store.load()
+        investigators = public_investigator_roster(state)
+        active_investigator_id = state.get("active_investigator_id")
+    except Exception:
+        investigators = []
+        active_investigator_id = None
+    return {
+        "type": "room_full_state",
+        "status": room.status,
+        "owner_user_id": room.owner_user_id,
+        "current_actor_user_id": room.current_actor_user_id,
+        "ready_user_ids": sorted(room.ready_users),
+        "online_user_ids": sorted(room.connected_users),
+        "latest_event_id": await room.hub.latest_event_id(),
+        "history": history,
+        "investigators": investigators,
+        "active_investigator_id": active_investigator_id,
+    }
+
+
 async def _broadcast_room_state(room: GameRoom) -> None:
     connections = await room.hub.connection_snapshot()
     await room.hub.broadcast(
@@ -1996,6 +2100,18 @@ async def _broadcast_room_state(room: GameRoom) -> None:
             "online_user_ids": sorted({item["user_id"] for item in connections}),
         }
     )
+
+
+def _persist_room_control(room: GameRoom) -> None:
+    with session_scope(DATABASE_URL) as db_session:
+        world = db_session.get(World, room.world_id)
+        if world is None:
+            return
+        metadata = dict(world.metadata_json or {})
+        metadata["room_status"] = room.status
+        metadata["current_actor_user_id"] = room.current_actor_user_id
+        world.metadata_json = metadata
+        world.updated_at = utcnow()
 
 
 def _room_roster(world_id: str) -> tuple[list[dict], set[str]]:
@@ -2101,7 +2217,11 @@ async def multiplayer_room_ws(ws: WebSocket):
                 engine,
                 RoomEventHub(world_id),
                 owner_user_id,
-                current_actor_user_id=owner_user_id,
+                current_actor_user_id=(
+                    str((world.metadata_json or {}).get("current_actor_user_id") or "")
+                    or owner_user_id
+                ),
+                status=str((world.metadata_json or {}).get("room_status") or "lobby"),
             )
             transport = RoomDriverTransport(room)
             room.driver_transport = transport
@@ -2118,6 +2238,7 @@ async def multiplayer_room_ws(ws: WebSocket):
             )
         else:
             await _room_bootstrap(ws, room)
+        await ws.send_json(await _room_full_recovery_payload(room))
         await room.hub.broadcast(
             {
                 "type": "member_joined",
@@ -2138,6 +2259,11 @@ async def multiplayer_room_ws(ws: WebSocket):
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            try:
+                role = authorize_world(DATABASE_URL, user.id, world_id, "read")
+            except Exception:
+                await ws.close(code=4403, reason="房间成员权限已被移除")
+                break
             message_type = str(data.get("type") or "")
             if message_type == "ping":
                 await ws.send_json({"type": "pong"})
@@ -2162,6 +2288,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                             "latest_event_id": replay["latest_event_id"],
                         }
                     )
+                    await ws.send_json(await _room_full_recovery_payload(room))
                 else:
                     for event in replay["events"]:
                         await ws.send_json(event)
@@ -2206,6 +2333,7 @@ async def multiplayer_room_ws(ws: WebSocket):
                     )
                     continue
                 room.assign_actor(target_user_id)
+                _persist_room_control(room)
                 await room.hub.broadcast(
                     {"type": "actor_changed", "user_id": target_user_id}
                 )
@@ -2331,8 +2459,27 @@ async def multiplayer_room_ws(ws: WebSocket):
                         }
                     )
                     continue
+                try:
+                    reserve_room_action(
+                        DATABASE_URL,
+                        world_id,
+                        action_id,
+                        user.id,
+                        message_type,
+                    )
+                except MultiplayerError as exc:
+                    room.release_action()
+                    await ws.send_json(
+                        {
+                            "type": "room_action_rejected",
+                            "code": exc.code,
+                            "message": str(exc),
+                        }
+                    )
+                    continue
                 if message_type == "start":
                     room.status = "playing"
+                    _persist_room_control(room)
                     await _broadcast_room_state(room)
                     data["character_ref"] = actor_claim["character_ref"]
                     data["_room_roster"] = roster
