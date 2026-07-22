@@ -2007,15 +2007,8 @@ async def game_ws(ws: WebSocket):
             if user is None:
                 await ws.close(code=4401, reason="未登录或会话已过期")
                 return
-            effective_world = requested_world or _active_context.world_id
-            authorize_world(DATABASE_URL, user.id, effective_world, "play")
-            with session_scope(DATABASE_URL) as session:
-                world = session.get(World, effective_world)
-                if world is None or world.status != "active":
-                    await ws.close(code=4404, reason="世界不存在")
-                    return
-                requested_world = world.id
-                requested_module = world.module_name
+            await ws.close(code=4409, reason="账号模式请使用多人房间连接")
+            return
         await ws.accept()
         if requested_world:
             context = RuntimeContext.create(
@@ -2289,7 +2282,7 @@ async def multiplayer_room_ws(ws: WebSocket):
             )
         await _broadcast_room_state(room)
     except Exception as exc:
-        if ws.client_state.name == "CONNECTED":
+        if ws.client_state.name != "DISCONNECTED":
             await ws.close(code=4403, reason=str(exc)[:120] or "连接被拒绝")
         return
 

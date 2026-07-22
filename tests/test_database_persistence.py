@@ -145,6 +145,7 @@ def test_http_accounts_and_world_ownership_gate_websocket(tmp_path: Path):
                 "TRPG_ALLOW_REGISTRATION": "1",
                 "TRPG_ALLOWED_ORIGINS": "https://testserver",
                 "TRPG_WRITE_COMPAT_EXPORTS": "0",
+                "TRPG_ROOM_IDLE_SECONDS": "0",
             },
         ),
         patch.object(server, "DATABASE_URL", url),
@@ -167,15 +168,16 @@ def test_http_accounts_and_world_ownership_gate_websocket(tmp_path: Path):
             assert created.status_code == 201
             world_id = created.json()["world_id"]
             owner_cookie = owner_client.cookies.get("trpg_session")
-            with owner_client.websocket_connect(
-                f"/ws?world_id={world_id}",
-                headers={
-                    "origin": "https://testserver",
-                    "cookie": f"trpg_session={owner_cookie}",
-                },
-            ) as websocket:
-                assert websocket.receive_json()["type"] == "module_list"
-
+            with pytest.raises(WebSocketDisconnect) as legacy_denied:
+                with owner_client.websocket_connect(
+                    f"/ws?world_id={world_id}",
+                    headers={
+                        "origin": "https://testserver",
+                        "cookie": f"trpg_session={owner_cookie}",
+                    },
+                ):
+                    pass
+            assert legacy_denied.value.code == 4409
         with TestClient(server.app, base_url="https://testserver") as stranger_client:
             assert (
                 stranger_client.post(
@@ -190,7 +192,7 @@ def test_http_accounts_and_world_ownership_gate_websocket(tmp_path: Path):
             stranger_cookie = stranger_client.cookies.get("trpg_session")
             with pytest.raises(WebSocketDisconnect) as denied:
                 with stranger_client.websocket_connect(
-                    f"/ws?world_id={world_id}",
+                    f"/ws/room?world_id={world_id}",
                     headers={
                         "origin": "https://testserver",
                         "cookie": f"trpg_session={stranger_cookie}",
