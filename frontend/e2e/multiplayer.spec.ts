@@ -12,7 +12,11 @@ import {
 } from "@playwright/test";
 
 const port = 8767;
-const baseUrl = `https://127.0.0.1:${port}`;
+const externalBaseUrl = process.env.TRPG_E2E_EXTERNAL_BASE_URL?.replace(
+  /\/+$/,
+  "",
+);
+const baseUrl = externalBaseUrl ?? `https://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 let runtimeRoot = "";
 let server: ChildProcess | null = null;
@@ -93,6 +97,10 @@ function collectWebSocketFrames(page: Page): string[] {
 }
 
 test.beforeAll(async () => {
+  if (externalBaseUrl) {
+    await waitForServer();
+    return;
+  }
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-multiplayer-e2e-"));
   const certificate = join(runtimeRoot, "certificate.pem");
   const privateKey = join(runtimeRoot, "private-key.pem");
@@ -164,6 +172,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  if (externalBaseUrl) return;
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");
     await new Promise<void>((resolveWait) => {
@@ -181,6 +190,9 @@ test.afterAll(async () => {
 test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与开局", async ({
   browser,
 }) => {
+  const runId = externalBaseUrl ? `${Date.now()}` : "";
+  const ownerUsername = `e2e_owner${runId}`;
+  const playerUsername = `e2e_player${runId}`;
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const playerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const owner = await ownerContext.newPage();
@@ -188,7 +200,7 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   const ownerFrames = collectWebSocketFrames(owner);
   const playerFrames = collectWebSocketFrames(player);
 
-  await register(owner, "e2e_owner");
+  await register(owner, ownerUsername);
   await owner.getByLabel("房间名称").fill("双客户端验收房");
   await owner.getByRole("button", { name: "创建房间" }).click();
   await expect(
@@ -204,7 +216,7 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   )?.trim();
   expect(inviteToken).toBeTruthy();
 
-  await register(player, "e2e_player");
+  await register(player, playerUsername);
   await player
     .getByRole("textbox", { name: "邀请码", exact: true })
     .fill(inviteToken!);
@@ -212,12 +224,12 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   await expect(
     player.getByRole("heading", { name: "双客户端验收房" }),
   ).toBeVisible();
-  await expect(owner.getByText("e2e_player", { exact: true })).toBeVisible();
+  await expect(owner.getByText(playerUsername, { exact: true })).toBeVisible();
 
   await player.getByRole("button", { name: "选择" }).first().click();
   await expect(player.getByRole("button", { name: "释放" })).toBeVisible();
   await expect(
-    owner.locator(".member-row", { hasText: "e2e_player" }),
+    owner.locator(".member-row", { hasText: playerUsername }),
   ).toContainText(/在线/);
 
   const worldIdText = await owner
@@ -286,13 +298,16 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
 
   await expect(owner.getByTestId("game-room-bar")).toBeVisible();
   await expect(player.getByTestId("game-room-bar")).toBeVisible();
-  await expect(player.getByText(/等待 e2e_owner 行动/)).toBeVisible();
+  await expect(
+    player.getByText(new RegExp(`等待 ${ownerUsername} 行动`)),
+  ).toBeVisible();
 
   await ownerContext.close();
   await playerContext.close();
 });
 
 test("Electron 真实进程可在内置启动器与 HTTPS 多人页之间安全往返", async () => {
+  test.skip(Boolean(externalBaseUrl), "外部 staging 验收只运行浏览器联机场景");
   const electronEnvironment = { ...process.env };
   delete electronEnvironment.ELECTRON_RUN_AS_NODE;
   delete electronEnvironment.NODE_ENV;
@@ -324,6 +339,7 @@ test("Electron 真实进程可在内置启动器与 HTTPS 多人页之间安全�
 });
 
 test("Electron 开发进程选择单机后连接真实本地后端", async () => {
+  test.skip(Boolean(externalBaseUrl), "外部 staging 验收只运行浏览器联机场景");
   const localRuntime = mkdtempSync(join(tmpdir(), "trpg-local-e2e-"));
   const repositoryPython = resolve(repositoryRoot, "venv/bin/python");
   const python =
