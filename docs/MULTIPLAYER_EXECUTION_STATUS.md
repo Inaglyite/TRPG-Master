@@ -1,6 +1,6 @@
 # 多人功能执行状态与接续说明
 
-更新日期：2026-07-22  
+更新日期：2026-07-26
 开发分支：`feat/multiplayer`  
 文档性质：持续更新的工程台账，不是完成报告。
 
@@ -62,7 +62,9 @@ PostgreSQL、部署和恢复测试。
 - 最近的多人存档控制改动已通过 `18 passed` 的针对性测试；
 - 本机真实 PostgreSQL 17 已通过迁移、JSONB 深层往返、邀请/成员、调查员绑定和行动幂等测试；
 - Ruff 与 `tools/check_architecture.py`：通过；
-- 在前端集成及最终验收后仍须重新运行完整测试，不能把以上结果当成最终结果。
+- 前端：`27` 个测试文件、`219` 个用例，TypeScript、Prettier、生产构建均通过；
+- 本机 Playwright：双浏览器联机、Electron 云端往返和 Electron 单机三条 E2E 均通过；
+- Azure 公网 Playwright：双浏览器 HTTPS/WSS 联机与真实 Electron 云端往返通过。
 
 架构门禁已经恢复通过：认证 HTTP、多人 HTTP 和多人 WebSocket 适配层已分别抽取到
 `src/auth_http.py`、`src/multiplayer_http.py` 和 `src/multiplayer_ws.py`，`server.py` 已降至主线历史
@@ -104,27 +106,36 @@ Codex 已完成首轮逐文件审计并修复房间 WebSocket 生命周期、事
 进程验证内置启动器与 HTTPS 多人页安全往返，以及选择单机后连接真实本地 FastAPI。三条 E2E 均通过
 并已加入普通 CI 与 staging 部署前门禁。
 
-Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检查、单元测试、构建和真实双客户端
-联调；不能只根据 Kimi 的完成说明合并。
+Codex 已完成逐项审查、修正、提交和推送；Kimi 的工作成果不再作为未审查工作区改动保留。
 
-## 5. 尚未完成的工作
+## 5. Azure staging 现状
+
+Azure VM 已完成隔离部署：
+
+- PostgreSQL 16 仅监听 `127.0.0.1`，使用独立 staging 数据库与最小权限角色；
+- Alembic 已迁移至 `20260722_0004`；
+- staging 使用独立 systemd 服务、运行目录、环境文件、Cookie、备份目录和单 worker；
+- 受内存约束，已配置 1 GiB 专用 swap 和 PostgreSQL 连接/内存限额；
+- 旧应用服务保持停止，旧应用目录、世界目录、数据库文件和原 Nginx 配置备份均保留；
+- Azure NSG 未开放 8443，因此验收通过后将可回滚的公网 443 入口切到联机 staging；
+- 公网 `/api/health`、HTTPS 页面、WSS 双客户端联机和 Electron 云端往返均通过；
+- 每日加密备份 timer 已启用。恢复演练发现并修复校验文件使用绝对临时路径的问题；修复后的
+  GPG 归档已完成 SHA256 校验、隔离数据库 `pg_restore` 和 Alembic 版本核对，演练库随后删除；
+- systemd 重启后健康检查与数据库迁移状态保持正常。
+
+## 6. 尚未完成的工作
 
 按当前优先级继续：
 
-1. 提交并推送浏览器/Electron E2E 与 CI 门禁；
-2. 审核多人协议文档是否完整覆盖：云端旧 `/ws` 禁用、`private_event`、`room_error`、同步、恢复及
+1. 审核多人协议文档是否完整覆盖：云端旧 `/ws` 禁用、`private_event`、`room_error`、同步、恢复及
    多人存读档错误码；
-3. 用真实双客户端验证私人状态恢复，确保其他玩家的网络消息、日志和恢复数据均不含秘密；
-4. 复核多人存档、读档和时间线恢复的前端交互与端到端行为；
-5. 扩展现有双客户端 E2E，补齐模型回合的重复提交、并发、主动掉线和服务重启场景；
-6. 在 Azure staging 复跑 Electron 多人 E2E，验证真实 Nginx TLS/WSS 和 staging Cookie；
-7. 本机真实 PostgreSQL 17 的迁移与 JSONB/成员/调查员/行动幂等集成测试已通过；仍需在 Azure
-   staging 数据库复验并演练恢复；
-8. 在 Azure 安装隔离 staging，验证 TLS/WSS、单 worker、数据库、备份、恢复、重启和回滚；
-9. 更新架构、API、数据库、部署和最终用户操作文档；
-10. 全部验收通过后，才讨论合入 `master` 和替换旧版服务。
+2. 复核多人存档、读档和时间线恢复的前端交互与端到端行为；
+3. 扩展双客户端 E2E，补齐真实模型完整回合、重复提交、并发、主动掉线和服务重启恢复；
+4. 演练两个真实 release 之间的 symlink 回滚和 Nginx 配置回滚；
+5. 更新最终用户操作文档，并决定正式域名与受信任证书方案；
+6. 全部验收通过后，才讨论合入 `master`。
 
-## 6. 当前风险与禁止事项
+## 7. 当前风险与禁止事项
 
 - Electron 从 `file://` 跨站请求云端并依赖 `SameSite=Lax` Cookie 不可靠；联机模式应加载受信任的
   Azure HTTPS 同源应用，并限制导航、窗口创建和 IPC 来源。
@@ -133,12 +144,14 @@ Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检
 - 完整恢复会按连接附加当前玩家自己的角色、可见线索和私人笔记；仍需在真实双客户端 E2E 中验证
   交叉用户无法从网络消息、日志或恢复数据看到秘密。
 - staging 与生产必须使用独立数据库、运行目录、端口、Cookie 名和环境文件。
+- 当前公网入口使用 IP 地址和现有自签名证书；自动化通过忽略测试证书错误验证，但面向普通玩家前
+  必须配置域名和受信任证书，不能要求用户长期绕过浏览器证书警告。
 - 可以停止旧应用服务，但不得误删 Nginx、PostgreSQL、备份和已有世界数据。
 - 不修改用户 SSH 密码或凭据；任何密码、Session、API Key、邀请明文和数据库 DSN 都不得写进仓库、
   测试输出、日志或对话回复。
 - 不允许未经测试直接替换 Azure 生产，不允许在验收前合入 `master`。
 
-## 7. 每次继续开发时的固定流程
+## 8. 每次继续开发时的固定流程
 
 1. 确认当前分支为 `feat/multiplayer`，检查 `git status`，识别用户和 Kimi 的未提交改动；
 2. 阅读本文件及交付约定，不根据聊天记忆自行缩减范围；
@@ -150,7 +163,7 @@ Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检
 8. 只有 [`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md) 第 6 节全部满足，才可将
    本文标记为完成。
 
-## 8. 相关文档
+## 9. 相关文档
 
 - 产品范围与最终验收：[`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md)
 - 技术路线：[`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md)
@@ -159,7 +172,7 @@ Codex 在接收前端成果后必须逐项对照 `docs/API.md`，运行类型检
 - 数据模型与迁移：[`DATABASE.md`](DATABASE.md)
 - staging/生产部署：[`DEPLOYMENT.md`](DEPLOYMENT.md)
 
-## 9. 上下文恢复契约
+## 10. 上下文恢复契约
 
 若聊天中断、上下文被压缩或换由新的执行者继续，以下规则优先于对话中的模糊记忆：
 
