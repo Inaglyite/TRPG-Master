@@ -307,7 +307,6 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
 });
 
 test("Electron 真实进程可在内置启动器与 HTTPS 多人页之间安全往返", async () => {
-  test.skip(Boolean(externalBaseUrl), "外部 staging 验收只运行浏览器联机场景");
   const electronEnvironment = { ...process.env };
   delete electronEnvironment.ELECTRON_RUN_AS_NODE;
   delete electronEnvironment.NODE_ENV;
