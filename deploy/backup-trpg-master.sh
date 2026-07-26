@@ -36,7 +36,10 @@ pg_url="${pg_url/postgresql+psycopg2:/postgresql:}"
 pg_dump --format=custom --no-owner --no-acl "$pg_url" > "$work/database.dump"
 tar --create --gzip --file "$work/runtime.tar.gz" \
     --exclude='trpg-master.db*' --directory "$runtime_root" .
-sha256sum "$work/database.dump" "$work/runtime.tar.gz" > "$work/SHA256SUMS"
+(
+    cd "$work"
+    sha256sum database.dump runtime.tar.gz > SHA256SUMS
+)
 tar --create --file - --directory "$work" database.dump runtime.tar.gz SHA256SUMS \
     | gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 \
         --passphrase-file "$TRPG_BACKUP_PASSPHRASE_FILE" \
