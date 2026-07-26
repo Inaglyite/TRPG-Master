@@ -58,6 +58,8 @@ jobs:
           npm ci
           npm test
           npm run build
+          npx playwright install --with-deps chromium
+          xvfb-run --auto-servernum npm run test:e2e
 
       - name: Package complete runtime
         run: |

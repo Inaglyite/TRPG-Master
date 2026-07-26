@@ -8,15 +8,17 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc && vite build",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"*.{json,ts}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"*.{json,ts}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"*.{json,ts}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"*.{json,ts}\"",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npx electron .",
     "electron:start": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron .",
     "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64",
     "dist:win": "vite build && electron-builder --win nsis portable --x64"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.17",

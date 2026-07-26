@@ -10,6 +10,8 @@ trpg-master.db*
 node_modules/
 frontend/dist/
 frontend/release/
+frontend/test-results/
+frontend/playwright-report/
 skillsucai/
 mod/*/characters/*.json
 characters/custom/*.json
