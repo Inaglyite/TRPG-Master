@@ -104,6 +104,32 @@ class WebSocketTurnGateTests(unittest.TestCase):
         self.assertIn("未找到存档", error["message"])
         self.assertEqual("pong", pong["type"])
 
+    def test_failed_save_does_not_terminate_shared_protocol_driver(self):
+        import server
+
+        with (
+            patch("src.engine.API_KEY", "test-api-key"),
+            patch.object(
+                server.GameEngine,
+                "save",
+                side_effect=RuntimeError("simulated persistence failure"),
+            ),
+        ):
+            with TestClient(server.app) as client:
+                with client.websocket_connect("/ws") as ws:
+                    for _ in range(5):
+                        ws.receive_json()
+                    ws.send_json({"type": "save", "manual": False})
+                    error = ws.receive_json()
+                    ws.send_json({"type": "ping"})
+                    pong = ws.receive_json()
+
+        self.assertEqual("error", error["type"])
+        self.assertEqual("operation_failed", error["code"])
+        self.assertEqual("save", error["operation"])
+        self.assertNotIn("simulated persistence failure", error["message"])
+        self.assertEqual("pong", pong["type"])
+
     def test_second_action_is_rejected_before_another_turn_starts(self):
         import server
 

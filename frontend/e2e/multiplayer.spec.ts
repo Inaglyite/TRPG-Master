@@ -190,6 +190,7 @@ test.afterAll(async () => {
 test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与开局", async ({
   browser,
 }) => {
+  test.setTimeout(externalBaseUrl ? 240_000 : 90_000);
   const runId = externalBaseUrl ? `${Date.now()}` : "";
   const ownerUsername = `e2e_owner${runId}`;
   const playerUsername = `e2e_player${runId}`;
@@ -301,6 +302,65 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   await expect(
     player.getByText(new RegExp(`等待 ${ownerUsername} 行动`)),
   ).toBeVisible();
+
+  if (externalBaseUrl) {
+    const input = owner.locator("#user-input");
+    await expect(input).toBeEnabled({ timeout: 120_000 });
+    const actionText = `验收行动-${runId}：我检查门锁和附近的脚印。`;
+    await input.fill(actionText);
+    await owner.locator("#btn-send").click();
+    await expect(owner.getByText(actionText, { exact: true })).toBeVisible();
+    await expect(input).toBeDisabled();
+    const concurrentCode = await owner.evaluate(async (id) => {
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(
+        `${protocol}//${location.host}/ws/room?world_id=${encodeURIComponent(id)}`,
+      );
+      return await new Promise<string>((resolveSocket, rejectSocket) => {
+        const timer = window.setTimeout(() => {
+          socket.close();
+          rejectSocket(new Error("concurrent action rejection timeout"));
+        }, 15_000);
+        socket.onopen = () => {
+          socket.send(
+            JSON.stringify({
+              type: "action",
+              action_id: `overlap-${crypto.randomUUID()}`,
+              content: "并发提交不应启动第二个模型回合",
+            }),
+          );
+        };
+        socket.onmessage = (event) => {
+          const payload = JSON.parse(String(event.data)) as {
+            type?: string;
+            code?: string;
+          };
+          if (payload.type !== "room_action_rejected") return;
+          window.clearTimeout(timer);
+          socket.close();
+          resolveSocket(payload.code ?? "");
+        };
+        socket.onerror = () => {
+          window.clearTimeout(timer);
+          rejectSocket(new Error("concurrent action websocket failed"));
+        };
+      });
+    }, worldId!);
+    expect(concurrentCode).toBe("room_turn_in_progress");
+    await expect(input).toBeEnabled({ timeout: 120_000 });
+
+    await owner.getByRole("button", { name: "快速存档" }).click();
+    await expect(
+      owner.getByRole("button", { name: "快速存档" }),
+    ).toHaveAttribute("title", "已保存", { timeout: 30_000 });
+    await owner.getByRole("button", { name: "打开存档管理" }).click();
+    await expect(owner.getByText("💾 存档管理", { exact: true })).toBeVisible();
+    await expect(
+      owner.getByRole("button", { name: "读取存档" }).first(),
+    ).toBeVisible();
+    await owner.getByRole("button", { name: "读取存档" }).first().click();
+    await expect(input).toBeEnabled({ timeout: 60_000 });
+  }
 
   await ownerContext.close();
   await playerContext.close();

@@ -1385,7 +1385,30 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             except json.JSONDecodeError:
                 continue
 
-            routed = await router.dispatch(data)
+            try:
+                routed = await router.dispatch(data)
+            except Exception as exc:
+                # A malformed save/state/control operation must not terminate the
+                # shared room driver for every connected player. Turn workers
+                # already report their own failures; synchronous protocol
+                # handlers are isolated here and the driver stays available.
+                import traceback
+
+                print(
+                    f"[ws] {data.get('type', 'unknown')} 处理异常: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc(file=sys.stderr)
+                await outbound.send(
+                    {
+                        "type": "error",
+                        "code": "operation_failed",
+                        "operation": str(data.get("type") or ""),
+                        "message": "操作失败，房间连接已保留，请稍后重试。",
+                    }
+                )
+                continue
             if routed.handled:
                 if session.close_requested:
                     break

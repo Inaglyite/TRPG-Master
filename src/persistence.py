@@ -288,6 +288,11 @@ def save_game(
             state=world_state,
         )
         session.add(snapshot_row)
+        # SaveSlot may already point at the snapshot created by the automatic
+        # turn journal. SQLAlchemy only sees scalar foreign-key IDs here, not a
+        # relationship dependency, so PostgreSQL can otherwise schedule the
+        # slot UPDATE before the new snapshot INSERT.
+        session.flush()
         row.metadata_json = meta
         row.messages = serializable
         row.snapshot_id = snapshot_row.id

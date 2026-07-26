@@ -8,7 +8,16 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import event
 
-from src.database import Base, SaveSlot, Turn, World, WorldState, get_engine, session_scope
+from src.database import (
+    Base,
+    SaveSlot,
+    Snapshot,
+    Turn,
+    World,
+    WorldState,
+    get_engine,
+    session_scope,
+)
 from src.database_store import DatabaseWorldStore
 from src.database_turn_journal import DatabaseTurnJournal
 from src.runtime import RuntimeContext
@@ -146,6 +155,45 @@ def test_completed_turn_and_auto_save_share_one_snapshot(tmp_path: Path):
         ).one()
         assert auto.snapshot_id == turn.snapshot_id
         assert turn.record["diagnostics"]["performance"]["phases_ms"]["journal_commit"] >= 0
+
+
+def test_quick_save_can_replace_snapshot_created_by_completed_turn(tmp_path: Path):
+    store = _store(tmp_path)
+    messages = [{"role": "assistant", "content": "你观察四周。"}]
+    with patch.dict("os.environ", {
+        "TRPG_DATABASE_URL": store.database_url,
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+    }):
+        journal = DatabaseTurnJournal(
+            tmp_path / "worlds/perf-world",
+            world_id="perf-world",
+            module_name="mansion_of_madness",
+        )
+        turn_id = journal.begin(kind="action", player_input="观察")
+        journal.complete(
+            turn_id,
+            messages=messages,
+            world_state=store.load(),
+            narrative="你观察四周。",
+            choices=[],
+        )
+        from src.persistence import save_game
+
+        context = RuntimeContext.create(
+            "perf-world",
+            "mansion_of_madness",
+            project_root=PROJECT_ROOT,
+            runtime_root=tmp_path,
+        )
+        assert save_game(messages, "slot_000", context=context) == "slot_000"
+
+    with session_scope(store.database_url) as session:
+        turn = session.query(Turn).filter_by(world_id="perf-world", id=turn_id).one()
+        auto = session.query(SaveSlot).filter_by(
+            world_id="perf-world", slot_key="slot_000"
+        ).one()
+        assert auto.snapshot_id != turn.snapshot_id
+        assert session.get(Snapshot, auto.snapshot_id) is not None
 
 
 def test_world_turn_snapshot_and_auto_save_commit_atomically(tmp_path: Path):

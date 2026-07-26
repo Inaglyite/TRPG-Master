@@ -1693,6 +1693,19 @@ diagnostics 中。字段含义见 `docs/PERFORMANCE.md`。
 }
 ```
 
+若存储或其他同步协议处理失败，服务端返回：
+
+```json
+{
+  "type": "error",
+  "code": "operation_failed",
+  "operation": "save",
+  "message": "操作失败，房间连接已保留，请稍后重试。"
+}
+```
+
+这类失败只终止当前操作，不终止共享房间驱动；响应不包含数据库异常、路径或凭据等内部细节。
+
 #### `loaded`
 
 ```json

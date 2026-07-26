@@ -57,14 +57,16 @@ PostgreSQL、部署和恢复测试。
 
 最近一次完整后端测试结果：
 
-- Python：`313 passed, 1 skipped`（使用 `venv/bin/python -m pytest -q`）；
+- Python：`315 passed, 1 skipped`（使用 `venv/bin/python -m pytest -q`）；
 - Ruff：通过；
 - 最近的多人存档控制改动已通过 `18 passed` 的针对性测试；
 - 本机真实 PostgreSQL 17 已通过迁移、JSONB 深层往返、邀请/成员、调查员绑定和行动幂等测试；
 - Ruff 与 `tools/check_architecture.py`：通过；
 - 前端：`27` 个测试文件、`219` 个用例，TypeScript、Prettier、生产构建均通过；
 - 本机 Playwright：双浏览器联机、Electron 云端往返和 Electron 单机三条 E2E 均通过；
-- Azure 公网 Playwright：双浏览器 HTTPS/WSS 联机与真实 Electron 云端往返通过。
+- Azure 公网 Playwright：双浏览器 HTTPS/WSS、真实模型开场与玩家行动、回合内并发拒绝、快速
+  存档/读档、真实 Electron 云端往返均通过；
+- Azure 服务重启后：既有账号重新登录，公开历史、当前行动权和可读存档恢复通过。
 
 架构门禁已经恢复通过：认证 HTTP、多人 HTTP 和多人 WebSocket 适配层已分别抽取到
 `src/auth_http.py`、`src/multiplayer_http.py` 和 `src/multiplayer_ws.py`，`server.py` 已降至主线历史
@@ -123,18 +125,19 @@ Azure VM 已完成隔离部署：
   GPG 归档已完成 SHA256 校验、隔离数据库 `pg_restore` 和 Alembic 版本核对，演练库随后删除；
 - systemd 重启后健康检查与数据库迁移状态保持正常。
 - 已在两个保留 release 之间执行 symlink 前进、回滚、再前进；三次重启后的健康检查均通过。
+- Nginx 已实际回滚到旧入口并观察到旧 Basic Auth `401`，随后恢复联机配置；配置检查与公网健康
+  检查均通过。
+- Azure 完整回合验收发现 PostgreSQL 会将已有自动槽的 FK 更新排在新 snapshot 插入之前，导致快速
+  存档失败；现已显式 flush snapshot、加入回归测试，并在公网重新验证存档与读档成功。同步协议处理
+  异常也不再杀死整个共享房间驱动。
 
 ## 6. 尚未完成的工作
 
 按当前优先级继续：
 
-1. 审核多人协议文档是否完整覆盖：云端旧 `/ws` 禁用、`private_event`、`room_error`、同步、恢复及
-   多人存读档错误码；
-2. 复核多人存档、读档和时间线恢复的前端交互与端到端行为；
-3. 扩展双客户端 E2E，补齐真实模型完整回合、重复提交、并发、主动掉线和服务重启恢复；
-4. 演练 Nginx 配置回滚；
-5. 更新最终用户操作文档，并决定正式域名与受信任证书方案；
-6. 全部验收通过后，才讨论合入 `master`。
+1. 补充非开发者最终用户操作文档；
+2. 决定正式域名与受信任证书方案；
+3. 全部验收通过后，才讨论合入 `master`。
 
 ## 7. 当前风险与禁止事项
 
