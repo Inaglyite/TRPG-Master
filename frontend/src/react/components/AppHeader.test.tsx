@@ -23,3 +23,41 @@ describe("AppHeader", () => {
     expect(container.querySelector("#conn-status")).toHaveClass("connected");
   });
 });
+
+describe("AppHeader 多人房主专属操作", () => {
+  beforeEach(async () => {
+    const { initialOnlineState, useOnlineStore } =
+      await import("../../state/online-store");
+    useOnlineStore.setState({
+      ...initialOnlineState,
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      members: [{ user_id: "u1", username: "alice", role: "player" }],
+    });
+    useAppStore.setState({ mode: "online", connection: "connected" });
+  });
+
+  it("非房主隐藏快速存档与存档管理", () => {
+    render(<AppHeader />);
+    expect(screen.queryByLabelText("快速存档")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("打开存档管理")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("打开模型设置")).not.toBeInTheDocument();
+  });
+
+  it("房主可见存档操作", async () => {
+    const { useOnlineStore } = await import("../../state/online-store");
+    useOnlineStore.setState({
+      members: [{ user_id: "u1", username: "alice", role: "owner" }],
+    });
+    render(<AppHeader />);
+    expect(screen.getByLabelText("快速存档")).toBeInTheDocument();
+    expect(screen.getByLabelText("打开存档管理")).toBeInTheDocument();
+  });
+
+  it("单机模式不受成员角色影响", async () => {
+    useAppStore.setState({ mode: "local" });
+    render(<AppHeader />);
+    expect(screen.getByLabelText("快速存档")).toBeInTheDocument();
+    expect(screen.getByLabelText("打开模型设置")).toBeInTheDocument();
+  });
+});

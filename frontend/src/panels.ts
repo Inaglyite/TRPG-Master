@@ -9,6 +9,7 @@ import {
   type SaveEntry,
   type WorldEntry,
 } from "./state/app-store";
+import { isRoomOwner } from "./state/online-store";
 import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
 import { safeSend } from "./ws";
@@ -20,6 +21,19 @@ let quickSavePending = false;
 let quickSaveTimeout: number | undefined;
 let quickSaveFeedbackTimeout: number | undefined;
 let clueToastTimeout: number | undefined;
+
+/**
+ * 多人房间的房主专属操作（存档管理、读档、结案等）前端门禁；
+ * 服务端按 Session 再次校验，此处只是提前阻断并给出可读提示。
+ */
+function roomOwnerOpsAllowed(): boolean {
+  if (useAppStore.getState().mode !== "online") return true;
+  return isRoomOwner();
+}
+
+function denyRoomOwnerOp(): void {
+  addMsg("system", "多人房间中，存档与结案操作仅房主可用。");
+}
 
 function parseJson<T>(raw: string, fallback: T): T {
   try {
@@ -92,6 +106,10 @@ export function showEnding(data: any) {
 }
 
 export function confirmEnding(data: any) {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   const emoji =
     data.ending_type === "good"
       ? "🏆"
@@ -141,16 +159,28 @@ export function renderWorldPanel(worlds: WorldEntry[], activeWorldId: string) {
 }
 
 export function loadSave(slotId: string) {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   closeSavePanel();
   addMsg("system", "正在读档…");
   safeSend(JSON.stringify({ type: "save_load", slot_id: slotId }));
 }
 
 export function deleteSave(slotId: string) {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   safeSend(JSON.stringify({ type: "save_delete", slot_id: slotId }));
 }
 
 export function renameSave(slotId: string, label: string) {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   safeSend(
     JSON.stringify({
       type: "save_rename",
@@ -161,6 +191,10 @@ export function renameSave(slotId: string, label: string) {
 }
 
 export function createSave() {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   safeSend(JSON.stringify({ type: "save_create" }));
   addMsg("system", "正在保存…");
 }
@@ -170,6 +204,10 @@ export function switchWorld(worldId: string) {
 }
 
 export function quickSave() {
+  if (!roomOwnerOpsAllowed()) {
+    denyRoomOwnerOp();
+    return;
+  }
   if (quickSavePending || !getGameStarted()) return;
   window.clearTimeout(quickSaveFeedbackTimeout);
   quickSavePending = true;

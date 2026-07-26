@@ -156,6 +156,9 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 调查员占用请求为 `{"character_key":"服务端 options 返回的 id"}`。服务端会重新解析模组角色并
 保存可信 `character_ref`，客户端提交的 `user_id`、`investigator_id` 或角色正文均不作为授权事实。
+认领与释放只允许在 `room_status=lobby` 时进行；开局后返回
+`room_already_started`，防止进行中切换权威角色。若房间运行时已加载，成功操作会广播
+`investigator_claimed` 或 `investigator_released`，并取消受影响玩家的 ready 状态。
 
 ### 2.5 `GET /api/theme`
 
@@ -584,6 +587,8 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
   以及只为当前连接生成的 `private_state`；
 - `room_state`：房间状态、房主、当前行动者、ready/online 用户 ID；
 - `member_joined`、`member_left`、`member_removed`、`owner_changed`、`actor_changed`；
+- `investigator_claimed`、`investigator_released`：成员选角发生变化，所有客户端应刷新成员与
+  调查员占用；
 - `room_action_rejected {code,message}`：稳定错误码包括 `owner_required`、`player_required`、
   `not_current_actor`、`investigator_required`、`room_not_ready`、`duplicate_action` 和
   `room_turn_in_progress`；

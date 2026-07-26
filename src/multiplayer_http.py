@@ -27,6 +27,7 @@ from .multiplayer import (
     transfer_owner,
     update_member_role,
 )
+from .multiplayer_room_events import broadcast_investigator_change
 from .room_runtime import GameRoom, RoomManager
 from .runtime import RuntimeContext
 
@@ -81,12 +82,8 @@ def create_multiplayer_http_router(
                         "updated_at": world.updated_at.isoformat(),
                         "metadata": world.metadata_json,
                         "name": str((world.metadata_json or {}).get("name") or ""),
-                        "status": str(
-                            (world.metadata_json or {}).get("room_status") or "lobby"
-                        ),
-                        "max_players": int(
-                            (world.metadata_json or {}).get("max_players") or 4
-                        ),
+                        "status": str((world.metadata_json or {}).get("room_status") or "lobby"),
+                        "max_players": int((world.metadata_json or {}).get("max_players") or 4),
                         "member_count": session.query(WorldMember)
                         .filter_by(world_id=world.id)
                         .count(),
@@ -114,8 +111,7 @@ def create_multiplayer_http_router(
             world.created_by = user.id
             world.metadata_json = {
                 **dict(world.metadata_json or {}),
-                "name": str(data.get("name") or "").strip()[:120]
-                or f"{user.username} 的房间",
+                "name": str(data.get("name") or "").strip()[:120] or f"{user.username} 的房间",
                 "room_status": "lobby",
                 "max_players": max(2, min(int(data.get("max_players") or 4), 4)),
             }
@@ -314,9 +310,7 @@ def create_multiplayer_http_router(
                 deps.persist_room_control(room)
             await room.hub.disconnect_user(target_user_id)
             room.connected_users.pop(target_user_id, None)
-            await room.hub.broadcast(
-                {"type": "member_removed", "user_id": target_user_id}
-            )
+            await room.hub.broadcast({"type": "member_removed", "user_id": target_user_id})
             await deps.broadcast_room_state(room)
         audit(
             db_url(),
@@ -368,6 +362,13 @@ def create_multiplayer_http_router(
             )
         except MultiplayerError as exc:
             return _error(exc)
+        await broadcast_investigator_change(
+            deps.room_manager(),
+            deps.broadcast_room_state,
+            world_id,
+            "investigator_claimed",
+            result,
+        )
         audit(
             db_url(),
             "investigator_claimed",
@@ -390,9 +391,16 @@ def create_multiplayer_http_router(
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
         try:
-            release_investigator(db_url(), world_id, investigator_id, user.id)
+            result = release_investigator(db_url(), world_id, investigator_id, user.id)
         except MultiplayerError as exc:
             return _error(exc)
+        await broadcast_investigator_change(
+            deps.room_manager(),
+            deps.broadcast_room_state,
+            world_id,
+            "investigator_released",
+            result,
+        )
         audit(
             db_url(),
             "investigator_released",

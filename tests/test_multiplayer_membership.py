@@ -252,6 +252,28 @@ def test_claim_can_be_released_only_by_controller_or_owner(tmp_path: Path):
     )
 
 
+def test_investigator_claims_are_locked_after_room_starts(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    owner, player, _stranger = seed_accounts_and_world(url)
+    token = create_invite(url, "world-room", owner.id, max_uses=1)["token"]
+    accept_invite(url, token, player.id)
+    claim = claim_investigator(url, "world-room", "detective-huang", player.id)
+    with session_scope(url) as session:
+        world = session.get(World, "world-room")
+        world.metadata_json = {**world.metadata_json, "room_status": "playing"}
+
+    with pytest.raises(MultiplayerError) as replace:
+        claim_investigator(url, "world-room", "another-detective", player.id)
+    assert replace.value.code == "room_already_started"
+    with pytest.raises(MultiplayerError) as release:
+        release_investigator(url, "world-room", claim["id"], player.id)
+    assert release.value.code == "room_already_started"
+
+    state = room_members(url, "world-room", owner.id)
+    player_row = next(row for row in state["members"] if row["user_id"] == player.id)
+    assert player_row["investigator"]["id"] == claim["id"]
+
+
 def test_multiplayer_http_invite_join_and_claim_flow(tmp_path: Path):
     import server
 
@@ -399,9 +421,7 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 elif data.get("type") in {"start", "save_load"}:
                     await transport.send_json({"type": "done"})
                 elif data.get("type") == "save_create":
-                    await transport.send_json(
-                        {"type": "saved", "ok": True, "slot_id": "slot_001"}
-                    )
+                    await transport.send_json({"type": "saved", "ok": True, "slot_id": "slot_001"})
         except RuntimeError:
             return
 
@@ -531,13 +551,9 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 owner_ws.send_json({"type": "save_create"})
                 invalid_control = _receive_until(owner_ws, "room_action_rejected")
                 assert invalid_control["code"] == "invalid_action_id"
-                owner_ws.send_json(
-                    {"type": "save_create", "action_id": "owner-save-create"}
-                )
+                owner_ws.send_json({"type": "save_create", "action_id": "owner-save-create"})
                 _receive_until(owner_ws, "saved")
-                owner_ws.send_json(
-                    {"type": "save_create", "action_id": "owner-save-create"}
-                )
+                owner_ws.send_json({"type": "save_create", "action_id": "owner-save-create"})
                 duplicate_control = _receive_until(owner_ws, "room_action_rejected")
                 assert duplicate_control["code"] == "duplicate_action"
                 owner_ws.send_json({"type": "load"})

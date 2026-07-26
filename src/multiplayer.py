@@ -405,6 +405,14 @@ def claim_investigator(
             member = _require_member(session, world_id, user_id)
             if member.role not in {"owner", "player"}:
                 raise MultiplayerError("player_required", "旁观者不能占用调查员", 403)
+            world = session.get(World, world_id)
+            room_status = str((world.metadata_json or {}).get("room_status") or "lobby")
+            if room_status != "lobby":
+                raise MultiplayerError(
+                    "room_already_started",
+                    "游戏开始后不能更换调查员",
+                    409,
+                )
             existing_user_claim = (
                 session.query(WorldInvestigator)
                 .filter_by(world_id=world_id, controller_user_id=user_id)
@@ -444,14 +452,33 @@ def claim_investigator(
         raise MultiplayerError("investigator_taken", "该调查员已被其他玩家选择", 409) from exc
 
 
-def release_investigator(db_url: str, world_id: str, investigator_id: str, user_id: str) -> None:
+def release_investigator(
+    db_url: str,
+    world_id: str,
+    investigator_id: str,
+    user_id: str,
+) -> dict:
     with session_scope(db_url) as session:
         member = _require_member(session, world_id, user_id)
+        world = session.get(World, world_id)
+        room_status = str((world.metadata_json or {}).get("room_status") or "lobby")
+        if room_status != "lobby":
+            raise MultiplayerError(
+                "room_already_started",
+                "游戏开始后不能更换调查员",
+                409,
+            )
         claim = session.get(WorldInvestigator, investigator_id)
         if claim is None or claim.world_id != world_id:
             raise MultiplayerError("investigator_not_found", "调查员不存在", 404)
         if claim.controller_user_id != user_id and member.role != "owner":
             raise MultiplayerError("claim_owner_required", "不能释放其他玩家的调查员", 403)
+        previous_controller_user_id = claim.controller_user_id
         claim.controller_user_id = None
         claim.status = "available"
         claim.updated_at = utcnow()
+        return {
+            "id": claim.id,
+            "character_key": claim.character_key,
+            "user_id": previous_controller_user_id,
+        }

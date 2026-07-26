@@ -86,7 +86,10 @@ function Diagnostics({ data }: { data: TurnDiagnostics }) {
         />
         <Metric label="消息" value={String(data.message_count ?? "--")} />
         <Metric label="世界版本" value={String(data.world_revision ?? "--")} />
-        <Metric label="首段可见" value={seconds(performance.first_visible_ms)} />
+        <Metric
+          label="首段可见"
+          value={seconds(performance.first_visible_ms)}
+        />
         <Metric label="准备" value={seconds(phases.prepare)} />
         <Metric label="工具" value={seconds(phases.tool_execution)} />
         <Metric label="审计" value={seconds(phases.model_audit)} />

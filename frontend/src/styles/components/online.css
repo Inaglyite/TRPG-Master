@@ -1,0 +1,653 @@
+/* ---- 多人联机界面（模式选择 / 认证 / 大厅 / 房间） ---- */
+
+.online-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--ink) 52%, transparent),
+      color-mix(in srgb, var(--ink) 8%, transparent) 48%,
+      color-mix(in srgb, var(--ink) 58%, transparent)
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ink) 10%, transparent),
+      color-mix(in srgb, var(--ink) 58%, transparent)
+    ),
+    var(--module-bg-image, var(--ui-start-bg)) center / cover no-repeat,
+    var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  animation: fade-in 0.4s ease;
+}
+
+.online-box {
+  width: min(480px, calc(100vw - 48px));
+  margin: auto;
+  filter: drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
+}
+
+.online-box.online-card--wide {
+  width: min(720px, calc(100vw - 48px));
+}
+
+.online-card {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg2) 92%, black);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gold) 12%, transparent),
+    var(--shadow-2);
+}
+
+.online-title {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: clamp(34px, 5vw, 48px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+  text-align: center;
+  text-shadow:
+    0 2px 4px #000,
+    0 0 30px color-mix(in srgb, var(--gold) 55%, transparent);
+}
+
+.online-title--small {
+  font-size: clamp(22px, 3vw, 28px);
+  text-align: left;
+}
+
+.online-subtitle {
+  margin-top: var(--sp-2);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-style: italic;
+  letter-spacing: 0.22em;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+
+.online-header .online-subtitle {
+  text-align: left;
+  letter-spacing: 0.08em;
+}
+
+/* 模式选择 */
+.mode-select-box {
+  text-align: center;
+}
+
+.mode-select-hint {
+  margin-bottom: var(--sp-4);
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: 0.18em;
+}
+
+.mode-select-actions {
+  display: flex;
+  gap: var(--sp-4);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mode-card {
+  flex: 1 1 240px;
+  max-width: 320px;
+  min-height: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.mode-card-title {
+  font-size: 20px;
+}
+
+.mode-card-desc {
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  text-shadow: none;
+}
+
+.mode-select-origin {
+  margin-top: var(--sp-4);
+  display: flex;
+  justify-content: center;
+}
+
+.mode-select-origin input {
+  width: min(420px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--bg3), var(--bg2));
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+}
+
+.mode-select-origin input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 28%, transparent);
+}
+
+.mode-select-box .online-notice {
+  margin-top: var(--sp-3);
+}
+
+/* 页头 */
+.online-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.online-header-side {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+.online-user {
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+/* 分节 */
+.online-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.online-section h2 {
+  color: var(--gold-dim);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-shadow: 0 1px 2px #000;
+}
+
+.online-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* 表单 */
+.online-tabs {
+  display: flex;
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.online-tab {
+  flex: 1;
+  padding: var(--sp-2) 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.22em;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.online-tab--active,
+.online-tab:hover,
+.online-tab:focus-visible {
+  color: var(--gold-bright);
+  border-bottom-color: var(--gold);
+  outline: none;
+}
+
+.online-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.online-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+
+.online-field input,
+.online-inline-form input,
+.online-inline-form select,
+.online-server-form input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--bg3), var(--bg2));
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  outline: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.online-field input:focus,
+.online-inline-form input:focus,
+.online-inline-form select:focus,
+.online-server-form input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 28%, transparent);
+}
+
+.online-field input:disabled,
+.online-inline-form input:disabled,
+.online-inline-form select:disabled {
+  opacity: 0.62;
+  cursor: wait;
+}
+
+.online-inline-form {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+.online-inline-form input,
+.online-inline-form select {
+  flex: 1;
+  min-width: 0;
+}
+
+.online-submit {
+  min-height: 44px;
+  margin-top: var(--sp-1);
+}
+
+/* 提示与状态 */
+.online-notice {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.online-notice--error {
+  border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red-bright);
+}
+
+.online-notice--warn {
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  color: var(--gold-bright);
+}
+
+.online-loading {
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.online-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.online-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 服务器地址 */
+.online-server {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.online-server-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 12px;
+}
+
+.online-server-label {
+  color: var(--gold-dim);
+  letter-spacing: 0.2em;
+}
+
+.online-server-origin {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.online-server-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+/* 徽章 */
+.online-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.online-badge--online {
+  border-color: color-mix(in srgb, var(--green) 60%, transparent);
+  color: var(--green);
+}
+
+.online-badge--ready {
+  border-color: color-mix(in srgb, var(--gold) 60%, transparent);
+  color: var(--gold-bright);
+}
+
+.online-badge--investigator {
+  border-color: color-mix(in srgb, var(--blue) 60%, transparent);
+  color: var(--blue-bright);
+}
+
+/* 房间卡片与成员行 */
+.room-list,
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--bg3), var(--bg2));
+  color: var(--text);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.room-card:hover,
+.room-card:focus-visible {
+  border-color: var(--gold);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 24%, transparent);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.room-card-title {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  overflow-wrap: anywhere;
+}
+
+.room-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.room-card-time {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg3) 70%, transparent);
+}
+
+.member-name {
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.member-me {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.member-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 邀请 */
+.invite-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.invite-token {
+  display: block;
+  padding: var(--sp-3);
+  border: 1px dashed var(--gold-dim);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--gold-bright);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* 底部操作 */
+.online-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+}
+
+.online-danger {
+  border-color: color-mix(in srgb, var(--red) 70%, black);
+  background: linear-gradient(180deg, var(--red-bright), var(--red));
+  color: #fff;
+}
+
+/* 私密线索（仅本人可见，不混入公共历史） */
+.private-clue {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--purple) 55%, transparent);
+  background: color-mix(in srgb, var(--purple) 8%, transparent);
+}
+
+.online-badge--private {
+  border-color: color-mix(in srgb, var(--purple) 60%, transparent);
+  color: var(--purple);
+}
+
+.online-badge--error {
+  border-color: color-mix(in srgb, var(--red) 60%, transparent);
+  color: var(--red-bright);
+}
+
+/* 多人游戏进行中的顶部房间条（不遮挡游戏区） */
+.game-room-bar {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: min(860px, calc(100vw - 32px));
+  padding: 6px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg2) 88%, black);
+  box-shadow: var(--shadow-2);
+  font-size: 12px;
+}
+
+.game-room-bar-title {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.game-room-bar-actor {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.game-room-bar-actor--me {
+  color: var(--gold-bright);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+
+.game-room-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .game-room-bar {
+    top: 46px;
+    gap: var(--sp-2);
+    font-size: 11px;
+  }
+
+  .game-room-bar-title {
+    max-width: 120px;
+  }
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .online-card {
+    padding: var(--sp-4) var(--sp-3);
+  }
+
+  .online-header {
+    flex-direction: column;
+  }
+
+  .mode-select-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mode-card {
+    max-width: none;
+  }
+
+  .online-inline-form {
+    flex-direction: column;
+  }
+
+  .member-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .member-badges {
+    justify-content: flex-start;
+  }
+
+  .online-actions {
+    justify-content: stretch;
+  }
+
+  .online-actions > button,
+  .online-actions > span {
+    flex: 1;
+  }
+}

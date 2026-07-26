@@ -14,4 +14,5 @@
 @import "./components/module-import.css";
 @import "./components/character-select.css";
 @import "./components/save-panel.css";
+@import "./components/online.css";
 @import "./components/responsive.css";

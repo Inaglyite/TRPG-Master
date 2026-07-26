@@ -232,7 +232,21 @@ export function setWs(w: WebSocket) {
 // ---- 待发送队列（连接未就绪时缓存） ----
 const sendQueue: string[] = [];
 
+// ---- 发送传输适配 ----
+// 多人房间模式下，全部客户端消息（action/decision/save/start 等）经
+// setActiveTransport 指向房间 WS；null 恢复单机本地连接的默认行为。
+export type WsTransport = { send: (payload: string) => void };
+let activeTransport: WsTransport | null = null;
+
+export function setActiveTransport(transport: WsTransport | null) {
+  activeTransport = transport;
+}
+
 export function safeSend(payload: string) {
+  if (activeTransport) {
+    activeTransport.send(payload);
+    return;
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(payload);
   } else {
@@ -264,7 +278,8 @@ function attachTurnActions(history: TurnHistoryItem[]) {
   }
 }
 
-function displayWorldHistory(rawHistory: unknown) {
+/** 渲染整段公共世界历史（单机读档/恢复与多人 room_full_state 共用）。 */
+export function displayWorldHistory(rawHistory: unknown) {
   const history = Array.isArray(rawHistory)
     ? (rawHistory as TurnHistoryItem[])
     : [];
@@ -356,10 +371,14 @@ export function disconnectCleanly() {
 }
 
 export function recoverLatestTurn() {
-  if (!ws || ws.readyState !== WebSocket.OPEN || recoveryPending) return;
+  if (
+    (!activeTransport && (!ws || ws.readyState !== WebSocket.OPEN)) ||
+    recoveryPending
+  )
+    return;
   recoveryPending = true;
   showConnectionNotice("正在恢复最近一个已完成回合……");
-  ws.send(JSON.stringify({ type: "save_load", slot_id: "slot_000" }));
+  safeSend(JSON.stringify({ type: "save_load", slot_id: "slot_000" }));
 }
 
 type PublicTurnRecord = {
@@ -475,7 +494,15 @@ function onTurnRecovery(data: any) {
 
 // ---- 消息分发 ----
 function handleMessage(e: MessageEvent) {
-  const parsed = parseServerMessage(e.data);
+  handleServerPayload(e.data);
+}
+
+/**
+ * 统一的服务端消息分发入口：单机 /ws 的 onmessage 与多人房间 WS
+ * （room-ws.ts）共用。输入为原始 frame（string）或可解析对象。
+ */
+export function handleServerPayload(raw: unknown) {
+  const parsed = parseServerMessage(raw);
   if (!parsed) {
     addMsg("error", "守秘人发送了无法识别的协议消息，已安全忽略。", true);
     return;

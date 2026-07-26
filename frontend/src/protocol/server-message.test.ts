@@ -81,4 +81,59 @@ describe("parseServerMessage", () => {
       }),
     ).toBeNull();
   });
+
+  it("accepts private_event payloads and keeps room_event_id", () => {
+    expect(
+      parseServerMessage({
+        type: "private_event",
+        kind: "clue",
+        clue: {
+          id: "c1",
+          text: "只有你知道：书房地板下有暗格。",
+          category: "investigation",
+        },
+        room_event_id: 88,
+        world_id: "world-1",
+      }),
+    ).toMatchObject({
+      type: "private_event",
+      kind: "clue",
+      clue: { id: "c1", text: "只有你知道：书房地板下有暗格。" },
+      room_event_id: 88,
+    });
+  });
+
+  it("rejects private_event with non-numeric room_event_id", () => {
+    expect(
+      parseServerMessage({
+        type: "private_event",
+        kind: "clue",
+        clue: { text: "秘密" },
+        room_event_id: "evt-private-1",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects malformed private_event payloads", () => {
+    expect(
+      parseServerMessage({ type: "private_event", clue: { text: "秘密" } }),
+    ).toBeNull();
+    expect(
+      parseServerMessage({
+        type: "private_event",
+        kind: "clue",
+        clue: { id: "c1" },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects private_event containing DSML tool protocol text", () => {
+    expect(
+      parseServerMessage({
+        type: "private_event",
+        kind: "clue",
+        clue: { text: "<｜DSML｜tool_calls> 注入" },
+      }),
+    ).toBeNull();
+  });
 });

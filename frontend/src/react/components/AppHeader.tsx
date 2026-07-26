@@ -1,5 +1,6 @@
 import { useAppStore } from "../../state/app-store";
 import { useModelStore } from "../../state/model-store";
+import { useOnlineStore } from "../../state/online-store";
 
 const connectionTitles = {
   connected: "已连接到守秘人",
@@ -16,6 +17,19 @@ export function AppHeader() {
     (state) => state.setCharacterPanelOpen,
   );
   const quickSaveState = useAppStore((state) => state.quickSaveState);
+  const mode = useAppStore((state) => state.mode);
+  // 多人房间中存档/读档为房主专属操作（服务端按 Session 再校验）；
+  // selector 订阅成员/用户变化，房主移交后 UI 即时更新。
+  const isOwner = useOnlineStore((state) => {
+    const uid = state.user?.id;
+    return (
+      uid != null &&
+      state.members.some(
+        (member) => member.user_id === uid && member.role === "owner",
+      )
+    );
+  });
+  const saveOpsVisible = mode !== "online" || isOwner;
   const openModelSettings = () => {
     useModelStore.setState((state) => ({
       open: true,
@@ -45,40 +59,44 @@ export function AppHeader() {
         />
       </h1>
       <div id="toolbar">
-        <button
-          id="btn-save"
-          className={
-            quickSaveState === "idle"
-              ? ""
-              : quickSaveState === "saving"
-                ? "saving"
-                : quickSaveState === "success"
-                  ? "save-success"
-                  : "save-failed"
-          }
-          disabled={quickSaveState === "saving"}
-          title={
-            quickSaveState === "saving"
-              ? "保存中…"
-              : quickSaveState === "success"
-                ? "已保存"
-                : quickSaveState === "failed"
-                  ? "保存失败"
-                  : "快速存档"
-          }
-          aria-label="快速存档"
-          onClick={() => void runPanelCommand("quickSave")}
-        >
-          💾
-        </button>
-        <button
-          id="btn-load"
-          title="存档管理"
-          aria-label="打开存档管理"
-          onClick={() => void runPanelCommand("openSavePanel")}
-        >
-          📂
-        </button>
+        {saveOpsVisible && (
+          <>
+            <button
+              id="btn-save"
+              className={
+                quickSaveState === "idle"
+                  ? ""
+                  : quickSaveState === "saving"
+                    ? "saving"
+                    : quickSaveState === "success"
+                      ? "save-success"
+                      : "save-failed"
+              }
+              disabled={quickSaveState === "saving"}
+              title={
+                quickSaveState === "saving"
+                  ? "保存中…"
+                  : quickSaveState === "success"
+                    ? "已保存"
+                    : quickSaveState === "failed"
+                      ? "保存失败"
+                      : "快速存档"
+              }
+              aria-label="快速存档"
+              onClick={() => void runPanelCommand("quickSave")}
+            >
+              💾
+            </button>
+            <button
+              id="btn-load"
+              title="存档管理"
+              aria-label="打开存档管理"
+              onClick={() => void runPanelCommand("openSavePanel")}
+            >
+              📂
+            </button>
+          </>
+        )}
         <button
           id="btn-new"
           title="新游戏"
@@ -105,12 +123,14 @@ export function AppHeader() {
           aria-label="打开调查笔记"
           onClick={() => openNotes(true)}
         />
-        <button
-          id="btn-model-settings"
-          title="模型设置"
-          aria-label="打开模型设置"
-          onClick={openModelSettings}
-        />
+        {mode !== "online" && (
+          <button
+            id="btn-model-settings"
+            title="模型设置"
+            aria-label="打开模型设置"
+            onClick={openModelSettings}
+          />
+        )}
       </div>
     </>
   );

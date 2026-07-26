@@ -3,14 +3,47 @@ import { useEffect, useRef, useState } from "react";
 import { sendAction, sendDecisionReply, sendSuggestReply } from "../../options";
 import { confirmEnding } from "../../panels";
 import { useAppStore, type EndingProposal } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
 
 export function GameControls() {
-  const enabled = useAppStore((state) => state.inputEnabled);
-  const placeholder = useAppStore((state) => state.inputPlaceholder);
+  const appEnabled = useAppStore((state) => state.inputEnabled);
+  const appPlaceholder = useAppStore((state) => state.inputPlaceholder);
   const choices = useAppStore((state) => state.choices);
   const ending = useAppStore((state) => state.ending);
+  const mode = useAppStore((state) => state.mode);
+  const roomStatus = useOnlineStore((state) => state.roomStatus);
+  const currentActorUserId = useOnlineStore(
+    (state) => state.currentActorUserId,
+  );
+  const userId = useOnlineStore((state) => state.user?.id);
+  const members = useOnlineStore((state) => state.members);
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 多人进行中：只有当前行动者可以提交；其他人输入与选项均禁用并显示等待。
+  const roomPlaying = mode === "online" && roomStatus === "playing";
+  const myTurn =
+    !roomPlaying || (userId != null && currentActorUserId === userId);
+  const enabled = appEnabled && myTurn;
+  // 结案（settle_case）为房主专属操作；普通成员只看到继续探索。
+  // selector 订阅成员变化，房主移交后按钮即时更新。
+  const isOwner = useOnlineStore((state) => {
+    const uid = state.user?.id;
+    return (
+      uid != null &&
+      state.members.some(
+        (member) => member.user_id === uid && member.role === "owner",
+      )
+    );
+  });
+  const settleVisible = mode !== "online" || isOwner;
+  const actorName = members.find(
+    (member) => member.user_id === currentActorUserId,
+  )?.username;
+  const placeholder =
+    roomPlaying && !myTurn
+      ? `等待 ${actorName ?? "行动者"} 行动……`
+      : appPlaceholder;
 
   useEffect(() => {
     if (enabled) inputRef.current?.focus();
@@ -28,18 +61,20 @@ export function GameControls() {
       <div id="options-bar">
         {ending ? (
           <>
-            <button
-              id="btn-end-confirm"
-              className="opt-btn end-confirm"
-              onClick={() => void confirmEnding(ending)}
-            >
-              {ending.ending_type === "good"
-                ? "🏆"
-                : ending.ending_type === "bad"
-                  ? "💀"
-                  : "🌫"}{" "}
-              确认结束 —— {ending.title}
-            </button>
+            {settleVisible && (
+              <button
+                id="btn-end-confirm"
+                className="opt-btn end-confirm"
+                onClick={() => void confirmEnding(ending)}
+              >
+                {ending.ending_type === "good"
+                  ? "🏆"
+                  : ending.ending_type === "bad"
+                    ? "💀"
+                    : "🌫"}{" "}
+                确认结束 —— {ending.title}
+              </button>
+            )}
             <button
               id="btn-end-continue"
               className="opt-btn free end-continue"
@@ -53,6 +88,7 @@ export function GameControls() {
             <button
               key={`${choice.label}-${index}`}
               className={`opt-btn${choice.isFree ? " free" : ""}`}
+              disabled={!enabled}
               onClick={() => void sendAction(choice.label)}
             >
               {index + 1}. {choice.label}

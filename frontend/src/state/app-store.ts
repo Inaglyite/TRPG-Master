@@ -95,7 +95,25 @@ export type WorldEntry = {
 };
 export type QuickSaveState = "idle" | "saving" | "success" | "failed";
 
+/** 应用运行模式：select=启动后待选择；local=单机本地后端；online=多人云端。 */
+export type AppMode = "select" | "local" | "online";
+
+/**
+ * 通过 URL 标记直接进入指定模式（如 Electron 联机由主进程同源加载
+ * `https://<cloud>/?mode=online`）；无标记时进入模式选择。
+ */
+export function detectInitialMode(): AppMode {
+  try {
+    const mode = new URLSearchParams(window.location.search).get("mode");
+    if (mode === "online" || mode === "local") return mode;
+  } catch {
+    /* 非浏览器环境按 select 处理 */
+  }
+  return "select";
+}
+
 type AppState = {
+  mode: AppMode;
   connection: ConnectionState;
   connectionNotice: string | null;
   connectionRecoveryAvailable: boolean;
@@ -129,6 +147,7 @@ type AppState = {
   worlds: WorldEntry[];
   renameSlotId: string | null;
   quickSaveState: QuickSaveState;
+  setMode: (mode: AppMode) => void;
   setConnection: (connection: ConnectionState) => void;
   setConnectionNotice: (
     message: string | null,
@@ -173,6 +192,7 @@ type AppState = {
 };
 
 export const useAppStore = create<AppState>((set) => ({
+  mode: detectInitialMode(),
   connection: "connecting",
   connectionNotice: null,
   connectionRecoveryAvailable: false,
@@ -206,6 +226,7 @@ export const useAppStore = create<AppState>((set) => ({
   worlds: [],
   renameSlotId: null,
   quickSaveState: "idle",
+  setMode: (mode) => set({ mode }),
   setConnection: (connection) => set({ connection }),
   setConnectionNotice: (
     connectionNotice,

@@ -79,18 +79,25 @@ flowchart LR
 
 ### 3.2 打包桌面模式
 
-打包后的 Electron 由 `frontend/electron/main.cjs` 托管内置后端：
+打包后的 Electron 由 `frontend/electron/main.cjs` 提供单机/多人双模式：
 
-1. 定位 `resources/backend/trpg-server(.exe)`。
-2. 设置只读 `TRPG_PROJECT_ROOT` 与用户数据下的 `TRPG_RUNTIME_ROOT` 后启动后端，Windows 使用 `windowsHide: true`。
-3. 轮询 `/api/health`，成功后加载前端页面。
-4. `window-all-closed` 或 `before-quit` 时终止内置后端。
+1. 启动时只加载打包内置的 `dist/index.html` 模式选择页，不提前启动后端。
+2. 选择单机后才定位 `resources/backend/trpg-server(.exe)`，完成本地配置、设置用户数据下的
+   `TRPG_RUNTIME_ROOT`、启动后端并轮询 `/api/health`。
+3. 选择多人时严格校验裸 `https` origin，并让窗口加载
+   `https://<cloud>/?mode=online`；HTTP、WSS 和 HttpOnly Session Cookie 因此保持同源。
+4. preload 只暴露模式选择和返回启动器的窄 IPC；本地 IPC 调用校验确切的内置页面 URL，云端页面
+   只能请求返回内置启动器，不能启动本地后端。任意新窗口、越界导航和权限请求默认拒绝。
+5. `window-all-closed` 或 `before-quit` 时终止已启动的内置后端。
 
 设置 `TRPG_EXTERNAL_BACKEND=1` 可禁止打包壳启动内置后端，供调试或外部服务托管使用。
 
 ### 3.3 浏览器模式
 
-`server.py` 在 `frontend/dist` 存在时将其挂载到 `/`；浏览器可直接访问 `http://127.0.0.1:8765`。浏览器标签页关闭无法可靠代表服务生命周期，因此自动关服只由 Electron/启动脚本保证。
+`server.py` 在 `frontend/dist` 存在时将其挂载到 `/`；浏览器可直接访问
+`http://127.0.0.1:8765`。生产构建默认以页面自身 origin 访问 HTTP/WSS（保留 Nginx 的 443/8443
+等实际端口），Vite 开发模式才直连本地 8765。浏览器标签页关闭无法可靠代表服务生命周期，因此
+自动关服只由 Electron/启动脚本保证。
 
 ## 4. 代码分层
 

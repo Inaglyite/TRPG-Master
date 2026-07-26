@@ -38,7 +38,10 @@
     },
     "files": [
       "dist/**/*",
-      "electron/main.cjs"
+      "electron/main.cjs",
+      "electron/preload.cjs",
+      "electron/cloud-origin.cjs",
+      "electron/ipc-guard.cjs"
     ],
     "extraResources": [
       {

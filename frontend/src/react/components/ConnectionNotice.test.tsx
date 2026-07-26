@@ -24,4 +24,32 @@ describe("ConnectionNotice", () => {
     const { recoverLatestTurn } = await import("../../ws");
     await waitFor(() => expect(recoverLatestTurn).toHaveBeenCalledOnce());
   });
+
+  it("多人模式下非房主不显示恢复按钮，房主显示", async () => {
+    const { initialOnlineState, useOnlineStore } =
+      await import("../../state/online-store");
+    useOnlineStore.setState({
+      ...initialOnlineState,
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      members: [{ user_id: "u1", username: "alice", role: "player" }],
+    });
+    useAppStore.setState({ mode: "online" });
+    useAppStore.getState().setConnectionNotice("可以恢复", true);
+    const { rerender } = render(<ConnectionNotice />);
+    expect(
+      screen.queryByRole("button", { name: "恢复最近自动存档" }),
+    ).not.toBeInTheDocument();
+
+    useOnlineStore.setState({
+      members: [{ user_id: "u1", username: "alice", role: "owner" }],
+    });
+    rerender(<ConnectionNotice />);
+    expect(
+      screen.getByRole("button", { name: "恢复最近自动存档" }),
+    ).toBeInTheDocument();
+
+    useAppStore.setState({ mode: "select" });
+    useAppStore.getState().setConnectionNotice(null);
+  });
 });

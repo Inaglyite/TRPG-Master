@@ -1,13 +1,29 @@
-const { app, BrowserWindow, Menu, dialog } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
+const { validateCloudOrigin } = require("./cloud-origin.cjs");
+const {
+  isTrustedSenderUrl,
+  isNavigationAllowed,
+  isApprovedCloudSenderUrl,
+} = require("./ipc-guard.cjs");
+const { pathToFileURL } = require("node:url");
 
 const isDev = process.env.NODE_ENV === "dev";
 const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
 const backendUrl = "http://127.0.0.1:8765";
 let backendProcess = null;
+// 本地后端改为按需启动：只有用户在模式选择页点了“单机游戏”才会配置/拉起。
+let localBackendReady = false;
+// 联机模式经主进程校验并 loadURL 的云端 origin；导航守卫只放行它。
+let approvedCloudOrigin = null;
+let mainWindow = null;
+// 打包模式下 IPC/导航唯一可信的内置页面 URL（确切的 dist/index.html）。
+const trustedFileUrl = pathToFileURL(
+  path.join(__dirname, "..", "dist", "index.html"),
+).href;
 
 function log(...args) {
   // electron 主进程日志，启动脚本或终端可见
@@ -29,7 +45,7 @@ function ensureEnvJson(backendRoot) {
     resizable: false,
     autoHideMenuBar: true,
     backgroundColor: "#14100c",
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
   Menu.setApplicationMenu(null);
 
@@ -102,7 +118,10 @@ function save() {
       req.on("end", () => {
         try {
           const cfg = JSON.parse(body);
-          fs.writeFileSync(envPath, JSON.stringify(cfg, null, 2), "utf-8");
+          fs.writeFileSync(envPath, JSON.stringify(cfg, null, 2), {
+            encoding: "utf-8",
+            mode: 0o600,
+          });
           log(".env.json 已保存");
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true }));
@@ -206,6 +225,105 @@ function stopBackend() {
   backendProcess = null;
 }
 
+// ---- 按需启动本地后端（用户选择单机模式后调用）----
+async function ensureLocalBackend() {
+  if (localBackendReady) return;
+  if (isDev) {
+    // 开发模式假定本地后端由开发者自行启动（server.py / start_desktop.sh）。
+    await waitForBackend();
+  } else {
+    const backendRoot = path.dirname(backendExecutablePath());
+    const configured = await ensureEnvJson(backendRoot);
+    if (!configured) {
+      const err = new Error("未完成模型配置");
+      err.code = "config-cancelled";
+      throw err;
+    }
+    await startPackagedBackend();
+  }
+  localBackendReady = true;
+}
+
+// ---- 导航与新窗口守卫 ----
+function navigationAllowed(rawUrl) {
+  return isNavigationAllowed(rawUrl, {
+    isDev,
+    devServerUrl,
+    trustedFileUrl,
+    approvedCloudOrigin,
+  });
+}
+
+function trustedSender(senderUrl) {
+  return isTrustedSenderUrl(senderUrl, { isDev, devServerUrl, trustedFileUrl });
+}
+
+function loadLauncher() {
+  if (!mainWindow) return Promise.reject(new Error("窗口尚未就绪"));
+  return isDev
+    ? mainWindow.loadURL(devServerUrl)
+    : mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+}
+
+function registerIpcHandlers() {
+  ipcMain.handle("trpg:select-local", async (event) => {
+    if (!trustedSender(event.senderFrame?.url ?? "")) {
+      log("拒绝来自不可信页面的 select-local:", event.senderFrame?.url);
+      return { ok: false, error: "untrusted-sender" };
+    }
+    try {
+      await ensureLocalBackend();
+      return { ok: true };
+    } catch (err) {
+      if (err && err.code === "config-cancelled") {
+        return { ok: false, cancelled: true };
+      }
+      const hint = isDev ? "（开发模式请先启动本地后端 server.py）" : "";
+      return { ok: false, error: `${err.message || err}${hint}` };
+    }
+  });
+
+  ipcMain.handle("trpg:select-online", async (event, rawOrigin) => {
+    if (!trustedSender(event.senderFrame?.url ?? "")) {
+      log("拒绝来自不可信页面的 select-online:", event.senderFrame?.url);
+      return { ok: false, error: "untrusted-sender" };
+    }
+    const origin = validateCloudOrigin(rawOrigin);
+    if (!origin) return { ok: false, error: "invalid-origin" };
+    if (!mainWindow) return { ok: false, error: "窗口尚未就绪" };
+    // 先暂存并批准 origin（导航守卫放行），加载失败再恢复旧值。
+    const previousOrigin = approvedCloudOrigin;
+    approvedCloudOrigin = origin;
+    try {
+      // 同源加载云端页面：认证 Cookie 与 WebSocket 都在该 origin 下工作，
+      // 不依赖跨站 Cookie（SameSite=None）。
+      await mainWindow.loadURL(`${origin}/?mode=online`);
+      return { ok: true };
+    } catch (err) {
+      approvedCloudOrigin = previousOrigin;
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
+
+  // 云端页面只能请求返回内置启动器，不能直接调用 select-local 启动本机服务。
+  ipcMain.handle("trpg:return-launcher", async (event) => {
+    const senderUrl = event.senderFrame?.url ?? "";
+    if (!isApprovedCloudSenderUrl(senderUrl, approvedCloudOrigin)) {
+      log("拒绝来自非当前云端页面的 return-launcher:", senderUrl);
+      return { ok: false, error: "untrusted-sender" };
+    }
+    const previousOrigin = approvedCloudOrigin;
+    approvedCloudOrigin = null;
+    try {
+      await loadLauncher();
+      return { ok: true };
+    } catch (err) {
+      approvedCloudOrigin = previousOrigin;
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1180,
@@ -218,10 +336,22 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
+  mainWindow = win;
 
   Menu.setApplicationMenu(null);
+
+  // 禁止任意新窗口；导航只允许 file://（单机界面）、dev server 或已校验的云端 origin。
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!navigationAllowed(url)) {
+      log("阻止导航:", url);
+      event.preventDefault();
+    }
+  });
 
   win.webContents.on("did-finish-load", () => {
     log("页面加载完成:", win.webContents.getURL());
@@ -234,9 +364,7 @@ function createWindow() {
   });
 
   // 加载页面，并在失败时弹窗提示（避免白屏无声失败）
-  const loadPromise = isDev
-    ? win.loadURL(devServerUrl)
-    : win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  const loadPromise = loadLauncher();
 
   loadPromise.catch((err) => {
     log("页面加载失败:", err.message);
@@ -251,6 +379,10 @@ function createWindow() {
 
   // 打开 DevTools 便于调试（仅 dev）
   if (isDev) win.webContents.openDevTools({ mode: "detach" });
+
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
 
   // 退出确认（仅在用户真的要退时二次确认）
   let confirmedExit = false;
@@ -275,24 +407,13 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   log("Electron ready, isDev =", isDev);
-  try {
-    const backendRoot = app.isPackaged
-      ? path.dirname(backendExecutablePath())
-      : path.join(__dirname, "..", "..");
-    const configured = await ensureEnvJson(backendRoot);
-    if (!configured) {
-      log("用户未完成配置，退出");
-      app.quit();
-      return;
-    }
-    await startPackagedBackend();
-  } catch (err) {
-    log("内置后端启动失败:", err.message);
-    dialog.showErrorBox(
-      "守秘人启动失败",
-      `无法启动内置后端服务：\n${err.message}\n\n请确认打包资源中包含 backend/trpg-server.exe。`
-    );
-  }
+  // 默认拒绝一切权限请求（摄像头/麦克风/通知等）。
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
+  });
+  // 启动即展示模式选择页：不再强制配置本地 API Key 或启动本地后端。
+  // 单机后端在用户选择“单机游戏”后按需拉起；联机由 IPC 校验后同源加载。
+  registerIpcHandlers();
   createWindow();
 
   // macOS 重新激活时重建窗口

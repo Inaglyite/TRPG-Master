@@ -49,6 +49,19 @@ export const serverMessageTypes = [
   "case_settled",
   "character_state",
   "state_data",
+  "room_state",
+  "room_full_state",
+  "member_joined",
+  "member_left",
+  "member_removed",
+  "owner_changed",
+  "investigator_claimed",
+  "investigator_released",
+  "actor_changed",
+  "room_action_rejected",
+  "room_error",
+  "room_event_gap",
+  "private_event",
 ] as const;
 
 const serverMessageSchema = z.looseObject({
@@ -79,6 +92,63 @@ const chatEventSchema = z.object({
 const chatEventsMessageSchema = z.object({
   type: z.literal("chat_events"),
   events: z.array(chatEventSchema).max(512),
+});
+
+const roomStateMessageSchema = z.looseObject({
+  type: z.literal("room_state"),
+  status: z.string(),
+  owner_user_id: z.string().nullable().optional(),
+  current_actor_user_id: z.string().nullable().optional(),
+  ready_user_ids: z.array(z.string()).max(64),
+  online_user_ids: z.array(z.string()).max(64),
+  room_event_id: z.number().int().nonnegative().optional(),
+});
+
+// 首次连接与 gap 恢复时服务端发送的个性化快照；latest_event_id 是房间事件
+// 序号（JSON number），客户端必须用它重置同步游标。history 为公共叙事
+// （与单机世界历史同构），private_state 仅含当前用户的私有数据。
+const roomFullStateMessageSchema = z.looseObject({
+  type: z.literal("room_full_state"),
+  latest_event_id: z.number().int().nonnegative(),
+  status: z.string().optional(),
+  owner_user_id: z.string().nullable().optional(),
+  current_actor_user_id: z.string().nullable().optional(),
+  ready_user_ids: z.array(z.string()).max(64).optional(),
+  online_user_ids: z.array(z.string()).max(64).optional(),
+  history: z.array(z.unknown()).optional(),
+  investigators: z.array(z.unknown()).max(64).optional(),
+  active_investigator_id: z.string().nullable().optional(),
+  private_state: z
+    .looseObject({
+      investigator_id: z.string().nullable().optional(),
+      pc: z.unknown().optional(),
+      clues: z.record(z.string(), z.array(z.unknown()).max(512)).optional(),
+      player_notes: z
+        .looseObject({
+          text: z.string().optional(),
+          revision: z.number().optional(),
+        })
+        .nullable()
+        .optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+// 服务端按可见性过滤后定向投递的私密事件；不携带 target_user_id，
+// 客户端只渲染、不转发、不写入公共消息历史。房间序号为 JSON number。
+const privateEventMessageSchema = z.looseObject({
+  type: z.literal("private_event"),
+  kind: z.string().max(60),
+  clue: z
+    .looseObject({
+      id: z.string().max(160).optional(),
+      text: z.string().max(20_000),
+      category: z.string().max(60).optional(),
+    })
+    .optional(),
+  room_event_id: z.number().int().nonnegative().optional(),
+  world_id: z.string().max(160).optional(),
 });
 
 export type ServerMessageType = (typeof serverMessageTypes)[number];
@@ -114,6 +184,18 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   if (result.data.type === "chat_events") {
     const chatResult = chatEventsMessageSchema.safeParse(decoded);
     return chatResult.success ? (chatResult.data as ServerMessage) : null;
+  }
+  if (result.data.type === "room_state") {
+    const roomResult = roomStateMessageSchema.safeParse(decoded);
+    return roomResult.success ? (roomResult.data as ServerMessage) : null;
+  }
+  if (result.data.type === "room_full_state") {
+    const fullResult = roomFullStateMessageSchema.safeParse(decoded);
+    return fullResult.success ? (fullResult.data as ServerMessage) : null;
+  }
+  if (result.data.type === "private_event") {
+    const privateResult = privateEventMessageSchema.safeParse(decoded);
+    return privateResult.success ? (privateResult.data as ServerMessage) : null;
   }
   return result.data as ServerMessage;
 }
