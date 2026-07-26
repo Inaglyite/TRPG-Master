@@ -39,6 +39,10 @@
 6. 从 GitHub 手动运行 `deploy-multiplayer-staging`。它不会由分支 push 自动触发，也不会修改生产
    symlink。
 
+staging 的 8443 vhost 不复用旧生产站点的共享 Nginx Basic Auth；它使用应用自己的 HttpOnly
+Session、注册/登录限流和世界成员权限，确保浏览器与 Electron 能完成标准账号流程。若需要额外限制
+测试入口，应在 Azure NSG 或独立 staging 主机名上做来源限制，不能再把共享 Basic Auth 当游戏账号。
+
 发布包必须包含 `alembic.ini`、`migrations/`、运行时使用的 `tools/` 和备份所需的 `deploy/`。
 systemd 在每次启动前运行
 `alembic upgrade head`；迁移失败会阻止新版本启动。
