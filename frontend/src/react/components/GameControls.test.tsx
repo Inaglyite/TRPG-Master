@@ -54,6 +54,7 @@ describe("GameControls 多人行动门禁", () => {
       ...initialOnlineState,
       authStatus: "authenticated",
       user: { id: "u1", username: "alice" },
+      roomConnection: "connected",
       roomStatus: "playing",
       currentActorUserId: "u2",
       members: [
@@ -108,6 +109,7 @@ describe("GameControls 结案按钮的房主门禁", () => {
       ...initialOnlineState,
       authStatus: "authenticated",
       user: { id: "u1", username: "alice" },
+      roomConnection: "connected",
       roomStatus: "playing",
       currentActorUserId: "u1",
       members: [{ user_id: "u1", username: "alice", role: "player" }],
@@ -131,9 +133,14 @@ describe("GameControls 结案按钮的房主门禁", () => {
     expect(
       screen.queryByRole("button", { name: /确认结束/ }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /继续探索/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /继续探索/ })).toBeEnabled();
+  });
+
+  it("非当前行动者不能点击继续探索", async () => {
+    const { useOnlineStore } = await import("../../state/online-store");
+    useOnlineStore.setState({ currentActorUserId: "u2" });
+    render(<GameControls />);
+    expect(screen.getByRole("button", { name: /继续探索/ })).toBeDisabled();
   });
 
   it("房主可见确认结束", async () => {

@@ -19,9 +19,18 @@ import {
 import { safeSend } from "./ws";
 import { useAppStore } from "./state/app-store";
 import { useMessageStore } from "./state/message-store";
+import { canCurrentUserAct, useOnlineStore } from "./state/online-store";
 
 let activeDecisionId: string | null = null;
 let inputEnabledBeforeDisconnect = false;
+let pendingOptimisticAction: {
+  messageId: string;
+  choices: ReturnType<typeof useAppStore.getState>["choices"];
+  dialog: ReturnType<typeof useAppStore.getState>["dialog"];
+  ending: ReturnType<typeof useAppStore.getState>["ending"];
+  inputEnabled: boolean;
+  inputPlaceholder: string;
+} | null = null;
 
 export type ActionChoice = {
   label: string;
@@ -156,9 +165,57 @@ export function onConnectionRestored(recoveryRequired: boolean) {
   enableInput(inputEnabledBeforeDisconnect);
 }
 
+function onlineActionAllowed(): boolean {
+  if (useAppStore.getState().mode !== "online") return true;
+  if (canCurrentUserAct()) return true;
+  useOnlineStore.setState({ roomError: "还没有轮到你行动" });
+  return false;
+}
+
+function rememberOptimisticAction(messageId: string): void {
+  const state = useAppStore.getState();
+  pendingOptimisticAction = {
+    messageId,
+    choices: [...state.choices],
+    dialog: state.dialog,
+    ending: state.ending,
+    inputEnabled: state.inputEnabled,
+    inputPlaceholder: state.inputPlaceholder,
+  };
+}
+
+/** 服务端已开始处理该操作，后续不能再被无关拒绝事件回滚。 */
+export function acknowledgePendingAction(): void {
+  pendingOptimisticAction = null;
+}
+
+/** 回滚服务端拒绝前的乐观气泡、等待动画和输入状态。 */
+export function rollbackPendingAction(): boolean {
+  const pending = pendingOptimisticAction;
+  if (!pending) return false;
+  pendingOptimisticAction = null;
+  removeLoading();
+  removeRollPending();
+  useMessageStore
+    .getState()
+    .updateMessages((messages) =>
+      messages.filter((message) => message.id !== pending.messageId),
+    );
+  useAppStore.setState({
+    choices: pending.choices,
+    dialog: pending.dialog,
+    ending: pending.ending,
+    inputEnabled: pending.inputEnabled,
+    inputPlaceholder: pending.inputPlaceholder,
+  });
+  return true;
+}
+
 // ---- 发送行动 ----
 export function sendAction(text: string) {
-  addMsg("player", text, true);
+  if (!onlineActionAllowed() || pendingOptimisticAction) return;
+  const messageId = addMsg("player", text, true);
+  rememberOptimisticAction(messageId);
   useAppStore.getState().setChoices([]);
   useAppStore.getState().setEnding(null);
   enableInput(false);
@@ -168,12 +225,22 @@ export function sendAction(text: string) {
 
 // ---- 发送建议检定回复 ----
 export function sendSuggestReply(confirmed: boolean) {
+  if (!onlineActionAllowed() || pendingOptimisticAction) return;
+  const previous = useAppStore.getState();
   useAppStore.getState().setDialog(null);
+  const messageId = confirmed
+    ? addMsg("player", "🎲 确定尝试！", true)
+    : addMsg("player", "↩ 放弃行动。", true);
+  pendingOptimisticAction = {
+    messageId,
+    choices: [...previous.choices],
+    dialog: previous.dialog,
+    ending: previous.ending,
+    inputEnabled: previous.inputEnabled,
+    inputPlaceholder: previous.inputPlaceholder,
+  };
   if (confirmed) {
-    addMsg("player", "🎲 确定尝试！", true);
     showRollPending();
-  } else {
-    addMsg("player", "↩ 放弃行动。", true);
   }
   safeSend(JSON.stringify({ type: "suggest_reply", confirmed }));
 }
@@ -183,9 +250,19 @@ export function sendDecisionReply(
   optionId: string,
   label: string,
 ) {
+  if (!onlineActionAllowed() || pendingOptimisticAction) return;
+  const previous = useAppStore.getState();
   useAppStore.getState().setDialog(null);
   activeDecisionId = null;
-  addMsg("player", label, true);
+  const messageId = addMsg("player", label, true);
+  pendingOptimisticAction = {
+    messageId,
+    choices: [...previous.choices],
+    dialog: previous.dialog,
+    ending: previous.ending,
+    inputEnabled: previous.inputEnabled,
+    inputPlaceholder: previous.inputPlaceholder,
+  };
   if (optionId === "confirm_threat") {
     showGmThinking();
   } else if (!["cancel_violence", "cancel_threat"].includes(optionId)) {

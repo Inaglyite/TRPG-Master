@@ -155,7 +155,7 @@ class RoomAction(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     action_type: Mapped[str] = mapped_column(String(40))
-    status: Mapped[str] = mapped_column(String(20), default="accepted", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -294,6 +294,14 @@ _ENGINES: dict[str, Engine] = {}
 _ENGINE_LOCK = threading.Lock()
 
 
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
 def database_url(runtime_root: Path | None = None) -> str:
     configured = os.environ.get("TRPG_DATABASE_URL", "").strip()
     if configured:
@@ -310,6 +318,16 @@ def get_engine(url: str) -> Engine:
             kwargs: dict[str, Any] = {"pool_pre_ping": True}
             if url.startswith("sqlite:"):
                 kwargs["connect_args"] = {"check_same_thread": False}
+            elif url.startswith("postgresql"):
+                # The small Azure host runs production and staging beside the
+                # database. Bound every process so workers, migrations and
+                # backups retain connection headroom below PostgreSQL's limit.
+                kwargs.update(
+                    pool_size=_bounded_env_int("TRPG_DB_POOL_SIZE", 3, 1, 10),
+                    max_overflow=_bounded_env_int("TRPG_DB_MAX_OVERFLOW", 2, 0, 10),
+                    pool_timeout=_bounded_env_int("TRPG_DB_POOL_TIMEOUT", 10, 1, 60),
+                    pool_recycle=1800,
+                )
             engine = create_engine(url, **kwargs)
             _ENGINES[url] = engine
         return engine

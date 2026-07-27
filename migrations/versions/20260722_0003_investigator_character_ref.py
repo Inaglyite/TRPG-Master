@@ -2,13 +2,13 @@
 
 import sqlalchemy as sa
 from alembic import op
-
-from src.database import JSON_VALUE
+from sqlalchemy.dialects import postgresql
 
 revision = "20260722_0003"
 down_revision = "20260722_0002"
 branch_labels = None
 depends_on = None
+JSON_VALUE = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 def upgrade() -> None:

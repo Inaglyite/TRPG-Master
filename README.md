@@ -20,13 +20,13 @@ Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **�
 - **Modules you can write and share.** Modules are safe, sandboxed `.trpgmod` ZIP packages (JSON + Markdown + assets) with JSON Schema validation, one-click import, side-by-side versions and a v2 format that guarantees the main investigation can never dead-end on a failed roll. A ready-to-copy [template](examples/module-template/manifest.json) is included.
 - **Lorebook-powered context.** Character Card V3 lorebooks retrieve module lore per turn with budgets, groups and cooldowns; tiered information boundaries keep the model from spoiling secrets it shouldn't know yet.
 - **Saves, journals and timeline branches.** Per-world save slots, a persistent turn journal that survives disconnects, and branching timelines: rewind to any decision point and play out a different choice without rerolling the past.
-- **Desktop or self-hosted.** Electron app for Linux/Windows out of the box; for a server deployment you get Argon2id accounts, revocable sessions, per-world permissions, audit events and PostgreSQL persistence.
+- **Desktop or self-hosted.** Electron app for Linux/Windows out of the box; server deployments add shared 2–4 player rooms, Argon2id accounts, revocable sessions, turn ownership, private-event isolation and PostgreSQL persistence.
 
 ## Quick Start
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.12+
 - Node.js 20 LTS or newer
 - An API key for any OpenAI-compatible endpoint (DeepSeek by default)
 - Optional: a Zhipu GLM API key for fast summaries and context compression
@@ -106,6 +106,18 @@ Environment variables take precedence over the file. The full list — model-rol
 
 The launcher activates the venv, installs missing backend dependencies, applies database migrations, and imports legacy save data on first run, then starts the backend and the Electron window. Closing the last window stops the backend automatically.
 
+### Multiplayer
+
+In a browser, open the HTTPS address supplied by the server operator. In Electron, choose **多人游戏**
+(Multiplayer) and enter the bare HTTPS server origin with no path or query string. After logging in, create a
+room or join one with an invitation code. See the Chinese
+[multiplayer user guide](docs/MULTIPLAYER_USER_GUIDE.md) for the complete room, character, turn, save,
+reconnection and ownership-transfer flow.
+
+Ordinary players need an HTTPS endpoint with a publicly trusted certificate. The current Azure acceptance
+environment still uses an IP address and a self-signed certificate; it is not a production player endpoint, and
+users should not bypass certificate warnings.
+
 ### Run in the terminal
 
 ```bash
@@ -141,10 +153,11 @@ The project documentation is written in Chinese:
 - [架构文档](docs/ARCHITECTURE.md) — processes, modules, turn lifecycle, data ownership, extension points
 - [接口文档](docs/API.md) — HTTP routes, WebSocket protocol, event ordering, payload schemas
 - [数据库与账号](docs/DATABASE.md) — migrations, legacy import, PostgreSQL, backup & restore
+- [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md) — browser/Electron login, rooms, turns, saves and reconnection
 - [模组格式](docs/MODULE_FORMAT.md) — the `.trpgmod` v1/v2 package specification for module authors
 - [前端架构](docs/FRONTEND_ARCHITECTURE.md) — React components, Zustand stores, protocol boundaries
 - [回合性能](docs/PERFORMANCE.md) — turn latency design, metrics and benchmarking
-- [开发路线图](docs/ROADMAP.md) — current baseline and the path to multiplayer rooms
+- [开发路线图](docs/ROADMAP.md) — current local/multiplayer baseline and remaining release work
 - [联机实施计划](docs/MULTIPLAYER_PLAN.md) — authoritative server, shared rooms, protocol, phases and acceptance criteria
 - [多人交付约定](docs/MULTIPLAYER_DELIVERY_BRIEF.md) — complete product scope, Electron dual mode, collaboration and definition of done
 - [模组编辑器规划](docs/MODULE_EDITOR_PLAN.md) — internal plan for the module editor (not a user manual)
@@ -196,8 +209,12 @@ Builds `trpg-server.exe` with PyInstaller, then the NSIS installer and portable 
 
 ## Current Limitations
 
-- Single player per world today. Worlds are isolated by `world_id`, but each WebSocket connection still owns a private keeper history; shared GM rooms are the next milestone (see [docs/ROADMAP.md](docs/ROADMAP.md)).
-- Desktop mode ships with auth disabled and must not be exposed to the public internet as-is. Server deployments must set `TRPG_REQUIRE_AUTH=1`, TLS and explicit allowed origins (see [docs/DATABASE.md](docs/DATABASE.md)).
+- Multiplayer now uses one shared `GameEngine` per active room, authoritative turn ownership and
+  member-filtered recovery. The current target is 2–4 players per room and one Uvicorn worker; cross-process
+  room coordination is not implemented.
+- Local desktop mode ships with auth disabled and must not be exposed to the public internet. Server
+  deployments require `TRPG_REQUIRE_AUTH=1`, trusted TLS and explicit allowed origins (see
+  [docs/DATABASE.md](docs/DATABASE.md) and the [multiplayer user guide](docs/MULTIPLAYER_USER_GUIDE.md)).
 
 ## Contributing
 

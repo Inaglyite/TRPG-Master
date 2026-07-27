@@ -57,6 +57,7 @@ jobs:
         run: |
           npm ci
           npm test
+          npm run format:check
           npm run build
           npx playwright install --with-deps chromium
           xvfb-run --auto-servernum npm run test:e2e
@@ -66,7 +67,7 @@ jobs:
           tar -czf /tmp/trpg-master-staging.tar.gz \
             --exclude='**/__pycache__' \
             server.py requirements.txt pyproject.toml alembic.ini \
-            src tools skills mod characters migrations schemas deploy frontend/dist
+            src tools skills mod characters migrations schemas rules deploy frontend/dist
 
       - name: Configure SSH
         env:
@@ -85,5 +86,6 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
         run: |
           scp /tmp/trpg-master-staging.tar.gz "$USER@$HOST:/tmp/trpg-staging-$RELEASE_SHA.tar.gz"
+          scp deploy/install-staging-release.sh "$USER@$HOST:/tmp/trpg-install-staging-$RELEASE_SHA.sh"
           ssh "$USER@$HOST" \
-            "sudo /usr/local/sbin/trpg-install-staging-release '$RELEASE_SHA' '/tmp/trpg-staging-$RELEASE_SHA.tar.gz'"
+            "sudo bash '/tmp/trpg-install-staging-$RELEASE_SHA.sh' '$RELEASE_SHA' '/tmp/trpg-staging-$RELEASE_SHA.tar.gz'; status=\$?; rm -f -- '/tmp/trpg-install-staging-$RELEASE_SHA.sh' '/tmp/trpg-staging-$RELEASE_SHA.tar.gz'; exit \$status"

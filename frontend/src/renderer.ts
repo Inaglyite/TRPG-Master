@@ -42,11 +42,68 @@ export type TurnHistoryItem = {
   turn_id?: string;
   parent_turn_id?: string | null;
   player_input?: string | null;
+  actor?: InvestigatorActor | null;
   narrative?: string;
   narrative_segments?: NarrativeSegment[];
   chat_events?: NarrativeSegment[];
   choices?: Array<{ label: string; isFree: boolean }>;
 };
+
+export type InvestigatorActor = {
+  type?: "investigator";
+  user_id?: string;
+  userId?: string;
+  investigator_id?: string | null;
+  investigatorId?: string | null;
+  name?: string;
+  avatar?: {
+    asset_url?: string;
+    asset_data_uri?: string;
+    alt?: string;
+  };
+};
+
+export function normalizeInvestigatorActor(
+  actor: InvestigatorActor | null | undefined,
+): Speaker | undefined {
+  if (!actor || (actor.type && actor.type !== "investigator")) return undefined;
+  const name = typeof actor.name === "string" ? actor.name.trim() : "";
+  if (!name) return undefined;
+  const userId =
+    typeof actor.user_id === "string"
+      ? actor.user_id
+      : typeof actor.userId === "string"
+        ? actor.userId
+        : undefined;
+  const investigatorId =
+    typeof actor.investigator_id === "string"
+      ? actor.investigator_id
+      : typeof actor.investigatorId === "string"
+        ? actor.investigatorId
+        : undefined;
+  const avatar =
+    actor.avatar && typeof actor.avatar === "object"
+      ? {
+          ...(typeof actor.avatar.asset_url === "string"
+            ? { asset_url: actor.avatar.asset_url }
+            : {}),
+          ...(typeof actor.avatar.asset_data_uri === "string"
+            ? { asset_data_uri: actor.avatar.asset_data_uri }
+            : {}),
+          ...(typeof actor.avatar.alt === "string"
+            ? { alt: actor.avatar.alt }
+            : {}),
+        }
+      : undefined;
+  return {
+    type: "investigator",
+    id: investigatorId || userId,
+    name,
+    ...(userId ? { userId } : {}),
+    ...(investigatorId ? { investigatorId } : {}),
+    ...(avatar && Object.keys(avatar).length ? { avatar } : {}),
+  };
+}
 
 export function branchSourceTurnId(turn: TurnHistoryItem): string {
   return String(turn.parent_turn_id || turn.turn_id || "");
@@ -131,6 +188,55 @@ export function tagPendingPlayerMessage(turnId: string) {
       current === index ? { ...message, turnId } : message,
     );
   });
+}
+
+/**
+ * 将 gm_turn_start 中的权威玩家行动写入聊天。发送者升级本地乐观气泡，
+ * 其他成员追加同一条权威气泡；按 turnId 幂等，避免重放时重复。
+ */
+export function applyAuthoritativePlayerAction(
+  turnId: string,
+  text: string,
+  actor: InvestigatorActor,
+  dedupePending: boolean,
+): boolean {
+  const content = String(text || "").trim();
+  const speaker = normalizeInvestigatorActor(actor);
+  if (!turnId || !content || !speaker) return false;
+  updateMessages((messages) => {
+    let target = lastMessageIndex(
+      messages,
+      (message) =>
+        message.kind === "player" &&
+        message.turnId === turnId &&
+        message.text.trim() === content,
+    );
+    if (target < 0 && dedupePending) {
+      target = lastMessageIndex(
+        messages,
+        (message) => message.kind === "player" && !message.turnId,
+      );
+    }
+    if (target >= 0) {
+      return messages.map((message, index) =>
+        index === target
+          ? { ...message, text: content, turnId, speaker }
+          : message,
+      );
+    }
+    return [
+      ...messages,
+      {
+        id: nextId(),
+        kind: "player",
+        text: content,
+        turnId,
+        speaker,
+      },
+    ];
+  });
+  scrollDown(true);
+  return true;
 }
 
 export function beginNarrativeReplacement(sourceTurnId: string) {
@@ -271,11 +377,13 @@ export function renderTurnHistory(
     const turnId = String(turn.turn_id || "");
     if (!turnId) return;
     if (turn.player_input) {
+      const speaker = normalizeInvestigatorActor(turn.actor);
       messages.push({
         id: nextId(),
         kind: "player",
         text: String(turn.player_input),
         turnId,
+        ...(speaker ? { speaker } : {}),
       });
     }
     if (turn.narrative) {

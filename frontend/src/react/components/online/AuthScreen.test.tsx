@@ -21,6 +21,7 @@ beforeEach(() => {
   useAppStore.setState({ mode: "online" });
   vi.clearAllMocks();
   localStorage.clear();
+  delete window.trpgDesktop;
 });
 
 describe("AuthScreen 会话检查", () => {
@@ -137,5 +138,19 @@ describe("AuthScreen 服务器地址", () => {
     expect(localStorage.getItem("trpg-cloud-origin")).toBe(
       "https://trpg.example.com",
     );
+  });
+
+  it("Electron 云端页隐藏无效的 renderer 内改服务器入口", () => {
+    window.trpgDesktop = {
+      getOnlineOrigin: vi.fn(),
+      selectLocalMode: vi.fn(),
+      selectOnlineMode: vi.fn(),
+      returnToLauncher: vi.fn(),
+    };
+    render(<AuthScreen />);
+    expect(
+      screen.queryByRole("button", { name: "修改" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("http://localhost:8765")).toBeInTheDocument();
   });
 });

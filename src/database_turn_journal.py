@@ -134,7 +134,13 @@ class DatabaseTurnJournal:
                 recovered = record
             return copy.deepcopy(recovered)
 
-    def begin(self, *, kind: str, player_input: str | None) -> str:
+    def begin(
+        self,
+        *,
+        kind: str,
+        player_input: str | None,
+        actor: dict | None = None,
+    ) -> str:
         with session_scope(self.database_url) as session:
             world = session.scalar(select(World).where(World.id == self.world_id).with_for_update())
             if world is None:
@@ -162,6 +168,7 @@ class DatabaseTurnJournal:
                 "created_at": _now(),
                 "owner_token": self.owner_token,
                 "player_input": player_input,
+                "actor": _json_safe(actor) if isinstance(actor, dict) else None,
                 "events": [],
             }
             session.add(
@@ -451,6 +458,7 @@ class DatabaseTurnJournal:
                             "parent_turn_id",
                             "kind",
                             "player_input",
+                            "actor",
                             "narrative",
                             "choices",
                             "narrative_segments",
@@ -604,6 +612,7 @@ class DatabaseTurnJournal:
             "interrupted_at",
             "duration_ms",
             "player_input",
+            "actor",
             "narrative",
             "choices",
             "narrative_segments",

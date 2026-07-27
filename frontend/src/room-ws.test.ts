@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { refreshRoom } from "./online";
-import { updateCharPanel, updateCluePanel } from "./panels";
+import { enterLobby, refreshRoom } from "./online";
+import {
+  clearTransientHandouts,
+  updateCharPanel,
+  updateCluePanel,
+} from "./panels";
 import {
   connectRoom,
   disconnectRoom,
@@ -12,17 +16,22 @@ import {
 } from "./room-ws";
 import { useAppStore } from "./state/app-store";
 import { initialOnlineState, useOnlineStore } from "./state/online-store";
+import { useStartStore } from "./state/start-store";
 import {
   displayWorldHistory,
   handleServerPayload,
+  recoverRejectedRoomAction,
+  resetRoomGameSession,
   setActiveTransport,
 } from "./ws";
 
 vi.mock("./online", () => ({
+  enterLobby: vi.fn(),
   refreshRoom: vi.fn(),
 }));
 
 vi.mock("./panels", () => ({
+  clearTransientHandouts: vi.fn(),
   updateCharPanel: vi.fn(),
   updateCluePanel: vi.fn(),
 }));
@@ -30,6 +39,8 @@ vi.mock("./panels", () => ({
 vi.mock("./ws", () => ({
   displayWorldHistory: vi.fn(),
   handleServerPayload: vi.fn(),
+  recoverRejectedRoomAction: vi.fn(),
+  resetRoomGameSession: vi.fn(),
   setActiveTransport: vi.fn(),
 }));
 
@@ -41,7 +52,7 @@ class FakeWebSocket {
   readyState = 0;
   sent: string[] = [];
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { code: number }) => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;
 
@@ -54,9 +65,9 @@ class FakeWebSocket {
     this.sent.push(data);
   }
 
-  close(): void {
+  close(code = 1000): void {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 
   open(): void {
@@ -81,7 +92,12 @@ beforeEach(() => {
     notesText: "",
     notesRevision: 0,
     notesDirty: false,
+    handouts: [],
+    dialog: null,
+    ending: null,
+    choices: [],
   });
+  useStartStore.setState({ gameStarted: false, gameStarting: false });
   FakeWebSocket.instances = [];
   vi.clearAllMocks();
   vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -126,9 +142,29 @@ describe("connectRoom", () => {
       notesText: "上一位玩家的笔记",
       notesRevision: 9,
       notesDirty: true,
+      handouts: [
+        {
+          id: "secret-handout",
+          file: "secret.png",
+          label: "上一房间秘密",
+          asset_data_uri: "data:image/png;base64,AA==",
+          asset_url: "",
+          entity_type: "clue",
+          entity_id: "secret",
+        },
+      ],
+      dialog: {
+        kind: "decision",
+        id: "old-dialog",
+        options: [],
+      },
+    });
+    useOnlineStore.setState({
+      privateEvents: [{ kind: "clue", clue: { text: "私密事件" } }],
     });
     disconnectRoom();
     expect(setActiveTransport).toHaveBeenLastCalledWith(null);
+    expect(resetRoomGameSession).toHaveBeenCalled();
     expect(useOnlineStore.getState().roomConnection).toBe("idle");
     expect(useAppStore.getState()).toMatchObject({
       character: null,
@@ -136,8 +172,87 @@ describe("connectRoom", () => {
       notesText: "",
       notesRevision: 0,
       notesDirty: false,
+      handouts: [],
+      dialog: null,
+      inputEnabled: false,
     });
+    expect(useOnlineStore.getState().privateEvents).toEqual([]);
+    expect(clearTransientHandouts).toHaveBeenCalled();
     expect(displayWorldHistory).toHaveBeenLastCalledWith([]);
+  });
+});
+
+describe("终止性关闭码", () => {
+  it("4401 进入登录页并停止重连", () => {
+    vi.useFakeTimers();
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+
+    FakeWebSocket.latest().close(4401);
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "anonymous",
+      view: "auth",
+      user: null,
+      sessionExpired: true,
+    });
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("4403 清除房间恢复记录、回大厅并停止重连", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+
+    FakeWebSocket.latest().close(4403);
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      view: "lobby",
+      activeWorldId: null,
+    });
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    await vi.waitFor(() => expect(enterLobby).toHaveBeenCalled());
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("发送队列", () => {
+  it("权威快照前的队列最多保留 64 条", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    for (let index = 0; index < 70; index += 1) {
+      roomSend({ type: "player_notes_update", text: String(index) });
+    }
+    ws.message(
+      JSON.stringify({
+        type: "room_full_state",
+        latest_event_id: 0,
+        status: "waiting",
+        history: [],
+        private_state: null,
+      }),
+    );
+    const queuedFrames = ws.sent.map((frame) => JSON.parse(frame));
+    expect(queuedFrames).toHaveLength(64);
+    expect(queuedFrames[0].text).toBe("6");
+    expect(queuedFrames[63].text).toBe("69");
   });
 });
 
@@ -305,6 +420,7 @@ describe("room_full_state", () => {
     );
     const state = useOnlineStore.getState();
     expect(state.roomStatus).toBe("playing");
+    expect(useStartStore.getState().gameStarted).toBe(true);
     expect(state.ownerUserId).toBe("u1");
     expect(state.currentActorUserId).toBe("u2");
     expect(state.readyUserIds).toEqual(["u1", "u2"]);
@@ -405,6 +521,23 @@ describe("房间控制事件", () => {
     expect(useOnlineStore.getState().currentActorUserId).toBe("u3");
   });
 
+  it("investigator_roster 实时刷新公开调查员状态", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(
+      JSON.stringify({
+        type: "investigator_roster",
+        investigators: [{ id: "inv-1", name: "黄千陆", hp: 8, san: 53 }],
+        active_investigator_id: "inv-1",
+      }),
+    );
+    expect(useOnlineStore.getState()).toMatchObject({
+      roomInvestigators: [{ id: "inv-1", name: "黄千陆", hp: 8, san: 53 }],
+      activeInvestigatorId: "inv-1",
+    });
+  });
+
   it("member_joined 触发成员刷新", async () => {
     connectRoom("world-1");
     const ws = FakeWebSocket.latest();
@@ -475,6 +608,7 @@ describe("房间控制事件", () => {
     expect(useOnlineStore.getState().roomError).toBe(
       "房主需要先移交房主才能退出房间",
     );
+    expect(recoverRejectedRoomAction).toHaveBeenCalledTimes(2);
   });
 
   it("room_error 展示服务端错误", () => {
@@ -483,6 +617,20 @@ describe("房间控制事件", () => {
     ws.open();
     ws.message(JSON.stringify({ type: "room_error", message: "房间已关闭" }));
     expect(useOnlineStore.getState().roomError).toBe("房间已关闭");
+  });
+
+  it("protocol_error 不再被静默丢弃", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(
+      JSON.stringify({
+        type: "protocol_error",
+        code: "invalid_room_ack",
+        message: "确认序号无效",
+      }),
+    );
+    expect(useOnlineStore.getState().roomError).toBe("确认序号无效");
   });
 
   it("room_event_gap 不再发起第二次 room_sync，等待 full_state", async () => {

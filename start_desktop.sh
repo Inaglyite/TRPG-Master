@@ -173,7 +173,7 @@ if ensure_electron_binary; then
     ELECTRON_STARTED_AT=$SECONDS
     (
         cd frontend || exit 1
-        exec env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron --no-sandbox .
+        exec env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron .
     ) &
     ELECTRON_PID=$!
 

@@ -12,6 +12,7 @@ export function GameControls() {
   const ending = useAppStore((state) => state.ending);
   const mode = useAppStore((state) => state.mode);
   const roomStatus = useOnlineStore((state) => state.roomStatus);
+  const roomConnection = useOnlineStore((state) => state.roomConnection);
   const currentActorUserId = useOnlineStore(
     (state) => state.currentActorUserId,
   );
@@ -22,8 +23,14 @@ export function GameControls() {
 
   // 多人进行中：只有当前行动者可以提交；其他人输入与选项均禁用并显示等待。
   const roomPlaying = mode === "online" && roomStatus === "playing";
+  const myRole = members.find((member) => member.user_id === userId)?.role;
   const myTurn =
-    !roomPlaying || (userId != null && currentActorUserId === userId);
+    mode !== "online" ||
+    (roomPlaying &&
+      roomConnection === "connected" &&
+      userId != null &&
+      currentActorUserId === userId &&
+      (myRole === "owner" || myRole === "player"));
   const enabled = appEnabled && myTurn;
   // 结案（settle_case）为房主专属操作；普通成员只看到继续探索。
   // selector 订阅成员变化，房主移交后按钮即时更新。
@@ -78,6 +85,7 @@ export function GameControls() {
             <button
               id="btn-end-continue"
               className="opt-btn free end-continue"
+              disabled={!enabled}
               onClick={() => void sendAction("继续探索")}
             >
               🔄 继续探索

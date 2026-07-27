@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "electron:dev": "env -u ELECTRON_RUN_AS_NODE NODE_ENV=dev VITE_DEV_SERVER_URL=http://127.0.0.1:5173 npx electron .",
     "electron:start": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron .",
-    "dist": "vite build && env -u ELECTRON_RUN_AS_NODE npx electron-builder --linux AppImage --x64",
+    "dist": "node electron/reject-linux-package.cjs",
     "dist:win": "vite build && electron-builder --win nsis portable --x64"
   },
   "devDependencies": {
@@ -42,8 +42,12 @@
       "dist/**/*",
       "electron/main.cjs",
       "electron/preload.cjs",
+      "electron/setup-preload.cjs",
       "electron/cloud-origin.cjs",
-      "electron/ipc-guard.cjs"
+      "electron/cloud-origin-store.cjs",
+      "electron/ipc-guard.cjs",
+      "electron/local-config.cjs",
+      "electron/packaged-backend.cjs"
     ],
     "extraResources": [
       {
@@ -54,10 +58,6 @@
         ]
       }
     ],
-    "linux": {
-      "target": "AppImage",
-      "category": "Game"
-    },
     "win": {
       "target": [
         "nsis",

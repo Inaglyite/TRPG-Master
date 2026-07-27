@@ -18,7 +18,13 @@ function Assert-LastCommand($Label) {
 Write-Host "== TRPG Master Windows package ==" -ForegroundColor Cyan
 Write-Host "Project: $Root"
 
-Require-Command python "Install Python 3.11+ first."
+Require-Command python "Install Python 3.12+ first."
+
+$PythonVersion = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+Assert-LastCommand "Python version check"
+if ([version]$PythonVersion -lt [version]"3.12") {
+  throw "Python 3.12+ is required; found $PythonVersion."
+}
 
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
   if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -28,6 +34,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
   }
 }
 Require-Command npm "Install Node.js LTS first."
+Require-Command git "Install Git and build from a Git checkout so only tracked release assets are packaged."
 
 Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
 python -m pip install --upgrade pip
@@ -49,6 +56,9 @@ Assert-LastCommand "PyInstaller"
 if (-not (Test-Path (Join-Path $BackendOut "trpg-server.exe"))) {
   throw "Backend build failed: trpg-server.exe was not created."
 }
+python (Join-Path $Root "packaging\verify_backend_bundle.py") `
+  $BackendOut --platform windows
+Assert-LastCommand "backend bundle verification"
 
 Write-Host "Building Electron package..." -ForegroundColor Cyan
 Push-Location (Join-Path $Root "frontend")

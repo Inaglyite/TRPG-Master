@@ -277,7 +277,14 @@ def update_member_role(
         if target.role == "owner":
             raise MultiplayerError("owner_role_locked", "请使用房主移交功能", 409)
         if role == "player" and target.role != "player":
-            world = _require_world(session, world_id)
+            world = (
+                session.query(World)
+                .filter_by(id=world_id, status="active")
+                .with_for_update()
+                .one_or_none()
+            )
+            if world is None:
+                raise MultiplayerError("world_not_found", "房间不存在", 404)
             max_players = max(
                 2,
                 min(int((world.metadata_json or {}).get("max_players") or 4), 4),
@@ -350,23 +357,77 @@ def reserve_room_action(
     user_id: str,
     action_type: str,
 ) -> None:
-    """Persist idempotency before an action reaches the shared engine."""
+    """Persist a durable running lease before an action reaches the engine."""
     try:
         with session_scope(db_url) as session:
             _require_member(session, world_id, user_id)
-            session.add(
-                RoomAction(
+            existing = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_id=action_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if existing is not None:
+                if existing.status != "failed":
+                    raise MultiplayerError(
+                        "duplicate_action",
+                        "该行动已经提交",
+                        409,
+                    )
+                existing.submitted_by = user_id
+                existing.action_type = str(action_type or "action")[:40]
+                existing.status = "running"
+            else:
+                session.add(RoomAction(
                     id=new_id("room_action"),
                     world_id=world_id,
                     action_id=action_id,
                     submitted_by=user_id,
                     action_type=str(action_type or "action")[:40],
-                    status="accepted",
-                )
-            )
+                    status="running",
+                ))
             session.flush()
+    except MultiplayerError:
+        raise
     except IntegrityError as exc:
         raise MultiplayerError("duplicate_action", "该行动已经提交", 409) from exc
+
+
+def finish_room_action(
+    db_url: str,
+    world_id: str,
+    action_id: str,
+    status: str,
+) -> None:
+    """Mark the durable action lease after its authoritative terminal event."""
+    if status not in {"completed", "failed", "unknown"}:
+        raise ValueError(f"非法房间行动状态: {status}")
+    with session_scope(db_url) as session:
+        row = (
+            session.query(RoomAction)
+            .filter_by(world_id=world_id, action_id=action_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is not None and row.status in {"accepted", "running"}:
+            row.status = status
+
+
+def recover_room_actions(db_url: str, world_id: str) -> int:
+    """Fail closed when a crash obscures whether an action already committed."""
+    with session_scope(db_url) as session:
+        rows = (
+            session.query(RoomAction)
+            .filter(
+                RoomAction.world_id == world_id,
+                RoomAction.status == "running",
+            )
+            .with_for_update()
+            .all()
+        )
+        for row in rows:
+            row.status = "unknown"
+        return len(rows)
 
 
 def remove_member(db_url: str, world_id: str, target_user_id: str, actor_user_id: str) -> None:

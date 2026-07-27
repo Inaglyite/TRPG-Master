@@ -7,21 +7,33 @@ import {
   logout as apiLogout,
   registerAccount,
 } from "./api/auth";
-import { getRoomInfo, removeMember } from "./api/worlds";
+import {
+  createWorld,
+  getRoomInfo,
+  listWorlds,
+  removeMember,
+} from "./api/worlds";
 import {
   assignActor,
   checkSession,
+  createRoom,
+  enterRoom,
   initOnlineSession,
   leaveRoom,
   login,
   logout,
   register,
+  refreshWorlds,
   resumeLastRoom,
   startGame,
   toggleReady,
 } from "./online";
-import { roomSend } from "./room-ws";
-import { initialOnlineState, useOnlineStore } from "./state/online-store";
+import { disconnectRoom, roomSend } from "./room-ws";
+import {
+  initialOnlineState,
+  resetOnlineState,
+  useOnlineStore,
+} from "./state/online-store";
 
 let triggerUnauthorized: (() => void) | null = null;
 
@@ -64,11 +76,23 @@ vi.mock("./api/worlds", () => ({
 }));
 
 vi.mock("./room-ws", () => ({
+  disconnectRoom: vi.fn(),
   roomSend: vi.fn(),
   newActionId: vi.fn(() => "action-1"),
 }));
 
 const alice = { id: "u1", username: "alice" };
+const bob = { id: "u2", username: "bob" };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 beforeEach(() => {
   useOnlineStore.setState({ ...initialOnlineState });
@@ -155,6 +179,7 @@ describe("logout 与会话过期", () => {
     expect(state.authStatus).toBe("anonymous");
     expect(state.user).toBeNull();
     expect(state.view).toBe("auth");
+    expect(disconnectRoom).toHaveBeenCalled();
   });
 
   it("服务端撤销失败时保留登录态，避免有效 Cookie 静默存活", async () => {
@@ -222,6 +247,130 @@ describe("上次房间恢复", () => {
     expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
     expect(useOnlineStore.getState().view).toBe("lobby");
     expect(useOnlineStore.getState().activeWorldId).toBeNull();
+  });
+});
+
+describe("异步 REST 归属隔离", () => {
+  it("换号后丢弃上一账号迟到的世界列表", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "lobby",
+    });
+    const pending = deferred<Awaited<ReturnType<typeof listWorlds>>>();
+    vi.mocked(listWorlds).mockReturnValue(pending.promise);
+    const oldRefresh = refreshWorlds();
+
+    resetOnlineState();
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: bob,
+      view: "lobby",
+    });
+    pending.resolve([
+      {
+        world_id: "alice-secret-world",
+        module: "mansion_of_madness",
+        role: "owner",
+      },
+    ]);
+    await oldRefresh;
+
+    expect(useOnlineStore.getState().worlds).toEqual([]);
+  });
+
+  it("切到新房间后丢弃旧房间迟到的成员与元数据", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "lobby",
+      privateState: {
+        investigatorId: "old",
+        pc: { name: "旧角色" },
+        clues: {},
+        playerNotes: "旧私密笔记",
+        playerNotesRevision: 1,
+      },
+      privateEvents: [{ kind: "clue", clue: { text: "旧秘密" } }],
+    });
+    const roomA = deferred<Awaited<ReturnType<typeof getRoomInfo>>>();
+    const roomB = deferred<Awaited<ReturnType<typeof getRoomInfo>>>();
+    vi.mocked(getRoomInfo).mockImplementation((worldId) =>
+      worldId === "world-a" ? roomA.promise : roomB.promise,
+    );
+
+    const enteringA = enterRoom("world-a");
+    expect(useOnlineStore.getState().privateState).toBeNull();
+    expect(useOnlineStore.getState().privateEvents).toEqual([]);
+    const enteringB = enterRoom("world-b");
+    roomB.resolve({
+      world_id: "world-b",
+      module: "",
+      metadata: { name: "房间 B" },
+      members: [
+        {
+          user_id: "u2",
+          username: "bob",
+          role: "player",
+          investigator: null,
+        },
+      ],
+    });
+    await enteringB;
+    roomA.resolve({
+      world_id: "world-a",
+      module: "",
+      metadata: { name: "房间 A" },
+      members: [
+        {
+          user_id: "secret-a",
+          username: "secret-a",
+          role: "player",
+          investigator: null,
+        },
+      ],
+    });
+    await enteringA;
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      activeWorldId: "world-b",
+      roomMetadata: { name: "房间 B" },
+      members: [
+        {
+          user_id: "u2",
+          username: "bob",
+        },
+      ],
+    });
+  });
+
+  it("换号后忽略旧账号迟到的创建房间响应", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "lobby",
+    });
+    const pending = deferred<Awaited<ReturnType<typeof createWorld>>>();
+    vi.mocked(createWorld).mockReturnValue(pending.promise);
+    const creating = createRoom("mansion_of_madness", "Alice 私房", 2);
+
+    resetOnlineState();
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: bob,
+      view: "lobby",
+    });
+    pending.resolve({
+      world_id: "alice-created-world",
+      module: "mansion_of_madness",
+    });
+    await creating;
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      user: bob,
+      view: "lobby",
+      activeWorldId: null,
+    });
   });
 });
 

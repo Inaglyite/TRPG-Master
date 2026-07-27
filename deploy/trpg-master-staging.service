@@ -18,6 +18,9 @@ Environment=TRPG_ALLOW_REGISTRATION=1
 Environment=TRPG_SESSION_COOKIE=trpg_staging_session
 Environment=TRPG_WRITE_COMPAT_EXPORTS=0
 Environment=TRPG_MAX_ACTIVE_ROOMS=2
+Environment=TRPG_DB_POOL_SIZE=3
+Environment=TRPG_DB_MAX_OVERFLOW=1
+Environment=TRPG_DB_POOL_TIMEOUT=10
 ExecStartPre=/opt/trpg-master-staging/current/.venv/bin/alembic -c /opt/trpg-master-staging/current/alembic.ini upgrade head
 ExecStart=/opt/trpg-master-staging/current/.venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8766 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure

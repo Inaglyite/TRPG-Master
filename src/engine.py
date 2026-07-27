@@ -40,6 +40,7 @@ from .discovery import (
 from .encounters import SceneEncounterResolution, resolve_scene_encounters
 from .handouts import matching_handouts
 from .history_compactor import HistoryCompactor, build_summary_input, parse_summary_json
+from .investigators import project_active_investigator
 from .logger import error as log_error
 from .logger import game_event as log_game
 from .logger import model_call as log_model_call
@@ -343,6 +344,20 @@ class GameEngine:
         self._summary_token_estimate = 0
         return len(self.messages)
 
+    def restore_latest_committed_history(self) -> int:
+        """Resume model context from the latest atomically committed turn.
+
+        World state and browser-visible history already live in PostgreSQL, but a
+        newly created engine also needs the committed model messages. Restoring
+        only those messages avoids replaying world mutations or an interrupted
+        turn after a process/idle-room restart.
+        """
+        latest_turn_id = self.turn_journal.latest_completed_id()
+        if not latest_turn_id:
+            return 0
+        messages, _snapshot = self.turn_journal.load_artifacts(latest_turn_id)
+        return self.adopt_message_history(messages)
+
     @property
     def active_turn_id(self) -> str | None:
         return getattr(self, "_active_turn_id", None)
@@ -352,6 +367,7 @@ class GameEngine:
         *,
         kind: str,
         player_input: str | None,
+        actor: dict | None = None,
     ) -> str:
         active_turn_id = getattr(self, "_active_turn_id", None)
         if active_turn_id is not None:
@@ -362,6 +378,7 @@ class GameEngine:
         turn_id = self.turn_journal.begin(
             kind=kind,
             player_input=player_input,
+            actor=actor,
         )
         self._active_turn_id = turn_id
         self._turn_diagnostics = []
@@ -480,6 +497,11 @@ class GameEngine:
         else:
             world_state = self.context.world_store.load()
             expected_world_revision = None
+        # Multiplayer tools still mutate the active legacy ``pc`` projection.
+        # Fold it into the roster before the one transaction writes WorldState,
+        # Turn, Snapshot and auto-save, so a crash after commit cannot expose an
+        # older investigator copy during recovery.
+        project_active_investigator(world_state)
         with self.performance_span("journal_commit"):
             record = journal.complete(
             turn_id,
@@ -809,7 +831,14 @@ class GameEngine:
         self._preconfirmed_escalation = None
         return len(messages) - 1
 
-    def settle_case(self, ending_type: str, title: str, summary: str) -> dict:
+    def settle_case(
+        self,
+        ending_type: str,
+        title: str,
+        summary: str,
+        *,
+        persist_profile: bool = True,
+    ) -> dict:
         """将已确认结局写入长期角色履历。"""
         result: dict = {"ok": False, "error": "案件结算未执行"}
 
@@ -822,6 +851,7 @@ class GameEngine:
                 summary=summary,
                 module_name=self.context.module_name,
                 context=self.context,
+                persist_profile=persist_profile,
             )
 
         try:
@@ -2005,6 +2035,12 @@ class GameEngine:
                 continue
             for clue in clues:
                 if not isinstance(clue, dict):
+                    continue
+                # Private discoveries are recovered through the requesting
+                # investigator's personalized room state.  Broadcasting their
+                # handout here would turn a private clue into a public room
+                # event after save_load/reconnect.
+                if clue.get("visibility") == "private":
                     continue
                 asset = clue.get("asset") or {}
                 asset_id = asset.get("id")

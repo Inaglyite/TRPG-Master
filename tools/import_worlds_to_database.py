@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,10 +28,8 @@ from src.database import (  # noqa: E402
     initialize_database,
     new_id,
     session_scope,
-    utcnow,
 )
 from src.player_notes import PLAYER_NOTES_SCHEMA_VERSION  # noqa: E402
-from src.turn_journal import TurnJournal  # noqa: E402
 from src.world_migrations import migrate_world_state  # noqa: E402
 
 
@@ -40,25 +40,153 @@ def read_object(path: Path) -> dict:
     return data
 
 
-def import_world(world_dir: Path, db_url: str, owner: User | None, *, replace: bool) -> dict:
+def _record_time(record: dict, key: str, fallback_path: Path) -> datetime:
+    """Preserve the requested legacy timestamp without conflating lifecycle fields."""
+    value = record.get(key)
+    if value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(fallback_path.stat().st_mtime, UTC)
+
+
+def _legacy_artifacts(world_dir: Path, world_id: str, module_name: str):
+    """Read and validate every source artifact before opening a transaction."""
+    saves = []
+    for slot_dir in sorted((world_dir / "saves").glob("slot_*")):
+        messages_path = slot_dir / "messages.json"
+        snapshot_path = slot_dir / "snapshot.json"
+        try:
+            messages = json.loads(messages_path.read_text(encoding="utf-8"))
+            snapshot = read_object(snapshot_path)
+            meta = read_object(slot_dir / "meta.json") if (slot_dir / "meta.json").is_file() else {}
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"存档 {slot_dir.name} 无法导入: {exc}") from exc
+        if not isinstance(messages, list):
+            raise ValueError(f"存档 {slot_dir.name} 的 messages.json 根节点不是 array")
+        saves.append((slot_dir.name, messages, snapshot, meta))
+
+    turns = []
+    turns_root = world_dir / "turns"
+    turn_dirs = (
+        sorted(path for path in turns_root.iterdir() if path.is_dir())
+        if turns_root.is_dir()
+        else []
+    )
+    for turn_dir in turn_dirs:
+        record_path = turn_dir / "record.json"
+        if not record_path.is_file():
+            raise ValueError(f"回合目录 {turn_dir.name} 缺少 record.json")
+        try:
+            record = read_object(record_path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"回合 {turn_dir.name} 的 record.json 损坏: {exc}") from exc
+        turn_id = str(record.get("turn_id") or "")
+        if turn_id != turn_dir.name:
+            raise ValueError(
+                f"回合目录 {turn_dir.name} 与 record.turn_id={turn_id!r} 不一致"
+            )
+        if record.get("status") != "completed":
+            continue
+        try:
+            messages = json.loads(
+                (turn_dir / "messages.json").read_text(encoding="utf-8")
+            )
+            snapshot = read_object(turn_dir / "snapshot.json")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"回合 {turn_id} 的提交产物损坏: {exc}") from exc
+        if not isinstance(messages, list):
+            raise ValueError(f"回合 {turn_id} 的 messages.json 根节点不是 array")
+        if not isinstance(record.get("events", []), list):
+            raise ValueError(f"回合 {turn_id} 的 events 不是 array")
+        turns.append(
+            (
+                turn_id,
+                record,
+                messages,
+                snapshot,
+                _record_time(record, "created_at", record_path),
+                _record_time(record, "completed_at", record_path),
+            )
+        )
+    turns.sort(key=lambda item: item[5])
+    return saves, turns
+
+
+def prepare_world(world_dir: Path) -> dict:
+    """Strictly validate a world and every importable artifact before any write."""
     metadata = read_object(world_dir / "world.json")
     state, _ = migrate_world_state(read_object(world_dir / "world_state.json"))
     world_id = world_dir.name
     module_name = str(metadata.get("module_name") or "")
     if not module_name:
         raise ValueError("缺少 module_name")
+    source_saves, source_turns = _legacy_artifacts(world_dir, world_id, module_name)
+    note = (
+        read_object(world_dir / "player_notes.json")
+        if (world_dir / "player_notes.json").is_file()
+        else None
+    )
+    return {
+        "metadata": metadata,
+        "state": state,
+        "world_id": world_id,
+        "module_name": module_name,
+        "saves": source_saves,
+        "turns": source_turns,
+        "note": note,
+    }
+
+
+def _delete_orphan_snapshot(session, snapshot_id: str | None) -> None:
+    if not snapshot_id:
+        return
+    session.flush()
+    if session.query(SaveSlot.id).filter_by(snapshot_id=snapshot_id).first():
+        return
+    if session.query(Turn.pk).filter_by(snapshot_id=snapshot_id).first():
+        return
+    snapshot = session.get(Snapshot, snapshot_id)
+    if snapshot is not None:
+        session.delete(snapshot)
+
+
+def import_world(
+    world_dir: Path,
+    db_url: str,
+    owner: User | None,
+    *,
+    replace: bool,
+    prepared: dict | None = None,
+) -> dict:
+    source = prepared or prepare_world(world_dir)
+    metadata = source["metadata"]
+    state = source["state"]
+    world_id = source["world_id"]
+    module_name = source["module_name"]
+    source_saves = source["saves"]
+    source_turns = source["turns"]
+    note = source["note"]
+
+    imported_saves = 0
+    imported_turns = 0
+    changed = False
     with session_scope(db_url) as session:
         world = session.get(World, world_id)
-        if world and not replace:
-            return {"world_id": world_id, "status": "skipped"}
+        existed = world is not None
         if world is None:
             world = World(id=world_id, module_name=module_name)
             session.add(world)
-        world.module_name = module_name
-        world.module_id = str(metadata.get("module_id") or "")
-        world.module_version = str(metadata.get("module_version") or "")
-        world.metadata_json = metadata
-        world.created_by = owner.id if owner else None
+            changed = True
+        if not existed or replace:
+            world.module_name = module_name
+            world.module_id = str(metadata.get("module_id") or "")
+            world.module_version = str(metadata.get("module_version") or "")
+            world.metadata_json = metadata
+            world.created_by = owner.id if owner else None
+            changed = True
         row = session.get(WorldState, world_id)
         if row is None:
             row = WorldState(
@@ -68,43 +196,53 @@ def import_world(world_dir: Path, db_url: str, owner: User | None, *, replace: b
                 state=state,
             )
             session.add(row)
-        else:
+            changed = True
+        elif replace:
             row.schema_version = state["schema_version"]
             row.revision = state["revision"]
             row.state = state
-        if (
-            owner
-            and not session.query(WorldMember)
-            .filter_by(world_id=world_id, user_id=owner.id)
-            .first()
-        ):
-            session.add(
-                WorldMember(id=new_id("member"), world_id=world_id, user_id=owner.id, role="owner")
+            changed = True
+        if owner:
+            owner_members = (
+                session.query(WorldMember)
+                .filter_by(world_id=world_id, role="owner")
+                .all()
             )
-
-    saves = 0
-    for slot_dir in sorted((world_dir / "saves").glob("slot_*")):
-        try:
-            messages = json.loads((slot_dir / "messages.json").read_text(encoding="utf-8"))
-            snapshot = read_object(slot_dir / "snapshot.json")
-            meta = read_object(slot_dir / "meta.json") if (slot_dir / "meta.json").is_file() else {}
-        except (OSError, json.JSONDecodeError, ValueError):
-            continue
-        with session_scope(db_url) as session:
-            row = (
-                session.query(SaveSlot)
-                .filter_by(world_id=world_id, slot_key=slot_dir.name)
+            if len(owner_members) > 1:
+                raise ValueError(f"世界 {world_id} 已存在多个房主，拒绝继续导入")
+            if owner_members and owner_members[0].user_id != owner.id:
+                raise ValueError(
+                    f"世界 {world_id} 已属于其他房主；--owner 不会隐式转移所有权"
+                )
+            target_member = (
+                session.query(WorldMember)
+                .filter_by(world_id=world_id, user_id=owner.id)
                 .one_or_none()
             )
-            if row is None:
-                row = SaveSlot(
-                    id=new_id("save"),
-                    world_id=world_id,
-                    slot_key=slot_dir.name,
-                    kind="auto" if slot_dir.name == "slot_000" else "manual",
-                    snapshot_id="pending",
+            if target_member is None:
+                session.add(
+                    WorldMember(
+                        id=new_id("member"),
+                        world_id=world_id,
+                        user_id=owner.id,
+                        role="owner",
+                    )
                 )
-                session.add(row)
+                changed = True
+            elif target_member.role != "owner":
+                target_member.role = "owner"
+                changed = True
+            world.created_by = owner.id
+
+        for slot_key, messages, snapshot, meta in source_saves:
+            save_row = (
+                session.query(SaveSlot)
+                .filter_by(world_id=world_id, slot_key=slot_key)
+                .one_or_none()
+            )
+            if save_row is not None and not replace:
+                continue
+            previous_snapshot_id = save_row.snapshot_id if save_row is not None else None
             snapshot_row = Snapshot(
                 id=new_id("snapshot"),
                 world_id=world_id,
@@ -113,22 +251,41 @@ def import_world(world_dir: Path, db_url: str, owner: User | None, *, replace: b
                 state=snapshot,
             )
             session.add(snapshot_row)
-            row.messages = messages
-            row.snapshot_id = snapshot_row.id
-            row.metadata_json = meta
-            row.label = str(meta.get("label") or "")
-            row.world_revision = int(snapshot.get("revision", 0))
-        saves += 1
+            session.flush()
+            if save_row is None:
+                save_row = SaveSlot(
+                    id=new_id("save"),
+                    world_id=world_id,
+                    slot_key=slot_key,
+                    kind="auto" if slot_key == "slot_000" else "manual",
+                    snapshot_id=snapshot_row.id,
+                )
+                session.add(save_row)
+            save_row.messages = messages
+            save_row.snapshot_id = snapshot_row.id
+            save_row.metadata_json = meta
+            save_row.label = str(meta.get("label") or "")
+            save_row.world_revision = int(snapshot.get("revision", 0))
+            _delete_orphan_snapshot(session, previous_snapshot_id)
+            imported_saves += 1
+            changed = True
 
-    turns = 0
-    legacy = TurnJournal(world_dir, world_id=world_id, module_name=module_name)
-    for public in legacy.list_completed(limit=1_000_000):
-        turn_id = str(public["turn_id"])
-        record = legacy.read(turn_id)
-        messages, snapshot = legacy.load_artifacts(turn_id)
-        with session_scope(db_url) as session:
-            if session.query(Turn).filter_by(world_id=world_id, id=turn_id).first():
+        for (
+            turn_id,
+            record,
+            messages,
+            snapshot,
+            created_at,
+            completed_at,
+        ) in source_turns:
+            turn_row = (
+                session.query(Turn)
+                .filter_by(world_id=world_id, id=turn_id)
+                .one_or_none()
+            )
+            if turn_row is not None and not replace:
                 continue
+            previous_snapshot_id = turn_row.snapshot_id if turn_row is not None else None
             snapshot_row = Snapshot(
                 id=new_id("snapshot"),
                 world_id=world_id,
@@ -138,63 +295,87 @@ def import_world(world_dir: Path, db_url: str, owner: User | None, *, replace: b
                 state=snapshot,
             )
             session.add(snapshot_row)
-            row = Turn(
-                pk=new_id("turnrow"),
-                id=turn_id,
-                world_id=world_id,
-                parent_turn_id=record.get("parent_turn_id"),
-                origin_world_id=record.get("origin_world_id"),
-                kind=record.get("kind", "action"),
-                status="completed",
-                owner_token=record.get("owner_token", ""),
-                player_input=record.get("player_input"),
-                record=record,
-                messages=messages,
-                snapshot_id=snapshot_row.id,
-                completed_at=utcnow(),
-            )
-            session.add(row)
+            session.flush()
+            if turn_row is None:
+                turn_row = Turn(
+                    pk=new_id("turnrow"),
+                    id=turn_id,
+                    world_id=world_id,
+                    status="completed",
+                    snapshot_id=snapshot_row.id,
+                )
+                session.add(turn_row)
+            else:
+                session.query(TurnEvent).filter_by(turn_pk=turn_row.pk).delete(
+                    synchronize_session=False
+                )
+            turn_row.parent_turn_id = record.get("parent_turn_id")
+            turn_row.origin_world_id = record.get("origin_world_id")
+            turn_row.kind = record.get("kind", "action")
+            turn_row.status = "completed"
+            turn_row.owner_token = record.get("owner_token", "")
+            turn_row.player_input = record.get("player_input")
+            turn_row.record = record
+            turn_row.messages = messages
+            turn_row.snapshot_id = snapshot_row.id
+            turn_row.created_at = created_at
+            turn_row.completed_at = completed_at
             session.flush()
             for sequence, event in enumerate(record.get("events", [])):
                 if isinstance(event, dict):
                     session.add(
                         TurnEvent(
                             id=new_id("event"),
-                            turn_pk=row.pk,
-                            turn_id=row.id,
+                            turn_pk=turn_row.pk,
+                            turn_id=turn_row.id,
                             sequence=sequence,
                             event_type=str(event.get("type") or "unknown"),
                             payload=event,
                         )
                     )
-        turns += 1
+            _delete_orphan_snapshot(session, previous_snapshot_id)
+            imported_turns += 1
+            changed = True
 
-    note_path = world_dir / "player_notes.json"
-    if note_path.is_file():
-        note = read_object(note_path)
-        with session_scope(db_url) as session:
-            row = (
+        if note is not None:
+            note_row = (
                 session.query(PlayerNote)
                 .filter_by(world_id=world_id, owner_key="__local__")
                 .one_or_none()
             )
-            if row is None:
-                row = PlayerNote(
+            if note_row is None:
+                note_row = PlayerNote(
                     id=new_id("note"),
                     world_id=world_id,
                     user_id=None,
                     owner_key="__local__",
                 )
-                session.add(row)
-            row.revision = int(note.get("revision", 0))
-            row.text = str(note.get("text") or "")
+                session.add(note_row)
+                changed = True
+            if replace or note_row.revision == 0 and not note_row.text:
+                note_row.revision = int(note.get("revision", 0))
+                note_row.text = str(note.get("text") or "")
+                changed = True
     return {
         "world_id": world_id,
-        "status": "imported",
-        "saves": saves,
-        "turns": turns,
+        "status": "imported" if changed else "skipped",
+        "saves": imported_saves,
+        "turns": imported_turns,
         "notes_schema": PLAYER_NOTES_SCHEMA_VERSION,
     }
+
+
+def source_fingerprint(world_dirs: list[Path]) -> str:
+    """Fingerprint all legacy source files so --once cannot hide new data."""
+    digest = hashlib.sha256()
+    for world_dir in world_dirs:
+        digest.update(world_dir.name.encode("utf-8"))
+        for path in sorted(item for item in world_dir.rglob("*") if item.is_file()):
+            digest.update(path.relative_to(world_dir).as_posix().encode("utf-8"))
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    return digest.hexdigest()
 
 
 def main() -> int:
@@ -219,32 +400,62 @@ def main() -> int:
                 .first()
             )
             if completed is not None:
+                # Compatibility exports continue changing after the database
+                # becomes authoritative. --once is therefore a true one-shot
+                # guard: re-importing with --replace could overwrite newer
+                # database state with a stale world_state.json.
                 print(json.dumps({"status": "already_imported"}, ensure_ascii=False))
                 return 0
+    world_dirs = [
+        world_dir
+        for world_dir in sorted(
+            (args.runtime_root / "worlds").iterdir()
+            if (args.runtime_root / "worlds").is_dir()
+            else []
+        )
+        if (
+            world_dir.is_dir()
+            and (world_dir / "world.json").is_file()
+            and (world_dir / "world_state.json").is_file()
+        )
+    ]
+    fingerprint = source_fingerprint(world_dirs)
     owner = None
     if args.owner:
         with session_scope(db_url) as session:
             owner = session.query(User).filter_by(username=args.owner.lower()).one_or_none()
             if owner is None:
                 raise SystemExit(f"owner 不存在: {args.owner}")
+    # Validate every source first. A broken later world must not leave earlier
+    # worlds partially imported while still failing to write the completion marker.
+    prepared_worlds = [(world_dir, prepare_world(world_dir)) for world_dir in world_dirs]
     results = []
-    for world_dir in sorted(
-        (args.runtime_root / "worlds").iterdir() if (args.runtime_root / "worlds").is_dir() else []
-    ):
-        if (
-            world_dir.is_dir()
-            and (world_dir / "world.json").is_file()
-            and (world_dir / "world_state.json").is_file()
-        ):
-            results.append(import_world(world_dir, db_url, owner, replace=args.replace))
+    for world_dir, prepared in prepared_worlds:
+        results.append(
+            import_world(
+                world_dir,
+                db_url,
+                owner,
+                replace=args.replace,
+                prepared=prepared,
+            )
+        )
     if args.once:
         with session_scope(db_url) as session:
+            session.query(AuditEvent).filter_by(
+                event_type="legacy_import_completed",
+                success=True,
+            ).delete(synchronize_session=False)
             session.add(
                 AuditEvent(
                     id=new_id("audit"),
                     event_type="legacy_import_completed",
                     success=True,
-                    details={"world_count": len(results)},
+                    details={
+                        "world_count": len(results),
+                        "world_ids": [path.name for path in world_dirs],
+                        "source_fingerprint": fingerprint,
+                    },
                 )
             )
     print(json.dumps(results, ensure_ascii=False, indent=2))

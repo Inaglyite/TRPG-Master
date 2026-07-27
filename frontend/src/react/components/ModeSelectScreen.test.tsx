@@ -10,6 +10,7 @@ vi.mock("../../desktop", () => ({
 }));
 
 const bridge = {
+  getOnlineOrigin: vi.fn(),
   selectLocalMode: vi.fn(),
   selectOnlineMode: vi.fn(),
   returnToLauncher: vi.fn(),
@@ -19,6 +20,7 @@ beforeEach(() => {
   useAppStore.setState({ mode: "select" });
   vi.clearAllMocks();
   vi.mocked(desktopBridge).mockReturnValue(null);
+  bridge.getOnlineOrigin.mockResolvedValue({ ok: true, origin: null });
   localStorage.clear();
   window.history.replaceState({}, "", "/");
 });
@@ -94,7 +96,20 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     expect(bridge.selectOnlineMode).not.toHaveBeenCalled();
   });
 
-  it("校验通过后交由主进程同源加载并保存地址", async () => {
+  it("从主进程读取上次保存的地址", async () => {
+    bridge.getOnlineOrigin.mockResolvedValue({
+      ok: true,
+      origin: "https://saved.example",
+    });
+    render(<ModeSelectScreen />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("云端服务器地址")).toHaveValue(
+        "https://saved.example",
+      ),
+    );
+  });
+
+  it("校验通过后交由主进程持久化并同源加载", async () => {
     bridge.selectOnlineMode.mockResolvedValue({ ok: true });
     render(<ModeSelectScreen />);
     fireEvent.change(screen.getByLabelText("云端服务器地址"), {
@@ -106,11 +121,7 @@ describe("ModeSelectScreen（Electron 联机）", () => {
         "https://trpg.example.com",
       ),
     );
-    await waitFor(() =>
-      expect(localStorage.getItem("trpg-cloud-origin")).toBe(
-        "https://trpg.example.com",
-      ),
-    );
+    expect(localStorage.getItem("trpg-cloud-origin")).toBeNull();
   });
 
   it("主进程拒绝时展示错误", async () => {

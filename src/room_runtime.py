@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import os
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -21,6 +23,11 @@ class RoomConnection:
     role: str
     socket: JsonConnection
     last_ack: int = 0
+    send_tail: asyncio.Task[bool] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -33,16 +40,51 @@ class BufferedRoomEvent:
 class RoomEventHub:
     """One ordered public/private event boundary shared by all room clients."""
 
-    def __init__(self, world_id: str, *, replay_limit: int = 1024):
+    def __init__(self, world_id: str, *, replay_limit: int = 256):
         self.world_id = world_id
         self._connections: dict[str, RoomConnection] = {}
         self._events: deque[BufferedRoomEvent] = deque(maxlen=max(16, replay_limit))
         self._event_id = 0
         self._lock = asyncio.Lock()
+        try:
+            configured_timeout = float(os.environ.get("TRPG_ROOM_SEND_TIMEOUT", "5"))
+        except ValueError:
+            configured_timeout = 5.0
+        self._send_timeout = max(0.05, min(30.0, configured_timeout))
 
     async def attach(self, connection: RoomConnection) -> None:
         async with self._lock:
             self._connections[connection.connection_id] = connection
+
+    async def attach_with_replay(
+        self,
+        connection: RoomConnection,
+        after_event_id: int,
+    ) -> dict:
+        """Atomically enqueue missed events before activating future broadcasts."""
+        async with self._lock:
+            oldest = self._events[0].event_id if self._events else self._event_id + 1
+            gap = after_event_id < oldest - 1 or after_event_id > self._event_id
+            if gap:
+                return {
+                    "gap": True,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
+            self._connections[connection.connection_id] = connection
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(event.payload))
+                for event in self._events
+                if event.event_id > after_event_id
+                and self._can_receive(connection, event.visibility)
+            ]
+            latest_event_id = self._event_id
+        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        return {
+            "gap": False,
+            "latest_event_id": latest_event_id,
+            "delivered": delivered,
+        }
 
     async def detach(self, connection_id: str) -> RoomConnection | None:
         async with self._lock:
@@ -79,10 +121,26 @@ class RoomEventHub:
     async def send_direct(self, connection_id: str, payload: dict[str, Any]) -> bool:
         async with self._lock:
             connection = self._connections.get(connection_id)
-        if connection is None:
-            return False
-        await connection.socket.send_json(dict(payload))
-        return True
+            if connection is None:
+                return False
+            delivery = self._queue_send_unlocked(connection, dict(payload))
+        return await delivery
+
+    async def send_batch(
+        self,
+        connection_id: str,
+        payload_factory: Callable[[], list[dict[str, Any]]],
+    ) -> bool:
+        """Build and enqueue a snapshot batch at one room-event boundary."""
+        async with self._lock:
+            connection = self._connections.get(connection_id)
+            if connection is None:
+                return False
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(payload))
+                for payload in payload_factory()
+            ]
+        return all(await asyncio.gather(*deliveries)) if deliveries else True
 
     async def broadcast(self, payload: dict[str, Any], *, visibility: str = "public") -> int:
         if visibility == "server_only":
@@ -93,24 +151,93 @@ class RoomEventHub:
             wire = dict(payload)
             wire.setdefault("room_event_id", event_id)
             wire.setdefault("world_id", self.world_id)
-            event = BufferedRoomEvent(event_id, wire, visibility)
+            # Live recipients get the complete event. Replay storage drops
+            # embedded base64 blobs, which otherwise multiply a single image
+            # across hundreds of events and exhaust a small server's memory.
+            buffered = self._without_embedded_assets(wire)
+            event = BufferedRoomEvent(event_id, buffered, visibility)
             self._events.append(event)
             recipients = [
                 connection
                 for connection in self._connections.values()
                 if self._can_receive(connection, visibility)
             ]
-        failed: list[str] = []
-        for connection in recipients:
-            try:
-                await connection.socket.send_json(dict(wire))
-            except Exception:
-                failed.append(connection.connection_id)
-        if failed:
-            async with self._lock:
-                for connection_id in failed:
-                    self._connections.pop(connection_id, None)
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(wire))
+                for connection in recipients
+            ]
+        if deliveries:
+            await asyncio.gather(*deliveries)
         return event_id
+
+    def _queue_send_unlocked(
+        self,
+        connection: RoomConnection,
+        payload: dict[str, Any],
+    ) -> asyncio.Task[bool]:
+        previous = connection.send_tail
+        delivery = asyncio.create_task(
+            self._deliver_after(connection, previous, payload)
+        )
+        connection.send_tail = delivery
+        return delivery
+
+    async def _deliver_after(
+        self,
+        connection: RoomConnection,
+        previous: asyncio.Task[bool] | None,
+        payload: dict[str, Any],
+    ) -> bool:
+        if previous is not None:
+            try:
+                await previous
+            except asyncio.CancelledError:
+                return False
+        async with self._lock:
+            if self._connections.get(connection.connection_id) is not connection:
+                return False
+        try:
+            await asyncio.wait_for(
+                connection.socket.send_json(payload),
+                timeout=self._send_timeout,
+            )
+            return True
+        except Exception:
+            await self._drop_failed_connection(connection)
+            return False
+
+    async def _drop_failed_connection(self, connection: RoomConnection) -> None:
+        removed = False
+        async with self._lock:
+            if self._connections.get(connection.connection_id) is connection:
+                self._connections.pop(connection.connection_id, None)
+                removed = True
+        if removed:
+            await self._close_failed_connection(connection)
+
+    async def _close_failed_connection(self, connection: RoomConnection) -> None:
+        close = getattr(connection.socket, "close", None)
+        if close is None:
+            return
+        try:
+            await asyncio.wait_for(
+                close(code=1011, reason="客户端接收超时，请重新连接"),
+                timeout=min(1.0, self._send_timeout),
+            )
+        except Exception:
+            pass
+
+    @classmethod
+    def _without_embedded_assets(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: cls._without_embedded_assets(item)
+                for key, item in value.items()
+                if key != "asset_data_uri"
+            }
+        if isinstance(value, list):
+            return [cls._without_embedded_assets(item) for item in value]
+        return copy.deepcopy(value)
 
     async def acknowledge(self, connection_id: str, event_id: int) -> bool:
         async with self._lock:
@@ -219,22 +346,39 @@ class RoomDriverTransport:
                 )
             elif wire.get("type") == "decision_resolved":
                 room.clear_pending_reply()
-        await room.hub.broadcast(wire, visibility=visibility)
-        if room.control_action_active and payload.get("type") in {
+        terminal_error = (
+            payload.get("type") == "error"
+            and payload.get("terminal") is True
+        )
+        if terminal_error:
+            room.mark_action_failed()
+        control_terminal = room.control_action_active and payload.get("type") in {
             "saved",
             "save_deleted",
             "save_renamed",
             "case_settled",
-            "error",
-        }:
-            room.release_action()
-        if payload.get("type") in {
+        }
+        control_terminal = control_terminal or (
+            room.control_action_active and terminal_error
+        )
+        turn_terminal = payload.get("type") in {
             "done",
             "turn_rejected",
+            "turn_rewritten",
             "turn_rewrite_failed",
-        }:
+        } or terminal_error
+        # Release the authoritative lease before publishing the terminal frame.
+        # A fast client is then free to retry as soon as it observes that frame.
+        if control_terminal or turn_terminal:
             room.clear_pending_reply()
-            room.release_action()
+            failed_terminal = payload.get("type") in {
+                "turn_rejected",
+                "turn_rewrite_failed",
+            } or terminal_error
+            room.release_action(
+                terminal_status="failed" if failed_terminal else "completed"
+            )
+        await room.hub.broadcast(wire, visibility=visibility)
 
     async def close_input(self) -> None:
         if self._closed:
@@ -273,6 +417,12 @@ class GameRoom:
     pending_reply_user_id: str | None = None
     pending_reply_request_id: str | None = None
     control_action_active: bool = False
+    active_action_id: str | None = None
+    active_action_failed: bool = False
+    action_status_callback: Callable[[str, str, str], None] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def member_connected(self, user_id: str) -> bool:
         first_connection = user_id not in self.connected_users
@@ -346,6 +496,8 @@ class GameRoom:
         if self._action_lock.locked():
             raise ActionReservationError("room_turn_in_progress", "房间正在处理上一项行动")
         await self._action_lock.acquire()
+        self.active_action_id = action_id
+        self.active_action_failed = False
         if len(self._action_ids) == self._action_ids.maxlen:
             expired = self._action_ids.popleft()
             self._action_id_set.discard(expired)
@@ -360,8 +512,41 @@ class GameRoom:
         )
         self.control_action_active = True
 
-    def release_action(self) -> None:
+    def mark_action_failed(self) -> None:
+        if self.active_action_id is not None:
+            self.active_action_failed = True
+
+    def release_action(self, *, terminal_status: str | None = None) -> None:
+        action_id = self.active_action_id
+        status_persisted = True
+        if terminal_status and action_id and self.action_status_callback is not None:
+            status = (
+                "unknown"
+                if terminal_status == "unknown"
+                else (
+                    "failed"
+                    if terminal_status == "failed" or self.active_action_failed
+                    else "completed"
+                )
+            )
+            try:
+                self.action_status_callback(self.world_id, action_id, status)
+            except Exception:
+                # A status/audit write must never leave the in-memory room
+                # permanently locked. A running DB row is recovered on reload.
+                status_persisted = False
+        if terminal_status == "failed" and action_id and status_persisted:
+            # Failed actions are explicitly retryable with the same stable ID.
+            # Remove the deque entry too, otherwise a later expiry of an older
+            # duplicate would incorrectly evict the retried active ID.
+            self._action_id_set.discard(action_id)
+            try:
+                self._action_ids.remove(action_id)
+            except ValueError:
+                pass
         self.control_action_active = False
+        self.active_action_id = None
+        self.active_action_failed = False
         if self._action_lock.locked():
             self._action_lock.release()
 

@@ -1,14 +1,34 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  dialog,
+  ipcMain,
+  session,
+} = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const { validateCloudOrigin } = require("./cloud-origin.cjs");
 const {
+  readStoredCloudOrigin,
+  writeStoredCloudOrigin,
+} = require("./cloud-origin-store.cjs");
+const {
   isTrustedSenderUrl,
   isNavigationAllowed,
   isApprovedCloudSenderUrl,
 } = require("./ipc-guard.cjs");
+const {
+  localConfigPath,
+  migrateLegacyLocalConfig,
+  writeLocalConfig,
+} = require("./local-config.cjs");
+const {
+  isTrpgHealthResponse,
+  packagedBackendExecutable,
+} = require("./packaged-backend.cjs");
 const { pathToFileURL } = require("node:url");
 
 const isDev = process.env.NODE_ENV === "dev";
@@ -20,10 +40,14 @@ let localBackendReady = false;
 // 联机模式经主进程校验并 loadURL 的云端 origin；导航守卫只放行它。
 let approvedCloudOrigin = null;
 let mainWindow = null;
+let setupWindow = null;
+let setupPromise = null;
+let pendingSetupConfigPath = null;
 // 打包模式下 IPC/导航唯一可信的内置页面 URL（确切的 dist/index.html）。
 const trustedFileUrl = pathToFileURL(
   path.join(__dirname, "..", "dist", "index.html"),
 ).href;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 function log(...args) {
   // electron 主进程日志，启动脚本或终端可见
@@ -31,13 +55,16 @@ function log(...args) {
 }
 
 // ---- 首次运行：API Key 配置 ----
-function ensureEnvJson(backendRoot) {
-  const envPath = path.join(backendRoot, ".env.json");
+function ensureEnvJson(envPath) {
   if (fs.existsSync(envPath)) return true;
+  if (setupWindow && !setupWindow.isDestroyed() && setupPromise) {
+    setupWindow.show();
+    setupWindow.focus();
+    return setupPromise;
+  }
 
   log("未找到 .env.json，弹出配置窗口");
 
-  // 创建一个配置窗口
   const setupWin = new BrowserWindow({
     width: 500,
     height: 480,
@@ -45,13 +72,21 @@ function ensureEnvJson(backendRoot) {
     resizable: false,
     autoHideMenuBar: true,
     backgroundColor: "#14100c",
-    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, "setup-preload.cjs"),
+    },
   });
+  setupWindow = setupWin;
+  pendingSetupConfigPath = envPath;
   Menu.setApplicationMenu(null);
 
-  // 内联 HTML 配置表单
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:"Noto Serif SC","Songti SC",serif; background:#14100c; color:#ddd0bc; padding:30px; }
   h2 { color:#ecd07a; margin-bottom:8px; font-size:18px; letter-spacing:2px; }
@@ -62,6 +97,7 @@ function ensureEnvJson(backendRoot) {
   .hint { font-size:11px; color:#5e5346; margin-top:3px; }
   button { margin-top:18px; padding:10px 24px; background:linear-gradient(180deg,#ecd07a,#c8a24e); color:#241806; border:1px solid #8a6e30; border-radius:4px; cursor:pointer; font-size:14px; font-weight:700; letter-spacing:1px; }
   button:hover { filter:brightness(1.08); }
+  button:disabled { cursor:wait; opacity:.65; }
   .error { color:#c95050; font-size:12px; margin-top:8px; display:none; }
 </style></head><body>
 <h2>请为您的守秘人注入灵魂</h2>
@@ -82,140 +118,167 @@ function ensureEnvJson(backendRoot) {
   <input id="glm" placeholder="智谱 API Key">
   <div class="hint">注册地址：open.bigmodel.cn → API 密钥（免费额度）</div>
 </div>
-<button onclick="save()">保存并启动</button>
+<button id="save" onclick="save()">保存并启动</button>
 <div class="error" id="err"></div>
 <script>
-function save() {
+async function save() {
+  const button = document.getElementById("save");
+  const error = document.getElementById("err");
   const url = document.getElementById("url").value.trim();
   const key = document.getElementById("key").value.trim();
-  if (!key) { document.getElementById("err").style.display="block"; document.getElementById("err").textContent="请填写 API Key"; return; }
+  if (!key) { error.style.display="block"; error.textContent="请填写 API Key"; return; }
   const cfg = { api_key: key, base_url: url || "https://api.deepseek.com" };
   if (document.getElementById("glm-toggle").checked) {
     const glm = document.getElementById("glm").value.trim();
     if (glm) cfg.glm_api_key = glm;
   }
-  fetch("http://127.0.0.1:8765/__electron_save_env", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify(cfg)
-  }).then(r=>r.json()).then(data=>{
-    if(data.ok) { window.close(); }
-    else { document.getElementById("err").style.display="block"; document.getElementById("err").textContent="保存失败："+data.error; }
-  }).catch(e=>{ document.getElementById("err").style.display="block"; document.getElementById("err").textContent="无法连接后端："+e.message; });
+  button.disabled = true;
+  error.style.display = "none";
+  try {
+    const result = await window.trpgSetup.saveConfig(cfg);
+    if (result && result.ok) { window.close(); return; }
+    error.style.display = "block";
+    error.textContent = "保存失败：" + (result?.error || "未知错误");
+  } catch {
+    error.style.display = "block";
+    error.textContent = "保存失败：主进程不可用";
+  } finally {
+    button.disabled = false;
+  }
 }
 </script></body></html>`;
 
-  setupWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-  // 启动一个临时 HTTP 服务来接收配置保存请求
-  const http = require("node:http");
-  const setupServer = http.createServer((req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") { res.writeHead(200); res.end(); return; }
-    if (req.method === "POST" && req.url === "/__electron_save_env") {
-      let body = "";
-      req.on("data", d => body += d);
-      req.on("end", () => {
-        try {
-          const cfg = JSON.parse(body);
-          fs.writeFileSync(envPath, JSON.stringify(cfg, null, 2), {
-            encoding: "utf-8",
-            mode: 0o600,
-          });
-          log(".env.json 已保存");
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (e) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: e.message }));
-        }
-      });
-      return;
-    }
-    res.writeHead(404); res.end();
+  const setupUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  setupWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const guardSetupNavigation = (event, url) => {
+    if (url !== setupUrl && url !== "about:blank") event.preventDefault();
+  };
+  setupWin.webContents.on("will-navigate", guardSetupNavigation);
+  setupWin.webContents.on("will-redirect", guardSetupNavigation);
+  void setupWin.loadURL(setupUrl).catch((error) => {
+    log("配置窗口加载失败:", error.message || String(error));
+    if (!setupWin.isDestroyed()) setupWin.close();
   });
-  setupServer.listen(8765, "127.0.0.1");
-  setupWin.on("closed", () => { setupServer.close(); });
 
-  // 等待用户完成配置或关闭窗口
-  return new Promise((resolve) => {
+  setupPromise = new Promise((resolve) => {
     setupWin.on("closed", () => {
-      if (fs.existsSync(envPath)) {
+      const configured = fs.existsSync(envPath);
+      if (configured) {
         log("配置完成，继续启动");
-        resolve(true);
       } else {
         log("用户关闭了配置窗口但未保存");
-        resolve(false);
       }
+      if (setupWindow === setupWin) setupWindow = null;
+      if (pendingSetupConfigPath === envPath) pendingSetupConfigPath = null;
+      setupPromise = null;
+      resolve(configured);
     });
   });
+  return setupPromise;
 }
 
 function backendExecutablePath() {
-  const exe = process.platform === "win32" ? "trpg-server.exe" : "trpg-server";
-  return path.join(process.resourcesPath, "backend", exe);
+  return packagedBackendExecutable(process.resourcesPath, process.platform);
 }
 
-function startPackagedBackend() {
-  if (!app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND === "1") {
-    return Promise.resolve();
-  }
-
-  const exePath = backendExecutablePath();
+async function startPackagedBackend(exePath, runtimeRoot) {
   const backendRoot = path.dirname(exePath);
-  const runtimeRoot = path.join(app.getPath("userData"), "runtime");
   fs.mkdirSync(runtimeRoot, { recursive: true });
   log("启动内置后端:", exePath);
-  backendProcess = spawn(exePath, [], {
+  const child = spawn(exePath, [], {
     cwd: backendRoot,
     windowsHide: true,
     env: {
       ...process.env,
-      TRPG_PROJECT_ROOT: backendRoot,
+      // server.py 从这里读取 userData/runtime/.env.json；只读模组资源仍由
+      // src.config 在 PyInstaller 的 _internal/ 中自动定位。
+      TRPG_PROJECT_ROOT: runtimeRoot,
       TRPG_RUNTIME_ROOT: runtimeRoot,
     },
   });
+  backendProcess = child;
+  const spawnFailure = new Promise((_, reject) => {
+    child.once("error", (error) => {
+      reject(new Error(`无法启动内置后端：${error.message || error}`));
+    });
+  });
 
-  backendProcess.stdout?.on("data", (data) => log("[backend]", String(data).trim()));
-  backendProcess.stderr?.on("data", (data) => log("[backend:error]", String(data).trim()));
-  backendProcess.on("error", (err) => {
+  child.stdout?.on("data", (data) =>
+    log("[backend]", String(data).trim()),
+  );
+  child.stderr?.on("data", (data) =>
+    log("[backend:error]", String(data).trim()),
+  );
+  child.on("error", (err) => {
     log("内置后端进程错误:", err.message);
   });
-  backendProcess.on("exit", (code, signal) => {
+  child.on("exit", (code, signal) => {
     log("内置后端退出:", code, signal);
-    backendProcess = null;
+    if (backendProcess === child) backendProcess = null;
+    localBackendReady = false;
   });
 
-  return waitForBackend();
+  try {
+    await Promise.race([waitForBackend(30000, child), spawnFailure]);
+  } catch (error) {
+    if (child.exitCode === null && !child.killed) child.kill();
+    throw error;
+  }
 }
 
-function waitForBackend(timeoutMs = 12000) {
-  const startedAt = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      const req = http.get(`${backendUrl}/api/health`, (res) => {
-        res.resume();
-        if (res.statusCode && res.statusCode < 500) {
-          resolve();
-          return;
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function probeBackendHealth(timeoutMs = 900) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const req = http.get(`${backendUrl}/api/health`, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 64 * 1024) {
+          req.destroy();
+          finish(false);
         }
-        retry();
       });
-      req.on("error", retry);
-      req.setTimeout(900, () => {
-        req.destroy();
-        retry();
+      res.on("end", () => {
+        finish(isTrpgHealthResponse(res.statusCode, body));
       });
-    };
-    const retry = () => {
-      if (Date.now() - startedAt > timeoutMs) {
-        reject(new Error(`后端启动超时：${backendUrl}`));
-        return;
-      }
-      setTimeout(tick, 350);
-    };
-    tick();
+    });
+    req.once("error", () => finish(false));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      finish(false);
+    });
   });
+}
+
+async function waitForBackend(timeoutMs = 12000, expectedChild = null) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (expectedChild && expectedChild.exitCode !== null) {
+      throw new Error(`内置后端提前退出（状态码 ${expectedChild.exitCode}）`);
+    }
+    if (await probeBackendHealth()) {
+      if (expectedChild) {
+        // 避免端口已被旧进程占用时，在新子进程报告 bind 失败前误判成功。
+        await delay(250);
+        if (expectedChild.exitCode !== null) {
+          throw new Error(`内置后端未能占用 ${backendUrl}`);
+        }
+      }
+      return;
+    }
+    await delay(350);
+  }
+  throw new Error(`后端启动超时：${backendUrl}`);
 }
 
 function stopBackend() {
@@ -223,23 +286,37 @@ function stopBackend() {
   log("关闭内置后端");
   backendProcess.kill();
   backendProcess = null;
+  localBackendReady = false;
 }
 
 // ---- 按需启动本地后端（用户选择单机模式后调用）----
 async function ensureLocalBackend() {
-  if (localBackendReady) return;
-  if (isDev) {
-    // 开发模式假定本地后端由开发者自行启动（server.py / start_desktop.sh）。
+  if (localBackendReady) {
+    try {
+      await waitForBackend(1500);
+      return;
+    } catch {
+      localBackendReady = false;
+    }
+  }
+  const usesExternalBackend =
+    !app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND === "1";
+  if (usesExternalBackend) {
+    // start_desktop.sh 已启动源码后端；显式 external 模式也必须验证服务存在。
     await waitForBackend();
   } else {
-    const backendRoot = path.dirname(backendExecutablePath());
-    const configured = await ensureEnvJson(backendRoot);
+    const exePath = backendExecutablePath();
+    const backendRoot = path.dirname(exePath);
+    const runtimeRoot = path.join(app.getPath("userData"), "runtime");
+    const envPath = localConfigPath(app.getPath("userData"));
+    migrateLegacyLocalConfig(path.join(backendRoot, ".env.json"), envPath);
+    const configured = await ensureEnvJson(envPath);
     if (!configured) {
       const err = new Error("未完成模型配置");
       err.code = "config-cancelled";
       throw err;
     }
-    await startPackagedBackend();
+    await startPackagedBackend(exePath, runtimeRoot);
   }
   localBackendReady = true;
 }
@@ -266,6 +343,36 @@ function loadLauncher() {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle("trpg:save-local-config", (event, rawConfig) => {
+    const activeWindow = setupWindow;
+    const activeWebContents = activeWindow?.webContents;
+    if (
+      !activeWindow ||
+      activeWindow.isDestroyed() ||
+      !activeWebContents ||
+      event.sender !== activeWebContents ||
+      event.senderFrame !== activeWebContents.mainFrame ||
+      !pendingSetupConfigPath
+    ) {
+      log("拒绝来自非配置窗口的本地配置写入");
+      return { ok: false, error: "untrusted-sender" };
+    }
+    const result = writeLocalConfig(pendingSetupConfigPath, rawConfig);
+    if (result.ok) log("本地模型配置已保存到 userData/runtime");
+    return result;
+  });
+
+  ipcMain.handle("trpg:get-online-origin", (event) => {
+    if (!trustedSender(event.senderFrame?.url ?? "")) {
+      log("拒绝来自不可信页面的 get-online-origin:", event.senderFrame?.url);
+      return { ok: false, error: "untrusted-sender" };
+    }
+    return {
+      ok: true,
+      origin: readStoredCloudOrigin(app.getPath("userData")),
+    };
+  });
+
   ipcMain.handle("trpg:select-local", async (event) => {
     if (!trustedSender(event.senderFrame?.url ?? "")) {
       log("拒绝来自不可信页面的 select-local:", event.senderFrame?.url);
@@ -278,7 +385,10 @@ function registerIpcHandlers() {
       if (err && err.code === "config-cancelled") {
         return { ok: false, cancelled: true };
       }
-      const hint = isDev ? "（开发模式请先启动本地后端 server.py）" : "";
+      const hint =
+        !app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND === "1"
+          ? "（请先通过 start_desktop.sh 启动本地后端）"
+          : "";
       return { ok: false, error: `${err.message || err}${hint}` };
     }
   });
@@ -291,8 +401,13 @@ function registerIpcHandlers() {
     const origin = validateCloudOrigin(rawOrigin);
     if (!origin) return { ok: false, error: "invalid-origin" };
     if (!mainWindow) return { ok: false, error: "窗口尚未就绪" };
-    // 先暂存并批准 origin（导航守卫放行），加载失败再恢复旧值。
+    // 地址由主进程持久化；renderer 随 loadURL 销毁也不会丢失设置。
     const previousOrigin = approvedCloudOrigin;
+    const userDataPath = app.getPath("userData");
+    const previousStoredOrigin = readStoredCloudOrigin(userDataPath);
+    if (!writeStoredCloudOrigin(userDataPath, origin)) {
+      return { ok: false, error: "服务器地址保存失败" };
+    }
     approvedCloudOrigin = origin;
     try {
       // 同源加载云端页面：认证 Cookie 与 WebSocket 都在该 origin 下工作，
@@ -301,6 +416,9 @@ function registerIpcHandlers() {
       return { ok: true };
     } catch (err) {
       approvedCloudOrigin = previousOrigin;
+      if (!writeStoredCloudOrigin(userDataPath, previousStoredOrigin)) {
+        log("恢复上一云端地址失败");
+      }
       return { ok: false, error: err.message || String(err) };
     }
   });
@@ -346,19 +464,34 @@ function createWindow() {
 
   // 禁止任意新窗口；导航只允许 file://（单机界面）、dev server 或已校验的云端 origin。
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.webContents.on("will-navigate", (event, url) => {
+  const guardNavigation = (event, url) => {
     if (!navigationAllowed(url)) {
       log("阻止导航:", url);
       event.preventDefault();
     }
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  // HTTP 30x 不一定走 will-navigate；重定向必须使用同一套 origin 白名单。
+  win.webContents.on("will-redirect", guardNavigation);
+  // 纵深防御：若 Electron/协议边缘路径绕过预导航事件，最终落点仍不能保留。
+  win.webContents.on("did-navigate", (_event, url) => {
+    if (navigationAllowed(url)) return;
+    log("检测到不允许的最终导航，返回启动器:", url);
+    approvedCloudOrigin = null;
+    void loadLauncher().catch((err) =>
+      log("从非法导航恢复启动器失败:", err.message || String(err)),
+    );
   });
 
   win.webContents.on("did-finish-load", () => {
     log("页面加载完成:", win.webContents.getURL());
   });
-  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    log("页面加载失败事件:", errorCode, errorDescription, validatedURL);
-  });
+  win.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL) => {
+      log("页面加载失败事件:", errorCode, errorDescription, validatedURL);
+    },
+  );
   win.webContents.on("render-process-gone", (_event, details) => {
     log("渲染进程退出:", details.reason, details.exitCode);
   });
@@ -373,7 +506,7 @@ function createWindow() {
       `无法加载游戏界面：\n${err.message}\n\n` +
         (isDev
           ? `请确认 vite dev server 已在 ${devServerUrl} 运行。`
-          : "请确认前端已构建（cd frontend && npm run build）。")
+          : "请确认前端已构建（cd frontend && npm run build）。"),
     );
   });
 
@@ -405,22 +538,35 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
-  log("Electron ready, isDev =", isDev);
-  // 默认拒绝一切权限请求（摄像头/麦克风/通知等）。
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-    callback(false);
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
-  // 启动即展示模式选择页：不再强制配置本地 API Key 或启动本地后端。
-  // 单机后端在用户选择“单机游戏”后按需拉起；联机由 IPC 校验后同源加载。
-  registerIpcHandlers();
-  createWindow();
 
-  // macOS 重新激活时重建窗口
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  app.whenReady().then(async () => {
+    log("Electron ready, isDev =", isDev);
+    // 默认拒绝一切权限请求（摄像头/麦克风/通知等）。
+    session.defaultSession.setPermissionRequestHandler(
+      (_wc, _permission, callback) => {
+        callback(false);
+      },
+    );
+    // 启动即展示模式选择页：不再强制配置本地 API Key 或启动本地后端。
+    // 单机后端在用户选择“单机游戏”后按需拉起；联机由 IPC 校验后同源加载。
+    registerIpcHandlers();
+    createWindow();
+
+    // macOS 重新激活时重建窗口
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
+}
 
 app.on("window-all-closed", () => {
   log("window-all-closed, quitting");

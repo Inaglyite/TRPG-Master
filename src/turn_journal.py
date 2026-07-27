@@ -193,7 +193,13 @@ class TurnJournal:
             except TurnJournalError:
                 return None
 
-    def begin(self, *, kind: str, player_input: str | None) -> str:
+    def begin(
+        self,
+        *,
+        kind: str,
+        player_input: str | None,
+        actor: dict | None = None,
+    ) -> str:
         with self._thread_lock, file_lock(self.lock_path):
             index = self._load_index_unlocked()
             if self._recover_stale_unlocked(index):
@@ -214,6 +220,7 @@ class TurnJournal:
                 "created_at": _now(),
                 "owner_token": self.owner_token,
                 "player_input": player_input,
+                "actor": _json_safe(actor) if isinstance(actor, dict) else None,
                 "events": [],
             }
             self._write_record_unlocked(record)
@@ -387,6 +394,7 @@ class TurnJournal:
                     "parent_turn_id": record.get("parent_turn_id"),
                     "kind": record.get("kind"),
                     "player_input": record.get("player_input"),
+                    "actor": copy.deepcopy(record.get("actor")),
                     "narrative": record.get("narrative", ""),
                     "choices": copy.deepcopy(record.get("choices", [])),
                     "narrative_segments": copy.deepcopy(
@@ -557,6 +565,7 @@ class TurnJournal:
                 "interrupted_at",
                 "duration_ms",
                 "player_input",
+                "actor",
                 "narrative",
                 "choices",
                 "narrative_segments",

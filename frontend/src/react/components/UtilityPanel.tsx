@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { sendAction } from "../../options";
 import { closeUtility, requestNotes, saveNotes } from "../../utility";
 import { useAppStore } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
 
 const quickActions = [
   "观察当前环境",
@@ -32,7 +33,26 @@ export function UtilityPanel() {
   const status = useAppStore((state) => state.notesStatus);
   const statusKind = useAppStore((state) => state.notesStatusKind);
   const inputEnabled = useAppStore((state) => state.inputEnabled);
+  const mode = useAppStore((state) => state.mode);
   const setDraft = useAppStore((state) => state.setNotesDraft);
+  const roomConnection = useOnlineStore((state) => state.roomConnection);
+  const roomStatus = useOnlineStore((state) => state.roomStatus);
+  const currentActorUserId = useOnlineStore(
+    (state) => state.currentActorUserId,
+  );
+  const userId = useOnlineStore((state) => state.user?.id);
+  const myRole = useOnlineStore(
+    (state) =>
+      state.members.find((member) => member.user_id === state.user?.id)?.role,
+  );
+  const onlineCanAct =
+    roomConnection === "connected" &&
+    roomStatus === "playing" &&
+    userId != null &&
+    currentActorUserId === userId &&
+    (myRole === "owner" || myRole === "player");
+  const quickActionsEnabled =
+    inputEnabled && (mode !== "online" || onlineCanAct);
 
   useEffect(() => {
     if (open) void notesCommand("requestNotes");
@@ -88,7 +108,7 @@ export function UtilityPanel() {
                 <button
                   key={action}
                   type="button"
-                  disabled={!inputEnabled}
+                  disabled={!quickActionsEnabled}
                   onClick={() => void submitQuickAction(action)}
                 >
                   {quickLabels[index]}

@@ -19,6 +19,7 @@ import {
   beginNarrativeReplacement,
   cancelNarrativeReplacement,
   completeNarrativeReplacement,
+  applyAuthoritativePlayerAction,
   removeTurnMessages,
   resetTurnActionButtons,
   renderTurnHistory,
@@ -26,6 +27,7 @@ import {
   tagPendingPlayerMessage,
   whenNarrativePresented,
   whenNarrativeVisible,
+  type InvestigatorActor,
   type TurnHistoryItem,
 } from "./renderer";
 import {
@@ -42,6 +44,7 @@ import {
 import { onNarrativeChunk, onTension, onDice, onSummary } from "./renderer";
 import { onNarrativeSegment, onNarrativeSegments } from "./renderer";
 import {
+  acknowledgePendingAction,
   onSuggest,
   onDecision,
   onDecisionResolved,
@@ -49,6 +52,7 @@ import {
   onTurnPhase,
   onConnectionLost,
   onConnectionRestored,
+  rollbackPendingAction,
   type ActionChoice,
 } from "./options";
 import {
@@ -77,6 +81,7 @@ import {
   onPlayerNotesError,
 } from "./utility";
 import { parseServerMessage } from "./protocol/server-message";
+import { useOnlineStore } from "./state/online-store";
 
 // ---- 后端地址 ----
 const WS_BASE_URL = backendWebSocketUrl();
@@ -240,6 +245,29 @@ let activeTransport: WsTransport | null = null;
 
 export function setActiveTransport(transport: WsTransport | null) {
   activeTransport = transport;
+}
+
+/** 房间服务端拒绝操作时恢复乐观 UI，并重新启用历史操作按钮。 */
+export function recoverRejectedRoomAction(): boolean {
+  resetTurnActionButtons();
+  return rollbackPendingAction();
+}
+
+/** 离开多人房间时丢弃仍绑定旧房间的流式/乐观回合状态。 */
+export function resetRoomGameSession(): void {
+  acknowledgePendingAction();
+  resetTurnActionButtons();
+  deferredHandouts = [];
+  gmTurnActive = false;
+  activeTurnId = null;
+  activeBranchSourceTurnId = null;
+  activeTurnKind = null;
+  rewriteSourceTurnId = null;
+  pendingChoices = undefined;
+  lastTurnSeq = 0;
+  turnHasVisibleNarrative = false;
+  narrativeVisibilityScheduled = false;
+  setDisplayTurnId(null);
 }
 
 export function safeSend(payload: string) {
@@ -509,6 +537,21 @@ export function handleServerPayload(raw: unknown) {
   }
   const data: any = parsed;
   if (!acceptTurnEvent(data)) return;
+  if (
+    [
+      "gm_turn_start",
+      "turn_phase",
+      "narrative_chunk",
+      "narrative_segment",
+      "narrative_segments",
+      "chat_events",
+      "dice_result",
+      "decision_resolved",
+      "done",
+    ].includes(data.type)
+  ) {
+    acknowledgePendingAction();
+  }
   switch (data.type) {
     case "pong":
       break;
@@ -523,7 +566,46 @@ export function handleServerPayload(raw: unknown) {
       activeBranchSourceTurnId =
         String(data.parent_turn_id || activeTurnId || "") || null;
       if (activeTurnId && activeTurnKind !== "rewrite") {
-        tagPendingPlayerMessage(activeTurnId);
+        const playerAction =
+          typeof data.player_action === "string"
+            ? data.player_action
+            : data.player_action && typeof data.player_action === "object"
+              ? data.player_action.content || data.player_action.text
+              : null;
+        const playerInput =
+          typeof data.player_input === "string"
+            ? data.player_input
+            : typeof playerAction === "string"
+              ? playerAction
+              : "";
+        const actor =
+          data.actor && typeof data.actor === "object"
+            ? (data.actor as InvestigatorActor)
+            : data.player_action?.actor &&
+                typeof data.player_action.actor === "object"
+              ? (data.player_action.actor as InvestigatorActor)
+              : null;
+        const actorUserId =
+          typeof actor?.user_id === "string"
+            ? actor.user_id
+            : typeof actor?.userId === "string"
+              ? actor.userId
+              : null;
+        const localUserId = useOnlineStore.getState().user?.id ?? null;
+        const dedupePending =
+          useAppStore.getState().mode !== "online" ||
+          (actorUserId !== null && actorUserId === localUserId);
+        if (
+          !actor ||
+          !applyAuthoritativePlayerAction(
+            activeTurnId,
+            playerInput,
+            actor,
+            dedupePending,
+          )
+        ) {
+          tagPendingPlayerMessage(activeTurnId);
+        }
       }
       deferredHandouts = [];
       turnHasVisibleNarrative = false;

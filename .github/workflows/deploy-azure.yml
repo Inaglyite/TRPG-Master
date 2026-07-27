@@ -17,10 +17,31 @@ permissions:
 jobs:
   deploy:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     environment: azure-production
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: trpg_test
+          POSTGRES_PASSWORD: test_only_password
+          POSTGRES_DB: trpg_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trpg_test -d trpg_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TRPG_TEST_POSTGRES_URL: postgresql+psycopg://trpg_test:test_only_password@127.0.0.1:5432/trpg_test
     steps:
       - name: Resolve release commit
         id: release
@@ -39,26 +60,41 @@ jobs:
         with:
           ref: ${{ steps.release.outputs.sha }}
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - name: Verify backend and PostgreSQL migrations
+        run: |
+          pip install -r requirements-dev.txt
+          ruff check .
+          python tools/check_architecture.py
+          TRPG_DATABASE_URL="$TRPG_TEST_POSTGRES_URL" alembic upgrade head
+          python -m pytest -q
+
+      - name: Verify frontend and end-to-end flows
         working-directory: frontend
-        env:
-          VITE_TRPG_BACKEND_ORIGIN: https://20.249.11.57
         run: |
           npm ci
+          npm test
+          npm run format:check
           npm run build
+          npx playwright install --with-deps chromium
+          xvfb-run --auto-servernum npm run test:e2e
 
       - name: Package release
         run: |
           tar -czf /tmp/trpg-master-release.tar.gz \
             --exclude='**/__pycache__' \
             server.py requirements.txt pyproject.toml alembic.ini \
-            src tools skills mod characters migrations schemas frontend/dist
+            src tools skills mod characters migrations schemas rules deploy frontend/dist
 
       - name: Configure SSH
         env:
@@ -77,5 +113,6 @@ jobs:
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
           scp /tmp/trpg-master-release.tar.gz "$USER@$HOST:/tmp/trpg-master-$RELEASE_SHA.tar.gz"
+          scp deploy/install-release.sh "$USER@$HOST:/tmp/trpg-install-release-$RELEASE_SHA.sh"
           ssh "$USER@$HOST" \
-            "sudo /usr/local/sbin/trpg-install-release '$RELEASE_SHA' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'"
+            "sudo bash '/tmp/trpg-install-release-$RELEASE_SHA.sh' '$RELEASE_SHA' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'; status=\$?; rm -f -- '/tmp/trpg-install-release-$RELEASE_SHA.sh' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'; exit \$status"

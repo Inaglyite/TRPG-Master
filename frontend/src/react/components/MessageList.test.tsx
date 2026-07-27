@@ -8,7 +8,7 @@ import { MessageList } from "./MessageList";
 describe("MessageList", () => {
   beforeEach(() => {
     useMessageStore.setState({ messages: [], actionReset: 0 });
-    useAppStore.setState({ character: null });
+    useAppStore.setState({ mode: "local", character: null });
   });
 
   it("renders markdown while suppressing model-provided images", () => {
@@ -156,5 +156,49 @@ describe("MessageList", () => {
     });
 
     expect(screen.getByText("黄千陆")).toBeInTheDocument();
+  });
+
+  it("多人玩家气泡使用消息权威 speaker，不借用查看者角色卡", () => {
+    useAppStore.setState({
+      mode: "online",
+      character: { name: "当前查看者" },
+    });
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([
+        {
+          id: "p-authoritative",
+          kind: "player",
+          text: "我去检查窗户。",
+          turnId: "t-authoritative",
+          speaker: {
+            type: "investigator",
+            id: "inv-remote",
+            name: "远端调查员",
+          },
+        },
+      ]);
+    });
+
+    expect(screen.getByText("远端调查员")).toBeInTheDocument();
+    expect(screen.queryByText("当前查看者")).not.toBeInTheDocument();
+  });
+
+  it("多人旧历史缺少 actor 时显示通用调查员而非查看者姓名", () => {
+    useAppStore.setState({
+      mode: "online",
+      character: { name: "不该显示的查看者" },
+    });
+    render(<MessageList />);
+    act(() => {
+      useMessageStore
+        .getState()
+        .replaceMessages([
+          { id: "legacy-player", kind: "player", text: "旧行动" },
+        ]);
+    });
+
+    expect(screen.getByText("调查员")).toBeInTheDocument();
+    expect(screen.queryByText("不该显示的查看者")).not.toBeInTheDocument();
   });
 });

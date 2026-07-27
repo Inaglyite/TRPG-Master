@@ -79,14 +79,24 @@ def sync_active_investigator(context: Any) -> None:
     """Copy mutations made through ``pc`` back into the persistent roster."""
 
     def apply(state: dict) -> None:
-        investigator_id = str(state.get("active_investigator_id") or "")
-        investigators = state.get("investigators")
-        if not investigator_id or not isinstance(investigators, dict):
-            return
-        if investigator_id in investigators and isinstance(state.get("pc"), dict):
-            investigators[investigator_id] = copy.deepcopy(state["pc"])
+        project_active_investigator(state)
 
     context.world_store.update(apply)
+
+
+def project_active_investigator(state: dict) -> bool:
+    """Project the legacy active ``pc`` into a roster state in-place."""
+    investigator_id = str(state.get("active_investigator_id") or "")
+    investigators = state.get("investigators")
+    if (
+        not investigator_id
+        or not isinstance(investigators, dict)
+        or investigator_id not in investigators
+        or not isinstance(state.get("pc"), dict)
+    ):
+        return False
+    investigators[investigator_id] = copy.deepcopy(state["pc"])
+    return True
 
 
 def public_investigator_roster(state: dict) -> list[dict]:

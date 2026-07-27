@@ -10,3 +10,6 @@ EnvironmentFile=/etc/trpg-master/trpg-master.env
 ExecStart=/opt/trpg-master/current/deploy/backup-trpg-master.sh
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/trpg-master

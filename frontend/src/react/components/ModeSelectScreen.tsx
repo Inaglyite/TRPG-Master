@@ -1,10 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  getCloudOrigin,
-  normalizeOrigin,
-  setCloudOrigin,
-} from "../../api/client";
+import { getCloudOrigin, normalizeOrigin } from "../../api/client";
 import { desktopBridge } from "../../desktop";
 import { useAppStore } from "../../state/app-store";
 
@@ -23,6 +19,19 @@ export function ModeSelectScreen() {
   const [originDraft, setOriginDraft] = useState(getCloudOrigin() ?? "");
 
   const bridge = desktopBridge();
+
+  useEffect(() => {
+    if (!bridge) return;
+    let active = true;
+    void bridge.getOnlineOrigin().then((result) => {
+      if (active && result.ok && result.origin) {
+        setOriginDraft(result.origin);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [bridge]);
 
   async function chooseLocal() {
     if (!bridge) {
@@ -55,8 +64,7 @@ export function ModeSelectScreen() {
     const result = await bridge.selectOnlineMode(normalized);
     setBusyMode(null);
     if (result.ok) {
-      // 主进程已同源加载云端页面；保存地址作为下次默认值。
-      setCloudOrigin(normalized);
+      // 主进程已经持久化地址并同源加载云端页面。
       return;
     }
     setError(

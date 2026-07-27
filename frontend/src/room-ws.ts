@@ -1,11 +1,23 @@
 import { apiHttpOrigin } from "./api/client";
-import { updateCharPanel, updateCluePanel } from "./panels";
+import {
+  clearTransientHandouts,
+  updateCharPanel,
+  updateCluePanel,
+} from "./panels";
 import { parseServerMessage } from "./protocol/server-message";
 import { useAppStore } from "./state/app-store";
-import { PrivateState, useOnlineStore } from "./state/online-store";
+import {
+  bumpOnlineRequestEpoch,
+  PrivateState,
+  resetOnlineState,
+  useOnlineStore,
+} from "./state/online-store";
+import { useStartStore } from "./state/start-store";
 import {
   displayWorldHistory,
   handleServerPayload,
+  recoverRejectedRoomAction,
+  resetRoomGameSession,
   setActiveTransport,
 } from "./ws";
 
@@ -31,9 +43,12 @@ let manuallyClosed = false;
 let lastEventId: number | null = null;
 let roomSnapshotApplied = false;
 const sendQueue: string[] = [];
+const MAX_SEND_QUEUE = 64;
+const LAST_ROOM_KEY = "trpg-online-world-id";
 
 /** 清除仅属于上一位玩家/上一房间的本地展示数据，避免切房或串号泄露。 */
 function clearPrivatePresentationState(): void {
+  clearTransientHandouts();
   useAppStore.setState({
     character: null,
     clues: {},
@@ -45,7 +60,21 @@ function clearPrivatePresentationState(): void {
     notesStatus: "",
     notesStatusKind: "",
     characterPanelOpen: false,
+    handouts: [],
     clueToast: null,
+    choices: [],
+    dialog: null,
+    ending: null,
+    utilityOpen: false,
+    inputEnabled: false,
+    inputPlaceholder: "等待守秘人叙述……",
+    savePanelOpen: false,
+    saves: [],
+    quickSaveState: "idle",
+  });
+  useStartStore.setState({
+    gameStarted: false,
+    gameStarting: false,
   });
 }
 
@@ -101,11 +130,35 @@ function open(): void {
     handleRoomMessage(event.data);
   };
 
-  next.onclose = () => {
+  next.onclose = (event) => {
     if (socket !== next) return;
     socket = null;
     roomSnapshotApplied = false;
     setConnectionState("disconnected");
+    if (event.code === 4401) {
+      // Session 已失效：清空账号与房间数据并停掉重连，认证页显示过期提示。
+      disconnectRoom();
+      resetOnlineState({ sessionExpired: true });
+      return;
+    }
+    if (event.code === 4403) {
+      // 成员资格被撤销/被踢：仍保留登录态，但不再尝试连接无权访问的房间。
+      disconnectRoom();
+      bumpOnlineRequestEpoch();
+      try {
+        localStorage.removeItem(LAST_ROOM_KEY);
+      } catch {
+        /* localStorage 不可用时仍可回到大厅 */
+      }
+      useOnlineStore.setState({
+        view: "lobby",
+        activeWorldId: null,
+        worldsStatus: "loading",
+        worldsError: null,
+      });
+      void import("./online").then(({ enterLobby }) => enterLobby());
+      return;
+    }
     scheduleReconnect();
   };
 
@@ -141,10 +194,12 @@ export function disconnectRoom(): void {
   lastEventId = null;
   sendQueue.length = 0;
   setActiveTransport(null);
+  resetRoomGameSession();
   current?.close();
-  clearPrivatePresentationState();
   // 公共叙事也属于房间；退出、切房和换号时不能短暂显示上一房间内容。
   displayWorldHistory([]);
+  // displayWorldHistory([]) 会复用单机 onDone；最后再次关闭输入并清私态。
+  clearPrivatePresentationState();
   useOnlineStore.setState({
     roomConnection: "idle",
     roomStatus: null,
@@ -154,6 +209,7 @@ export function disconnectRoom(): void {
     onlineUserIds: [],
     roomInvestigators: [],
     activeInvestigatorId: null,
+    privateEvents: [],
     privateState: null,
   });
 }
@@ -162,6 +218,7 @@ function sendRaw(data: string): void {
   if (roomSnapshotApplied && socket && socket.readyState === WebSocket.OPEN) {
     socket.send(data);
   } else {
+    if (sendQueue.length >= MAX_SEND_QUEUE) sendQueue.shift();
     sendQueue.push(data);
   }
 }
@@ -324,6 +381,14 @@ function handleRoomMessage(raw: unknown): void {
         lastEventId = message.latest_event_id;
       }
       applyRoomStateFields(message);
+      const roomPlaying =
+        (typeof message.status === "string"
+          ? message.status
+          : useOnlineStore.getState().roomStatus) === "playing";
+      useStartStore.setState({
+        gameStarted: roomPlaying,
+        gameStarting: false,
+      });
       useOnlineStore.setState({
         roomInvestigators: Array.isArray(message.investigators)
           ? message.investigators.filter(
@@ -415,6 +480,15 @@ function handleRoomMessage(raw: unknown): void {
       useOnlineStore.setState({ currentActorUserId: actor });
       break;
     }
+    case "investigator_roster":
+      useOnlineStore.setState({
+        roomInvestigators: message.investigators,
+        activeInvestigatorId:
+          typeof message.active_investigator_id === "string"
+            ? message.active_investigator_id
+            : null,
+      });
+      break;
     case "room_action_rejected": {
       const code = typeof message.code === "string" ? message.code : "";
       const detail =
@@ -426,8 +500,17 @@ function handleRoomMessage(raw: unknown): void {
       useOnlineStore.setState({
         roomError: REJECTION_TEXTS[code] ?? detail ?? "操作被服务器拒绝",
       });
+      recoverRejectedRoomAction();
       break;
     }
+    case "protocol_error":
+      useOnlineStore.setState({
+        roomError:
+          typeof message.message === "string"
+            ? message.message
+            : "房间协议消息未被服务器接受",
+      });
+      break;
     case "room_error": {
       const detail =
         typeof message.message === "string"

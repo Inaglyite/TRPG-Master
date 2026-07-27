@@ -74,6 +74,8 @@ class GameApplicationTests(unittest.TestCase):
 
         with self.assertRaises(ApplicationUseCaseError):
             self.app.perform_action.execute("   ")
+        with self.assertRaisesRegex(ApplicationUseCaseError, "8000"):
+            self.app.perform_action.execute("a" * 8_001)
 
     def test_rewrite_requires_id_and_delegates_exactly_once(self):
         result = self.app.rewrite_turn.execute(" turn-7 ")

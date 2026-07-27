@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import audit, authorize_world, request_user
 from .characters import list_character_options
-from .database import World, WorldMember, new_id, session_scope
+from .database import User, World, WorldMember, new_id, session_scope
 from .module_registry import ModuleRegistry
 from .multiplayer import (
     MultiplayerError,
@@ -97,24 +99,76 @@ def create_multiplayer_http_router(
         user = request_user(request, db_url())
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
-        module = str(data.get("module") or deps.default_module_name)
-        deps.module_registry.resolve(module)
+        module = str(data.get("module") or deps.default_module_name).strip()
+        try:
+            module_record = deps.module_registry.resolve(module)
+        except (FileNotFoundError, ValueError):
+            return JSONResponse(
+                {"detail": "模组不存在", "code": "module_not_found"},
+                status_code=404,
+            )
+        try:
+            max_players = int(data.get("max_players") or 4)
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"detail": "玩家上限必须是 2–4 的整数", "code": "invalid_max_players"},
+                status_code=400,
+            )
+        if max_players < 2 or max_players > 4:
+            return JSONResponse(
+                {"detail": "玩家上限必须是 2–4 的整数", "code": "invalid_max_players"},
+                status_code=400,
+            )
+        name = str(data.get("name") or "").strip()[:120] or f"{user.username} 的房间"
+        try:
+            world_limit = max(
+                1,
+                min(100, int(os.environ.get("TRPG_MAX_WORLDS_PER_USER", "8"))),
+            )
+        except ValueError:
+            world_limit = 8
         world_id = f"world-{secrets.token_hex(12)}"
-        context = RuntimeContext.create(
-            world_id,
-            module,
-            project_root=deps.project_root,
-            runtime_root=deps.runtime_root,
-        )
         with session_scope(db_url()) as session:
-            world = session.get(World, world_id)
-            world.created_by = user.id
-            world.metadata_json = {
-                **dict(world.metadata_json or {}),
-                "name": str(data.get("name") or "").strip()[:120] or f"{user.username} 的房间",
-                "room_status": "lobby",
-                "max_players": max(2, min(int(data.get("max_players") or 4), 4)),
-            }
+            # Lock the account so concurrent create requests cannot both pass
+            # the quota check on PostgreSQL.
+            account = (
+                session.query(User)
+                .filter_by(id=user.id)
+                .with_for_update()
+                .one()
+            )
+            del account
+            existing_count = (
+                session.query(World)
+                .filter(
+                    World.created_by == user.id,
+                    World.status.in_(("active", "pending")),
+                )
+                .count()
+            )
+            if existing_count >= world_limit:
+                return JSONResponse(
+                    {
+                        "detail": f"每个账号最多保留 {world_limit} 个房间",
+                        "code": "world_limit_reached",
+                    },
+                    status_code=429,
+                )
+            session.add(
+                World(
+                    id=world_id,
+                    module_name=module,
+                    module_id=module_record.package_id,
+                    module_version=module_record.version,
+                    created_by=user.id,
+                    status="pending",
+                    metadata_json={
+                        "name": name,
+                        "room_status": "lobby",
+                        "max_players": max_players,
+                    },
+                )
+            )
             session.add(
                 WorldMember(
                     id=new_id("member"),
@@ -123,6 +177,31 @@ def create_multiplayer_http_router(
                     role="owner",
                 )
             )
+        try:
+            context = await asyncio.to_thread(
+                RuntimeContext.create,
+                world_id,
+                module,
+                project_root=deps.project_root,
+                runtime_root=deps.runtime_root,
+            )
+        except Exception:
+            # Keep the failed control-plane row non-active for diagnosis and
+            # cleanup; it can never appear as an ownerless joinable room.
+            with session_scope(db_url()) as session:
+                world = session.get(World, world_id)
+                if world is not None:
+                    world.status = "failed"
+            raise
+        with session_scope(db_url()) as session:
+            world = session.get(World, world_id)
+            world.status = "active"
+            world.metadata_json = {
+                **dict(world.metadata_json or {}),
+                "name": name,
+                "room_status": "lobby",
+                "max_players": max_players,
+            }
         audit(db_url(), "world_created", user_id=user.id, world_id=world_id)
         return {"world_id": context.world_id, "module": module}
 
@@ -216,7 +295,11 @@ def create_multiplayer_http_router(
                 project_root=deps.project_root,
                 runtime_root=deps.runtime_root,
             )
-            return list_character_options(module_name, context=context)
+            return list_character_options(
+                module_name,
+                context=context,
+                include_personal=False,
+            )
         except MultiplayerError as exc:
             return _error(exc)
 
@@ -338,7 +421,11 @@ def create_multiplayer_http_router(
                 project_root=deps.project_root,
                 runtime_root=deps.runtime_root,
             )
-            options = list_character_options(module_name, context=context)
+            options = list_character_options(
+                module_name,
+                context=context,
+                include_personal=False,
+            )
             selected = next(
                 (
                     character

@@ -7,6 +7,22 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: trpg_test
+          POSTGRES_PASSWORD: test_only_password
+          POSTGRES_DB: trpg_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trpg_test -d trpg_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TRPG_TEST_POSTGRES_URL: postgresql+psycopg://trpg_test:test_only_password@127.0.0.1:5432/trpg_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,6 +32,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: python tools/check_architecture.py
+      - run: TRPG_DATABASE_URL="$TRPG_TEST_POSTGRES_URL" alembic upgrade head
       - run: python -m pytest -q
 
   frontend:

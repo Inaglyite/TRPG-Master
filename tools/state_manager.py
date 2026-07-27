@@ -308,7 +308,7 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
             if changed:
                 _save(data)
             print(json.dumps(result, ensure_ascii=False))
-            return
+            return result
     if isinstance(catalog_entry, dict):
         category = catalog_entry.get("category", category)
         clue_type = catalog_entry.get("type", clue_type)
@@ -416,6 +416,7 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
     if skipped_asset:
         result["skipped_asset"] = skipped_asset
     print(json.dumps(result, ensure_ascii=False))
+    return result
 
 
 def cmd_link_clues(from_id, to_id, reasoning):
@@ -430,15 +431,17 @@ def cmd_link_clues(from_id, to_id, reasoning):
             if item.get("id"):
                 all_clue_ids.add(item["id"])
     if from_id not in all_clue_ids or to_id not in all_clue_ids:
-        print(json.dumps({"ok": False, "error": f"线索不存在: from={from_id} to={to_id}"}, ensure_ascii=False))
-        return
+        result = {"ok": False, "error": f"线索不存在: from={from_id} to={to_id}"}
+        print(json.dumps(result, ensure_ascii=False))
+        return result
 
     # 校验重复关联
     links = data.setdefault("clue_links", [])
     for link in links:
         if {link.get("from"), link.get("to")} == {from_id, to_id}:
-            print(json.dumps({"ok": False, "error": "关联已存在", "link": link}, ensure_ascii=False))
-            return
+            result = {"ok": False, "error": "关联已存在", "link": link}
+            print(json.dumps(result, ensure_ascii=False))
+            return result
 
     link_id = f"link_{len(links)+1:03d}"
     link = {
@@ -467,7 +470,9 @@ def cmd_link_clues(from_id, to_id, reasoning):
     }
     data["clues_found"].setdefault("investigation", []).append(inference)
     _save(data)
-    print(json.dumps({"ok": True, "link": link, "inference": inference}, ensure_ascii=False))
+    result = {"ok": True, "link": link, "inference": inference}
+    print(json.dumps(result, ensure_ascii=False))
+    return result
 
 
 def cmd_show_handout(entity_type, entity_id, asset_id=None):
@@ -487,15 +492,16 @@ def cmd_show_handout(entity_type, entity_id, asset_id=None):
             str(resolved_asset_id or ""),
         )
     ):
-        print(json.dumps({
+        result = {
             "found": False,
             "entity_type": entity_type,
             "entity_id": entity_id,
             "asset_id": resolved_asset_id,
             "reason": "clue_not_discovered",
             "hint": "线索尚未进入已发现清单，拒绝提前展示素材",
-        }, ensure_ascii=False))
-        return
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
     if entry:
         seen = data.setdefault("seen_handouts", {})
         seen_key = entity_type + "s"
@@ -524,6 +530,7 @@ def cmd_show_handout(entity_type, entity_id, asset_id=None):
         result = {"found": False, "entity_type": entity_type, "entity_id": entity_id,
                   "hint": f"资产映射中未找到 {entity_type}={entity_id}"}
     print(json.dumps(result, ensure_ascii=False))
+    return result
 
 
 def cmd_add_item(item_name):
@@ -531,19 +538,22 @@ def cmd_add_item(item_name):
     inv = data.setdefault("pc", {}).setdefault("inventory", [])
     item_name = str(item_name).strip()
     if item_name in inv:
-        print(json.dumps({
+        result = {
             "ok": True,
             "duplicate": True,
             "item": item_name,
-        }, ensure_ascii=False))
-        return
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
     inv.append(item_name)
     _save(data)
-    print(json.dumps({
+    result = {
         "ok": True,
         "duplicate": False,
         "item": item_name,
-    }, ensure_ascii=False))
+    }
+    print(json.dumps(result, ensure_ascii=False))
+    return result
 
 
 def cmd_remove_item(item_name):
@@ -552,9 +562,12 @@ def cmd_remove_item(item_name):
     if item_name in inv:
         inv.remove(item_name)
         _save(data)
+        result = {"ok": True, "removed": True, "item": item_name}
         print(f"物品已移除: {item_name}")
     else:
+        result = {"ok": True, "removed": False, "item": item_name}
         print(f"物品不存在: {item_name}", file=sys.stderr)
+    return result
 
 
 def cmd_npc_reveal(npc_id, tier, entry_text):
@@ -568,33 +581,36 @@ def cmd_npc_reveal(npc_id, tier, entry_text):
             revealed = npc.setdefault("revealed", {"level": 0, "entries": []})
             new_entry = {"tier": tier_int, "text": entry_text}
             if new_entry in revealed["entries"]:
-                print(json.dumps({
+                result = {
                     "ok": True,
                     "duplicate": True,
                     "npc_id": npc_id,
                     "npc_name": npc["name"],
                     "revealed_level": revealed.get("level", 0),
                     "new_entry": new_entry,
-                }, ensure_ascii=False))
-                return
+                }
+                print(json.dumps(result, ensure_ascii=False))
+                return result
             revealed["entries"].append(new_entry)
             # 自动升级 level 到最高已揭示 tier
             max_tier = max(e["tier"] for e in revealed["entries"])
             revealed["level"] = max_tier
             found = True
             _save(data)
-            print(json.dumps({
+            result = {
                 "ok": True,
                 "npc_id": npc_id,
                 "npc_name": npc["name"],
                 "duplicate": False,
                 "revealed_level": revealed["level"],
                 "new_entry": new_entry
-            }, ensure_ascii=False))
+            }
+            print(json.dumps(result, ensure_ascii=False))
             break
     if not found:
         print(f"ERROR: NPC '{npc_id}' 不存在", file=sys.stderr)
         sys.exit(1)
+    return result
 
 
 def cmd_npc_secret(npc_id):
@@ -635,7 +651,9 @@ def cmd_private_memory_update(section, value_str):
         parsed = value_str
     pm[section] = parsed
     _save(data)
-    print(json.dumps({"ok": True, "section": section, "updated": True}, ensure_ascii=False))
+    result = {"ok": True, "section": section, "updated": True}
+    print(json.dumps(result, ensure_ascii=False))
+    return result
 
 
 def cmd_psychological_trait(category, name, context=""):
@@ -662,12 +680,14 @@ def cmd_psychological_trait(category, name, context=""):
         sys.exit(1)
 
     _save(data)
-    print(json.dumps({
+    result = {
         "ok": True,
         "category": category,
         "name": name,
         "psychological_profile": profile
-    }, ensure_ascii=False, indent=2))
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
 def cmd_usage():

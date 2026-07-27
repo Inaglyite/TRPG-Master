@@ -1,30 +1,78 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+import subprocess
 from pathlib import Path
 
-ROOT = Path.cwd()
+ROOT = Path(SPECPATH).resolve().parent.parent
 
 
-def data_tree(name):
-    path = ROOT / name
-    if not path.exists():
-        return []
-    return [(str(path), name)]
+def tracked_data(*paths):
+    """Package only Git-tracked release assets, never ignored runtime data."""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z", "--", *paths],
+            check=True,
+            capture_output=True,
+        )
+        untracked = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "ls-files",
+                "-z",
+                "--others",
+                "--exclude-standard",
+                "--",
+                *paths,
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            "A Git checkout is required to build a safe release asset manifest"
+        ) from exc
+    if untracked.stdout:
+        names = ", ".join(
+            os.fsdecode(raw) for raw in untracked.stdout.split(b"\0") if raw
+        )
+        raise RuntimeError(
+            "Untracked release assets must be reviewed and committed before packaging: "
+            + names
+        )
+    relative_files = [
+        Path(os.fsdecode(raw))
+        for raw in result.stdout.split(b"\0")
+        if raw
+    ]
+    if not relative_files:
+        raise RuntimeError(f"No tracked release assets found for: {', '.join(paths)}")
+    packaged = []
+    root = ROOT.resolve()
+    for relative in relative_files:
+        source = (ROOT / relative).resolve()
+        if not source.is_file() or not source.is_relative_to(root):
+            raise RuntimeError(f"Unsafe or missing release asset: {relative}")
+        destination = relative.parent.as_posix()
+        packaged.append((str(source), destination if destination != "." else "."))
+    return packaged
 
 
-datas = []
-for folder in [
-    "characters",
+datas = tracked_data(
+    "alembic.ini",
+    "characters/default",
+    "migrations",
     "mod",
-    "profiles",
     "rules",
-    "saves",
+    "schemas",
     "skills",
     "tools",
-]:
-    datas += data_tree(folder)
+)
 
-# 注意：.env.json 包含 API key，绝不打包！
+# .env.json、数据库、世界、存档、玩家档案及自定义角色绝不从工作区打包。
 
 block_cipher = None
 
@@ -42,10 +90,19 @@ a = Analysis(
         "httptools",
         "websockets",
         "yaml",
+        "alembic",
+        "alembic.command",
+        "alembic.config",
+        "alembic.ddl.postgresql",
+        "alembic.ddl.sqlite",
+        "alembic.runtime.migration",
+        "sqlalchemy.dialects.postgresql",
+        "sqlalchemy.dialects.sqlite",
+        "psycopg",
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(ROOT / "packaging" / "pyinstaller_runtime_hook.py")],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

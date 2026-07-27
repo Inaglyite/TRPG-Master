@@ -346,11 +346,12 @@ def list_character_options(
     module_name: str | None = None,
     *,
     context: RuntimeContext | None = None,
+    include_personal: bool = True,
 ) -> dict:
     context = _runtime_context(context, module_name)
     ensure_character_dirs(context)
     module = module_name or context.module_name
-    profile = load_profile(context)
+    profile = load_profile(context) if include_personal else _profile_template()
     experienced = []
     for char_id, entry in sorted(profile.get("characters", {}).items()):
         char = _profile_entry_to_character(entry)
@@ -383,7 +384,9 @@ def list_character_options(
             "title": "自定义角色",
             "characters": _list_character_files(
                 context.custom_characters_dir, "custom", "自定义角色", context=context
-            ),
+            )
+            if include_personal
+            else [],
         },
     ]
     return {"module": module, "groups": groups}
@@ -496,7 +499,8 @@ def _reputation_delta(ending_type: str) -> int:
 
 def settle_case(world_state: dict, *, ending_type: str, title: str,
                 summary: str, module_name: str | None = None,
-                context: RuntimeContext | None = None) -> dict:
+                context: RuntimeContext | None = None,
+                persist_profile: bool = True) -> dict:
     """把当前案件的粗粒度结果写入长期 profile。"""
     pc = world_state.get("pc", {})
     if not pc:
@@ -506,7 +510,7 @@ def settle_case(world_state: dict, *, ending_type: str, title: str,
     char_id = pc.get("character_id") or _character_id("profile", pc, module_name=module)
     pc["character_id"] = char_id
 
-    profile = load_profile(context)
+    profile = load_profile(context) if persist_profile else _profile_template()
     characters = profile.setdefault("characters", {})
     existing = characters.get(char_id, {})
     career = _normalize_career(existing.get("career") or pc.get("career"))
@@ -544,5 +548,6 @@ def settle_case(world_state: dict, *, ending_type: str, title: str,
     record["last_case"] = case_entry
     characters[char_id] = record
     profile["active_character_id"] = char_id
-    save_profile(profile, context)
+    if persist_profile:
+        save_profile(profile, context)
     return {"ok": True, "character_id": char_id, "case": case_entry, "career": career}

@@ -20,13 +20,13 @@
 - **可创作的模组生态。** 模组是安全沙箱化的 `.trpgmod` ZIP 包（JSON + Markdown + 素材），带 JSON Schema 校验、一键导入和版本并存；v2 格式的主线安全契约保证随机失败不会让调查永久卡死。自带可直接复制的[工程模板](examples/module-template/manifest.json)。
 - **Lorebook 上下文与防剧透。** Character Card V3 Lorebook 按回合本地检索叙事素材，带预算、分组与冷却；分层信息边界、NPC 揭示记录和私有工作记忆降低模型提前剧透的概率；每 50 个玩家回合静默压缩旧上下文。
 - **存档、回合日志与时间线分支。** 按世界实例隔离的多槽位存档；持久回合日志把叙事、选项、事件和快照绑定到同一回合，断线后可恢复；可在任意决策点创建时间线分支，回到当时的世界快照走出另一条路，且不重新掷骰；无副作用重新叙述只替换最后一轮的文字表达。
-- **桌面与云端双形态。** Linux/Windows 桌面开箱即用；云端部署提供 Argon2id 账号、可撤销会话、世界成员权限、审计事件、WebSocket Origin 校验和 PostgreSQL 持久化。
+- **桌面与云端双形态。** Linux/Windows 桌面开箱即用；云端部署提供 2–4 人共享房间、Argon2id 账号、可撤销会话、成员权限、当前行动者裁决、私密事件隔离和 PostgreSQL 持久化。
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.12+
 - Node.js 20 LTS 或更新版本
 - 一个 OpenAI 兼容 API Key（默认面向 DeepSeek）
 - 可选：智谱 GLM API Key，用于快速摘要与上下文压缩
@@ -131,6 +131,16 @@ python -m pip install -r requirements.txt
 bash start_desktop.sh
 ```
 
+### 多人游戏
+
+浏览器直接打开服务器维护者提供的 HTTPS 地址；Electron 启动后选择“多人游戏”，并填写不带路径或
+参数的 HTTPS 服务器 origin。登录后可以创建房间，或用房主生成的邀请码加入。完整的建房、邀请、
+选角、准备、行动顺序、私密内容、存档、重连和房主移交说明见
+[多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
+
+普通玩家必须使用受信任的 TLS 证书。当前 Azure 验收环境仍使用 IP 地址和自签名证书，不是面向普通
+玩家的正式入口；不要绕过浏览器证书警告。
+
 ### 启动终端版
 
 ```bash
@@ -207,10 +217,11 @@ electron-builder 构建 NSIS 安装版和便携版。输出位于 `frontend/rele
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
 - [数据库与账号](docs/DATABASE.md)：迁移、旧世界导入、PostgreSQL、备份与恢复。
+- [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)：浏览器/Electron 登录、房间、选角、行动、存档和重连。
 - [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
 - [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。
 - [回合性能](docs/PERFORMANCE.md)：阶段指标、进程内工具、回合缓存与本地基准。
-- [开发路线图](docs/ROADMAP.md)：当前基线、多人房间和未来可选 Agent 的进入条件。
+- [开发路线图](docs/ROADMAP.md)：当前单机/多人基线、上线收口和未来可选 Agent 的进入条件。
 - [模组编辑器规划](docs/MODULE_EDITOR_PLAN.md)：编辑器需求与技术规划（内部文档，非使用手册）。
 - [设计依据](docs/DESIGN_RATIONALE.md)：关键设计决策参考的外部资料。
 - [模组工程模板](examples/module-template/manifest.json)：可直接打包的示例。
@@ -253,8 +264,11 @@ trpg-master/
 
 ## 当前边界
 
-- 单机单玩家：世界已按 `world_id` 隔离，但每条 WebSocket 连接仍拥有独立的守秘人历史；共享 GM 房间是下一个里程碑，见[路线图](docs/ROADMAP.md)。
-- 桌面模式默认关闭账号门禁，不应直接暴露到公网；云端必须设置 `TRPG_REQUIRE_AUTH=1`、TLS 和允许的 Origin，见[数据库与账号](docs/DATABASE.md)。
+- 多人模式已经使用房间级共享 `GameEngine`、权威行动顺序和按成员过滤的恢复数据；当前产品目标为
+  单房间 2–4 人，服务端保持单个 Uvicorn worker，尚未引入跨进程房间协调。
+- 桌面单机模式默认关闭账号门禁，不应直接暴露到公网；云端必须设置
+  `TRPG_REQUIRE_AUTH=1`、受信任的 TLS 和明确的允许 Origin，见
+  [数据库与账号](docs/DATABASE.md)与[多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
 
 ## 参与贡献
 

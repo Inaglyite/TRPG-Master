@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accelerateNarrativeChoices,
   addMsg,
+  applyAuthoritativePlayerAction,
   beginNarrativeReplacement,
   branchSourceTurnId,
   completeNarrativeReplacement,
@@ -39,6 +40,67 @@ describe("React message renderer adapter", () => {
       kind: "player",
       text: "检查门锁",
       turnId: "turn-1",
+    });
+  });
+
+  it("发送者把乐观玩家气泡升级为权威署名，且同 turn 重放不重复", () => {
+    setDisplayTurnId(null);
+    addMsg("player", "检查门锁");
+    const actor = {
+      type: "investigator" as const,
+      user_id: "u1",
+      investigator_id: "inv-1",
+      name: "黄千陆",
+    };
+
+    expect(
+      applyAuthoritativePlayerAction(
+        "turn-authoritative",
+        "检查门锁",
+        actor,
+        true,
+      ),
+    ).toBe(true);
+    applyAuthoritativePlayerAction(
+      "turn-authoritative",
+      "检查门锁",
+      actor,
+      false,
+    );
+
+    const players = useMessageStore
+      .getState()
+      .messages.filter((message) => message.kind === "player");
+    expect(players).toHaveLength(1);
+    expect(players[0]).toMatchObject({
+      text: "检查门锁",
+      turnId: "turn-authoritative",
+      speaker: {
+        type: "investigator",
+        userId: "u1",
+        investigatorId: "inv-1",
+        name: "黄千陆",
+      },
+    });
+  });
+
+  it("其他成员收到权威行动时追加远端调查员气泡", () => {
+    applyAuthoritativePlayerAction(
+      "turn-remote",
+      "翻阅档案",
+      {
+        type: "investigator",
+        user_id: "u2",
+        investigator_id: "inv-2",
+        name: "温蒂",
+      },
+      false,
+    );
+    expect(useMessageStore.getState().messages[0]).toMatchObject({
+      kind: "player",
+      text: "翻阅档案",
+      turnId: "turn-remote",
+      speaker: { name: "温蒂", userId: "u2" },
     });
   });
 
@@ -339,6 +401,31 @@ describe("React message renderer adapter", () => {
       .getState()
       .messages.find((message) => message.kind === "gm");
     expect(gm?.segments?.[1].speaker?.name).toBe("旧人");
+  });
+
+  it("历史玩家输入使用 turn.actor 的权威署名", () => {
+    renderTurnHistory([
+      {
+        turn_id: "t-actor",
+        player_input: "查看窗外",
+        actor: {
+          type: "investigator",
+          user_id: "u-remote",
+          investigator_id: "inv-remote",
+          name: "法伦",
+        },
+        narrative: "窗外只有雨。",
+      },
+    ]);
+
+    const player = useMessageStore
+      .getState()
+      .messages.find((message) => message.kind === "player");
+    expect(player?.speaker).toMatchObject({
+      name: "法伦",
+      userId: "u-remote",
+      investigatorId: "inv-remote",
+    });
   });
 
   it("prefers authoritative chat events and normalizes wire field names", () => {

@@ -17,6 +17,8 @@ export type SpeakerAvatar = {
 export type Speaker = {
   type: "keeper" | "npc" | "investigator" | "system";
   id?: string;
+  userId?: string;
+  investigatorId?: string;
   name: string;
   avatar?: SpeakerAvatar;
 };
@@ -48,6 +50,8 @@ export type ChatMessage = {
   dice?: VisualDie[];
   canRewrite?: boolean;
   canBranch?: boolean;
+  /** 玩家气泡也使用服务端权威发言者，不能从当前查看者角色卡推断。 */
+  speaker?: Speaker;
   /** 发言者段结构（守秘人旁白 + NPC 发言单元）；旧消息无此字段按原文渲染 */
   segments?: NarrativeSegment[];
 };

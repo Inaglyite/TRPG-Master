@@ -23,6 +23,12 @@ class Socket:
         self.messages.append(payload)
 
 
+class SlowSocket(Socket):
+    async def send_json(self, payload):
+        await asyncio.sleep(1)
+        await super().send_json(payload)
+
+
 async def _room_manager_single_flights_concurrent_creation():
     manager = RoomManager()
     calls = 0
@@ -84,6 +90,36 @@ async def _event_visibility_ack_and_replay_are_connection_scoped():
     }
 
 
+async def _replay_drops_embedded_assets_and_slow_clients_do_not_block_room(
+    monkeypatch,
+):
+    monkeypatch.setenv("TRPG_ROOM_SEND_TIMEOUT", "0.05")
+    hub = RoomEventHub("world-assets", replay_limit=16)
+    fast_socket, slow_socket = Socket(), SlowSocket()
+    await hub.attach(RoomConnection("fast", "alice", "player", fast_socket))
+    await hub.attach(RoomConnection("slow", "bob", "player", slow_socket))
+
+    started = asyncio.get_running_loop().time()
+    await hub.broadcast(
+        {
+            "type": "handout",
+            "asset_data_uri": "data:image/png;base64,large",
+            "speaker": {
+                "avatar": {
+                    "asset_data_uri": "data:image/png;base64,also-large",
+                }
+            },
+        }
+    )
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert fast_socket.messages[0]["asset_data_uri"].startswith("data:")
+    replay = await hub.replay_after("fast", 0)
+    assert "asset_data_uri" not in replay["events"][0]
+    assert "asset_data_uri" not in replay["events"][0]["speaker"]["avatar"]
+    connections = await hub.connection_snapshot()
+    assert [item["connection_id"] for item in connections] == ["fast"]
+
+
 async def _action_policy_rejects_wrong_actor_duplicates_and_overlap():
     room = GameRoom(
         "world-a",
@@ -137,12 +173,55 @@ async def _owner_control_releases_on_terminal_response():
         "owner",
         current_actor_user_id="player",
     )
+    terminal = []
+    room.action_status_callback = (
+        lambda world_id, action_id, status: terminal.append(
+            (world_id, action_id, status)
+        )
+    )
     transport = RoomDriverTransport(room)
     await room.reserve_control("owner", "save-control-1")
     assert room.action_active and room.control_action_active
     await transport.send_json({"type": "saved", "ok": True, "slot_id": "slot_001"})
     assert not room.action_active
     assert not room.control_action_active
+    assert terminal == [
+        ("world-control-terminal", "save-control-1", "completed")
+    ]
+
+    room.current_actor_user_id = "player"
+    await room.reserve_action("player", "failed-action")
+    await transport.send_json({"type": "error", "message": "model failed"})
+    assert room.action_active
+    await transport.send_json({"type": "done"})
+    assert terminal[-1] == (
+        "world-control-terminal",
+        "failed-action",
+        "completed",
+    )
+
+    await room.reserve_action("player", "terminal-failure")
+    await transport.send_json(
+        {"type": "error", "message": "turn aborted", "terminal": True}
+    )
+    assert not room.action_active
+    assert terminal[-1] == (
+        "world-control-terminal",
+        "terminal-failure",
+        "failed",
+    )
+    # An explicitly failed action keeps its stable client ID retryable.
+    await room.reserve_action("player", "terminal-failure")
+    room.release_action()
+
+    await room.reserve_action("player", "rewrite-action")
+    await transport.send_json({"type": "turn_rewritten"})
+    assert not room.action_active
+    assert terminal[-1] == (
+        "world-control-terminal",
+        "rewrite-action",
+        "completed",
+    )
 
 
 async def _room_is_removed_only_after_empty_idle_grace():
@@ -237,6 +316,16 @@ def test_room_manager_enforces_active_room_capacity():
 
 def test_event_visibility_ack_and_replay_are_connection_scoped():
     asyncio.run(_event_visibility_ack_and_replay_are_connection_scoped())
+
+
+def test_replay_drops_embedded_assets_and_slow_clients_do_not_block_room(
+    monkeypatch,
+):
+    asyncio.run(
+        _replay_drops_embedded_assets_and_slow_clients_do_not_block_room(
+            monkeypatch
+        )
+    )
 
 
 def test_action_policy_rejects_wrong_actor_duplicates_and_overlap():

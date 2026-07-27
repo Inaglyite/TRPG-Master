@@ -4,7 +4,10 @@
  * 其他 file:// 一律拒绝——防止同盘恶意文件或远程页借 file 协议调用 IPC；
  * 开发模式只信任 vite dev server origin；云端 origin 仅在主进程显式批准后放行。
  */
-function isTrustedSenderUrl(senderUrl, { isDev, devServerUrl, trustedFileUrl }) {
+function isTrustedSenderUrl(
+  senderUrl,
+  { isDev, devServerUrl, trustedFileUrl },
+) {
   if (typeof senderUrl !== "string" || !senderUrl) return false;
   if (isDev) {
     try {
@@ -28,6 +31,7 @@ function isNavigationAllowed(
     return false;
   }
   if (url.protocol === "about:") return true;
+  if (approvedCloudOrigin && url.origin === approvedCloudOrigin) return true;
   if (isDev) {
     try {
       return url.origin === new URL(devServerUrl).origin;
@@ -35,7 +39,6 @@ function isNavigationAllowed(
       return false;
     }
   }
-  if (approvedCloudOrigin && url.origin === approvedCloudOrigin) return true;
   return rawUrl === trustedFileUrl;
 }
 

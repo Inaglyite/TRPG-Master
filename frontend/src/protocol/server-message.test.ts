@@ -30,6 +30,94 @@ describe("parseServerMessage", () => {
     });
   });
 
+  it("校验 gm_turn_start 的权威玩家行动并剥离 actor 私有字段", () => {
+    expect(
+      parseServerMessage({
+        type: "gm_turn_start",
+        turn_id: "turn-1",
+        seq: 0,
+        player_input: "检查书桌",
+        actor: {
+          type: "investigator",
+          user_id: "u1",
+          investigator_id: "inv-1",
+          name: "黄千陆",
+          private_notes: "不能下发",
+        },
+      }),
+    ).toEqual({
+      type: "gm_turn_start",
+      turn_id: "turn-1",
+      seq: 0,
+      player_input: "检查书桌",
+      actor: {
+        type: "investigator",
+        user_id: "u1",
+        investigator_id: "inv-1",
+        name: "黄千陆",
+      },
+    });
+  });
+
+  it("拒绝缺少权威身份字段的 gm_turn_start actor", () => {
+    expect(
+      parseServerMessage({
+        type: "gm_turn_start",
+        turn_id: "turn-1",
+        player_input: "检查书桌",
+        actor: { type: "investigator", name: "黄千陆" },
+      }),
+    ).toBeNull();
+    expect(
+      parseServerMessage({
+        type: "gm_turn_start",
+        turn_id: "turn-2",
+        player_input: "没有署名的行动",
+      }),
+    ).toBeNull();
+  });
+
+  it("校验 room_full_state 历史 actor 并只保留公开身份字段", () => {
+    expect(
+      parseServerMessage({
+        type: "room_full_state",
+        latest_event_id: 4,
+        history: [
+          {
+            turn_id: "turn-history",
+            player_input: "查看窗外",
+            actor: {
+              type: "investigator",
+              user_id: "u2",
+              investigator_id: "inv-2",
+              name: "温蒂",
+              secret: "不可进入客户端",
+            },
+            narrative: "窗外仍在下雨。",
+          },
+        ],
+        private_state: null,
+      }),
+    ).toEqual({
+      type: "room_full_state",
+      latest_event_id: 4,
+      history: [
+        {
+          turn_id: "turn-history",
+          player_input: "查看窗外",
+          actor: {
+            type: "investigator",
+            user_id: "u2",
+            investigator_id: "inv-2",
+            name: "温蒂",
+          },
+          narrative: "窗外仍在下雨。",
+        },
+      ],
+      private_state: null,
+    });
+  });
+
   it("validates and strips private fields from authoritative chat events", () => {
     expect(
       parseServerMessage({

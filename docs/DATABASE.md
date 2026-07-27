@@ -74,14 +74,16 @@ TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/backup-passphrase
 升级生产数据库：
 
 ```bash
-venv/bin/python -m alembic upgrade head
+cd /opt/trpg-master/current
+.venv/bin/python -m alembic -c alembic.ini upgrade head
 ```
 
 首次导入云端旧世界（先创建 owner 账号）：
 
 ```bash
-venv/bin/python tools/manage_users.py create account_name
-venv/bin/python tools/import_worlds_to_database.py \
+cd /opt/trpg-master/current
+.venv/bin/python tools/manage_users.py create account_name
+.venv/bin/python tools/import_worlds_to_database.py \
   --runtime-root /var/lib/trpg-master \
   --owner account_name \
   --once --replace

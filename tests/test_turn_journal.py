@@ -20,7 +20,7 @@ class TurnJournalTests(unittest.TestCase):
 
     def make_engine(self, root: Path) -> GameEngine:
         module_dir = root / "mod" / "test-module"
-        module_dir.mkdir(parents=True)
+        module_dir.mkdir(parents=True, exist_ok=True)
         (module_dir / "module.md").write_text("# Test", encoding="utf-8")
         (module_dir / "world_state_initial.json").write_text(
             json.dumps({
@@ -117,7 +117,6 @@ class TurnJournalTests(unittest.TestCase):
             messages, snapshot = journal.load_artifacts(turn_id)
             self.assertEqual("你拉开抽屉。", messages[-1]["content"])
             self.assertTrue(snapshot["flags"]["desk_open"])
-
             index = json.loads(journal.index_path.read_text(encoding="utf-8"))
             self.assertIsNone(index["active_turn_id"])
             self.assertEqual(turn_id, index["latest_completed_turn_id"])
@@ -129,6 +128,32 @@ class TurnJournalTests(unittest.TestCase):
             self.assertEqual(["skill_check"], diagnostic["tool_names"])
             self.assertEqual(18, diagnostic["lorebook"]["token_estimate"])
 
+    def test_public_history_preserves_authoritative_multiplayer_actor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            journal = self.make_journal(Path(temp))
+            actor = {
+                "type": "investigator",
+                "user_id": "user-alice",
+                "investigator_id": "investigator-alice",
+                "name": "爱丽丝",
+            }
+            turn_id = journal.begin(
+                kind="action",
+                player_input="检查书桌",
+                actor=actor,
+            )
+            journal.complete(
+                turn_id,
+                messages=[],
+                world_state={"revision": 1},
+                narrative="抽屉里没有东西。",
+                choices=[],
+            )
+
+            history = journal.public_history()
+            self.assertEqual(actor, history[-1]["actor"])
+            self.assertEqual(actor, journal.recovery_status(turn_id)["requested"]["actor"])
+
     def test_new_process_marks_uncommitted_turn_interrupted(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -139,6 +164,34 @@ class TurnJournalTests(unittest.TestCase):
             status = second.recovery_status(turn_id)
             self.assertEqual("interrupted", status["requested"]["status"])
             self.assertIsNone(status["active"])
+
+    def test_new_multiplayer_engine_restores_latest_committed_model_history(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = self.make_engine(root)
+            messages = [
+                {"role": "system", "content": "old system prompt"},
+                {"role": "user", "content": "检查书桌"},
+                {"role": "assistant", "content": "你在抽屉里发现一封信。"},
+            ]
+            turn_id = first.turn_journal.begin(
+                kind="action",
+                player_input="检查书桌",
+            )
+            first.turn_journal.complete(
+                turn_id,
+                messages=messages,
+                world_state=first.context.world_store.load(),
+                narrative="你在抽屉里发现一封信。",
+                choices=[],
+            )
+
+            restarted = self.make_engine(root)
+            restored_count = restarted.restore_latest_committed_history()
+
+            self.assertEqual(3, restored_count)
+            self.assertNotEqual("old system prompt", restarted.messages[0]["content"])
+            self.assertEqual(messages[1:], restarted.messages[1:])
 
     def test_same_process_cannot_start_overlapping_turn(self):
         with tempfile.TemporaryDirectory() as temp:

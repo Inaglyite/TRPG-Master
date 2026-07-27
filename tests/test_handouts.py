@@ -413,6 +413,37 @@ class ScarletLettersHandoutIntegrationTests(unittest.TestCase):
             self.assertEqual(private_events[0]["clue"]["text"], "只有 Alice 听见的低语。")
             self.assertEqual(handouts, [])
 
+    def test_save_recovery_never_broadcasts_a_private_clue_handout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine, handouts = self._engine(Path(temp_dir))
+
+            def add_private_asset_clue(state: dict) -> None:
+                state["clues_found"]["investigation"].append(
+                    {
+                        "id": "private-body-evidence",
+                        "catalog_id": "wright_body_evidence",
+                        "text": "只有 Alice 看到了尸检细节。",
+                        "visibility": "private",
+                        "owner_investigator_id": "investigator-alice",
+                        "asset": {
+                            "id": "wright_body",
+                            "file": "莱特教授的尸体.png",
+                            "label": "莱特教授尸体",
+                        },
+                    }
+                )
+
+            engine.context.world_store.update(add_private_asset_clue)
+            engine._emit_unseen_discovered_handouts()
+
+            self.assertEqual(handouts, [])
+            self.assertNotIn(
+                "wright_body",
+                engine.context.world_store.load()
+                .get("seen_handout_assets", {})
+                .get("clues", []),
+            )
+
     def test_asset_name_as_free_clue_id_cannot_bypass_handout_gate(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             engine, events = self._engine(Path(temp_dir))

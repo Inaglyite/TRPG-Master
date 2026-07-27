@@ -96,6 +96,7 @@ export function showHandout(data: Omit<Handout, "id">) {
 
 export function clearTransientHandouts() {
   window.clearTimeout(clueToastTimeout);
+  knownClueKeys = null;
   useAppStore.setState({ handouts: [], clueToast: null });
 }
 

@@ -34,7 +34,8 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
         return deps.database_url()
 
     @router.post("/api/auth/register", status_code=201)
-    async def register(data: dict, request: Request, response: Response):
+    def register(data: dict, request: Request, response: Response):
+        """Hash credentials and write the session outside the asyncio event loop."""
         if os.environ.get("TRPG_ALLOW_REGISTRATION", "1").lower() not in {
             "1",
             "true",
@@ -64,7 +65,8 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
         return {"id": user.id, "username": user.username}
 
     @router.post("/api/auth/login")
-    async def login(data: dict, request: Request, response: Response):
+    def login(data: dict, request: Request, response: Response):
+        """Verify Argon2 credentials in FastAPI's bounded worker threadpool."""
         ip = request.client.host if request.client else ""
         key = f"login:{ip}:{str(data.get('username') or '').lower()}"
         LOGIN_LIMITER.check(key)
@@ -92,7 +94,7 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
         return {"id": user.id, "username": user.username}
 
     @router.post("/api/auth/logout", status_code=204)
-    async def logout(request: Request, response: Response):
+    def logout(request: Request, response: Response):
         user = request_user(request, db_url())
         revoke_session(db_url(), request.cookies.get(SESSION_COOKIE))
         response.delete_cookie(SESSION_COOKIE, path="/")
@@ -100,7 +102,7 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
             audit(db_url(), "logout", user_id=user.id)
 
     @router.get("/api/auth/me")
-    async def current_user(request: Request):
+    def current_user(request: Request):
         user = request_user(request, db_url())
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)

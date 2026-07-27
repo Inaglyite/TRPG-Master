@@ -1,8 +1,6 @@
 """Tool 定义（Function Calling Schema）+ 执行器 + 骰子摘要"""
 
 import base64
-import contextlib
-import io
 import json
 import mimetypes
 import random
@@ -961,28 +959,42 @@ def _state_clues(_args: dict, context: RuntimeContext) -> str:
 
 
 _STATE_COMMAND_LOCK = threading.RLock()
+_MISSING_MODULE_GLOBAL = object()
 
 
 def _state_command(context: RuntimeContext, command: str, *args, **kwargs) -> str:
     """Run a legacy state-manager command against one in-memory DB transaction."""
     from tools import state_manager
 
-    output = io.StringIO()
-    result_text = ""
+    result_value: object = None
     with _STATE_COMMAND_LOCK:
         def mutate(world: dict) -> None:
-            nonlocal result_text
+            nonlocal result_value
             previous = state_manager._TRANSACTION_STATE
+            previous_print = state_manager.__dict__.get(
+                "print",
+                _MISSING_MODULE_GLOBAL,
+            )
             state_manager._TRANSACTION_STATE = world
+            state_manager.print = lambda *_args, **_kwargs: None
             try:
-                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                    getattr(state_manager, command)(*args, **kwargs)
-                result_text = output.getvalue().strip()
+                # Do not use contextlib.redirect_stdout here.  It replaces the
+                # process-global streams and can capture another room's logs
+                # into this room's model-visible tool result.
+                result_value = getattr(state_manager, command)(*args, **kwargs)
             finally:
                 state_manager._TRANSACTION_STATE = previous
+                if previous_print is _MISSING_MODULE_GLOBAL:
+                    state_manager.__dict__.pop("print", None)
+                else:
+                    state_manager.print = previous_print
 
         context.world_store.update(mutate)
-    return result_text or "(空)"
+    if isinstance(result_value, str):
+        return result_value
+    if result_value is not None:
+        return _json_result(result_value)
+    return "(空)"
 
 
 def _sanity_mutation(context: RuntimeContext, operation) -> str:
@@ -993,13 +1005,18 @@ def _sanity_mutation(context: RuntimeContext, operation) -> str:
         def mutate(world: dict) -> None:
             nonlocal result
             previous = sanity._TRANSACTION_STATE
+            previous_print = sanity.__dict__.get("print", _MISSING_MODULE_GLOBAL)
             sanity._TRANSACTION_STATE = world
+            sanity.print = lambda *_args, **_kwargs: None
             try:
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    value = operation(sanity, world)
+                value = operation(sanity, world)
                 result = value if isinstance(value, dict) else {}
             finally:
                 sanity._TRANSACTION_STATE = previous
+                if previous_print is _MISSING_MODULE_GLOBAL:
+                    sanity.__dict__.pop("print", None)
+                else:
+                    sanity.print = previous_print
 
         context.world_store.update(mutate)
     return _json_result(result)

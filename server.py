@@ -87,6 +87,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from src.asset_payload import (
     SpeakerPayloadResolver,
@@ -135,7 +136,6 @@ from src.investigators import (
     activate_investigator,
     initialize_investigator_roster,
     public_investigator_roster,
-    sync_active_investigator,
 )
 from src.lorebook import lorebook_json_schema
 from src.model_settings import ModelSettings, persist_model_settings
@@ -157,12 +157,11 @@ from src.multiplayer_http import (
     create_multiplayer_http_router,
 )
 from src.multiplayer_ws import MultiplayerWsController, MultiplayerWsDependencies
+from src.narrative_history import enrich_public_history_record
 from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
-from src.room_runtime import RoomManager
+from src.room_runtime import ActionReservationError, GameRoom, RoomManager
 from src.runtime import RuntimeContext
-from src.speaker_parser import parse_segments as parse_speaker_segments
-from src.tool_protocol import strip_tool_protocol
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
 from src.ws_router import WsMessageRouter
@@ -221,6 +220,79 @@ app.include_router(
 )
 
 
+def _member_mutation_target(request: Request) -> tuple[str, str | None] | None:
+    """Return the room/member addressed by a role-change or removal request."""
+    parts = request.url.path.strip("/").split("/")
+    if (
+        request.method in {"PATCH", "DELETE"}
+        and len(parts) == 5
+        and parts[:2] == ["api", "worlds"]
+        and parts[3] == "members"
+    ):
+        return parts[2], parts[4]
+    if (
+        request.method == "POST"
+        and len(parts) == 4
+        and parts[:2] == ["api", "worlds"]
+        and parts[3] == "owner"
+    ):
+        # Ownership transfer demotes the existing owner. Resolve that user from
+        # the live room rather than trusting a client body.
+        return parts[2], None
+    return None
+
+
+async def _reserve_current_actor_member_mutation(
+    request: Request,
+) -> tuple[GameRoom | None, JSONResponse | None]:
+    """Serialize actor demotion/removal against an authoritative room turn."""
+    target = _member_mutation_target(request)
+    if target is None:
+        return None, None
+    world_id, target_user_id = target
+    room = await ROOM_MANAGER.get(world_id)
+    target_user_id = target_user_id or (room.owner_user_id if room is not None else "")
+    if room is None or room.current_actor_user_id != target_user_id:
+        return None, None
+    if MULTIPLAYER_WS.room_control_change_blocked(room):
+        return None, JSONResponse(
+            {
+                "detail": "当前回合或确认请求结束前不能更换、降级或移除行动者",
+                "code": "room_turn_in_progress",
+            },
+            status_code=409,
+        )
+    try:
+        await room.reserve_action(
+            target_user_id,
+            f"member-mutation:{secrets.token_hex(12)}",
+            require_current_actor=False,
+        )
+    except ActionReservationError:
+        return None, JSONResponse(
+            {
+                "detail": "当前回合或确认请求结束前不能更换、降级或移除行动者",
+                "code": "room_turn_in_progress",
+            },
+            status_code=409,
+        )
+    # Actor assignment and pending prompts are also event-loop operations. Check
+    # again after acquiring the room lease so a mutation cannot cross their edge.
+    if room.current_actor_user_id != target_user_id:
+        room.release_action()
+        return None, None
+    if room.pending_reply_kind is not None:
+        room.release_action()
+        return None, JSONResponse(
+            {
+                "detail": "当前回合或确认请求结束前不能更换、降级或移除行动者",
+                "code": "room_turn_in_progress",
+            },
+            status_code=409,
+        )
+    return room, None
+
+
 @app.middleware("http")
 async def authentication_gate(request: Request, call_next):
     """Cloud mode protects every API except health and authentication."""
@@ -228,15 +300,37 @@ async def authentication_gate(request: Request, call_next):
         request.url.path
         in {
             "/api/health",
+            "/api/ready",
             "/api/auth/register",
             "/api/auth/login",
         }
         or request.url.path == "/"
     )
+    actor_mutation_room: GameRoom | None = None
     if auth_required() and request.url.path.startswith("/api/") and not public:
         user = request_user(request, DATABASE_URL)
         if user is None:
             return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+        authoring_request = request.url.path.startswith("/api/editor/") or (
+            request.method == "POST"
+            and request.url.path
+            in {
+                "/api/modules/compile",
+                "/api/modules/inspect",
+                "/api/modules/import",
+            }
+        )
+        if authoring_request:
+            administrators = {
+                item.strip().lower()
+                for item in os.environ.get("TRPG_ADMIN_USERS", "").split(",")
+                if item.strip()
+            }
+            if user.username.lower() not in administrators:
+                return JSONResponse(
+                    {"detail": "云端模组编辑与导入仅限管理员"},
+                    status_code=403,
+                )
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = request.headers.get("origin", "")
             allowed = {
@@ -251,8 +345,17 @@ async def authentication_gate(request: Request, call_next):
                 )
             if not origin or origin not in allowed:
                 return JSONResponse({"detail": "请求 Origin 不受信任"}, status_code=403)
+        actor_mutation_room, rejection = await _reserve_current_actor_member_mutation(
+            request
+        )
+        if rejection is not None:
+            return rejection
         request.state.user = user
-    return await call_next(request)
+    try:
+        return await call_next(request)
+    finally:
+        if actor_mutation_room is not None:
+            actor_mutation_room.release_action()
 
 
 def _world_turn_lock(context: RuntimeContext) -> threading.Lock:
@@ -408,39 +511,19 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     # 每个发言段各自携带一次内联身份；不按 NPC/会话去重，避免 Electron 退回占位
     pending_inline_speakers: dict[str, dict] = {}
     resolve_speaker = SpeakerPayloadResolver(engine)
+    room_start_guard = threading.Lock()
+    room_start_pending = False
 
     def public_chat_events(record: dict) -> list[dict]:
         """Enrich saved segments and repair legacy/all-narration attribution."""
-        segments = record.get("narrative_segments") or []
-        narrative = strip_tool_protocol(str(record.get("narrative") or ""))
-        record["narrative"] = narrative
-        clean_segments = []
-        for segment in segments:
-            if not isinstance(segment, dict):
-                continue
-            clean = dict(segment)
-            clean["text"] = strip_tool_protocol(str(clean.get("text") or ""))
-            if clean["text"].strip():
-                clean_segments.append(clean)
-        segments = clean_segments
-        events = record.get("events")
-        if isinstance(events, list):
-            for event in events:
-                if isinstance(event, dict) and event.get("type") == "narrative_chunk":
-                    event["text"] = strip_tool_protocol(str(event.get("text") or ""))
-        has_speech = any(
-            isinstance(segment, dict) and segment.get("kind") == "speech" for segment in segments
+        public = enrich_public_history_record(
+            record,
+            engine,
+            resolve_speaker=resolve_speaker,
         )
-        if narrative and not has_speech:
-            reparsed, _clean = parse_speaker_segments(
-                narrative,
-                is_valid_npc=engine.is_valid_npc_id,
-                on_unknown_npc=engine.log_unknown_npc_speaker,
-                speaker_aliases=engine.npc_speaker_aliases(),
-            )
-            if any(segment.kind == "speech" for segment in reparsed):
-                segments = [segment.to_dict() for segment in reparsed]
-        return enrich_narrative_segments(segments, resolve_speaker)
+        record.clear()
+        record.update(public)
+        return public["narrative_segments"]
 
     def turn_state_busy() -> bool:
         return session.turn_busy
@@ -448,13 +531,37 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     def release_turn() -> None:
         session.release_turn()
 
-    def run_reserved_turn(coro_fn, *args):
+    def mark_room_start_pending() -> None:
+        """Track only starts submitted by the authoritative room controller."""
+        nonlocal room_start_pending
+        room = getattr(ws, "room", None)
+        if room is None or getattr(room, "status", None) != "starting":
+            return
+        with room_start_guard:
+            room_start_pending = True
+
+    def finish_room_start(success: bool) -> bool:
+        """Atomically promote a committed opening or make a failed one retryable."""
+        nonlocal room_start_pending
+        with room_start_guard:
+            if not room_start_pending:
+                return False
+            room_start_pending = False
+        room = getattr(ws, "room", None)
+        if room is None:
+            return False
+        MULTIPLAYER_WS.set_room_status(room, "playing" if success else "lobby")
+        outbound.emit(MULTIPLAYER_WS.room_state_payload(room))
+        return True
+
+    def run_reserved_turn(coro_fn, *args, room_start: bool = False):
         """Run a previously reserved turn in the executor."""
 
         def _wrapped():
             try:
                 coro_fn(*args)
             except Exception as e:
+                finish_room_start(False)
                 engine.finish_turn_record(
                     status="failed",
                     error=f"{type(e).__name__}: {e}",
@@ -467,6 +574,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     {
                         "type": "error",
                         "message": "本轮处理失败，请重新发送刚才的行动。",
+                        "terminal": True,
                     }
                 )
                 if outbound.has_active_turn:
@@ -477,6 +585,20 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                         status="failed",
                         error="回合执行结束但没有产生完整提交记录",
                     )
+                rolled_back_start = finish_room_start(False)
+                if room_start and rolled_back_start:
+                    emit(
+                        {
+                            "type": "error",
+                            "message": "开场未能完成，房间已恢复到大厅，请重试。",
+                            "terminal": True,
+                        }
+                    )
+                # GameEngine deliberately swallows a cancelled turn after marking
+                # its journal record.  An opening still needs a terminal wire
+                # event so RoomDriverTransport releases the room reservation.
+                if room_start and outbound.has_active_turn:
+                    outbound.end_turn()
                 release_turn()
 
         loop.run_in_executor(None, _wrapped)
@@ -486,26 +608,41 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         *args,
         turn_kind: str,
         player_input: str | None = None,
+        actor: dict | None = None,
     ) -> None:
         """Create the lifecycle only after the session reservation succeeded."""
         try:
             turn_id = engine.begin_turn_record(
                 kind=turn_kind,
                 player_input=player_input,
+                actor=actor,
             )
             turn_record = engine.turn_journal.read(turn_id)
+            metadata = {"parent_turn_id": turn_record.get("parent_turn_id")}
+            if player_input:
+                metadata["player_input"] = player_input
+                if actor:
+                    metadata["actor"] = actor
             await outbound.begin_turn(
                 turn_id,
-                metadata={"parent_turn_id": turn_record.get("parent_turn_id")},
+                metadata=metadata,
             )
         except Exception:
+            finish_room_start(False)
             engine.finish_turn_record(
                 status="failed",
                 error="回合生命周期启动失败",
             )
             release_turn()
             raise
-        run_reserved_turn(coro_fn, *args)
+        run_reserved_turn(
+            coro_fn,
+            *args,
+            room_start=(
+                turn_kind == "opening"
+                and getattr(ws, "room", None) is not None
+            ),
+        )
 
     async def launch_rewrite(turn_id: str) -> None:
         operation_id = f"rewrite:{secrets.token_hex(8)}"
@@ -678,7 +815,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     def on_done():
         if getattr(engine, "_multiplayer_roster_active", False):
             try:
-                sync_active_investigator(engine.context)
                 state = engine.context.world_store.load()
                 emit(
                     {
@@ -689,6 +825,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 )
             except Exception as exc:
                 print(f"[room] 调查员状态同步失败: {exc}", file=sys.stderr)
+        finish_room_start(True)
         outbound.end_turn()
 
     def on_game_over(ending_type: str, title: str, summary: str):
@@ -711,6 +848,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         )
 
     def on_error(msg: str):
+        # This callback also carries recoverable model-stream warnings. Only a
+        # terminal protocol event may release or roll back a room action.
         emit({"type": "error", "message": msg})
 
     router = WsMessageRouter()
@@ -785,6 +924,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 **list_character_options(
                     engine.context.module_name,
                     context=engine.context,
+                    include_personal=not auth_required(),
                 ),
             }
         )
@@ -879,6 +1019,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 {
                     "type": "error",
                     "message": "自动存档不可手动删除。",
+                    "terminal": True,
                 }
             )
             return
@@ -923,6 +1064,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 {
                     "type": "error",
                     "message": "当前回合尚未结束，暂时不能结算案件。",
+                    "terminal": True,
                 }
             )
             return
@@ -930,6 +1072,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             data.get("ending_type", "neutral"),
             data.get("title", "故事结束"),
             data.get("summary", ""),
+            persist_profile=not auth_required(),
         )
         await outbound.send({"type": "case_settled", **result})
         await outbound.send(
@@ -938,6 +1081,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 **list_character_options(
                     engine.context.module_name,
                     context=engine.context,
+                    include_personal=not auth_required(),
                 ),
             }
         )
@@ -956,7 +1100,9 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         try:
             count = engine.load()
         except StaleRevisionError as exc:
-            await outbound.send({"type": "error", "message": str(exc)})
+            await outbound.send(
+                {"type": "error", "message": str(exc), "terminal": True}
+            )
             return
         await outbound.send(
             {
@@ -1200,7 +1346,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             await outbound.send(
                 {
                     "type": "character_list",
-                    **list_character_options(name, context=context),
+                    **list_character_options(
+                        name,
+                        context=context,
+                        include_personal=not auth_required(),
+                    ),
                 }
             )
             await outbound.send({"type": "save_list", "saves": engine.list_saves()})
@@ -1211,6 +1361,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     async def handle_start(data: dict) -> None:
         if not await reserve_turn():
             return
+        mark_room_start_pending()
         try:
             intent = game_app.start_game.execute(data.get("character_ref"))
             roster = data.get("_room_roster")
@@ -1223,22 +1374,63 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 )
                 engine._multiplayer_roster_active = True
         except ValueError as exc:
+            finish_room_start(False)
             release_turn()
-            await outbound.send({"type": "error", "message": str(exc)})
+            await outbound.send(
+                {"type": "error", "message": str(exc), "terminal": True}
+            )
             return
-        except Exception:
+        except Exception as exc:
+            finish_room_start(False)
             release_turn()
-            raise
+            print(
+                f"[room] 开场初始化失败: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            await outbound.send(
+                {
+                    "type": "error",
+                    "message": "开场初始化失败，房间已恢复到大厅，请重试。",
+                    "terminal": True,
+                }
+            )
+            return
         try:
             await send_character_state(data.get("_room_actor_user_id"))
-        except Exception:
+        except Exception as exc:
+            finish_room_start(False)
             release_turn()
-            raise
-        await launch_reserved_turn(
-            engine.handle_action,
-            intent.engine_input,
-            turn_kind=intent.kind,
-        )
+            print(
+                f"[room] 开场角色同步失败: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            await outbound.send(
+                {
+                    "type": "error",
+                    "message": "开场初始化失败，房间已恢复到大厅，请重试。",
+                    "terminal": True,
+                }
+            )
+            return
+        try:
+            await launch_reserved_turn(
+                engine.handle_action,
+                intent.engine_input,
+                turn_kind=intent.kind,
+            )
+        except Exception as exc:
+            finish_room_start(False)
+            print(
+                f"[room] 开场回合启动失败: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            await outbound.send(
+                {
+                    "type": "error",
+                    "message": "开场启动失败，房间已恢复到大厅，请重试。",
+                    "terminal": True,
+                }
+            )
 
     async def resume_game(
         slot_id: str | None,
@@ -1253,12 +1445,16 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             intent = game_app.resume_game.execute(slot_id)
         except StaleRevisionError as exc:
             release_turn()
-            await outbound.send({"type": "error", "message": str(exc)})
+            await outbound.send(
+                {"type": "error", "message": str(exc), "terminal": True}
+            )
             return
         except SaveNotFoundError:
             release_turn()
             message = "未找到存档。" if announce_loaded else "未找到存档，请开始新游戏。"
-            await outbound.send({"type": "error", "message": message})
+            await outbound.send(
+                {"type": "error", "message": message, "terminal": True}
+            )
             return
         except Exception:
             release_turn()
@@ -1308,21 +1504,44 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     async def handle_action(data: dict) -> None:
         if not await reserve_turn():
             return
+        actor = None
         try:
             investigator_id = str(data.get("_room_investigator_id") or "")
             if investigator_id:
                 activate_investigator(engine.context, investigator_id)
                 engine._multiplayer_roster_active = True
             intent = game_app.perform_action.execute(data.get("content", ""))
+            actor_user_id = str(data.get("_room_actor_user_id") or "")
+            if actor_user_id and investigator_id:
+                state = engine.context.world_store.load()
+                investigators = state.get("investigators")
+                pc = (
+                    investigators.get(investigator_id)
+                    if isinstance(investigators, dict)
+                    else state.get("pc")
+                )
+                if isinstance(pc, dict):
+                    actor = {
+                        "type": "investigator",
+                        "user_id": actor_user_id,
+                        "investigator_id": investigator_id,
+                        "name": str(pc.get("name") or "调查员")[:160],
+                    }
         except ApplicationUseCaseError as exc:
             release_turn()
-            await outbound.send({"type": "error", "message": str(exc)})
+            await outbound.send(
+                {"type": "error", "message": str(exc), "terminal": True}
+            )
             return
+        except Exception:
+            release_turn()
+            raise
         await launch_reserved_turn(
             engine.handle_action,
             intent.engine_input,
             turn_kind=intent.kind,
             player_input=intent.player_input,
+            actor=actor,
         )
 
     # 保持首连的五条初始化消息稳定；世界身份随 module_list 一并下发。
@@ -1338,7 +1557,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     await outbound.send(
         {
             "type": "character_list",
-            **list_character_options(engine.context.module_name, context=engine.context),
+            **list_character_options(
+                engine.context.module_name,
+                context=engine.context,
+                include_personal=not auth_required(),
+            ),
         }
     )
 
@@ -1406,6 +1629,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                         "code": "operation_failed",
                         "operation": str(data.get("type") or ""),
                         "message": "操作失败，房间连接已保留，请稍后重试。",
+                        "terminal": data.get("_room_reserved_action") is True,
                     }
                 )
                 continue
@@ -1430,6 +1654,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         # Reloading/closing the client must stop the old streaming request;
         # otherwise it keeps the world lock while the new-game screen waits.
         engine.cancel_active_turn()
+        finish_room_start(False)
         # A disconnected browser can no longer answer modal handshakes. Wake
         # the worker immediately so it can take the safe default and release
         # the world-level turn lock instead of waiting the full timeout.
@@ -1445,7 +1670,25 @@ async def get_theme():
 
 @app.get("/api/health")
 async def health():
-    """桌面壳用于等待内置后端启动完成。"""
+    """Process liveness; it deliberately does not touch external dependencies."""
+    return {
+        "ok": True,
+        "module": _active_context.module_name,
+        "world_id": _active_context.world_id,
+    }
+
+
+@app.get("/api/ready")
+def readiness():
+    """Deployment readiness, including a real database round trip."""
+    try:
+        with session_scope(DATABASE_URL) as db_session:
+            db_session.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "detail": "database unavailable"},
+            status_code=503,
+        )
     return {
         "ok": True,
         "module": _active_context.module_name,
@@ -1593,7 +1836,11 @@ async def import_module_upload(request: Request):
 @app.get("/api/characters")
 async def list_characters():
     """列出可用于当前模组的新游戏调查员。"""
-    return list_character_options(_active_context.module_name, context=_active_context)
+    return list_character_options(
+        _active_context.module_name,
+        context=_active_context,
+        include_personal=not auth_required(),
+    )
 
 
 @app.post("/api/modules/switch")
@@ -1663,6 +1910,11 @@ async def game_ws(ws: WebSocket):
 @app.get("/api/assets/{module_name}/{filename:path}")
 async def serve_asset(module_name: str, filename: str):
     """服务模组资产图片，带路径遍历保护。"""
+    if auth_required():
+        # Hosted assets include keeper-only and not-yet-discovered material.
+        # Authorized room events carry the approved image as a data URI, so a
+        # path-shaped public endpoint must not become a spoiler oracle.
+        return JSONResponse({"error": "not found"}, status_code=404)
     try:
         record = MODULE_REGISTRY.resolve(module_name)
     except FileNotFoundError:
@@ -1691,6 +1943,8 @@ else:
 if __name__ == "__main__":
     import uvicorn
 
+    bind_host = os.environ.get("TRPG_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    bind_port = int(os.environ.get("TRPG_BIND_PORT", "8765"))
     print("🎲 TRPG Agent WebSocket 服务器")
-    print("   ws://localhost:8765/ws    前端: http://localhost:8765/")
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    print(f"   ws://{bind_host}:{bind_port}/ws    前端: http://{bind_host}:{bind_port}/")
+    uvicorn.run(app, host=bind_host, port=bind_port)

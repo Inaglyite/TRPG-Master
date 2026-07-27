@@ -79,6 +79,8 @@ class ResumeGame:
 
 
 class PerformAction:
+    MAX_ACTION_CHARS = 8_000
+
     def __init__(self, engine: GameEnginePort):
         self.engine = engine
 
@@ -86,6 +88,10 @@ class PerformAction:
         normalized = str(content or "").strip()
         if not normalized:
             raise ApplicationUseCaseError("行动内容不能为空")
+        if len(normalized) > self.MAX_ACTION_CHARS:
+            raise ApplicationUseCaseError(
+                f"行动内容不能超过 {self.MAX_ACTION_CHARS} 个字符"
+            )
         return TurnIntent(
             kind="action",
             engine_input=normalized,

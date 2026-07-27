@@ -21,8 +21,13 @@ import {
   transferOwnership,
   updateMember,
 } from "./api/worlds";
-import { newActionId, roomSend } from "./room-ws";
-import { resetOnlineState, useOnlineStore } from "./state/online-store";
+import { disconnectRoom, newActionId, roomSend } from "./room-ws";
+import {
+  bumpOnlineRequestEpoch,
+  currentOnlineRequestEpoch,
+  resetOnlineState,
+  useOnlineStore,
+} from "./state/online-store";
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -41,18 +46,50 @@ function isUnsupported(error: unknown): boolean {
   );
 }
 
+let worldsRequestSerial = 0;
+let roomRequestSerial = 0;
+let characterRequestSerial = 0;
+let inviteRequestSerial = 0;
+
+type RequestScope = {
+  epoch: number;
+  userId: string | null;
+  worldId?: string | null;
+};
+
+function captureRequestScope(worldId?: string | null): RequestScope {
+  const state = useOnlineStore.getState();
+  return {
+    epoch: currentOnlineRequestEpoch(),
+    userId: state.user?.id ?? null,
+    ...(worldId !== undefined ? { worldId } : {}),
+  };
+}
+
+function requestScopeIsCurrent(scope: RequestScope): boolean {
+  const state = useOnlineStore.getState();
+  return (
+    scope.epoch === currentOnlineRequestEpoch() &&
+    scope.userId === (state.user?.id ?? null) &&
+    (scope.worldId === undefined || scope.worldId === state.activeWorldId)
+  );
+}
+
 // —— 认证状态机 ——
 
 export async function checkSession(): Promise<void> {
+  const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({ authStatus: "checking", authError: null });
   try {
     const user = await fetchMe();
+    if (epoch !== currentOnlineRequestEpoch()) return;
     useOnlineStore.setState({
       authStatus: "authenticated",
       user,
       sessionExpired: false,
     });
   } catch (error) {
+    if (epoch !== currentOnlineRequestEpoch()) return;
     if (error instanceof ApiError && error.isUnauthorized) {
       useOnlineStore.setState({ authStatus: "anonymous", user: null });
     } else {
@@ -69,6 +106,7 @@ export async function login(
   username: string,
   password: string,
 ): Promise<boolean> {
+  const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     authBusy: true,
     authError: null,
@@ -76,6 +114,7 @@ export async function login(
   });
   try {
     const user = await apiLogin(username, password);
+    if (epoch !== currentOnlineRequestEpoch()) return false;
     useOnlineStore.setState({
       authBusy: false,
       authStatus: "authenticated",
@@ -83,6 +122,7 @@ export async function login(
     });
     return true;
   } catch (error) {
+    if (epoch !== currentOnlineRequestEpoch()) return false;
     useOnlineStore.setState({
       authStatus: "anonymous",
       authBusy: false,
@@ -96,6 +136,7 @@ export async function register(
   username: string,
   password: string,
 ): Promise<boolean> {
+  const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     authBusy: true,
     authError: null,
@@ -103,6 +144,7 @@ export async function register(
   });
   try {
     const user = await registerAccount(username, password);
+    if (epoch !== currentOnlineRequestEpoch()) return false;
     useOnlineStore.setState({
       authBusy: false,
       authStatus: "authenticated",
@@ -110,6 +152,7 @@ export async function register(
     });
     return true;
   } catch (error) {
+    if (epoch !== currentOnlineRequestEpoch()) return false;
     useOnlineStore.setState({
       authStatus: "anonymous",
       authBusy: false,
@@ -120,10 +163,12 @@ export async function register(
 }
 
 export async function logout(): Promise<boolean> {
+  const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({ authBusy: true, authError: null });
   try {
     await apiLogout();
   } catch (error) {
+    if (epoch !== currentOnlineRequestEpoch()) return false;
     // 401 表示 Session 本就已失效，可安全完成本地退出。其他失败必须保留
     // 登录态并明确报错，不能让仍有效的 HttpOnly Cookie 在后台悄悄存活。
     if (!(error instanceof ApiError && error.isUnauthorized)) {
@@ -134,6 +179,8 @@ export async function logout(): Promise<boolean> {
       return false;
     }
   }
+  if (epoch !== currentOnlineRequestEpoch()) return false;
+  disconnectRoom();
   resetOnlineState();
   return true;
 }
@@ -143,6 +190,7 @@ export function initOnlineSession(): () => void {
   return onUnauthorized(() => {
     const state = useOnlineStore.getState();
     if (state.authStatus === "authenticated") {
+      disconnectRoom();
       resetOnlineState({ sessionExpired: true });
     }
   });
@@ -151,11 +199,25 @@ export function initOnlineSession(): () => void {
 // —— 大厅 ——
 
 export async function refreshWorlds(): Promise<void> {
+  const scope = captureRequestScope();
+  const requestSerial = ++worldsRequestSerial;
   useOnlineStore.setState({ worldsStatus: "loading", worldsError: null });
   try {
     const worlds = await listWorlds();
+    if (
+      requestSerial !== worldsRequestSerial ||
+      !requestScopeIsCurrent(scope)
+    ) {
+      return;
+    }
     useOnlineStore.setState({ worlds: worlds ?? [], worldsStatus: "ready" });
   } catch (error) {
+    if (
+      requestSerial !== worldsRequestSerial ||
+      !requestScopeIsCurrent(scope)
+    ) {
+      return;
+    }
     useOnlineStore.setState({
       worldsStatus: "error",
       worldsError: errorMessage(error, "无法读取房间列表"),
@@ -176,12 +238,31 @@ export async function ensureModules(): Promise<void> {
 }
 
 export async function enterLobby(): Promise<void> {
+  disconnectRoom();
+  bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     view: "lobby",
     activeWorldId: null,
     roomModule: null,
     roomMetadata: null,
+    members: [],
+    membersStatus: "idle",
+    membersError: null,
+    characterOptions: [],
+    charactersStatus: "idle",
+    roomConnection: "idle",
+    roomStatus: null,
+    ownerUserId: null,
+    currentActorUserId: null,
+    readyUserIds: [],
+    onlineUserIds: [],
+    roomInvestigators: [],
+    activeInvestigatorId: null,
     invite: null,
+    invites: [],
+    privateEvents: [],
+    privateState: null,
+    roomBusy: false,
     roomError: null,
     joinError: null,
     createError: null,
@@ -194,15 +275,18 @@ export async function createRoom(
   name: string,
   maxPlayers: number,
 ): Promise<void> {
+  const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
   try {
     const world = await createWorld(module, {
       ...(name.trim() ? { name: name.trim() } : {}),
       max_players: maxPlayers,
     });
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ createBusy: false });
     await enterRoom(world.world_id);
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       createBusy: false,
       createError: errorMessage(error, "创建房间失败，请重试"),
@@ -216,12 +300,15 @@ export async function joinWithToken(token: string): Promise<void> {
     useOnlineStore.setState({ joinError: "请输入邀请码" });
     return;
   }
+  const scope = captureRequestScope();
   useOnlineStore.setState({ joinBusy: true, joinError: null });
   try {
     const accepted = await acceptInvite(trimmed);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ joinBusy: false });
     await enterRoom(accepted.world_id);
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       joinBusy: false,
       joinError: isUnsupported(error)
@@ -236,6 +323,8 @@ export async function joinWithToken(token: string): Promise<void> {
 const LAST_ROOM_KEY = "trpg-online-world-id";
 
 export async function enterRoom(worldId: string): Promise<void> {
+  disconnectRoom();
+  bumpOnlineRequestEpoch();
   try {
     localStorage.setItem(LAST_ROOM_KEY, worldId);
   } catch {
@@ -244,13 +333,27 @@ export async function enterRoom(worldId: string): Promise<void> {
   useOnlineStore.setState({
     view: "room",
     activeWorldId: worldId,
+    roomModule: null,
+    roomMetadata: null,
+    members: [],
     membersStatus: "loading",
     membersError: null,
     characterOptions: [],
     charactersStatus: "idle",
     invite: null,
     invites: [],
+    inviteBusy: false,
     privateEvents: [],
+    privateState: null,
+    roomConnection: "idle",
+    roomStatus: null,
+    ownerUserId: null,
+    currentActorUserId: null,
+    readyUserIds: [],
+    onlineUserIds: [],
+    roomInvestigators: [],
+    activeInvestigatorId: null,
+    roomBusy: false,
     roomError: null,
   });
   await refreshRoom();
@@ -259,17 +362,26 @@ export async function enterRoom(worldId: string): Promise<void> {
 export async function refreshRoom(): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
+  const requestSerial = ++roomRequestSerial;
   try {
     const info = await getRoomInfo(activeWorldId);
+    if (requestSerial !== roomRequestSerial || !requestScopeIsCurrent(scope)) {
+      return;
+    }
     useOnlineStore.setState({
       members: info.members ?? [],
       membersStatus: "ready",
       roomModule: info.module ?? null,
       roomMetadata: info.metadata ?? null,
     });
-    if (info.module) await loadCharacters(activeWorldId);
-    await refreshInvites();
+    if (info.module) await loadCharacters(activeWorldId, scope);
+    if (!requestScopeIsCurrent(scope)) return;
+    await refreshInvites(scope);
   } catch (error) {
+    if (requestSerial !== roomRequestSerial || !requestScopeIsCurrent(scope)) {
+      return;
+    }
     if (isUnsupported(error)) {
       useOnlineStore.setState({ membersStatus: "unsupported" });
     } else {
@@ -282,12 +394,22 @@ export async function refreshRoom(): Promise<void> {
 }
 
 /** 加载房间模组的候选调查员（按世界查询）；加载成功后不重复请求。 */
-async function loadCharacters(worldId: string): Promise<void> {
+async function loadCharacters(
+  worldId: string,
+  expectedScope = captureRequestScope(worldId),
+): Promise<void> {
   const { charactersStatus } = useOnlineStore.getState();
   if (charactersStatus === "loading" || charactersStatus === "ready") return;
+  const requestSerial = ++characterRequestSerial;
   useOnlineStore.setState({ charactersStatus: "loading" });
   try {
     const data = await getInvestigatorOptions(worldId);
+    if (
+      requestSerial !== characterRequestSerial ||
+      !requestScopeIsCurrent(expectedScope)
+    ) {
+      return;
+    }
     const options = (data.groups ?? []).flatMap(
       (group) => group.characters ?? [],
     );
@@ -296,6 +418,12 @@ async function loadCharacters(worldId: string): Promise<void> {
       charactersStatus: "ready",
     });
   } catch (error) {
+    if (
+      requestSerial !== characterRequestSerial ||
+      !requestScopeIsCurrent(expectedScope)
+    ) {
+      return;
+    }
     useOnlineStore.setState({
       characterOptions: [],
       charactersStatus: isUnsupported(error) ? "unsupported" : "error",
@@ -339,16 +467,19 @@ export async function leaveRoom(): Promise<boolean> {
     await enterLobby();
     return true;
   }
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await removeMember(activeWorldId, user.id);
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return false;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "退出房间失败，请重试"),
     });
     return false;
   }
+  if (!requestScopeIsCurrent(scope)) return true;
   try {
     localStorage.removeItem(LAST_ROOM_KEY);
   } catch {
@@ -363,12 +494,15 @@ export async function leaveRoom(): Promise<boolean> {
 export async function claimByKey(characterKey: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await claimInvestigator(activeWorldId, characterKey);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
     await refreshRoom();
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "认领失败，请重试"),
@@ -380,12 +514,15 @@ export async function claimByKey(characterKey: string): Promise<void> {
 export async function releaseClaim(investigatorId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await releaseInvestigator(activeWorldId, investigatorId);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
     await refreshRoom();
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "释放失败，请重试"),
@@ -400,12 +537,15 @@ export async function changeMemberRole(
 ): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await updateMember(activeWorldId, userId, { role });
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
     await refreshRoom();
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "修改失败，请重试"),
@@ -417,12 +557,15 @@ export async function changeMemberRole(
 export async function kickMember(userId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await removeMember(activeWorldId, userId);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
     await refreshRoom();
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "移除失败，请重试"),
@@ -445,12 +588,15 @@ export async function newInvite(options: {
 }): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ inviteBusy: true, roomError: null });
   try {
     const invite = await createInvite(activeWorldId, options);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ invite, inviteBusy: false });
-    await refreshInvites();
+    await refreshInvites(scope);
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       inviteBusy: false,
       roomError: errorMessage(error, "创建邀请失败"),
@@ -459,16 +605,25 @@ export async function newInvite(options: {
 }
 
 /** 刷新邀请元数据列表；非房主无权限时静默置空。 */
-async function refreshInvites(): Promise<void> {
+async function refreshInvites(expectedScope?: RequestScope): Promise<void> {
   const { activeWorldId, user, members } = useOnlineStore.getState();
   if (!activeWorldId || !user) return;
+  const scope = expectedScope ?? captureRequestScope(activeWorldId);
+  if (!requestScopeIsCurrent(scope)) return;
   const me = members.find((member) => member.user_id === user.id);
   if (me?.role !== "owner") {
     useOnlineStore.setState({ invites: [] });
     return;
   }
+  const requestSerial = ++inviteRequestSerial;
   try {
     const invites = await listInvites(activeWorldId);
+    if (
+      requestSerial !== inviteRequestSerial ||
+      !requestScopeIsCurrent(scope)
+    ) {
+      return;
+    }
     useOnlineStore.setState({ invites: invites ?? [] });
   } catch {
     // 邀请列表读取失败不阻塞房间主流程。
@@ -479,12 +634,15 @@ async function refreshInvites(): Promise<void> {
 export async function revokeInviteById(inviteId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await revokeInvite(activeWorldId, inviteId);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
-    await refreshInvites();
+    await refreshInvites(scope);
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "撤销邀请失败"),
@@ -496,12 +654,15 @@ export async function revokeInviteById(inviteId: string): Promise<void> {
 export async function handOverOwnership(userId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
   useOnlineStore.setState({ roomBusy: true, roomError: null });
   try {
     await transferOwnership(activeWorldId, userId);
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ roomBusy: false });
     await refreshRoom();
   } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({
       roomBusy: false,
       roomError: errorMessage(error, "移交房主失败"),

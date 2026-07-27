@@ -8,7 +8,12 @@ export type DesktopResult = {
   cancelled?: boolean;
 };
 
+export type DesktopOriginResult = DesktopResult & {
+  origin?: string | null;
+};
+
 export type DesktopBridge = {
+  getOnlineOrigin(): Promise<DesktopOriginResult>;
   selectLocalMode(): Promise<DesktopResult>;
   selectOnlineMode(origin: string): Promise<DesktopResult>;
   returnToLauncher(): Promise<DesktopResult>;

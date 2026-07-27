@@ -17,6 +17,7 @@ export function AuthScreen() {
   const authError = useOnlineStore((state) => state.authError);
   const sessionExpired = useOnlineStore((state) => state.sessionExpired);
   const setMode = useAppStore((state) => state.setMode);
+  const bridge = desktopBridge();
 
   const [tab, setTab] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
@@ -69,7 +70,6 @@ export function AuthScreen() {
   }
 
   async function backToModeSelect() {
-    const bridge = desktopBridge();
     if (bridge) {
       const result = await bridge.returnToLauncher();
       if (!result.ok) {
@@ -179,7 +179,7 @@ export function AuthScreen() {
           <span className="online-server-origin" title={apiHttpOrigin()}>
             {apiHttpOrigin()}
           </span>
-          {!originEditing && (
+          {!bridge && !originEditing && (
             <button
               type="button"
               className="btn-ghost online-server-edit"
@@ -193,7 +193,7 @@ export function AuthScreen() {
             </button>
           )}
         </div>
-        {originEditing && (
+        {!bridge && originEditing && (
           <div className="online-server-form">
             <input
               value={originDraft}

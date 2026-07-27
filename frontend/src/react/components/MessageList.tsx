@@ -154,6 +154,14 @@ function Message({
   useEffect(() => setActionsDisabled(false), [actionReset]);
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
   const character = useAppStore((state) => state.character);
+  const mode = useAppStore((state) => state.mode);
+  const playerName =
+    message.speaker?.name ||
+    (mode !== "online" ? character?.name : undefined) ||
+    "调查员";
+  const playerAvatar =
+    message.speaker?.avatar ||
+    (mode !== "online" ? character?.avatar : undefined);
   if (message.hidden) return null;
   if (message.kind === "dice") return <DiceMessage message={message} />;
   const className = [
@@ -177,12 +185,10 @@ function Message({
       )}
       {message.kind === "player" && (
         <div className="msg-attribution msg-attribution-investigator">
-          <span className="msg-attribution-name">
-            {character?.name || "调查员"}
-          </span>
+          <span className="msg-attribution-name">{playerName}</span>
           <AvatarDisc
-            name={character?.name || "调查员"}
-            avatar={character?.avatar}
+            name={playerName}
+            avatar={playerAvatar}
             family="investigator"
           />
         </div>

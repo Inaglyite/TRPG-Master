@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,45 @@ class CharacterListTests(unittest.TestCase):
             self.assertIn("行动是最好的回击", character["backstory"]["beliefs"])
             self.assertTrue(character["top_skills"])
             self.assertEqual(character["source_label"], "默认调查员")
+
+    def test_shared_room_character_list_does_not_expose_host_personal_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.local(
+                "mansion_of_madness",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+            context.custom_characters_dir.mkdir(parents=True, exist_ok=True)
+            (context.custom_characters_dir / "secret.json").write_text(
+                json.dumps({"name": "主机私有角色", "occupation": "记者"})
+            )
+            context.profiles_dir.mkdir(parents=True, exist_ok=True)
+            context.player_profile_file.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "characters": {
+                            "private": {
+                                "name": "另一账号的长期角色",
+                                "character": {
+                                    "name": "另一账号的长期角色",
+                                    "occupation": "医生",
+                                },
+                            }
+                        },
+                    }
+                )
+            )
+
+            options = list_character_options(
+                context=context,
+                include_personal=False,
+            )
+            groups = {group["id"]: group["characters"] for group in options["groups"]}
+            self.assertEqual([], groups["profile"])
+            self.assertEqual([], groups["custom"])
+            self.assertTrue(groups["default"])
+            self.assertTrue(groups["module"])
 
     def test_new_game_applies_selected_character_before_opening_prompt(self):
         with tempfile.TemporaryDirectory() as temp_dir:
