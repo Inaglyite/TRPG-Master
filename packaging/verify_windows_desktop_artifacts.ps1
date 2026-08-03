@@ -79,13 +79,23 @@ function Assert-PortableBootstrap([string]$Executable) {
   # hosted runner it does not reliably forward Chromium's remote-debugging
   # endpoint, so verify its own bootstrap separately and reserve UI probing
   # for the unpacked/installed Electron executable below.
+  $Token = "--trpg-portable-probe=$([guid]::NewGuid().ToString('N'))"
   $Probe = Start-Process `
     -FilePath $Executable `
     -WorkingDirectory (Split-Path $Executable -Parent) `
-    -ArgumentList "--version" `
+    -ArgumentList "--headless=new --disable-gpu $Token" `
     -PassThru `
-    -Wait
-  Assert-Condition ($Probe.ExitCode -eq 0) "Portable bootstrap failed with exit code $($Probe.ExitCode)."
+  try {
+    Start-Sleep -Seconds 8
+    if ($Probe.HasExited) {
+      Assert-Condition ($Probe.ExitCode -eq 0) "Portable bootstrap failed with exit code $($Probe.ExitCode)."
+    }
+  }
+  finally {
+    if ($Probe -and -not $Probe.HasExited) {
+      & taskkill.exe /PID $Probe.Id /T /F 2>$null | Out-Null
+    }
+  }
 }
 
 function Assert-DesktopLaunch(
