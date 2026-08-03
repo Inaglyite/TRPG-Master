@@ -4,7 +4,13 @@ import os
 import subprocess
 from pathlib import Path
 
-ROOT = Path(SPECPATH).resolve().parent.parent
+_spec_root = Path(SPECPATH).resolve()
+# PyInstaller exposes SPECPATH differently across releases/platforms: it may
+# be the spec directory or the project root. Resolve the repository by its
+# stable server.py marker instead of assuming a fixed number of parents.
+ROOT = _spec_root if (_spec_root / "server.py").is_file() else _spec_root.parent
+if not (ROOT / "server.py").is_file():
+    raise RuntimeError(f"Could not locate repository root from {SPECPATH!r}")
 
 
 def tracked_data(*paths):
