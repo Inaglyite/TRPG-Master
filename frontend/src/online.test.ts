@@ -249,6 +249,23 @@ describe("上次房间恢复", () => {
     expect(useOnlineStore.getState().view).toBe("lobby");
     expect(useOnlineStore.getState().activeWorldId).toBeNull();
   });
+
+  it("旧房间返回 world_not_found 时按资源错误回大厅，而不是误报接口未实现", async () => {
+    localStorage.setItem("trpg-online-world-id", "world-deleted");
+    vi.mocked(getRoomInfo).mockRejectedValue(
+      new ApiError("房间不存在", 404, "world_not_found"),
+    );
+
+    await resumeLastRoom();
+
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "lobby",
+      activeWorldId: null,
+      membersStatus: "error",
+      membersError: "房间不存在",
+    });
+  });
 });
 
 describe("异步 REST 归属隔离", () => {

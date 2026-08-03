@@ -38,7 +38,10 @@ vi.mock("./panels", () => ({
 
 vi.mock("./ws", () => ({
   displayWorldHistory: vi.fn(),
+  handleRoomTurnRecovery: vi.fn(),
   handleServerPayload: vi.fn(),
+  markRoomConnectionLost: vi.fn(),
+  markRoomConnectionRestored: vi.fn(),
   recoverRejectedRoomAction: vi.fn(),
   resetRoomGameSession: vi.fn(),
   setActiveTransport: vi.fn(),
@@ -280,6 +283,34 @@ describe("终止性关闭码", () => {
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it.each([4400, 4404])(
+    "%s 房间不可用时清除恢复记录、回大厅并停止重连",
+    async (closeCode) => {
+      vi.useFakeTimers();
+      localStorage.setItem("trpg-online-world-id", "world-1");
+      useOnlineStore.setState({
+        authStatus: "authenticated",
+        user: { id: "u1", username: "alice" },
+        view: "room",
+        activeWorldId: "world-1",
+      });
+      connectRoom("world-1");
+      FakeWebSocket.latest().open();
+
+      FakeWebSocket.latest().close(closeCode);
+
+      expect(useOnlineStore.getState()).toMatchObject({
+        authStatus: "authenticated",
+        view: "lobby",
+        activeWorldId: null,
+      });
+      expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+      await vi.waitFor(() => expect(enterLobby).toHaveBeenCalled());
+      vi.advanceTimersByTime(60_000);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    },
+  );
 
   it("4409 保留登录与活动房间、清除旧玩家私态并以 viewer 重连", async () => {
     vi.useFakeTimers();
@@ -652,6 +683,29 @@ describe("房间控制事件", () => {
     ws.open();
     ws.message(JSON.stringify({ type: "actor_changed", user_id: "u3" }));
     expect(useOnlineStore.getState().currentActorUserId).toBe("u3");
+  });
+
+  it("combat_actor_changed 不被协议边界丢弃并更新战斗行动者", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(
+      JSON.stringify({
+        type: "combat_actor_changed",
+        user_id: "u3",
+        investigator_id: "inv-3",
+        skipped_actor_ids: ["inv-2"],
+        round: 4,
+        room_event_id: 18,
+      }),
+    );
+    expect(useOnlineStore.getState()).toMatchObject({
+      currentActorUserId: "u3",
+      activeInvestigatorId: "inv-3",
+    });
+    expect(ws.sent).toContain(
+      JSON.stringify({ type: "room_ack", event_id: 18 }),
+    );
   });
 
   it("investigator_roster 实时刷新公开调查员状态", () => {

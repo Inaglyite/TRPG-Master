@@ -52,6 +52,7 @@ from src.multiplayer import (
     update_member_role,
 )
 from src.multiplayer_messages import run_room_message_loop, safe_multiplayer_diagnostics
+from src.multiplayer_recovery import turn_recovery_payload
 from src.multiplayer_ws import owner_turn_required
 from src.player_notes import PlayerNotesStore
 from src.room_runtime import (
@@ -121,6 +122,35 @@ def test_multiplayer_diagnostics_remove_keeper_text_and_tool_arguments():
         "failed": 0,
     }
     assert safe["tool_count"] == 1
+
+
+def test_turn_recovery_payload_uses_public_records_and_enriches_assets():
+    requested = {
+        "turn_id": "turn-public",
+        "status": "completed",
+        "events": [{"type": "handout", "file": "letter.png"}],
+    }
+    engine = SimpleNamespace(
+        context=SimpleNamespace(assets_dir=Path("/tmp/assets")),
+        turn_recovery_status=lambda turn_id: {
+            "requested": requested if turn_id == "turn-public" else None,
+            "active": None,
+            "latest_completed": None,
+        },
+    )
+
+    with patch(
+        "src.multiplayer_recovery.enrich_public_history_record",
+        side_effect=lambda record, _engine: dict(record),
+    ), patch(
+        "src.multiplayer_recovery.asset_payload",
+        return_value={"asset_url": "/api/assets/letter.png"},
+    ):
+        payload = turn_recovery_payload(engine, "turn-public")
+
+    assert payload["type"] == "turn_recovery"
+    assert payload["requested"]["events"][0]["asset_url"] == "/api/assets/letter.png"
+    assert payload["active"] is None
 
 
 def test_logout_revokes_and_disconnects_only_the_presented_session(tmp_path: Path):

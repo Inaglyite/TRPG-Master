@@ -267,7 +267,31 @@ export function resetRoomGameSession(): void {
   lastTurnSeq = 0;
   turnHasVisibleNarrative = false;
   narrativeVisibilityScheduled = false;
+  interruptedTurn = false;
+  interruptedTurnId = null;
+  recoveryPending = false;
+  clearRecoveryPoll();
   setDisplayTurnId(null);
+}
+
+/**
+ * Bridge the room transport's lifecycle into the shared turn UI state. The
+ * room WebSocket is separate from the single-player socket, so its close
+ * event cannot reach the normal `onclose` handler above by itself.
+ */
+export function markRoomConnectionLost(turnId: string): void {
+  if (!turnId) return;
+  interruptedTurn = true;
+  interruptedTurnId = turnId;
+  clearTransientHandouts();
+  onConnectionLost(true);
+}
+
+export function markRoomConnectionRestored(turnId: string): void {
+  if (!turnId) return;
+  interruptedTurn = true;
+  interruptedTurnId = turnId;
+  onConnectionRestored(true);
 }
 
 export function safeSend(payload: string) {
@@ -518,6 +542,45 @@ function onTurnRecovery(data: any) {
     "刚才的回合没有完整提交，可以回到最近一个完整自动存档。",
     true,
   );
+}
+
+/** Handle the same recovery record over the multiplayer room transport. */
+export function handleRoomTurnRecovery(
+  data: any,
+  turnId: string,
+  retry: () => void,
+): "completed" | "active" | "unavailable" | "ignored" {
+  if (!turnId) return "ignored";
+  interruptedTurn = true;
+  interruptedTurnId = turnId;
+  const requested = data?.requested as PublicTurnRecord | null;
+  const active = data?.active as PublicTurnRecord | null;
+  const candidate =
+    requested?.turn_id === turnId
+      ? requested
+      : active?.turn_id === turnId
+        ? active
+        : null;
+
+  if (candidate?.status === "completed") {
+    replayRecoveredTurn(candidate);
+    return "completed";
+  }
+  if (candidate?.status === "active") {
+    showConnectionNotice("连接已恢复，守秘人仍在后台完成刚才的回合……");
+    clearRecoveryPoll();
+    recoveryPollTimer = window.setTimeout(() => {
+      recoveryPollTimer = null;
+      retry();
+    }, 1500);
+    return "active";
+  }
+  clearRecoveryPoll();
+  showConnectionNotice(
+    "刚才的回合没有完整提交，可以回到最近一个完整自动存档。",
+    true,
+  );
+  return "unavailable";
 }
 
 // ---- 消息分发 ----

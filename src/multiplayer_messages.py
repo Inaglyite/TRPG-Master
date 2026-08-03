@@ -13,6 +13,7 @@ from .combat import CombatError, assign_combat_actor
 from .investigators import investigator_entity, visible_clues_for_investigator
 from .model_settings import ModelSettings
 from .multiplayer import MultiplayerError, reserve_room_action, room_members
+from .multiplayer_recovery import turn_recovery_payload
 from .player_notes import PlayerNotesConflict, PlayerNotesStore
 from .room_runtime import ActionReservationError, GameRoom
 
@@ -370,12 +371,8 @@ async def run_room_message_loop(
             )
             continue
         if message_type == "turn_recovery_get":
-            await controller.send_room_full_recovery(
-                ws,
-                room,
-                user.id,
-                role=role,
-                connection_id=connection_id,
+            await ws.send_json(
+                turn_recovery_payload(room.engine, data.get("turn_id"))
             )
             continue
         if message_type == "module_list":

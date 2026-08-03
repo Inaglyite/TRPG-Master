@@ -38,12 +38,15 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-/** 契约未实现的接口返回 404/405/501 时，界面应进入“等待后端接口”状态而非报错。 */
+/**
+ * 契约未实现的接口返回 404/405/501 时，界面应进入“等待后端接口”状态而非报错。
+ * 后端已实现的资源错误也可能是 404（例如 world_not_found、invite_invalid）；
+ * 这类错误必须交给业务流程处理，不能伪装成“接口暂不可用”。
+ */
 function isUnsupported(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.status === 404 || error.status === 405 || error.status === 501)
-  );
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 405 || error.status === 501) return true;
+  return error.status === 404 && error.code === null;
 }
 
 let worldsRequestSerial = 0;

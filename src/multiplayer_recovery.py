@@ -6,17 +6,44 @@ import copy
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from .asset_payload import enrich_pc_for_frontend
+from .asset_payload import asset_payload, enrich_pc_for_frontend
 from .investigators import (
     investigator_entity,
     public_investigator_roster,
     visible_clues_for_investigator,
 )
-from .narrative_history import enrich_public_history
+from .narrative_history import enrich_public_history, enrich_public_history_record
 from .player_notes import PlayerNotesStore
 from .room_runtime import BufferedRoomEvent, GameRoom, RoomEventHub
 
 _STATE_CONTROLLER = object()
+
+
+def turn_recovery_payload(engine: Any, requested_turn_id: str | None = None) -> dict:
+    """Return the public turn-journal recovery contract for a room member.
+
+    Room recovery images and turn-journal recovery serve different purposes:
+    the former restores roster/private state, while this payload answers
+    whether an interrupted model turn was committed and, when completed,
+    provides its replayable public events. Keep the same speaker/asset
+    enrichment as the single-player WebSocket without exposing prompts or
+    tool arguments.
+    """
+    requested = requested_turn_id if isinstance(requested_turn_id, str) else None
+    payload = engine.turn_recovery_status(requested)
+    for key in ("requested", "active", "latest_completed"):
+        record = payload.get(key)
+        if not isinstance(record, dict):
+            continue
+        public = enrich_public_history_record(record, engine)
+        for event in public.get("events") or []:
+            if not isinstance(event, dict) or event.get("type") != "handout":
+                continue
+            filename = event.get("file")
+            if isinstance(filename, str) and filename:
+                event.update(asset_payload(filename, engine.context))
+        payload[key] = public
+    return {"type": "turn_recovery", **payload}
 
 
 def public_history_snapshot(room: GameRoom) -> list[dict]:

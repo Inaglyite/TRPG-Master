@@ -73,6 +73,14 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const [inviteUses, setInviteUses] = useState("5");
   const [copied, setCopied] = useState(false);
 
+  // 开局后旁观者仍可加入，但不能再升级为玩家或房主；避免保留一个
+  // 服务端必然返回 room_already_started 的 player 选项。
+  useEffect(() => {
+    if (roomStatus === "playing" && inviteRole === "player") {
+      setInviteRole("viewer");
+    }
+  }, [inviteRole, roomStatus]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") void refreshRoom();
@@ -206,6 +214,8 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                 isOwner &&
                 member.user_id !== user?.id &&
                 member.role !== "owner";
+              const admissionLocked =
+                roomStatus === "playing" && member.role === "viewer";
               const online = onlineUserIds.includes(member.user_id);
               const ready = readyUserIds.includes(member.user_id);
               const isActor = currentActorUserId === member.user_id;
@@ -268,7 +278,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                         <button
                           type="button"
                           className="btn-ghost"
-                          disabled={roomBusy}
+                          disabled={roomBusy || admissionLocked}
+                          title={
+                            admissionLocked
+                              ? "游戏进行中不能将旁观者提升为玩家"
+                              : undefined
+                          }
                           onClick={() =>
                             void changeMemberRole(
                               member.user_id,
@@ -283,7 +298,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                             <button
                               type="button"
                               className="btn-ghost"
-                              disabled={roomBusy}
+                              disabled={roomBusy || admissionLocked}
+                              title={
+                                admissionLocked
+                                  ? "游戏进行中不能将旁观者设为房主"
+                                  : undefined
+                              }
                               onClick={() => {
                                 setConfirmingTransfer(null);
                                 void handOverOwnership(member.user_id);
@@ -303,7 +323,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                           <button
                             type="button"
                             className="btn-ghost"
-                            disabled={roomBusy}
+                            disabled={roomBusy || admissionLocked}
+                            title={
+                              admissionLocked
+                                ? "游戏进行中不能将旁观者设为房主"
+                                : undefined
+                            }
                             onClick={() =>
                               setConfirmingTransfer(member.user_id)
                             }
@@ -470,7 +495,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                   aria-label="邀请角色"
                   disabled={inviteBusy}
                 >
-                  <option value="player">玩家</option>
+                  {roomStatus !== "playing" && (
+                    <option value="player">玩家</option>
+                  )}
                   <option value="viewer">旁观者</option>
                 </select>
                 <input

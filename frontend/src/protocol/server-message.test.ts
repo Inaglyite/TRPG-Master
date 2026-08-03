@@ -227,6 +227,26 @@ describe("parseServerMessage", () => {
       }),
     ).toBeNull();
   });
+
+  it("接受战斗行动者切换事件并保留公开回合字段", () => {
+    expect(
+      parseServerMessage({
+        type: "combat_actor_changed",
+        user_id: "u2",
+        investigator_id: "inv-2",
+        skipped_actor_ids: ["inv-1"],
+        round: 3,
+        room_event_id: 17,
+      }),
+    ).toMatchObject({
+      type: "combat_actor_changed",
+      user_id: "u2",
+      investigator_id: "inv-2",
+      skipped_actor_ids: ["inv-1"],
+      round: 3,
+      room_event_id: 17,
+    });
+  });
 });
 
 describe("gm_turn_start 严格校验与 connected 问候", () => {

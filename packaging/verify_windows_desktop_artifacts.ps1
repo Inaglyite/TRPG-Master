@@ -74,6 +74,20 @@ function Remove-LaunchDirectory([string]$Path) {
   throw "Could not clean Electron acceptance userData '$Path': $LastError"
 }
 
+function Assert-PortableBootstrap([string]$Executable) {
+  # The portable target is an extraction wrapper.  On a non-interactive
+  # hosted runner it does not reliably forward Chromium's remote-debugging
+  # endpoint, so verify its own bootstrap separately and reserve UI probing
+  # for the unpacked/installed Electron executable below.
+  $Probe = Start-Process `
+    -FilePath $Executable `
+    -WorkingDirectory (Split-Path $Executable -Parent) `
+    -ArgumentList "--version" `
+    -PassThru `
+    -Wait
+  Assert-Condition ($Probe.ExitCode -eq 0) "Portable bootstrap failed with exit code $($Probe.ExitCode)."
+}
+
 function Assert-DesktopLaunch(
   [string]$Executable,
   [string]$Label,
@@ -230,10 +244,14 @@ try {
       (Get-FileHash $UnpackedBackend -Algorithm SHA256).Hash
   ) "Electron win-unpacked contains a different backend executable."
 
+  Assert-PortableBootstrap $Portable[0].FullName
+
   # The launcher starts on the mode-selection page. TRPG_EXTERNAL_BACKEND=1
   # prevents this acceptance launch from ever spawning/configuring a local
-  # server, even if launcher behavior changes unexpectedly.
-  Assert-DesktopLaunch $Portable[0].FullName "portable" $DiagnosticsDirectory
+  # server, even if launcher behavior changes unexpectedly. Probe the unpacked
+  # executable rather than the portable extraction wrapper because the latter
+  # cannot expose a stable remote-debugging endpoint on hosted Windows runners.
+  Assert-DesktopLaunch $UnpackedApp[0].FullName "unpacked" $DiagnosticsDirectory
 
   if (-not $SkipInstallCheck) {
     $InstallRoot = Join-Path (

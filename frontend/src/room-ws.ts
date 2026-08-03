@@ -15,7 +15,10 @@ import {
 import { useStartStore } from "./state/start-store";
 import {
   displayWorldHistory,
+  handleRoomTurnRecovery,
   handleServerPayload,
+  markRoomConnectionLost,
+  markRoomConnectionRestored,
   recoverRejectedRoomAction,
   resetRoomGameSession,
   setActiveTransport,
@@ -42,6 +45,8 @@ let reconnectTimer: number | null = null;
 let manuallyClosed = false;
 let lastEventId: number | null = null;
 let roomSnapshotApplied = false;
+let activeRoomTurnId: string | null = null;
+let pendingRoomRecoveryTurnId: string | null = null;
 const sendQueue: string[] = [];
 const MAX_SEND_QUEUE = 64;
 const LAST_ROOM_KEY = "trpg-online-world-id";
@@ -104,6 +109,8 @@ export function connectRoom(worldId: string): void {
   manuallyClosed = false;
   lastEventId = null;
   roomSnapshotApplied = false;
+  activeRoomTurnId = null;
+  pendingRoomRecoveryTurnId = null;
   setActiveTransport({ send: (payload) => sendRaw(injectActionId(payload)) });
   open();
 }
@@ -124,6 +131,13 @@ function open(): void {
         JSON.stringify({ type: "room_sync", after_event_id: lastEventId }),
       );
     }
+    if (pendingRoomRecoveryTurnId) {
+      markRoomConnectionRestored(pendingRoomRecoveryTurnId);
+      sendProtocolFrame({
+        type: "turn_recovery_get",
+        turn_id: pendingRoomRecoveryTurnId,
+      });
+    }
   };
 
   next.onmessage = (event) => {
@@ -136,14 +150,19 @@ function open(): void {
     socket = null;
     roomSnapshotApplied = false;
     setConnectionState("disconnected");
+    if (activeRoomTurnId) {
+      pendingRoomRecoveryTurnId = activeRoomTurnId;
+      markRoomConnectionLost(activeRoomTurnId);
+    }
     if (event.code === 4401) {
       // Session 已失效：清空账号与房间数据并停掉重连，认证页显示过期提示。
       disconnectRoom();
       resetOnlineState({ sessionExpired: true });
       return;
     }
-    if (event.code === 4403) {
-      // 成员资格被撤销/被踢：仍保留登录态，但不再尝试连接无权访问的房间。
+    if (event.code === 4403 || event.code === 4404 || event.code === 4400) {
+      // 成员资格被撤销/被踢，或房间已不存在/缺少房间 ID：仍保留登录态，
+      // 但不再尝试连接这个确定无法进入的房间。清除恢复记录后回大厅。
       disconnectRoom();
       bumpOnlineRequestEpoch();
       try {
@@ -208,6 +227,8 @@ export function disconnectRoom(): void {
   socket = null;
   activeWorldId = null;
   lastEventId = null;
+  activeRoomTurnId = null;
+  pendingRoomRecoveryTurnId = null;
   sendQueue.length = 0;
   setActiveTransport(null);
   resetRoomGameSession();
@@ -388,6 +409,31 @@ function handleRoomMessage(raw: unknown): void {
   }
 
   switch (message.type) {
+    case "gm_turn_start":
+      activeRoomTurnId =
+        typeof message.turn_id === "string" ? message.turn_id : null;
+      handleServerPayload(raw);
+      break;
+    case "turn_recovery": {
+      const recoveryTurnId = pendingRoomRecoveryTurnId;
+      if (recoveryTurnId) {
+        const result = handleRoomTurnRecovery(message, recoveryTurnId, () =>
+          sendProtocolFrame({
+            type: "turn_recovery_get",
+            turn_id: recoveryTurnId,
+          }),
+        );
+        if (result !== "active") {
+          pendingRoomRecoveryTurnId = null;
+          activeRoomTurnId = null;
+        }
+      }
+      break;
+    }
+    case "done":
+      activeRoomTurnId = null;
+      handleServerPayload(raw);
+      break;
     case "room_state":
       applyRoomStateFields(message);
       break;
@@ -500,6 +546,20 @@ function handleRoomMessage(raw: unknown): void {
       useOnlineStore.setState({ currentActorUserId: actor });
       break;
     }
+    case "combat_actor_changed":
+      // 战斗驱动在回合结束后会先广播专用战斗事件，再广播 actor_changed；
+      // 这里保留调查员与行动者信息，避免协议解析边界丢掉战斗切换细节。
+      useOnlineStore.setState((state) => ({
+        currentActorUserId:
+          typeof message.user_id === "string"
+            ? message.user_id
+            : state.currentActorUserId,
+        activeInvestigatorId:
+          typeof message.investigator_id === "string"
+            ? message.investigator_id
+            : state.activeInvestigatorId,
+      }));
+      break;
     case "investigator_roster":
       useOnlineStore.setState({
         roomInvestigators: message.investigators,

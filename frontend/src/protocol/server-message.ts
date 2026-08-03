@@ -58,6 +58,7 @@ export const serverMessageTypes = [
   "owner_changed",
   "investigator_claimed",
   "investigator_released",
+  "combat_actor_changed",
   "actor_changed",
   "room_action_rejected",
   "room_error",
@@ -217,6 +218,15 @@ const investigatorRosterMessageSchema = z.looseObject({
   active_investigator_id: z.string().nullable().optional(),
 });
 
+const combatActorChangedMessageSchema = z.looseObject({
+  type: z.literal("combat_actor_changed"),
+  user_id: z.string().min(1).max(160),
+  investigator_id: z.string().min(1).max(160),
+  skipped_actor_ids: z.array(z.string().max(160)).max(64).optional(),
+  round: z.number().int().nonnegative().optional(),
+  room_event_id: z.number().int().nonnegative().optional(),
+});
+
 export type ServerMessageType = (typeof serverMessageTypes)[number];
 // Domain handlers still own payload validation. The transport rejects unknown
 // discriminants; payload schemas can be tightened one message family at a time.
@@ -272,6 +282,13 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   if (result.data.type === "investigator_roster") {
     const rosterResult = investigatorRosterMessageSchema.safeParse(decoded);
     return rosterResult.success ? (rosterResult.data as ServerMessage) : null;
+  }
+  if (result.data.type === "combat_actor_changed") {
+    const combatActorResult =
+      combatActorChangedMessageSchema.safeParse(decoded);
+    return combatActorResult.success
+      ? (combatActorResult.data as ServerMessage)
+      : null;
   }
   return result.data as ServerMessage;
 }
