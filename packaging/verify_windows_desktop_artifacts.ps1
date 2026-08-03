@@ -216,7 +216,10 @@ $PreviousElectronRunAsNode = [Environment]::GetEnvironmentVariable(
 $PreviousNodeEnv = [Environment]::GetEnvironmentVariable("NODE_ENV", "Process")
 [Environment]::SetEnvironmentVariable("TRPG_EXTERNAL_BACKEND", "1", "Process")
 [Environment]::SetEnvironmentVariable("ELECTRON_ENABLE_LOGGING", "1", "Process")
-[Environment]::SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", $null, "Process")
+# Some hosted runners/tooling leave this variable in the inherited process
+# environment.  An explicit false value is safer than relying on removal:
+# Electron must start the packaged app, not Node's argument parser.
+[Environment]::SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", "0", "Process")
 [Environment]::SetEnvironmentVariable("NODE_ENV", $null, "Process")
 
 try {

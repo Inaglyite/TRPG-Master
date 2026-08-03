@@ -70,3 +70,4 @@ def test_windows_workflow_builds_smokes_installs_and_uploads() -> None:
     assert 'Assert-DesktopLaunch $UnpackedApp[0].FullName "unpacked"' in verifier
     assert "Assert-DesktopLaunch $InstalledApp[0].FullName" in verifier
     assert "/json/list" in verifier
+    assert 'SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", "0", "Process")' in verifier
