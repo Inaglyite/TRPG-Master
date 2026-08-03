@@ -21,9 +21,9 @@
 - 受限发布归档提取、备份加密/解密验证、同目录原子发布、回滚状态恢复和安装器权限边界；
 - 浏览器与 Electron 双客户端联机 E2E，以及 Linux 源码启动/退出进程组验收。
 
-尚未能称为正式生产发布的事项只有外部交付门禁：当前提交的 GitHub Windows workflow、重新部署后的
-Azure staging 验收，以及正式域名和受信任 TLS 证书。当前 Azure IP 自签名证书只适合受控测试，不应
-要求普通玩家绕过证书警告。
+尚未能称为正式生产发布的事项只剩重新部署后的 Azure staging 验收，以及正式域名和受信任 TLS 证书。
+当前 Azure IP 自签名证书只适合受控测试，不应要求普通玩家绕过证书警告。GitHub quality 与 Windows
+安装包门禁已在提交 `fe67af5` 上通过。
 
 ## 2. 当前代码边界
 
@@ -60,6 +60,8 @@ Electron 单机 → 按需启动本地 FastAPI → SQLite
 | `multiplayer.spec.ts` Playwright | `3 passed`：双浏览器、Electron 双端、Electron 单机生命周期 |
 | Windows VM（`192.168.12.129`）前端构建/测试 | `npm run build`、`npm run format:check`、`npm test -- --run` 全部通过；`32` 个文件、`274` 个用例 |
 | Windows VM Electron 无头启动 | 成功打开 `file:///.../frontend/dist/index.html` 并暴露 DevTools 页面 |
+| GitHub `quality`（`fe67af5`） | 通过，run `30780225280` |
+| GitHub Windows NSIS/portable/backend smoke（`fe67af5`） | 通过，run `30780230054`；安装/卸载和桌面探针均通过 |
 
 当前架构行数仍在既定 ratchet 内：`server.py 1697/1699`、`src/multiplayer_ws.py 710/740`、
 `src/multiplayer_http.py 419/420`、`src/engine.py 2125/2126`、`src/tools.py 1492/1503`、
@@ -99,12 +101,10 @@ skip，不能写入测试账号密码，也不能把自签名证书全局放行�
 ## 6. 下一步固定顺序
 
 1. 完成当前工作树的最终文档审校和一次完整门禁；
-2. 在 `feat/multiplayer` 产生有意图的提交并推送，检查 GitHub quality；
-3. 手动触发 Windows workflow，保留 NSIS/portable/backend smoke artifact；
-4. 用同一提交部署 Azure staging，执行 `/api/ready`、TLS/WSS 双客户端、重启恢复、备份解密/pg_restore
+2. 用当前已通过门禁的提交部署 Azure staging，执行 `/api/ready`、TLS/WSS 双客户端、重启恢复、备份解密/pg_restore
    和 release/Nginx 回滚；
-5. 记录真实 SHA、迁移号、测试证据和剩余 TLS 域名风险；未有受信任域名证书前不宣称面向普通玩家上线；
-6. 只有交付约定第 6 节全部满足后，才讨论合入 `master`。
+3. 记录真实 SHA、迁移号、测试证据和剩余 TLS 域名风险；未有受信任域名证书前不宣称面向普通玩家上线；
+4. 只有交付约定第 6 节全部满足后，才讨论合入 `master`。
 
 ## 7. 接续规则
 
