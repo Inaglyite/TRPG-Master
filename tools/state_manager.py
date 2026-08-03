@@ -10,6 +10,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.handouts import resolve_handout_asset  # noqa: E402
 from src.runtime import RuntimeContext  # noqa: E402
+from src.state_paths import resolve_path as _resolve_path  # noqa: E402
+from src.state_paths import set_path as _set_path  # noqa: E402
 
 CONTEXT = RuntimeContext.from_env()
 STORE = CONTEXT.world_store
@@ -29,45 +31,6 @@ def _save(data):
             _TRANSACTION_STATE.update(data)
         return
     STORE.restore(data)
-
-
-def _resolve_path(data, path):
-    """按点分隔路径读取嵌套 dict/列表中的值"""
-    parts = path.split(".")
-    current = data
-    for p in parts:
-        if isinstance(current, list):
-            try:
-                idx = int(p)
-                current = current[idx]
-            except (ValueError, IndexError) as exc:
-                raise KeyError(f"列表索引 '{p}' 不存在于 {current}") from exc
-        elif isinstance(current, dict):
-            if p not in current:
-                raise KeyError(f"键 '{p}' 不存在于 {list(current.keys())}")
-            current = current[p]
-        else:
-            raise KeyError(f"无法从 {type(current)} 中访问 '{p}'")
-    return current
-
-
-def _set_path(data, path, value):
-    """按点分隔路径写入嵌套值"""
-    parts = path.split(".")
-    current = data
-    for p in parts[:-1]:
-        if isinstance(current, list):
-            idx = int(p)
-            current = current[idx]
-        else:
-            if p not in current:
-                current[p] = {}
-            current = current[p]
-    last = parts[-1]
-    if isinstance(current, list):
-        current[int(last)] = value
-    else:
-        current[last] = value
 
 
 def cmd_get(path):

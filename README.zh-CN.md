@@ -20,7 +20,7 @@
 - **可创作的模组生态。** 模组是安全沙箱化的 `.trpgmod` ZIP 包（JSON + Markdown + 素材），带 JSON Schema 校验、一键导入和版本并存；v2 格式的主线安全契约保证随机失败不会让调查永久卡死。自带可直接复制的[工程模板](examples/module-template/manifest.json)。
 - **Lorebook 上下文与防剧透。** Character Card V3 Lorebook 按回合本地检索叙事素材，带预算、分组与冷却；分层信息边界、NPC 揭示记录和私有工作记忆降低模型提前剧透的概率；每 50 个玩家回合静默压缩旧上下文。
 - **存档、回合日志与时间线分支。** 按世界实例隔离的多槽位存档；持久回合日志把叙事、选项、事件和快照绑定到同一回合，断线后可恢复；可在任意决策点创建时间线分支，回到当时的世界快照走出另一条路，且不重新掷骰；无副作用重新叙述只替换最后一轮的文字表达。
-- **桌面与云端双形态。** Linux/Windows 桌面开箱即用；云端部署提供 2–4 人共享房间、Argon2id 账号、可撤销会话、成员权限、当前行动者裁决、私密事件隔离和 PostgreSQL 持久化。
+- **桌面与云端双形态。** Linux 通过源码启动 Electron，Windows 支持 NSIS 安装版和便携版；云端部署提供 2–4 人共享房间、Argon2id 账号、可撤销会话、成员权限、当前行动者裁决、私密事件隔离和 PostgreSQL 持久化。
 
 ## 快速开始
 
@@ -28,7 +28,7 @@
 
 - Python 3.12+
 - Node.js 20 LTS 或更新版本
-- 一个 OpenAI 兼容 API Key（默认面向 DeepSeek）
+- 本地游玩或运维云端服务时需要一个 OpenAI 兼容 API Key（默认面向 DeepSeek）；普通联机玩家不需要
 - 可选：智谱 GLM API Key，用于快速摘要与上下文压缩
 
 ### 安装依赖
@@ -45,6 +45,8 @@ cd ..
 ```
 
 ### 配置模型
+
+如果只作为玩家加入多人服务器，请跳过本节；模型配置由服务器维护者负责。
 
 交互式写入项目根目录的 `.env.json`（已被 Git 忽略）：
 
@@ -90,7 +92,7 @@ python3 start.py --config
 | `GLM_MODEL` | GLM 模型名 | `glm-4-flash-250414` |
 | `TRPG_MODULE` | 启动时使用的模组目录名 | `mansion_of_madness` |
 | `TRPG_PROJECT_ROOT` | 模组、规则与 Skill 的只读定义根目录 | 自动识别 |
-| `TRPG_RUNTIME_ROOT` | `worlds/`、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；打包模式为后端目录 |
+| `TRPG_RUNTIME_ROOT` | 数据库、兼容数据、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；Electron 打包模式注入当前用户的 `userData/runtime` |
 | `TRPG_DATABASE_URL` | SQLAlchemy 数据库 URL；云端必须使用 PostgreSQL | 桌面模式默认使用 `TRPG_RUNTIME_ROOT/trpg-master.db` |
 | `TRPG_REQUIRE_AUTH` | 启用账号、HTTP 与 WebSocket 权限门禁 | `0`；生产 service 设置为 `1` |
 | `TRPG_ALLOWED_ORIGINS` | 允许携带登录 Cookie 的 HTTP/WebSocket Origin | 生产环境必须显式配置 |
@@ -98,13 +100,14 @@ python3 start.py --config
 
 </details>
 
-### 启动桌面版
+### Linux 从源码启动桌面版
 
 ```bash
-./start_desktop.sh
+bash start_desktop.sh
 ```
 
-启动脚本会在打开后端前依次执行：
+启动脚本先检查/构建前端并打开 Electron 模式选择页，此时不会安装 Python 依赖、迁移数据库或读取
+旧世界。只有选择“单机游戏”后，Electron 才通过脚本的 `--backend-only` 模式依次执行：
 
 1. 优先激活项目的 `venv`，不存在时回退 `.venv`；
 2. 检查 SQLAlchemy、Alembic、psycopg 和 Argon2 等后端依赖，缺失时自动执行 `pip install -r requirements.txt`；
@@ -121,7 +124,14 @@ Exec=/absolute/path/to/trpg-master/start_desktop.sh --desktop
 Terminal=false
 ```
 
-桌面模式日志写入 `/tmp/trpg-desktop.log`，后端日志写入 `/tmp/trpg-server.log`。Electron 最后一个窗口关闭后，启动脚本会自动停止后端并释放 `8765` 端口。
+选择“多人游戏”不会执行上述步骤，也不会启动本地后端。桌面模式日志写入
+`/tmp/trpg-desktop.log`，浏览器回退的后端日志写入 `/tmp/trpg-server.log`。Electron 会管理自己
+按需启动的源码后端；最后一个窗口关闭或成功切换到多人模式时会停止该进程组并释放 `8765` 端口。
+若 Electron 在有终端的启动中立即失败，脚本才会回退到浏览器单机模式，此时按 Ctrl+C 停止后端；
+无终端桌面启动不会留下无法跟随浏览器标签页关闭的后台服务。
+
+当前不提供 Linux AppImage；`npm run dist` 会主动拒绝生成可能误带 Windows 后端的损坏包。Windows
+安装版与便携版使用下文的专用脚本构建。
 
 若出现 `ModuleNotFoundError: argon2`、`sqlalchemy` 或 `psycopg`，通常表示绕过了启动脚本，或虚拟环境尚未同步。可执行：
 
@@ -137,6 +147,11 @@ bash start_desktop.sh
 参数的 HTTPS 服务器 origin。登录后可以创建房间，或用房主生成的邀请码加入。完整的建房、邀请、
 选角、准备、行动顺序、私密内容、存档、重连和房主移交说明见
 [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
+
+选择多人模式不会启动本机后端，也不要求在玩家电脑上填写模型 API Key；模型凭据和推理配置由云端
+服务器维护者负责。只有选择单机模式时，打包版 Electron 才会启动内置后端并在缺少配置时打开本地
+API Key 设置窗口。多人当前只提供默认/模组调查员，不会上传或读取玩家电脑上的长期履历与自定义
+角色文件。
 
 普通玩家必须使用受信任的 TLS 证书。当前 Azure 验收环境仍使用 IP 地址和自签名证书，不是面向普通
 玩家的正式入口；不要绕过浏览器证书警告。
@@ -175,7 +190,8 @@ cd frontend && npm run electron:dev
 
 存档按世界实例隔离并事务化保存（自动槽 `slot_000` + 手动槽，世界快照不可变）。
 
-调查员数据分为三层：
+以下三层是本地单机角色数据；多人房间只提供默认/模组调查员，角色占用和案件内状态以服务器数据库
+为准，不读取玩家电脑上的自定义角色或长期履历：
 
 | 层 | 路径 | 作用 |
 |---|---|---|
@@ -210,7 +226,8 @@ powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 
 脚本安装/检查 Python 与 Node.js 依赖，用 PyInstaller 构建 `trpg-server.exe`，再用
 electron-builder 构建 NSIS 安装版和便携版。输出位于 `frontend/release/`。`.env.json`
-不会被打进安装包；首次运行时由 Electron 配置窗口收集 API 地址和 Key。
+不会被打进安装包；只有选择单机模式时，Electron 配置窗口才会收集模型 API 地址和 Key。多人模式
+只要求填写服务器的 HTTPS origin。
 
 ## 文档
 
@@ -232,7 +249,7 @@ electron-builder 构建 NSIS 安装版和便携版。输出位于 `frontend/rele
 提交前运行：
 
 ```bash
-venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m pytest -q
 venv/bin/python -m ruff check src server.py tools tests
 venv/bin/python -m compileall -q src tools server.py tests
 cd frontend

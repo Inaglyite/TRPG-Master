@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .investigators import investigator_entity, stable_investigator_id
+
 AMMO_RE = re.compile(r"(?P<open>[（(])(?P<before>\s*)(?P<count>\d+)(?P<after>\s*发\s*)(?P<close>[）)])")
 STACK_RE = re.compile(
     r"(?P<open>[（(])(?P<before>\s*)(?P<count>\d+)"
@@ -92,8 +94,18 @@ def use_item(
 
 def check_firearm_ammo(world: dict, weapon_hint: str | None, amount: int = 1) -> dict:
     """Return ammo status and reject a known empty/insufficient firearm."""
+    return check_investigator_firearm_ammo(world, "pc", weapon_hint, amount)
+
+
+def check_investigator_firearm_ammo(
+    world: dict,
+    investigator_id: str,
+    weapon_hint: str | None,
+    amount: int = 1,
+) -> dict:
+    """Return ammo status for one stable investigator identity."""
     amount = _valid_amount(amount)
-    inventory = _inventory(world)
+    inventory = _inventory(world, investigator_id)
     tracker = _find_ammo_tracker(inventory, weapon_hint)
     if tracker:
         if tracker["count"] < amount:
@@ -121,7 +133,26 @@ def consume_firearm_ammo(
     reason: str = "",
 ) -> dict:
     """Spend ammunition for a non-combat or combat firearm discharge."""
-    status = check_firearm_ammo(world, weapon_hint, amount)
+    return consume_investigator_firearm_ammo(
+        world,
+        "pc",
+        weapon_hint,
+        amount=amount,
+        reason=reason,
+    )
+
+
+def consume_investigator_firearm_ammo(
+    world: dict,
+    investigator_id: str,
+    weapon_hint: str | None,
+    *,
+    amount: int = 1,
+    reason: str = "",
+) -> dict:
+    """Spend ammunition from one stable investigator's inventory."""
+    stable_id = stable_investigator_id(world, investigator_id)
+    status = check_investigator_firearm_ammo(world, stable_id, weapon_hint, amount)
     if not status["tracked"]:
         result = {
             "ok": True,
@@ -130,12 +161,13 @@ def consume_firearm_ammo(
             "weapon": status["item"],
             "spent": amount,
             "reason": reason,
+            "investigator_id": stable_id,
             "warning": status["warning"],
         }
         _append_item_event(world, result)
         return result
 
-    inventory = _inventory(world)
+    inventory = _inventory(world, stable_id)
     before = status["count"]
     after = before - amount
     current = status["item"]
@@ -152,15 +184,18 @@ def consume_firearm_ammo(
         "after": after,
         "spent": amount,
         "reason": reason,
+        "investigator_id": stable_id,
     }
     _append_item_event(world, result)
     return result
 
 
-def _inventory(world: dict) -> list:
-    inventory = world.get("pc", {}).get("inventory")
+def _inventory(world: dict, investigator_id: str = "pc") -> list:
+    entity = investigator_entity(world, investigator_id)
+    inventory = entity.get("inventory") if isinstance(entity, dict) else None
     if not isinstance(inventory, list):
-        raise InventoryError("world_state.pc.inventory 不是有效列表")
+        stable_id = stable_investigator_id(world, investigator_id)
+        raise InventoryError(f"调查员 {stable_id} 的 inventory 不是有效列表")
     return inventory
 
 

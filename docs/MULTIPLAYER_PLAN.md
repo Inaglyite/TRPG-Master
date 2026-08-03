@@ -1,6 +1,6 @@
 # 联机功能实施计划
 
-更新日期：2026-07-22。本文是 `feat/multiplayer` 分支的实施依据，描述从当前单连接游戏演进到
+更新日期：2026-08-03。本文是 `feat/multiplayer` 分支的实施依据，描述从当前单连接游戏演进到
 2–4 人共享房间的目标架构、阶段、数据契约、测试和上线条件。总体路线图见
 [`ROADMAP.md`](ROADMAP.md)，现有运行结构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。用户确认的完整
 产品范围、Electron 双模式、前端交互要求、协作分工和最终完成定义见
@@ -36,28 +36,25 @@ Browser / Electron
 单机模式继续保留：Electron 连接本机 FastAPI 和 SQLite；联机模式连接 Azure HTTPS/WSS 和
 PostgreSQL。前端共享业务组件，仅在认证入口、后端地址和联机房间界面上区分运行模式。
 
-## 2. 当前基线与缺口
+## 2. 当前基线与交付状态
 
-已经具备：
+当前已经具备：
 
 - Argon2id 用户密码、可撤销服务端 Session、HttpOnly Cookie、登录限流和审计；
 - `users`、`sessions`、`worlds`、`world_members` 及世界权限检查；
 - WebSocket 握手与世界切换鉴权；
 - PostgreSQL 生产存储、世界 revision、回合事务、快照和断线恢复记录；
 - 连接内有序 `turn_id + seq` 事件流和世界级互斥锁；
-- Azure 自动部署入口、Nginx/systemd/PostgreSQL 运维材料。
+- Azure staging 自动部署入口、Nginx/systemd/PostgreSQL 运维材料、加密备份和回滚演练脚本。
 
-尚未具备：
+核心代码缺口已经收口；仍待外部交付验收：
 
-- 登录、注册、退出和 Session 过期的完整前端流程；
-- 世界邀请、成员管理、角色占用和在线状态；
-- 同一世界多个连接共享的 `GameEngine`、消息历史和事件广播；
-- 房间级行动队列、公平性、事件补发和私人事件；
-- 多调查员状态模型及所有工具的服务端角色授权；
-- 联机 staging、双客户端 E2E、压力测试与故障恢复演练。
+- 当前提交推送后的 GitHub quality CI 和 Windows runner artifact；
+- 用当前提交重新部署 Azure staging 后的 `/api/ready`、TLS/WSS、重启、备份/恢复和回滚证据；
+- 面向普通玩家的正式域名与受信任证书。当前 IP 自签名证书只用于受控测试。
 
-最关键的现状约束是：当前每条 WebSocket 都创建独立 `GameEngine`。数据库锁只能防止同时写入，
-不能让两个引擎共享 GM 消息历史，因此不能把“允许多个连接访问同一 `world_id`”误认为多人房间。
+运行时约束仍是：`RoomManager` 为进程内单例，第一版必须保持一个 Uvicorn worker；扩大 worker
+数量前需要跨进程房间租约和事件总线。
 
 ## 3. 第一版产品范围
 
@@ -141,7 +138,7 @@ RoomManager (process singleton)
 
 ### 5.2 新增邀请表
 
-建议增加 `world_invites`：
+已实现的 `world_invites`：
 
 | 字段 | 说明 |
 |---|---|
@@ -159,7 +156,7 @@ RoomManager (process singleton)
 
 ### 5.3 调查员绑定
 
-建议增加关系表 `world_investigators`，不要只把账号绑定藏在 JSONB 中：
+已实现的 `world_investigators` 关系表，不把账号绑定藏在 JSONB 中：
 
 | 字段 | 说明 |
 |---|---|
@@ -183,11 +180,11 @@ RoomManager (process singleton)
 
 - `POST /api/worlds/{id}/invites`：房主创建邀请；
 - `DELETE /api/worlds/{id}/invites/{invite_id}`：撤销邀请；
-- `POST /api/invites/{token}/accept`：接受邀请；
+- `POST /api/invites/accept`：接受邀请，token 放在 JSON 请求体中，避免进入 URL、代理访问日志和浏览器历史；
 - `GET /api/worlds/{id}/members`：成员与角色占用列表；
 - `PATCH /api/worlds/{id}/members/{user_id}`：修改角色或权限；
 - `DELETE /api/worlds/{id}/members/{user_id}`：移除成员；
-- `POST /api/worlds/{id}/investigators/{investigator_id}/claim`：占用角色；
+- `POST /api/worlds/{id}/investigators/claim`：以 `character_key` 占用服务端候选角色；
 - `DELETE /api/worlds/{id}/investigators/{investigator_id}/claim`：释放角色。
 
 所有变更接口使用服务端 Session、权限检查、CSRF/Origin 边界、限流和审计。错误响应逐步增加稳定
@@ -195,23 +192,23 @@ RoomManager (process singleton)
 
 ### 6.2 WebSocket
 
-建议新增客户端消息：
+当前客户端消息：
 
-- `room_join` / `room_leave`；
-- `room_ack { event_id }`；
-- `room_sync { after_event_id }`；
-- `action_submit { action_id, text }`；
-- `actor_assign { user_id }`（owner）；
-- `member_kick { user_id }`（owner）。
+- `room_ack { event_id }`、`room_sync { after_event_id }`；
+- `room_ready { ready }`、`actor_assign { user_id }`（owner）；
+- `start`、`action`、`continue`、`save_load`、`turn_rewrite` 及存档管理消息，均携带稳定
+  `action_id`；
+- `player_notes_get/update`、`suggest_reply`、`decision_reply` 和 `turn_recovery_get`。
+  成员加入、退出、邀请、角色修改和移除使用 HTTP 控制面，不在 WebSocket 中伪造身份。
 
-建议新增服务端事件：
+当前服务端事件：
 
-- `room_state`：成员、角色占用、当前行动者和房间状态；
+- `room_state` / `room_full_state`：成员、角色占用、当前行动者和房间状态；
 - `member_joined` / `member_left`；
 - `actor_changed`；
 - `action_queued` / `action_rejected`；
 - `room_event_gap`：缓存不足，客户端应执行完整恢复；
-- `private_event`：仅在服务端已经锁定目标用户后发送。
+- `private_event`、`private_state`：仅在服务端已经锁定目标用户后发送。
 
 房间事件使用独立、单调的 `event_id`。现有回合内 `turn_id + seq` 保留，用于描述一次 GM 回合的
 有序事件；两者职责不同。每条客户端连接记录最后 ack，重连时优先增量补发，缓存不足才从数据库

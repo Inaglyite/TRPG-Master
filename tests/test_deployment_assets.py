@@ -9,22 +9,48 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def test_backup_script_rejects_paths_outside_managed_roots() -> None:
     script = PROJECT_ROOT / "deploy" / "backup-trpg-master.sh"
-    env = {**os.environ, "TRPG_BACKUP_ROOT": "/tmp/not-an-approved-backup-root"}
-
-    result = subprocess.run(
-        ["bash", str(script)],
-        cwd=PROJECT_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+    invalid_roots = (
+        (
+            {"TRPG_BACKUP_ROOT": "/tmp/not-an-approved-backup-root"},
+            "unsafe backup root",
+        ),
+        (
+            {"TRPG_BACKUP_ROOT": "/var/backups/trpg-master-../../tmp"},
+            "unsafe backup root",
+        ),
+        (
+            {
+                "TRPG_BACKUP_ROOT": "/var/backups/trpg-master",
+                "TRPG_BACKUP_RUNTIME_ROOT": "/var/lib/trpg-master-../../etc",
+            },
+            "unsafe runtime root",
+        ),
     )
+    for overrides, expected_error in invalid_roots:
+        result = subprocess.run(
+            ["bash", str(script)],
+            cwd=PROJECT_ROOT,
+            env={**os.environ, **overrides},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    assert result.returncode == 2
-    assert "unsafe backup root" in result.stderr
+        assert result.returncode == 2
+        assert expected_error in result.stderr
 
     script_text = script.read_text(encoding="utf-8")
-    assert 'GNUPGHOME="${GNUPGHOME:-$work/gnupg}"' in script_text
+    assert 'export GNUPGHOME="$work/gnupg"' in script_text
+    assert 'exec 9<"$backup_root"' in script_text
+    assert "flock --exclusive 9" in script_text
+    assert "TRPG_BACKUP_LOCK_HELD" not in script_text
+    assert 'realpath -e -- "$path"' in script_text
+    assert (
+        'mktemp "$backup_root/.${backup_prefix}-${stamp}.partial.XXXXXX"'
+        in script_text
+    )
+    assert '--decrypt "$partial"' in script_text
+    assert 'mv --no-clobber -- "$partial" "$candidate"' in script_text
     assert "--pinentry-mode loopback" in script_text
     assert "sha256sum database.dump runtime.tar.gz > SHA256SUMS" in script_text
     assert 'sha256sum "$work/database.dump"' not in script_text
@@ -141,14 +167,32 @@ def test_release_installers_stage_atomically_and_install_managed_assets() -> Non
     ) in cases:
         installer_path = PROJECT_ROOT / "deploy" / installer_name
         installer = installer_path.read_text(encoding="utf-8")
+        service = (PROJECT_ROOT / "deploy" / app_service).read_text(
+            encoding="utf-8"
+        )
+        backup_service_source = (
+            PROJECT_ROOT / "deploy" / backup_service
+        ).read_text(encoding="utf-8")
 
         assert installer_path.stat().st_mode & 0o111
         assert 'exec 9>"$root/.install.lock"' in installer
+        assert "service_was_active=0" in installer
+        assert (
+            'systemctl is-active --quiet "$service_name"'
+            in installer
+        )
         assert 'mktemp -d "$root/releases/.install-$release_id-XXXXXX"' in installer
+        assert 'mktemp "$root/releases/.archive-$release_id-XXXXXX"' in installer
         assert '.release-complete' in installer
         assert 'mv -- "$candidate" "$release"' in installer
         assert "moving incomplete" in installer
+        assert "cleanup_stale_release_artifacts" in installer
+        assert "-mmin +1440 -print0" in installer
         assert "rollback_release" in installer
+        assert "previous release did not recover readiness" in installer.replace(
+            "previous staging release did not recover readiness",
+            "previous release did not recover readiness",
+        )
         assert "restore_managed_path" in installer
         assert "install_managed_file" in installer
         assert f'deploy/{app_service}"' in installer
@@ -160,6 +204,15 @@ def test_release_installers_stage_atomically_and_install_managed_assets() -> Non
         assert "nginx -t" in installer
         assert 'systemctl enable --now "$backup_timer"' in installer
         assert health_url in installer
+        assert 'chown -R trpgdeploy:trpgdeploy "$candidate"' not in installer
+        assert (
+            'install -d -m 0700 -o trpgdeploy -g trpgdeploy "$candidate/.venv"'
+            in installer
+        )
+        assert 'chown -R root:root "$candidate/.venv"' in installer
+        assert "! -user root -o -perm /022" in installer
+        assert "UMask=0077" in service
+        assert "UMask=0077" in backup_service_source
 
         result = subprocess.run(
             ["bash", "-n", str(installer_path)],
@@ -169,6 +222,106 @@ def test_release_installers_stage_atomically_and_install_managed_assets() -> Non
             check=False,
         )
         assert result.returncode == 0, result.stderr
+
+
+def _installer_function(source: str, name: str, next_name: str) -> str:
+    start = source.index(f"{name}() {{")
+    end = source.index(f"\n\n{next_name}() {{", start)
+    return source[start:end] + "\n"
+
+
+def _run_rollback_harness(
+    tmp_path: Path,
+    *,
+    service_was_active: bool,
+    ready: bool,
+) -> subprocess.CompletedProcess[str]:
+    source = (PROJECT_ROOT / "deploy" / "install-release.sh").read_text(
+        encoding="utf-8"
+    )
+    wait_function = _installer_function(
+        source,
+        "wait_for_service_ready",
+        "backup_managed_path",
+    )
+    rollback_function = _installer_function(
+        source,
+        "rollback_release",
+        "on_exit",
+    )
+    root = tmp_path / "root"
+    previous = root / "releases" / "abcdef0"
+    previous.mkdir(parents=True)
+    calls = tmp_path / "calls"
+    harness = f"""
+set -Eeuo pipefail
+root="$1"
+previous="$2"
+CALLS="$3"
+service_name=trpg-master.service
+backup_timer=trpg-master-backup.timer
+health_url=http://127.0.0.1:8765/api/ready
+service_was_enabled=1
+service_was_active={int(service_was_active)}
+timer_was_enabled=1
+timer_was_active=0
+unit_dir=/tmp/unit
+nginx_enabled=/tmp/nginx-enabled
+nginx_available=/tmp/nginx-available
+installer_target=/tmp/installer
+restore_managed_path() {{ :; }}
+systemctl() {{ printf 'systemctl %s\\n' "$*" >>"$CALLS"; }}
+nginx() {{ return 0; }}
+journalctl() {{ return 0; }}
+sleep() {{ :; }}
+curl() {{
+    printf 'curl\\n' >>"$CALLS"
+    return {0 if ready else 1}
+}}
+{wait_function}
+{rollback_function}
+rollback_release
+"""
+    return subprocess.run(
+        ["bash", "-s", "--", str(root), str(previous), str(calls)],
+        input=harness,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_release_rollback_restores_original_inactive_service_state(
+    tmp_path: Path,
+) -> None:
+    result = _run_rollback_harness(
+        tmp_path,
+        service_was_active=False,
+        ready=True,
+    )
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+
+    assert result.returncode == 0, result.stderr
+    assert "systemctl stop trpg-master.service" in calls
+    assert "systemctl restart trpg-master.service" not in calls
+    assert "curl" not in calls
+
+
+def test_release_rollback_requires_previous_release_readiness(
+    tmp_path: Path,
+) -> None:
+    result = _run_rollback_harness(
+        tmp_path,
+        service_was_active=True,
+        ready=False,
+    )
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+
+    assert result.returncode == 1
+    assert "systemctl restart trpg-master.service" in calls
+    assert "curl" in calls
+    assert "previous release did not recover readiness" in result.stderr
+    assert "CRITICAL: release rollback was incomplete" in result.stderr
 
 
 def test_desktop_launcher_keeps_electron_sandbox_enabled() -> None:

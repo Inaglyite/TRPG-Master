@@ -45,6 +45,7 @@ let roomSnapshotApplied = false;
 const sendQueue: string[] = [];
 const MAX_SEND_QUEUE = 64;
 const LAST_ROOM_KEY = "trpg-online-world-id";
+const ROLE_CHANGE_RECONNECT_NOTICE = "房间角色已更新，正在重新连接……";
 
 /** 清除仅属于上一位玩家/上一房间的本地展示数据，避免切房或串号泄露。 */
 function clearPrivatePresentationState(): void {
@@ -157,6 +158,21 @@ function open(): void {
         worldsError: null,
       });
       void import("./online").then(({ enterLobby }) => enterLobby());
+      return;
+    }
+    if (event.code === 4409) {
+      // 成员仍在房间，只是角色发生了变化。清除旧玩家私态与待发送动作，
+      // 保留账号、活动房间和恢复游标，并以数据库中的新角色重新握手。
+      bumpOnlineRequestEpoch();
+      sendQueue.length = 0;
+      clearPrivatePresentationState();
+      useOnlineStore.setState({
+        privateEvents: [],
+        privateState: null,
+        roomError: ROLE_CHANGE_RECONNECT_NOTICE,
+      });
+      void refreshRoomMembers();
+      scheduleReconnect();
       return;
     }
     scheduleReconnect();
@@ -389,7 +405,7 @@ function handleRoomMessage(raw: unknown): void {
         gameStarted: roomPlaying,
         gameStarting: false,
       });
-      useOnlineStore.setState({
+      useOnlineStore.setState((state) => ({
         roomInvestigators: Array.isArray(message.investigators)
           ? message.investigators.filter(
               (item): item is Record<string, unknown> =>
@@ -400,7 +416,11 @@ function handleRoomMessage(raw: unknown): void {
           typeof message.active_investigator_id === "string"
             ? message.active_investigator_id
             : null,
-      });
+        roomError:
+          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE
+            ? null
+            : state.roomError,
+      }));
       // 公共叙事历史走与单机相同的渲染链，缺口/服务重启后恢复完整公共叙事；
       // private_state 绝不进入这条公共链路。
       if (Array.isArray(message.history)) {

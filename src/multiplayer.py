@@ -60,6 +60,16 @@ def _require_owner(session, world_id: str, user_id: str) -> WorldMember:
     return member
 
 
+def _require_lobby_for_player_admission(world: World) -> None:
+    room_status = str((world.metadata_json or {}).get("room_status") or "lobby")
+    if room_status != "lobby":
+        raise MultiplayerError(
+            "room_already_started",
+            "游戏开始后不能加入或提升为玩家",
+            409,
+        )
+
+
 def create_invite(
     db_url: str,
     world_id: str,
@@ -200,6 +210,7 @@ def accept_invite(db_url: str, token: str, user_id: str) -> dict:
                 "already_member": True,
             }
         if invite.role == "player":
+            _require_lobby_for_player_admission(world)
             max_players = max(
                 2,
                 min(int((world.metadata_json or {}).get("max_players") or 4), 4),
@@ -272,19 +283,20 @@ def update_member_role(
     if role not in {"player", "viewer"}:
         raise MultiplayerError("invalid_role", "成员角色必须是玩家或旁观者")
     with session_scope(db_url) as session:
+        world = (
+            session.query(World)
+            .filter_by(id=world_id, status="active")
+            .with_for_update()
+            .one_or_none()
+        )
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
         _require_owner(session, world_id, actor_user_id)
         target = _require_member(session, world_id, target_user_id)
         if target.role == "owner":
             raise MultiplayerError("owner_role_locked", "请使用房主移交功能", 409)
         if role == "player" and target.role != "player":
-            world = (
-                session.query(World)
-                .filter_by(id=world_id, status="active")
-                .with_for_update()
-                .one_or_none()
-            )
-            if world is None:
-                raise MultiplayerError("world_not_found", "房间不存在", 404)
+            _require_lobby_for_player_admission(world)
             max_players = max(
                 2,
                 min(int((world.metadata_json or {}).get("max_players") or 4), 4),
@@ -339,6 +351,26 @@ def transfer_owner(
         if current is None or current.role != "owner":
             raise MultiplayerError("owner_required", "只有房主可以执行此操作", 403)
         target = _require_member(session, world_id, target_user_id)
+        if target.role == "viewer":
+            _require_lobby_for_player_admission(world)
+            max_players = max(
+                2,
+                min(int((world.metadata_json or {}).get("max_players") or 4), 4),
+            )
+            player_count = (
+                session.query(WorldMember)
+                .filter(
+                    WorldMember.world_id == world_id,
+                    WorldMember.role.in_(("owner", "player")),
+                )
+                .count()
+            )
+            if player_count >= max_players:
+                raise MultiplayerError(
+                    "world_full",
+                    "房主移交会超过房间玩家人数上限",
+                    409,
+                )
         current.role = "player"
         target.role = "owner"
         world.created_by = target_user_id
@@ -356,11 +388,34 @@ def reserve_room_action(
     action_id: str,
     user_id: str,
     action_type: str,
+    *,
+    required_permission: str = "play",
 ) -> None:
     """Persist a durable running lease before an action reaches the engine."""
+    if required_permission not in {"play", "manage"}:
+        raise ValueError(f"未知房间行动权限: {required_permission}")
     try:
         with session_scope(db_url) as session:
-            _require_member(session, world_id, user_id)
+            world = (
+                session.query(World)
+                .filter_by(id=world_id, status="active")
+                .with_for_update()
+                .one_or_none()
+            )
+            if world is None:
+                raise MultiplayerError("world_not_found", "房间不存在", 404)
+            member = (
+                session.query(WorldMember)
+                .filter_by(world_id=world_id, user_id=user_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if member is None:
+                raise MultiplayerError("not_a_member", "你不是该房间成员", 403)
+            if required_permission == "manage" and member.role != "owner":
+                raise MultiplayerError("owner_required", "只有房主可以执行此操作", 403)
+            if required_permission == "play" and member.role not in {"owner", "player"}:
+                raise MultiplayerError("player_required", "旁观者不能提交行动", 403)
             existing = (
                 session.query(RoomAction)
                 .filter_by(world_id=world_id, action_id=action_id)
@@ -378,14 +433,16 @@ def reserve_room_action(
                 existing.action_type = str(action_type or "action")[:40]
                 existing.status = "running"
             else:
-                session.add(RoomAction(
-                    id=new_id("room_action"),
-                    world_id=world_id,
-                    action_id=action_id,
-                    submitted_by=user_id,
-                    action_type=str(action_type or "action")[:40],
-                    status="running",
-                ))
+                session.add(
+                    RoomAction(
+                        id=new_id("room_action"),
+                        world_id=world_id,
+                        action_id=action_id,
+                        submitted_by=user_id,
+                        action_type=str(action_type or "action")[:40],
+                        status="running",
+                    )
+                )
             session.flush()
     except MultiplayerError:
         raise
@@ -432,6 +489,14 @@ def recover_room_actions(db_url: str, world_id: str) -> int:
 
 def remove_member(db_url: str, world_id: str, target_user_id: str, actor_user_id: str) -> None:
     with session_scope(db_url) as session:
+        world = (
+            session.query(World)
+            .filter_by(id=world_id, status="active")
+            .with_for_update()
+            .one_or_none()
+        )
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
         actor = _require_member(session, world_id, actor_user_id)
         if actor_user_id != target_user_id and actor.role != "owner":
             raise MultiplayerError("owner_required", "只有房主可以移除其他成员", 403)

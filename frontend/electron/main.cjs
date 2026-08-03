@@ -34,9 +34,13 @@ const { pathToFileURL } = require("node:url");
 const isDev = process.env.NODE_ENV === "dev";
 const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
 const backendUrl = "http://127.0.0.1:8765";
+const sourceBackendLauncher =
+  process.env.TRPG_SOURCE_BACKEND_LAUNCHER?.trim() || null;
 let backendProcess = null;
+let backendProcessGroup = false;
 // 本地后端改为按需启动：只有用户在模式选择页点了“单机游戏”才会配置/拉起。
 let localBackendReady = false;
+let localBackendStartPromise = null;
 // 联机模式经主进程校验并 loadURL 的云端 origin；导航守卫只放行它。
 let approvedCloudOrigin = null;
 let mainWindow = null;
@@ -181,13 +185,64 @@ function backendExecutablePath() {
   return packagedBackendExecutable(process.resourcesPath, process.platform);
 }
 
+async function startManagedBackend({
+  command,
+  args,
+  cwd,
+  env,
+  label,
+  timeoutMs,
+  processGroup = false,
+}) {
+  log(`启动${label}:`, command);
+  const child = spawn(command, args, {
+    cwd,
+    windowsHide: true,
+    env,
+    // Source setup runs pip/Alembic/import before exec-ing the server. On
+    // POSIX, a dedicated process group lets shutdown terminate that entire
+    // chain instead of orphaning the current foreground Python child.
+    detached: processGroup,
+  });
+  backendProcess = child;
+  backendProcessGroup = processGroup;
+  const spawnFailure = new Promise((_, reject) => {
+    child.once("error", (error) => {
+      reject(new Error(`无法启动${label}：${error.message || error}`));
+    });
+  });
+
+  child.stdout?.on("data", (data) => log("[backend]", String(data).trim()));
+  child.stderr?.on("data", (data) =>
+    log("[backend:error]", String(data).trim()),
+  );
+  child.on("error", (err) => {
+    log(`${label}进程错误:`, err.message);
+  });
+  child.on("exit", (code, signal) => {
+    log(`${label}退出:`, code, signal);
+    if (backendProcess === child) {
+      backendProcess = null;
+      backendProcessGroup = false;
+    }
+    localBackendReady = false;
+  });
+
+  try {
+    await Promise.race([waitForBackend(timeoutMs, child), spawnFailure]);
+  } catch (error) {
+    if (child.exitCode === null) signalBackendProcess(child, processGroup);
+    throw error;
+  }
+}
+
 async function startPackagedBackend(exePath, runtimeRoot) {
   const backendRoot = path.dirname(exePath);
   fs.mkdirSync(runtimeRoot, { recursive: true });
-  log("启动内置后端:", exePath);
-  const child = spawn(exePath, [], {
+  await startManagedBackend({
+    command: exePath,
+    args: [],
     cwd: backendRoot,
-    windowsHide: true,
     env: {
       ...process.env,
       // server.py 从这里读取 userData/runtime/.env.json；只读模组资源仍由
@@ -195,35 +250,34 @@ async function startPackagedBackend(exePath, runtimeRoot) {
       TRPG_PROJECT_ROOT: runtimeRoot,
       TRPG_RUNTIME_ROOT: runtimeRoot,
     },
+    label: "内置后端",
+    timeoutMs: 30000,
   });
-  backendProcess = child;
-  const spawnFailure = new Promise((_, reject) => {
-    child.once("error", (error) => {
-      reject(new Error(`无法启动内置后端：${error.message || error}`));
-    });
-  });
+}
 
-  child.stdout?.on("data", (data) =>
-    log("[backend]", String(data).trim()),
-  );
-  child.stderr?.on("data", (data) =>
-    log("[backend:error]", String(data).trim()),
-  );
-  child.on("error", (err) => {
-    log("内置后端进程错误:", err.message);
-  });
-  child.on("exit", (code, signal) => {
-    log("内置后端退出:", code, signal);
-    if (backendProcess === child) backendProcess = null;
-    localBackendReady = false;
-  });
-
-  try {
-    await Promise.race([waitForBackend(30000, child), spawnFailure]);
-  } catch (error) {
-    if (child.exitCode === null && !child.killed) child.kill();
-    throw error;
+async function startSourceBackend(launcherPath) {
+  if (!path.isAbsolute(launcherPath)) {
+    throw new Error("源码后端启动器必须是绝对路径");
   }
+  let resolvedLauncher;
+  try {
+    resolvedLauncher = fs.realpathSync(launcherPath);
+  } catch {
+    throw new Error("找不到源码后端启动器，请重新运行 start_desktop.sh");
+  }
+  if (!fs.statSync(resolvedLauncher).isFile()) {
+    throw new Error("源码后端启动器不是普通文件");
+  }
+  await startManagedBackend({
+    command: resolvedLauncher,
+    args: ["--backend-only"],
+    cwd: path.dirname(resolvedLauncher),
+    env: { ...process.env },
+    label: "源码后端",
+    // 首次安装依赖可能明显慢于正常重启。
+    timeoutMs: 180000,
+    processGroup: process.platform !== "win32",
+  });
 }
 
 function delay(ms) {
@@ -281,11 +335,35 @@ async function waitForBackend(timeoutMs = 12000, expectedChild = null) {
   throw new Error(`后端启动超时：${backendUrl}`);
 }
 
+function signalBackendProcess(child, processGroup, signal = "SIGTERM") {
+  try {
+    if (processGroup && process.platform !== "win32" && child.pid) {
+      process.kill(-child.pid, signal);
+      return;
+    }
+    child.kill(signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH") {
+      log("停止本地后端失败:", error?.message || String(error));
+    }
+  }
+}
+
 function stopBackend() {
   if (!backendProcess) return;
-  log("关闭内置后端");
-  backendProcess.kill();
+  log("关闭本地后端");
+  const child = backendProcess;
+  const processGroup = backendProcessGroup;
+  signalBackendProcess(child, processGroup);
+  const forceTimer = setTimeout(() => {
+    if (child.exitCode === null) {
+      log("本地后端未及时退出，强制结束");
+      signalBackendProcess(child, processGroup, "SIGKILL");
+    }
+  }, 3000);
+  child.once("exit", () => clearTimeout(forceTimer));
   backendProcess = null;
+  backendProcessGroup = false;
   localBackendReady = false;
 }
 
@@ -299,26 +377,46 @@ async function ensureLocalBackend() {
       localBackendReady = false;
     }
   }
-  const usesExternalBackend =
-    !app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND === "1";
-  if (usesExternalBackend) {
-    // start_desktop.sh 已启动源码后端；显式 external 模式也必须验证服务存在。
-    await waitForBackend();
-  } else {
-    const exePath = backendExecutablePath();
-    const backendRoot = path.dirname(exePath);
-    const runtimeRoot = path.join(app.getPath("userData"), "runtime");
-    const envPath = localConfigPath(app.getPath("userData"));
-    migrateLegacyLocalConfig(path.join(backendRoot, ".env.json"), envPath);
-    const configured = await ensureEnvJson(envPath);
-    if (!configured) {
-      const err = new Error("未完成模型配置");
-      err.code = "config-cancelled";
-      throw err;
-    }
-    await startPackagedBackend(exePath, runtimeRoot);
+
+  if (localBackendStartPromise) {
+    await localBackendStartPromise;
+    return;
   }
-  localBackendReady = true;
+
+  localBackendStartPromise = (async () => {
+    // Reuse an already-running verified local service without taking ownership.
+    if (await probeBackendHealth()) return;
+
+    if (process.env.TRPG_EXTERNAL_BACKEND === "1") {
+      await waitForBackend();
+    } else if (!app.isPackaged && sourceBackendLauncher) {
+      await startSourceBackend(sourceBackendLauncher);
+    } else if (!app.isPackaged) {
+      // Direct `npm run electron` remains a supported development workflow:
+      // the developer explicitly owns the separately started backend.
+      await waitForBackend();
+    } else {
+      const exePath = backendExecutablePath();
+      const backendRoot = path.dirname(exePath);
+      const runtimeRoot = path.join(app.getPath("userData"), "runtime");
+      const envPath = localConfigPath(app.getPath("userData"));
+      migrateLegacyLocalConfig(path.join(backendRoot, ".env.json"), envPath);
+      const configured = await ensureEnvJson(envPath);
+      if (!configured) {
+        const err = new Error("未完成模型配置");
+        err.code = "config-cancelled";
+        throw err;
+      }
+      await startPackagedBackend(exePath, runtimeRoot);
+    }
+  })();
+
+  try {
+    await localBackendStartPromise;
+    localBackendReady = true;
+  } finally {
+    localBackendStartPromise = null;
+  }
 }
 
 // ---- 导航与新窗口守卫 ----
@@ -386,8 +484,9 @@ function registerIpcHandlers() {
         return { ok: false, cancelled: true };
       }
       const hint =
-        !app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND === "1"
-          ? "（请先通过 start_desktop.sh 启动本地后端）"
+        process.env.TRPG_EXTERNAL_BACKEND === "1" ||
+        (!app.isPackaged && !sourceBackendLauncher)
+          ? "（请先单独启动本地后端，或通过 start_desktop.sh 启动桌面版）"
           : "";
       return { ok: false, error: `${err.message || err}${hint}` };
     }
@@ -413,11 +512,21 @@ function registerIpcHandlers() {
       // 同源加载云端页面：认证 Cookie 与 WebSocket 都在该 origin 下工作，
       // 不依赖跨站 Cookie（SameSite=None）。
       await mainWindow.loadURL(`${origin}/?mode=online`);
+      // A renderer can return to the launcher after using local mode. Once the
+      // cloud page has loaded successfully, an owned local backend is no longer
+      // part of this mode and must not keep running in the background.
+      stopBackend();
       return { ok: true };
     } catch (err) {
       approvedCloudOrigin = previousOrigin;
       if (!writeStoredCloudOrigin(userDataPath, previousStoredOrigin)) {
         log("恢复上一云端地址失败");
+      }
+      // 失败时把窗口带回启动器，而不是把 Chromium 错误页留给用户。
+      try {
+        await loadLauncher();
+      } catch (loadErr) {
+        log("联机失败后返回启动器失败:", loadErr.message || String(loadErr));
       }
       return { ok: false, error: err.message || String(err) };
     }

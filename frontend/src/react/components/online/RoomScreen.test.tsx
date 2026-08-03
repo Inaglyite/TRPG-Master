@@ -570,3 +570,40 @@ describe("RoomScreen 私密线索", () => {
     expect(screen.queryByText("仅你可见")).not.toBeInTheDocument();
   });
 });
+
+describe("RoomScreen 游戏进行中锁定调查员换绑", () => {
+  const claimOptions = [
+    { id: "default:霍华德", name: "霍华德" },
+    { id: "default:黄千陆", name: "黄千陆" },
+  ];
+
+  function setupClaimRoom(roomStatus: string) {
+    setupRoom({
+      roomStatus,
+      charactersStatus: "ready",
+      characterOptions: claimOptions,
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "owner",
+          investigator: { id: "claim-1", character_key: "default:霍华德" },
+        },
+      ],
+    });
+  }
+
+  it("playing 时选择与释放按钮均禁用", () => {
+    setupClaimRoom("playing");
+    render(<RoomScreen />);
+    expect(screen.getByRole("button", { name: "释放" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "选择" })).toBeDisabled();
+  });
+
+  it("lobby 时按钮保持可用", () => {
+    setupClaimRoom("lobby");
+    render(<RoomScreen />);
+    expect(screen.getByRole("button", { name: "释放" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "选择" })).toBeEnabled();
+  });
+});

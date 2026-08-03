@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from starlette.websockets import WebSocketDisconnect
 
 from src.auth import (
@@ -40,7 +42,7 @@ from src.engine import GameEngine
 from src.multiplayer import MultiplayerError, reserve_room_action
 from src.turn_journal import TurnJournal
 from src.world_store import StaleRevisionError
-from tools.import_worlds_to_database import import_world
+from tools.import_worlds_to_database import _record_time, import_world
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -168,7 +170,7 @@ def test_alembic_upgrade_creates_complete_schema(tmp_path: Path):
     url = sqlite_url(tmp_path)
     env = {**os.environ, "TRPG_DATABASE_URL": url}
     subprocess.run(
-        [str(Path(".venv/bin/alembic")), "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=Path(__file__).resolve().parent.parent,
         env=env,
         check=True,
@@ -196,14 +198,80 @@ def test_alembic_upgrade_creates_complete_schema(tmp_path: Path):
     } <= tables
 
 
+def test_alembic_accepts_percent_encoded_database_url(tmp_path: Path):
+    url = f"sqlite:///{tmp_path / 'encoded%40database.db'}"
+    env = {**os.environ, "TRPG_DATABASE_URL": url}
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=Path(__file__).resolve().parent.parent,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert inspect(get_engine(url)).has_table("alembic_version")
+
+
+def test_sqlite_enforces_foreign_keys(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    engine = get_engine(url)
+    Base.metadata.create_all(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+    with pytest.raises(IntegrityError):
+        with session_scope(url) as session:
+            session.add(
+                WorldMember(
+                    id=new_id("member"),
+                    world_id="missing-world",
+                    user_id="missing-user",
+                    role="owner",
+                )
+            )
+
+
+def test_alembic_head_matches_orm_schema(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    env = {**os.environ, "TRPG_DATABASE_URL": url}
+    root = Path(__file__).resolve().parent.parent
+    alembic = [sys.executable, "-m", "alembic"]
+    subprocess.run(
+        [*alembic, "upgrade", "head"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [*alembic, "check"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    indexes = {
+        index["name"]: index
+        for index in inspect(get_engine(url)).get_indexes("world_invites")
+    }
+    assert indexes["ix_world_invites_token_hash"]["unique"] == 1
+    assert not any(
+        constraint["column_names"] == ["token_hash"]
+        for constraint in inspect(get_engine(url)).get_unique_constraints(
+            "world_invites"
+        )
+    )
+
+
 def test_initial_alembic_revision_is_frozen_before_multiplayer_tables(tmp_path: Path):
     """An old production database must see the historical 0001 schema only."""
     url = sqlite_url(tmp_path)
     env = {**os.environ, "TRPG_DATABASE_URL": url}
     root = Path(__file__).resolve().parent.parent
-    alembic = str(root / ".venv/bin/alembic")
+    alembic = [sys.executable, "-m", "alembic"]
     subprocess.run(
-        [alembic, "upgrade", "20260722_0001"],
+        [*alembic, "upgrade", "20260722_0001"],
         cwd=root,
         env=env,
         check=True,
@@ -219,7 +287,7 @@ def test_initial_alembic_revision_is_frozen_before_multiplayer_tables(tmp_path: 
     }.isdisjoint(tables_at_0001)
 
     subprocess.run(
-        [alembic, "upgrade", "head"],
+        [*alembic, "upgrade", "head"],
         cwd=root,
         env=env,
         check=True,
@@ -238,9 +306,9 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
     url = sqlite_url(tmp_path)
     env = {**os.environ, "TRPG_DATABASE_URL": url}
     root = Path(__file__).resolve().parent.parent
-    alembic = str(root / ".venv/bin/alembic")
+    alembic = [sys.executable, "-m", "alembic"]
     subprocess.run(
-        [alembic, "upgrade", "20260722_0004"],
+        [*alembic, "upgrade", "20260722_0004"],
         cwd=root,
         env=env,
         check=True,
@@ -260,6 +328,10 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
                 role="owner",
             )
         )
+        # These ORM models deliberately do not expose relationships. Flush the
+        # parent rows before the RoomAction child so SQLite exercises the same
+        # immediate foreign-key checks as PostgreSQL.
+        session.flush()
         session.add(
             RoomAction(
                 id=new_id("room_action"),
@@ -271,7 +343,7 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
             )
         )
     subprocess.run(
-        [alembic, "upgrade", "head"],
+        [*alembic, "upgrade", "head"],
         cwd=root,
         env=env,
         check=True,
@@ -417,7 +489,7 @@ def test_once_import_marker_never_replaces_newer_database_state(tmp_path: Path):
     state_path.write_text(json.dumps(source_state))
     url = sqlite_url(tmp_path)
     command = [
-        str(Path(".venv/bin/python")),
+        sys.executable,
         "tools/import_worlds_to_database.py",
         "--runtime-root",
         str(tmp_path),
@@ -512,6 +584,86 @@ def test_legacy_import_refuses_to_create_a_second_owner(tmp_path: Path):
             .all()
         )
         assert [member.user_id for member in owners] == [first.id]
+
+
+def test_legacy_import_refuses_created_by_owner_transfer_without_membership(
+    tmp_path: Path,
+):
+    world_dir = tmp_path / "worlds" / "owned-world"
+    world_dir.mkdir(parents=True)
+    (world_dir / "world.json").write_text(
+        json.dumps({"module_name": "legacy-module"})
+    )
+    (world_dir / "world_state.json").write_text(
+        json.dumps({"schema_version": 0, "revision": 0})
+    )
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    first = create_user(url, "column_owner", "first password 123")
+    second = create_user(url, "replacement_owner", "second password 123")
+    with session_scope(url) as session:
+        session.add(
+            World(
+                id="owned-world",
+                module_name="legacy-module",
+                created_by=first.id,
+            )
+        )
+
+    with pytest.raises(ValueError, match="其他房主"):
+        import_world(world_dir, url, second, replace=True)
+    with session_scope(url) as session:
+        assert session.get(World, "owned-world").created_by == first.id
+        assert session.query(WorldMember).filter_by(world_id="owned-world").count() == 0
+
+
+def test_legacy_import_prevalidates_all_world_semantics_before_writing(
+    tmp_path: Path,
+):
+    worlds_root = tmp_path / "worlds"
+    for world_id in ("a-good", "z-bad"):
+        world_dir = worlds_root / world_id
+        world_dir.mkdir(parents=True)
+        (world_dir / "world.json").write_text(
+            json.dumps({"module_name": "legacy-module"})
+        )
+        (world_dir / "world_state.json").write_text(
+            json.dumps({"schema_version": 0, "revision": 0})
+        )
+    (worlds_root / "z-bad" / "player_notes.json").write_text(
+        json.dumps({"revision": "not-an-integer", "text": "broken"})
+    )
+    url = sqlite_url(tmp_path)
+    command = [
+        sys.executable,
+        "tools/import_worlds_to_database.py",
+        "--runtime-root",
+        str(tmp_path),
+        "--database-url",
+        url,
+        "--once",
+        "--replace",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    with session_scope(url) as session:
+        assert session.query(World).count() == 0
+
+
+def test_legacy_record_times_are_normalized_to_utc(tmp_path: Path):
+    fallback = tmp_path / "record.json"
+    fallback.write_text("{}")
+    timestamp = _record_time(
+        {"created_at": "2026-01-01T01:00:00+08:00"},
+        "created_at",
+        fallback,
+    )
+    assert timestamp.isoformat() == "2025-12-31T17:00:00+00:00"
 
 
 def test_replacing_legacy_artifacts_does_not_leave_orphan_snapshots(tmp_path: Path):

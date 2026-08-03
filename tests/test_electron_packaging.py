@@ -57,12 +57,29 @@ def test_packaged_migrations_create_fresh_database_at_head(
     )
 
     assert _revision(database_url) == MIGRATION_HOOK.migration_head(PROJECT_ROOT)
+    assert "TRPG_DATABASE_URL" not in __import__("os").environ
     engine = sa.create_engine(database_url)
     try:
         tables = set(sa.inspect(engine).get_table_names())
         assert {"users", "world_investigators", "room_actions"} <= tables
     finally:
         engine.dispose()
+
+
+def test_packaged_migration_helper_restores_existing_database_url(
+    tmp_path: Path, monkeypatch
+) -> None:
+    original_url = _sqlite_url(tmp_path / "original.db")
+    target_url = _sqlite_url(tmp_path / "target.db")
+    monkeypatch.setenv("TRPG_DATABASE_URL", original_url)
+
+    MIGRATION_HOOK.run_packaged_migrations(
+        resource_root=PROJECT_ROOT,
+        database_url=target_url,
+    )
+
+    assert __import__("os").environ["TRPG_DATABASE_URL"] == original_url
+    assert _revision(target_url) == MIGRATION_HOOK.migration_head(PROJECT_ROOT)
 
 
 def test_packaged_migrations_safely_adopt_create_all_database(
@@ -181,10 +198,11 @@ def test_pyinstaller_spec_uses_tracked_read_only_manifest_and_runtime_hook() -> 
     assert 'runtime_hooks=[str(ROOT / "packaging" / "pyinstaller_runtime_hook.py")]' in text
 
 
-def test_electron_setup_uses_scoped_ipc_and_source_mode_uses_external_backend() -> None:
+def test_electron_setup_uses_scoped_ipc_and_source_backend_is_on_demand() -> None:
     main = (PROJECT_ROOT / "frontend" / "electron" / "main.cjs").read_text(
         encoding="utf8"
     )
+    launcher = (PROJECT_ROOT / "start_desktop.sh").read_text(encoding="utf8")
     package = (PROJECT_ROOT / "frontend" / "package.json").read_text(
         encoding="utf8"
     )
@@ -193,6 +211,21 @@ def test_electron_setup_uses_scoped_ipc_and_source_mode_uses_external_backend() 
     assert "setupServer.listen" not in main
     assert 'ipcMain.handle("trpg:save-local-config"' in main
     assert "event.sender !== activeWebContents" in main
-    assert "!app.isPackaged || process.env.TRPG_EXTERNAL_BACKEND" in main
+    assert 'args: ["--backend-only"]' in main
+    assert "sourceBackendLauncher" in main
+    assert "await startSourceBackend(sourceBackendLauncher)" in main
+    assert 'process.kill(-child.pid, signal)' in main
+    assert 'processGroup: process.platform !== "win32"' in main
+    assert 'signalBackendProcess(child, processGroup, "SIGKILL")' in main
+    assert 'TRPG_SOURCE_BACKEND_LAUNCHER="$SCRIPT_DIR/start_desktop.sh"' in launcher
+    assert 'if [ "$BACKEND_ONLY" = true ]; then' in launcher
+    assert launcher.index('if [ "$BACKEND_ONLY" = true ]; then') < launcher.index(
+        "# ---- Frontend dependencies and build ----"
+    )
+    assert 'set -m\n    "$SCRIPT_DIR/start_desktop.sh" --backend-only' in launcher
+    assert "SERVER_PROCESS_GROUP=true" in launcher
+    assert 'terminate_child "$SERVER_PID" "后端服务" "$SERVER_PROCESS_GROUP"' in launcher
+    assert "start_browser_backend || exit 1" in launcher
+    assert 'URL="http://localhost:8765/?mode=local"' in launcher
     assert '"dist": "node electron/reject-linux-package.cjs"' in package
     assert '"linux"' not in package

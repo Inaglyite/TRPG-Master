@@ -3,33 +3,38 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import secrets
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from .asset_payload import enrich_pc_for_frontend
-from .auth import authorize_world, validate_websocket_origin, websocket_user
+from .auth import authorize_world, validate_websocket_origin, websocket_session
 from .characters import list_character_options
-from .database import World, WorldInvestigator, WorldMember, session_scope, utcnow
-from .investigators import public_investigator_roster, visible_clues_for_investigator
+from .database import Turn, World, WorldInvestigator, WorldMember, session_scope, utcnow
 from .model_settings import ModelSettings
 from .multiplayer import (
-    MultiplayerError,
     finish_room_action,
     recover_room_actions,
-    reserve_room_action,
-    room_members,
 )
-from .narrative_history import enrich_public_history
-from .player_notes import PlayerNotesConflict, PlayerNotesStore
+from .multiplayer_messages import (
+    owner_turn_required as owner_turn_required,
+)
+from .multiplayer_messages import (
+    run_room_message_loop,
+)
+from .multiplayer_private_state import reconcile_world_investigator_roster
+from .multiplayer_recovery import (
+    OrderedRoomSocket,
+    private_recovery_payload,
+    public_history_snapshot,
+    recovery_messages,
+)
 from .room_runtime import (
-    ActionReservationError,
     GameRoom,
     RoomConnection,
     RoomDriverTransport,
@@ -37,22 +42,6 @@ from .room_runtime import (
     RoomManager,
 )
 from .runtime import RuntimeContext
-
-UNSUPPORTED_ROOM_TYPES = frozenset(
-    {"load", "quit", "world_switch", "switch_module", "turn_branch_create", "model_settings_update"}
-)
-OWNER_CONTROL_TYPES = frozenset(
-    {"save", "save_delete", "save_create", "save_rename", "settle_case"}
-)
-MUTATING_TURN_TYPES = frozenset({"start", "continue", "save_load", "action", "turn_rewrite"})
-OWNER_TURN_TYPES = frozenset({"start", "save_load", "turn_rewrite"})
-
-
-def owner_turn_required(message_type: str, data: dict) -> bool:
-    """Return whether this particular turn command requires room ownership."""
-    return message_type in OWNER_TURN_TYPES or (
-        message_type == "continue" and bool(str(data.get("slot_id") or "").strip())
-    )
 
 
 @dataclass(frozen=True)
@@ -108,115 +97,138 @@ class MultiplayerWsController:
         )
         await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
 
-    def room_private_recovery_payload(self, room: GameRoom, user_id: str) -> dict:
-        """Build recovery data visible only to one authenticated room member."""
-        try:
-            world_state = room.engine.context.world_store.load()
-            controllers = world_state.get("investigator_controllers", {})
-            investigators = world_state.get("investigators", {})
-            investigator_id = controllers.get(user_id) if isinstance(controllers, dict) else None
-            own_pc = (
-                investigators.get(investigator_id, {}) if isinstance(investigators, dict) else {}
+    def authoritative_investigator_id(
+        self,
+        world_id: str,
+        user_id: str,
+        role: str,
+    ) -> str | None:
+        """Resolve private-state ownership from the control plane, not stale JSON."""
+        if role not in {"owner", "player"}:
+            return None
+        with session_scope(self.deps.database_url()) as db_session:
+            member = (
+                db_session.query(WorldMember)
+                .filter_by(world_id=world_id, user_id=user_id)
+                .one_or_none()
             )
-            if not own_pc and user_id == room.owner_user_id:
-                own_pc = world_state.get("pc", {})
-            pc_data = enrich_pc_for_frontend(
-                own_pc if isinstance(own_pc, dict) else {},
-                room.engine.context,
+            if member is None or member.role not in {"owner", "player"}:
+                return None
+            claim = (
+                db_session.query(WorldInvestigator)
+                .filter_by(
+                    world_id=world_id,
+                    controller_user_id=user_id,
+                    status="claimed",
+                )
+                .one_or_none()
             )
-            clues_data = self.deps.enrich_clues(
-                visible_clues_for_investigator(
-                    world_state.get("clues_found", {}),
-                    investigator_id,
-                ),
-                world_state,
-                room.engine.context,
-            )
-        except Exception:
-            investigator_id, pc_data, clues_data = None, {}, {}
-        try:
-            notes = PlayerNotesStore(
-                room.engine.context.world_dir,
-                user_id=user_id,
-            ).load()
-        except (OSError, TypeError, ValueError, RuntimeError):
-            notes = {"text": "", "revision": 0}
-        return {
-            "investigator_id": investigator_id,
-            "pc": pc_data,
-            "clues": clues_data,
-            "player_notes": notes,
-        }
+            return claim.id if claim is not None else None
 
-    async def room_full_recovery_payload(self, room: GameRoom, user_id: str) -> dict:
-        """Build a public recovery image plus the requesting member's private state."""
-        try:
-            history = enrich_public_history(
-                room.engine.turn_journal.public_history(),
-                room.engine,
+    def room_private_recovery_payload(
+        self,
+        room: GameRoom,
+        user_id: str,
+        *,
+        role: str | None = None,
+    ) -> dict:
+        """Build recovery data visible only to one authenticated room member."""
+        if role is None:
+            return private_recovery_payload(
+                room,
+                user_id,
+                self.deps.enrich_clues,
             )
-        except Exception:
-            history = []
-        try:
-            state = room.engine.context.world_store.load()
-            investigators = public_investigator_roster(state)
-            active_investigator_id = state.get("active_investigator_id")
-        except Exception:
-            investigators = []
-            active_investigator_id = None
-        return {
-            "type": "room_full_state",
-            "status": room.status,
-            "owner_user_id": room.owner_user_id,
-            "current_actor_user_id": room.current_actor_user_id,
-            "ready_user_ids": sorted(room.ready_users),
-            "online_user_ids": sorted(room.connected_users),
-            "latest_event_id": await room.hub.latest_event_id(),
-            "history": history,
-            "investigators": investigators,
-            "active_investigator_id": active_investigator_id,
-            "private_state": self.room_private_recovery_payload(room, user_id),
-            "pending_reply": await self.pending_reply_recovery_payload(room, user_id),
-        }
+        return private_recovery_payload(
+            room,
+            user_id,
+            self.deps.enrich_clues,
+            investigator_id=self.authoritative_investigator_id(
+                room.world_id,
+                user_id,
+                role,
+            ),
+        )
+
+    def _recovery_messages_factory(
+        self,
+        room: GameRoom,
+        user_id: str,
+        role: str | None = None,
+    ) -> Callable[[int, tuple], list[dict]]:
+        if role is None:
+            return lambda latest_event_id, events: recovery_messages(
+                room,
+                user_id,
+                self.deps.enrich_clues,
+                latest_event_id,
+                events,
+            )
+        investigator_id = self.authoritative_investigator_id(
+            room.world_id,
+            user_id,
+            role,
+        )
+        return lambda latest_event_id, events: recovery_messages(
+            room,
+            user_id,
+            self.deps.enrich_clues,
+            latest_event_id,
+            events,
+            investigator_id=investigator_id,
+        )
+
+    async def room_full_recovery_payload(
+        self,
+        room: GameRoom,
+        user_id: str,
+        *,
+        role: str | None = None,
+    ) -> dict:
+        """Build a public recovery image plus the requesting member's private state."""
+        messages = await room.hub.build_at_boundary(
+            self._recovery_messages_factory(room, user_id, role)
+        )
+        return messages[0]
 
     async def pending_reply_recovery_payload(
-        self, room: GameRoom, user_id: str
+        self,
+        room: GameRoom,
+        user_id: str,
+        *,
+        role: str | None = None,
     ) -> dict | None:
         """Recover the active actor's modal request without replay cursor races."""
-        kind = room.pending_reply_kind
-        if kind not in {"suggest", "decision"} or room.pending_reply_user_id != user_id:
-            return None
-        event_type = "suggest_check" if kind == "suggest" else "decision_request"
-        visibility = f"player:{user_id}"
-        # RoomEventHub owns the visibility-filtered replay buffer.  Read its
-        # latest matching event under the same lock so full-state recovery and
-        # the event cursor describe one authoritative image.
-        async with room.hub._lock:
-            events = tuple(room.hub._events)
-        for event in reversed(events):
-            if event.visibility != visibility or event.payload.get("type") != event_type:
-                continue
-            if (
-                kind == "decision"
-                and str(event.payload.get("id") or "") != room.pending_reply_request_id
-            ):
-                continue
-            payload = dict(event.payload)
-            payload["recovered"] = True
-            return payload
-        return None
+        payload = await self.room_full_recovery_payload(room, user_id, role=role)
+        pending = payload.get("pending_reply")
+        return pending if isinstance(pending, dict) else None
 
     async def send_room_full_recovery(
-        self, ws: WebSocket, room: GameRoom, user_id: str
-    ) -> None:
+        self,
+        ws: WebSocket,
+        room: GameRoom,
+        user_id: str,
+        *,
+        role: str | None = None,
+        connection_id: str | None = None,
+        include_pending_reemit: bool = False,
+    ) -> int:
         """Send a full image, then re-emit a pending modal outside event dedupe."""
-        payload = await self.room_full_recovery_payload(room, user_id)
-        await ws.send_json(payload)
-        pending = payload.get("pending_reply")
-        if isinstance(pending, dict):
-            recovered = dict(pending)
-            recovered.pop("room_event_id", None)
-            await ws.send_json(recovered)
+        factory = self._recovery_messages_factory(room, user_id, role)
+        if connection_id is not None:
+            delivered, replay_cursor = await room.hub.send_snapshot_with_replay(
+                connection_id,
+                factory,
+            )
+            if not delivered:
+                raise RuntimeError("room connection is no longer active")
+            return replay_cursor
+        messages = await room.hub.build_at_boundary(factory)
+        if not include_pending_reemit:
+            messages = messages[:1]
+        for payload in messages:
+            await ws.send_json(payload)
+        return int(messages[0].get("latest_event_id") or 0)
 
     @staticmethod
     def room_control_change_blocked(room: GameRoom) -> bool:
@@ -250,6 +262,52 @@ class MultiplayerWsController:
             metadata["current_actor_user_id"] = room.current_actor_user_id
             world.metadata_json = metadata
             world.updated_at = utcnow()
+
+    def refresh_room_control(self, room: GameRoom) -> None:
+        """Reconcile a newly built runtime with the current database control plane.
+
+        Engine construction runs in a worker thread and can take long enough for
+        an owner transfer, role downgrade, or member removal to commit meanwhile.
+        While a room is still in ``RoomManager._loading``, those HTTP handlers
+        cannot update the not-yet-published ``GameRoom``. Re-reading immediately
+        after publication closes that gap; the synchronous read and assignments
+        contain no event-loop yield, so a concurrent handler either runs wholly
+        before this reconciliation or updates the published room afterwards.
+        """
+        with session_scope(self.deps.database_url()) as db_session:
+            world = db_session.get(World, room.world_id)
+            if world is None or world.status != "active":
+                raise RuntimeError("房间不存在")
+            owner = (
+                db_session.query(WorldMember)
+                .filter_by(world_id=room.world_id, role="owner")
+                .one_or_none()
+            )
+            if owner is None:
+                raise RuntimeError("房间没有有效房主")
+            owner_user_id = owner.user_id
+            playable_members = {
+                member.user_id
+                for member in db_session.query(WorldMember)
+                .filter(WorldMember.world_id == room.world_id)
+                .all()
+                if member.role in {"owner", "player"}
+            }
+            metadata = dict(world.metadata_json or {})
+            actor_user_id = (
+                str(metadata.get("current_actor_user_id") or "") or owner_user_id
+            )
+            if actor_user_id not in playable_members:
+                actor_user_id = owner_user_id
+                metadata["current_actor_user_id"] = actor_user_id
+                world.metadata_json = metadata
+                world.updated_at = utcnow()
+            room_status = str(metadata.get("room_status") or "lobby")
+
+        room.owner_user_id = owner_user_id
+        room.current_actor_user_id = actor_user_id
+        room.status = room_status
+        room.ready_users.intersection_update(playable_members)
 
     def room_roster(self, world_id: str) -> tuple[list[dict], set[str]]:
         """Return claimed investigators and every member required to be ready."""
@@ -305,29 +363,43 @@ class MultiplayerWsController:
         if room.status == "starting":
             self.set_room_status(room, "lobby")
             await self.broadcast_room_state(room)
-        if task.cancelled() or not room.connected_users:
+        if task.cancelled():
             return
         try:
-            error = task.exception()
+            task.exception()
         except (asyncio.CancelledError, RuntimeError):
             return
-        if error is not None:
-            await room.hub.broadcast(
-                {
-                    "type": "room_error",
-                    "code": "room_driver_stopped",
-                    "message": "房间运行时意外停止，请重新进入房间",
-                }
-            )
+        if not await self.deps.room_manager().remove(room.world_id, room):
+            return
+        await room.hub.broadcast(
+            {
+                "type": "room_error",
+                "code": "room_driver_stopped",
+                "message": "房间运行时意外停止，请重新进入房间",
+            }
+        )
+        await room.hub.disconnect_all(
+            code=1012,
+            reason="房间运行时已重启，请重新连接",
+        )
 
     async def websocket(self, ws: WebSocket):
         """Join one authoritative shared engine using the authenticated user session."""
+        room: GameRoom | None = None
+        user: Any | None = None
+        world_id = ""
+        connection_id = ""
+        connection: RoomConnection | None = None
+        attached = False
+        presence_registered = False
+        created = False
         try:
             validate_websocket_origin(ws)
-            user = websocket_user(ws, self.deps.database_url())
-            if user is None:
+            identity = websocket_session(ws, self.deps.database_url())
+            if identity is None:
                 await ws.close(code=4401, reason="未登录或会话已过期")
                 return
+            user = identity.user
             world_id = str(ws.query_params.get("world_id") or "")
             if not world_id:
                 await ws.close(code=4400, reason="缺少房间 ID")
@@ -351,16 +423,25 @@ class MultiplayerWsController:
                 room_metadata = dict(world.metadata_json or {})
                 room_status = str(room_metadata.get("room_status") or "lobby")
                 # "starting" is a crash-recovery marker, never a durable game
-                # state.  If the process ended before the opening turn committed,
-                # make the room retryable on its next connection.
+                # state. Recover a committed opening as playing; otherwise make
+                # the uncommitted attempt retryable.
                 if room_status == "starting":
-                    room_status = "lobby"
-                    room_metadata["room_status"] = "lobby"
+                    latest_opening = (
+                        db_session.query(Turn.status)
+                        .filter(
+                            Turn.world_id == world_id,
+                            Turn.kind == "opening",
+                        )
+                        .order_by(Turn.created_at.desc(), Turn.pk.desc())
+                        .first()
+                    )
+                    opening_committed = bool(latest_opening and latest_opening[0] == "completed")
+                    room_status = "playing" if opening_committed else "lobby"
+                    room_metadata["room_status"] = room_status
                     world.metadata_json = room_metadata
                     world.updated_at = utcnow()
                 stored_actor_user_id = (
-                    str(room_metadata.get("current_actor_user_id") or "")
-                    or owner_user_id
+                    str(room_metadata.get("current_actor_user_id") or "") or owner_user_id
                 )
                 actor_member = (
                     db_session.query(WorldMember)
@@ -379,8 +460,7 @@ class MultiplayerWsController:
                     world.metadata_json = room_metadata
                     world.updated_at = utcnow()
 
-            def create_room() -> GameRoom:
-                recover_room_actions(self.deps.database_url(), world_id)
+            def build_engine() -> Any:
                 context = RuntimeContext.create(
                     world_id,
                     module_name,
@@ -395,43 +475,164 @@ class MultiplayerWsController:
                 engine.prepare_session()
                 if room_status == "playing":
                     engine.restore_latest_committed_history()
+                    engine._multiplayer_roster_active = True
+                return engine
+
+            async def create_room() -> GameRoom:
+                await asyncio.to_thread(
+                    recover_room_actions,
+                    self.deps.database_url(),
+                    world_id,
+                )
+                engine = await asyncio.to_thread(build_engine)
+                initial_actor_user_id = stored_actor_user_id
+                if room_status == "playing":
+                    controllers = reconcile_world_investigator_roster(
+                        self.deps.database_url(),
+                        engine.context,
+                        world_id,
+                        preferred_user_id=stored_actor_user_id,
+                    )
+                    if controllers and initial_actor_user_id not in controllers:
+                        initial_actor_user_id = (
+                            owner_user_id
+                            if owner_user_id in controllers
+                            else next(iter(controllers))
+                        )
                 room = GameRoom(
                     world_id,
                     engine,
                     RoomEventHub(world_id),
                     owner_user_id,
-                    current_actor_user_id=stored_actor_user_id,
+                    current_actor_user_id=initial_actor_user_id,
                     status=room_status,
                 )
-                room.action_status_callback = (
-                    lambda target_world_id, action_id, status: finish_room_action(
+                room.action_status_callback = lambda target_world_id, action_id, status: (
+                    finish_room_action(
                         self.deps.database_url(),
                         target_world_id,
                         action_id,
                         status,
                     )
                 )
+                room.recovery_history = public_history_snapshot(room)
+                room.history_snapshot_callback = lambda: public_history_snapshot(room)
+                room.status_change_callback = lambda status: self.set_room_status(
+                    room,
+                    status,
+                )
+                room.control_state_callback = lambda: self.persist_room_control(room)
                 transport = RoomDriverTransport(room)
                 room.driver_transport = transport
+                if initial_actor_user_id != stored_actor_user_id:
+                    self.persist_room_control(room)
+                recovered_actor_user_id = transport.combat_actor_controller()
+                if (
+                    recovered_actor_user_id
+                    and recovered_actor_user_id != room.current_actor_user_id
+                ):
+                    room.assign_actor(recovered_actor_user_id)
+                    self.persist_room_control(room)
                 return room
 
             room, created = await self.deps.room_manager().get_or_create(world_id, create_room)
+            # Publishing a room is the first point at which concurrent HTTP
+            # membership handlers can see and mutate it. Reconcile the database
+            # once here so changes committed during the slower engine build are
+            # not lost.
+            self.refresh_room_control(room)
             await ws.accept()
             connection_id = f"connection_{secrets.token_hex(12)}"
-            await room.hub.attach(RoomConnection(connection_id, user.id, role, ws))
+            connection = RoomConnection(
+                connection_id,
+                user.id,
+                role,
+                ws,
+                session_hash=identity.token_hash,
+                authorization_check=identity.locally_valid,
+                active=False,
+            )
+            await room.hub.attach_pending(connection)
+            # Room creation can include database recovery and model initialization.
+            # Revalidate after that await and before any room metadata or private
+            # recovery image is sent. Pending registration lets member removal or
+            # logout find this handshake during the remaining bootstrap window.
+            refreshed_identity = websocket_session(ws, self.deps.database_url())
+            if (
+                refreshed_identity is None
+                or refreshed_identity.user.id != user.id
+                or refreshed_identity.token_hash != identity.token_hash
+            ):
+                await ws.close(code=4401, reason="未登录或会话已过期")
+                return
+            role = authorize_world(self.deps.database_url(), user.id, world_id, "read")
+            await room.hub.update_user_role(user.id, role)
+            ordered_ws = OrderedRoomSocket(ws, room.hub, connection_id)
+            if not created:
+                await self.room_bootstrap(ordered_ws, room)
+            recovery_cursor = await self.send_room_full_recovery(
+                ordered_ws,
+                room,
+                user.id,
+                role=role,
+                connection_id=connection_id,
+                include_pending_reemit=False,
+            )
+            # A role change is allowed to race bootstrap, but the control-plane
+            # disconnects downgraded pending sockets. This final check also covers
+            # direct session revocation before activation.
+            refreshed_identity = websocket_session(ws, self.deps.database_url())
+            if (
+                refreshed_identity is None
+                or refreshed_identity.user.id != user.id
+                or refreshed_identity.token_hash != identity.token_hash
+            ):
+                await ws.close(code=4401, reason="未登录或会话已过期")
+                return
+            role = authorize_world(self.deps.database_url(), user.id, world_id, "read")
+            await room.hub.update_user_role(user.id, role)
+            replay = await room.hub.activate_with_replay(
+                connection_id,
+                recovery_cursor,
+            )
+            if replay["gap"] or not replay["delivered"]:
+                await room.hub.detach(connection_id)
+                await ws.close(
+                    code=1012,
+                    reason="房间事件已更新，请重新连接",
+                )
+                return
+            attached = True
             first_user_connection = room.member_connected(user.id)
-            if created:
-                room.driver_task = asyncio.create_task(
-                    self.deps.run_ws_session(
-                        room.driver_transport, room.engine, user_id=owner_user_id
+            presence_registered = True
+
+            async def release_presence() -> None:
+                nonlocal presence_registered
+                if not presence_registered:
+                    return
+                # Flip the guard before awaiting broadcasts: a close frame can
+                # make the WebSocket finally block race this send-timeout path.
+                presence_registered = False
+                last_user_connection = room.member_disconnected(user.id)
+                if last_user_connection:
+                    await room.hub.broadcast(
+                        {"type": "member_left", "user_id": user.id}
                     )
-                )
-                room.driver_task.add_done_callback(
-                    lambda task: asyncio.create_task(self.report_room_driver_exit(room, task))
-                )
-            else:
-                await self.room_bootstrap(ws, room)
-            await self.send_room_full_recovery(ws, room, user.id)
+                await self.broadcast_room_state(room)
+                if not room.connected_users:
+                    idle_seconds = max(
+                        0.0,
+                        float(os.environ.get("TRPG_ROOM_IDLE_SECONDS", "30")),
+                    )
+                    asyncio.create_task(
+                        self.retire_room_after_grace(
+                            world_id,
+                            room,
+                            idle_seconds,
+                        )
+                    )
+
+            connection.transport_failure_callback = release_presence
             if first_user_connection:
                 await room.hub.broadcast(
                     {
@@ -441,449 +642,69 @@ class MultiplayerWsController:
                     }
                 )
             await self.broadcast_room_state(room)
-        except Exception as exc:
-            if ws.client_state.name != "DISCONNECTED":
-                await ws.close(code=4403, reason=str(exc)[:120] or "连接被拒绝")
-            return
-
-        try:
-            while True:
-                raw = await ws.receive_text()
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if websocket_user(ws, self.deps.database_url()) is None:
-                    await ws.close(code=4401, reason="登录会话已过期")
-                    break
-                try:
-                    role = authorize_world(self.deps.database_url(), user.id, world_id, "read")
-                except Exception:
-                    await ws.close(code=4403, reason="房间成员权限已被移除")
-                    break
-                message_type = str(data.get("type") or "")
-                if message_type == "ping":
-                    await ws.send_json({"type": "pong"})
-                    continue
-                if message_type == "room_ack":
-                    accepted = await room.hub.acknowledge(
-                        connection_id, int(data.get("event_id") or 0)
+            if created:
+                room.driver_task = asyncio.create_task(
+                    self.deps.run_ws_session(
+                        room.driver_transport,
+                        room.engine,
+                        user_id=room.owner_user_id,
                     )
-                    if not accepted:
-                        await ws.send_json({"type": "protocol_error", "code": "invalid_room_ack"})
-                    continue
-                if message_type == "room_sync":
-                    replay = await room.hub.replay_after(
-                        connection_id, int(data.get("after_event_id") or 0)
-                    )
-                    if replay["gap"]:
-                        await ws.send_json(
-                            {
-                                "type": "room_event_gap",
-                                "latest_event_id": replay["latest_event_id"],
-                            }
-                        )
-                        await self.send_room_full_recovery(ws, room, user.id)
-                    else:
-                        for event in replay["events"]:
-                            await ws.send_json(event)
-                    continue
-                if message_type == "room_ready":
-                    if role == "viewer":
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "player_required",
-                                "message": "旁观者不能准备游戏",
-                            }
-                        )
-                        continue
-                    room.set_ready(user.id, bool(data.get("ready", True)))
-                    await self.broadcast_room_state(room)
-                    continue
-                if message_type == "actor_assign":
-                    if role != "owner":
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "owner_required",
-                                "message": "只有房主可以指定行动者",
-                            }
-                        )
-                        continue
-                    if self.room_control_change_blocked(room):
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "room_turn_in_progress",
-                                "message": "当前回合或确认请求结束前不能更换行动者",
-                            }
-                        )
-                        continue
-                    target_user_id = str(data.get("user_id") or "")
-                    member_state = room_members(self.deps.database_url(), world_id, user.id)
-                    eligible = {
-                        member["user_id"]
-                        for member in member_state["members"]
-                        if member["role"] in {"owner", "player"}
-                    }
-                    if target_user_id not in eligible:
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "invalid_actor",
-                                "message": "目标成员不能成为行动者",
-                            }
-                        )
-                        continue
-                    room.assign_actor(target_user_id)
-                    self.persist_room_control(room)
-                    await room.hub.broadcast({"type": "actor_changed", "user_id": target_user_id})
-                    await self.broadcast_room_state(room)
-                    continue
-                if message_type in {"player_notes_get", "player_notes_update"}:
-                    notes_store = PlayerNotesStore(
-                        room.engine.context.world_dir,
-                        user_id=user.id,
-                    )
-                    try:
-                        if message_type == "player_notes_get":
-                            payload = {"type": "player_notes", **notes_store.load()}
-                        else:
-                            saved = notes_store.save(
-                                data.get("text", ""),
-                                expected_revision=(
-                                    int(data["revision"])
-                                    if data.get("revision") is not None
-                                    else None
-                                ),
-                            )
-                            payload = {"type": "player_notes", "saved": True, **saved}
-                    except PlayerNotesConflict as exc:
-                        payload = {
-                            "type": "player_notes_conflict",
-                            "message": str(exc),
-                            **notes_store.load(),
-                        }
-                    except (OSError, TypeError, ValueError, RuntimeError) as exc:
-                        payload = {
-                            "type": "player_notes_error",
-                            "message": str(exc) or "玩家笔记保存失败",
-                        }
-                    await ws.send_json(payload)
-                    continue
-                if message_type == "state":
-                    try:
-                        world_state = room.engine.context.world_store.load()
-                        controllers = world_state.get("investigator_controllers", {})
-                        investigators = world_state.get("investigators", {})
-                        investigator_id = (
-                            controllers.get(user.id) if isinstance(controllers, dict) else None
-                        )
-                        own_pc = (
-                            investigators.get(investigator_id, {})
-                            if isinstance(investigators, dict)
-                            else {}
-                        )
-                        if not own_pc and user.id == room.owner_user_id:
-                            own_pc = world_state.get("pc", {})
-                        pc_data = enrich_pc_for_frontend(
-                            own_pc if isinstance(own_pc, dict) else {},
-                            room.engine.context,
-                        )
-                        clues_data = self.deps.enrich_clues(
-                            visible_clues_for_investigator(
-                                world_state.get("clues_found", {}),
-                                investigator_id,
-                            ),
-                            world_state,
-                            room.engine.context,
-                        )
-                    except Exception:
-                        pc_data, clues_data = {}, {}
-                    await ws.send_json(
-                        {
-                            "type": "state_data",
-                            "data": json.dumps(pc_data, ensure_ascii=False),
-                            "clues": json.dumps(clues_data, ensure_ascii=False),
-                        }
-                    )
-                    continue
-                if message_type == "turn_recovery_get":
-                    await self.send_room_full_recovery(ws, room, user.id)
-                    continue
-                if message_type == "module_list":
-                    await ws.send_json(
-                        {
-                            "type": "module_list",
-                            "modules": self.deps.list_modules(),
-                            "active": room.engine.context.module_name,
-                        }
-                    )
-                    continue
-                if message_type == "character_list":
-                    await ws.send_json(
-                        {
-                            "type": "character_list",
-                            **list_character_options(
-                                room.engine.context.module_name,
-                                context=room.engine.context,
-                                include_personal=False,
-                            ),
-                        }
-                    )
-                    continue
-                if message_type == "save_list":
-                    await ws.send_json({"type": "save_list", "saves": room.engine.list_saves()})
-                    continue
-                if message_type == "model_settings_get":
-                    await ws.send_json(
-                        self.deps.model_settings_payload(
-                            ModelSettings.validated(
-                                room.engine.narrative_model,
-                                room.engine.judgement_model,
-                            )
-                        )
-                    )
-                    continue
-                if message_type == "turn_diagnostics_get":
-                    if role != "owner":
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "owner_required",
-                                "message": "只有房主可以查看回合诊断",
-                            }
-                        )
-                    else:
-                        await ws.send_json(
-                            {
-                                "type": "turn_diagnostics",
-                                "diagnostics": room.engine.turn_diagnostics(data.get("turn_id")),
-                            }
-                        )
-                    continue
-                if message_type in {"suggest_reply", "decision_reply"}:
-                    if room.current_actor_user_id != user.id:
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "not_current_actor",
-                                "message": "只有当前行动者可以作出这个决定",
-                            }
-                        )
-                        continue
-                    reply_kind = "suggest" if message_type == "suggest_reply" else "decision"
-                    if not room.accept_pending_reply(
-                        reply_kind,
-                        user.id,
-                        request_id=data.get("decision_id"),
-                    ):
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "stale_reply",
-                                "message": "该确认请求已经失效或尚未发起",
-                            }
-                        )
-                        continue
-                if message_type in UNSUPPORTED_ROOM_TYPES:
-                    await ws.send_json(
-                        {
-                            "type": "room_action_rejected",
-                            "code": "unsupported_in_room",
-                            "message": "该操作不能在共享房间中执行",
-                        }
-                    )
-                    continue
-                if message_type in OWNER_CONTROL_TYPES and role != "owner":
-                    await ws.send_json(
-                        {
-                            "type": "room_action_rejected",
-                            "code": "owner_required",
-                            "message": "只有房主可以执行房间管理操作",
-                        }
-                    )
-                    continue
-                if message_type in OWNER_CONTROL_TYPES:
-                    action_id = str(data.get("action_id") or "")
-                    try:
-                        await room.reserve_control(user.id, action_id)
-                        reserve_room_action(
-                            self.deps.database_url(),
-                            world_id,
-                            action_id,
-                            user.id,
-                            message_type,
-                        )
-                    except (ActionReservationError, MultiplayerError) as exc:
-                        room.release_action()
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": exc.code,
-                                "message": str(exc),
-                            }
-                        )
-                        continue
-                    data["_room_reserved_action"] = True
-                if message_type in MUTATING_TURN_TYPES:
-                    requires_owner = owner_turn_required(message_type, data)
-                    if requires_owner and role != "owner":
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "owner_required",
-                                "message": "只有房主可以执行该房间控制操作",
-                            }
-                        )
-                        continue
-                    if message_type != "start" and room.status != "playing":
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "room_not_playing",
-                                "message": "房间尚未完成开场，当前不能推进或恢复回合",
-                            }
-                        )
-                        continue
-                    roster, playable_members = self.room_roster(world_id)
-                    claims_by_user = {
-                        str(item["user_id"]): item for item in roster if item.get("user_id")
-                    }
-                    actor_id = room.current_actor_user_id or user.id
-                    actor_claim = claims_by_user.get(actor_id)
-                    if actor_claim is None:
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": "investigator_required",
-                                "message": "当前行动者需要先选择调查员",
-                            }
-                        )
-                        continue
-                    if message_type == "start":
-                        if room.status != "lobby":
-                            await ws.send_json(
-                                {
-                                    "type": "room_action_rejected",
-                                    "code": "room_already_started",
-                                    "message": "房间已经开始游戏",
-                                }
-                            )
-                            continue
-                        missing_claims = sorted(playable_members - claims_by_user.keys())
-                        missing_ready = sorted(playable_members - room.ready_users)
-                        missing_online = sorted(playable_members - room.connected_users.keys())
-                        if missing_claims or missing_ready or missing_online:
-                            await ws.send_json(
-                                {
-                                    "type": "room_action_rejected",
-                                    "code": "room_not_ready",
-                                    "message": "所有玩家选择调查员并准备后才能开始",
-                                    "missing_claim_user_ids": missing_claims,
-                                    "missing_ready_user_ids": missing_ready,
-                                    "missing_online_user_ids": missing_online,
-                                }
-                            )
-                            continue
-                        if any(
-                            str((item.get("character_ref") or {}).get("source") or "")
-                            in {"profile", "custom"}
-                            for item in roster
-                        ):
-                            await ws.send_json(
-                                {
-                                    "type": "room_action_rejected",
-                                    "code": "personal_character_unavailable",
-                                    "message": (
-                                        "联机模式暂不读取服务器上的本地长期或自定义角色；"
-                                        "请改选默认或模组调查员"
-                                    ),
-                                }
-                            )
-                            continue
-                    action_id = str(data.get("action_id") or "")
-                    try:
-                        await room.reserve_action(
-                            user.id,
-                            action_id,
-                            require_current_actor=not requires_owner,
-                        )
-                    except ActionReservationError as exc:
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": exc.code,
-                                "message": str(exc),
-                            }
-                        )
-                        continue
-                    try:
-                        reserve_room_action(
-                            self.deps.database_url(),
-                            world_id,
-                            action_id,
-                            user.id,
-                            message_type,
-                        )
-                    except MultiplayerError as exc:
-                        room.release_action()
-                        await ws.send_json(
-                            {
-                                "type": "room_action_rejected",
-                                "code": exc.code,
-                                "message": str(exc),
-                            }
-                        )
-                        continue
-                    data["_room_reserved_action"] = True
-                    if message_type == "start":
-                        # Persist a transient marker before the driver starts.
-                        # Success is promoted to playing only after the opening
-                        # turn atomically commits; every failure rolls it back.
-                        self.set_room_status(room, "starting")
-                        room.control_action_active = True
-                        await self.broadcast_room_state(room)
-                        data["character_ref"] = actor_claim["character_ref"]
-                        data["_room_roster"] = roster
-                    data["_room_investigator_id"] = actor_claim["investigator_id"]
-                    data["_room_actor_user_id"] = actor_id
-                passthrough_types = (
-                    MUTATING_TURN_TYPES
-                    | OWNER_CONTROL_TYPES
-                    | {
-                        "suggest_reply",
-                        "decision_reply",
-                    }
                 )
-                if message_type not in passthrough_types:
-                    await ws.send_json(
-                        {
-                            "type": "protocol_error",
-                            "code": "unsupported_room_message",
-                            "message_type": message_type,
-                        }
-                    )
-                    continue
-                data["_room_user_id"] = user.id
-                data["_room_connection_id"] = connection_id
-                try:
-                    await room.driver_transport.submit(json.dumps(data, ensure_ascii=False))
-                except Exception:
-                    if message_type == "start" and room.status == "starting":
-                        self.set_room_status(room, "lobby")
-                        await self.broadcast_room_state(room)
-                    room.release_action(terminal_status="failed")
-                    raise
-        except (WebSocketDisconnect, RuntimeError):
+                room.driver_task.add_done_callback(
+                    lambda task: asyncio.create_task(self.report_room_driver_exit(room, task))
+                )
+            await run_room_message_loop(
+                self,
+                ordered_ws,
+                room,
+                user,
+                world_id,
+                connection_id,
+                role,
+            )
+        except WebSocketDisconnect:
             pass
+        except HTTPException as exc:
+            print(
+                f"[room] WebSocket 请求被拒绝: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            denied = exc.status_code == 403
+            state = getattr(ws, "client_state", None)
+            if getattr(state, "name", "") != "DISCONNECTED":
+                try:
+                    await ws.close(
+                        code=4403 if denied else 1011,
+                        reason="房间连接被拒绝" if denied else "房间连接暂时不可用",
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(
+                f"[room] WebSocket 内部错误: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            state = getattr(ws, "client_state", None)
+            if getattr(state, "name", "") != "DISCONNECTED":
+                try:
+                    await ws.close(
+                        code=1011,
+                        reason="房间连接发生内部错误",
+                    )
+                except Exception:
+                    pass
         finally:
-            await room.hub.detach(connection_id)
-            last_user_connection = room.member_disconnected(user.id)
-            if last_user_connection:
-                await room.hub.broadcast({"type": "member_left", "user_id": user.id})
-            await self.broadcast_room_state(room)
-            if not room.connected_users:
-                idle_seconds = max(0.0, float(os.environ.get("TRPG_ROOM_IDLE_SECONDS", "30")))
-                asyncio.create_task(self.retire_room_after_grace(world_id, room, idle_seconds))
+            if room is not None and connection_id:
+                await room.hub.detach(connection_id)
+            if room is not None and user is not None and presence_registered:
+                callback = (
+                    connection.transport_failure_callback
+                    if connection is not None
+                    else None
+                )
+                if callback is not None:
+                    await callback()
+            elif room is not None and created and not attached:
+                if await self.deps.room_manager().remove(world_id, room):
+                    if room.driver_transport is not None:
+                        await room.driver_transport.close_input()

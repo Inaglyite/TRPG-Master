@@ -503,6 +503,10 @@ class DatabaseTurnJournal:
                     state=snapshot,
                 )
                 session.add(snapshot_row)
+                # Snapshot is the FK parent of the cloned Turn. These models do
+                # not expose an ORM relationship, so persist it explicitly
+                # before adding the child on both PostgreSQL and SQLite.
+                session.flush()
                 cloned = Turn(
                     pk=new_id("turnrow"),
                     id=record["turn_id"],

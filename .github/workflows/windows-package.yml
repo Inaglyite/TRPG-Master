@@ -1,0 +1,141 @@
+name: windows-package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-package.yml"
+      - "packaging/**"
+      - "frontend/electron/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/src/**"
+      - "server.py"
+      - "src/**"
+      - "migrations/**"
+      - "alembic.ini"
+      - "requirements.txt"
+      - "requirements-packaging.txt"
+      - "mod/**"
+      - "rules/**"
+      - "schemas/**"
+      - "skills/**"
+      - "characters/default/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/windows-package.yml"
+      - "packaging/**"
+      - "frontend/electron/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/src/**"
+      - "server.py"
+      - "src/**"
+      - "migrations/**"
+      - "alembic.ini"
+      - "requirements.txt"
+      - "requirements-packaging.txt"
+      - "mod/**"
+      - "rules/**"
+      - "schemas/**"
+      - "skills/**"
+      - "characters/default/**"
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      ELECTRON_CACHE: ${{ runner.temp }}\electron-cache
+      ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder-cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-packaging.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache Electron build toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: windows-electron-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://pypi.org/simple -r requirements-packaging.txt
+          npm ci --prefix frontend
+
+      - name: Build backend, NSIS, and portable packages
+        shell: pwsh
+        run: ./packaging/build_windows.ps1 -SkipDependencyInstall
+
+      - name: Smoke packaged backend and fresh migrations
+        shell: pwsh
+        run: |
+          $head = python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; c=Config('alembic.ini'); print(ScriptDirectory.from_config(c).get_current_head())"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($head)) {
+            throw "Could not resolve the Alembic migration head."
+          }
+          ./packaging/smoke_windows_backend.ps1 `
+            -ExpectedMigrationHead $head.Trim() `
+            -RuntimeRoot (Join-Path $env:RUNNER_TEMP "trpg-packaged-backend-smoke")
+
+      - name: Verify portable package and NSIS install/uninstall
+        shell: pwsh
+        run: ./packaging/verify_windows_desktop_artifacts.ps1
+
+      - name: Upload Windows desktop packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: trpg-master-windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            frontend/release/trpg-master-setup-*-x64.exe
+            frontend/release/trpg-master-portable-*-x64.exe
+            frontend/release/SHA256SUMS.txt
+
+      - name: Upload packaged backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: trpg-master-windows-backend-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: release-backend/win/trpg-server/**
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trpg-master-windows-smoke-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/trpg-packaged-backend-smoke/*.log
+            ${{ runner.temp }}/trpg-packaged-backend-smoke/smoke-result.json
+            frontend/release/acceptance-logs/**

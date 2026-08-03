@@ -672,13 +672,26 @@ export async function handOverOwnership(userId: string): Promise<void> {
 
 export async function dismissInvite(): Promise<void> {
   const { activeWorldId, invite } = useOnlineStore.getState();
-  useOnlineStore.setState({ invite: null });
-  if (activeWorldId && invite?.invite_id) {
-    try {
+  if (!invite?.invite_id) {
+    useOnlineStore.setState({ invite: null });
+    return;
+  }
+  const scope = captureRequestScope(activeWorldId);
+  useOnlineStore.setState({ roomBusy: true, roomError: null });
+  try {
+    if (activeWorldId) {
       await revokeInvite(activeWorldId, invite.invite_id);
-    } catch {
-      // 撤销失败不阻塞界面；邀请会自行过期。
     }
+    if (!requestScopeIsCurrent(scope)) return;
+    // 只有 DELETE 成功后才从 UI 移除邀请码。
+    useOnlineStore.setState({ invite: null, roomBusy: false });
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
+    // 失败保留邀请码并给出明确错误，不吞异常。
+    useOnlineStore.setState({
+      roomBusy: false,
+      roomError: errorMessage(error, "撤销邀请失败，邀请码仍然有效"),
+    });
   }
 }
 

@@ -11,6 +11,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .investigators import investigator_controller_user_id
+
 
 class JsonConnection(Protocol):
     async def send_json(self, payload: dict[str, Any]) -> None: ...
@@ -22,6 +24,18 @@ class RoomConnection:
     user_id: str
     role: str
     socket: JsonConnection
+    session_hash: str = ""
+    authorization_check: Callable[[], bool] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    transport_failure_callback: Callable[[], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    active: bool = True
     last_ack: int = 0
     send_tail: asyncio.Task[bool] | None = field(
         default=None,
@@ -40,10 +54,12 @@ class BufferedRoomEvent:
 class RoomEventHub:
     """One ordered public/private event boundary shared by all room clients."""
 
-    def __init__(self, world_id: str, *, replay_limit: int = 256):
+    def __init__(self, world_id: str, *, replay_limit: int = 2048):
         self.world_id = world_id
         self._connections: dict[str, RoomConnection] = {}
-        self._events: deque[BufferedRoomEvent] = deque(maxlen=max(16, replay_limit))
+        self._events: deque[BufferedRoomEvent] = deque()
+        self._replay_limit = max(16, replay_limit)
+        self._pinned_after_event_id: int | None = None
         self._event_id = 0
         self._lock = asyncio.Lock()
         try:
@@ -54,6 +70,13 @@ class RoomEventHub:
 
     async def attach(self, connection: RoomConnection) -> None:
         async with self._lock:
+            connection.active = True
+            self._connections[connection.connection_id] = connection
+
+    async def attach_pending(self, connection: RoomConnection) -> None:
+        """Register a handshake before sending secrets, without receiving live events."""
+        async with self._lock:
+            connection.active = False
             self._connections[connection.connection_id] = connection
 
     async def attach_with_replay(
@@ -63,6 +86,12 @@ class RoomEventHub:
     ) -> dict:
         """Atomically enqueue missed events before activating future broadcasts."""
         async with self._lock:
+            if not self._is_authorized(connection):
+                return {
+                    "gap": False,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
             oldest = self._events[0].event_id if self._events else self._event_id + 1
             gap = after_event_id < oldest - 1 or after_event_id > self._event_id
             if gap:
@@ -71,13 +100,51 @@ class RoomEventHub:
                     "latest_event_id": self._event_id,
                     "delivered": False,
                 }
+            connection.active = True
             self._connections[connection.connection_id] = connection
             deliveries = [
                 self._queue_send_unlocked(connection, dict(event.payload))
                 for event in self._events
                 if event.event_id > after_event_id
-                and self._can_receive(connection, event.visibility)
+                and self._visibility_allows(connection, event.visibility)
             ]
+            latest_event_id = self._event_id
+        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        return {
+            "gap": False,
+            "latest_event_id": latest_event_id,
+            "delivered": delivered,
+        }
+
+    async def activate_with_replay(
+        self,
+        connection_id: str,
+        after_event_id: int,
+    ) -> dict:
+        """Atomically activate one pending handshake and enqueue its missed events."""
+        async with self._lock:
+            connection = self._connections.get(connection_id)
+            if connection is None or not self._is_authorized(connection):
+                return {
+                    "gap": False,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
+            oldest = self._events[0].event_id if self._events else self._event_id + 1
+            gap = after_event_id < oldest - 1 or after_event_id > self._event_id
+            if gap:
+                return {
+                    "gap": True,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(event.payload))
+                for event in self._events
+                if event.event_id > after_event_id
+                and self._visibility_allows(connection, event.visibility)
+            ]
+            connection.active = True
             latest_event_id = self._event_id
         delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
         return {
@@ -96,7 +163,13 @@ class RoomEventHub:
                 if connection.user_id == user_id:
                     connection.role = role
 
-    async def disconnect_user(self, user_id: str, *, code: int = 4403) -> int:
+    async def disconnect_user(
+        self,
+        user_id: str,
+        *,
+        code: int = 4403,
+        reason: str = "房间成员权限已被移除",
+    ) -> int:
         async with self._lock:
             removed = [
                 connection
@@ -109,9 +182,47 @@ class RoomEventHub:
             close = getattr(connection.socket, "close", None)
             if close is not None:
                 try:
-                    await close(code=code, reason="房间成员权限已被移除")
+                    await close(code=code, reason=reason)
                 except Exception:
                     pass
+        return len(removed)
+
+    async def disconnect_session(self, session_hash: str, *, code: int = 4401) -> int:
+        """Close every active or pending socket bound to one revoked login."""
+        async with self._lock:
+            removed = [
+                connection
+                for connection in self._connections.values()
+                if connection.session_hash and connection.session_hash == session_hash
+            ]
+            for connection in removed:
+                self._connections.pop(connection.connection_id, None)
+        for connection in removed:
+            close = getattr(connection.socket, "close", None)
+            if close is not None:
+                try:
+                    await close(code=code, reason="登录会话已注销")
+                except Exception:
+                    pass
+        return len(removed)
+
+    async def disconnect_all(
+        self,
+        *,
+        code: int = 1012,
+        reason: str = "房间正在恢复，请重新连接",
+    ) -> int:
+        async with self._lock:
+            removed = list(self._connections.values())
+            self._connections.clear()
+        for connection in removed:
+            close = getattr(connection.socket, "close", None)
+            if close is None:
+                continue
+            try:
+                await close(code=code, reason=reason)
+            except Exception:
+                pass
         return len(removed)
 
     async def send_json(self, payload: dict[str, Any]) -> None:
@@ -121,7 +232,7 @@ class RoomEventHub:
     async def send_direct(self, connection_id: str, payload: dict[str, Any]) -> bool:
         async with self._lock:
             connection = self._connections.get(connection_id)
-            if connection is None:
+            if connection is None or not self._is_authorized(connection):
                 return False
             delivery = self._queue_send_unlocked(connection, dict(payload))
         return await delivery
@@ -129,20 +240,78 @@ class RoomEventHub:
     async def send_batch(
         self,
         connection_id: str,
-        payload_factory: Callable[[], list[dict[str, Any]]],
+        payload_factory: Callable[
+            [int, tuple[BufferedRoomEvent, ...]],
+            list[dict[str, Any]],
+        ],
     ) -> bool:
         """Build and enqueue a snapshot batch at one room-event boundary."""
         async with self._lock:
             connection = self._connections.get(connection_id)
-            if connection is None:
+            if connection is None or not self._is_authorized(connection):
                 return False
             deliveries = [
                 self._queue_send_unlocked(connection, dict(payload))
-                for payload in payload_factory()
+                for payload in payload_factory(self._event_id, tuple(self._events))
             ]
         return all(await asyncio.gather(*deliveries)) if deliveries else True
 
-    async def broadcast(self, payload: dict[str, Any], *, visibility: str = "public") -> int:
+    async def send_snapshot_with_replay(
+        self,
+        connection_id: str,
+        payload_factory: Callable[
+            [int, tuple[BufferedRoomEvent, ...]],
+            list[dict[str, Any]],
+        ],
+    ) -> tuple[bool, int]:
+        """Queue full state, its following events, and modal recovery atomically."""
+        async with self._lock:
+            connection = self._connections.get(connection_id)
+            if connection is None or not self._is_authorized(connection):
+                return False, self._event_id
+            messages = payload_factory(self._event_id, tuple(self._events))
+            if not messages:
+                return True, self._event_id
+            cursor = int(messages[0].get("latest_event_id") or 0)
+            replay = [
+                dict(event.payload)
+                for event in self._events
+                if event.event_id > cursor and self._visibility_allows(connection, event.visibility)
+            ]
+            recovered_tail = [
+                payload
+                for payload in messages[1:]
+                if not any(
+                    event.get("type") == payload.get("type")
+                    and (payload.get("id") is None or event.get("id") == payload.get("id"))
+                    for event in replay
+                )
+            ]
+            ordered = [messages[0], *replay, *recovered_tail]
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(payload)) for payload in ordered
+            ]
+            replay_cursor = self._event_id
+        return all(await asyncio.gather(*deliveries)), replay_cursor
+
+    async def build_at_boundary(
+        self,
+        payload_factory: Callable[
+            [int, tuple[BufferedRoomEvent, ...]],
+            Any,
+        ],
+    ) -> Any:
+        """Build an unattached-client snapshot at one event-buffer boundary."""
+        async with self._lock:
+            return payload_factory(self._event_id, tuple(self._events))
+
+    async def broadcast(
+        self,
+        payload: dict[str, Any],
+        *,
+        visibility: str = "public",
+        on_enqueued: Callable[[], None] | None = None,
+    ) -> int:
         if visibility == "server_only":
             return self._event_id
         async with self._lock:
@@ -157,15 +326,17 @@ class RoomEventHub:
             buffered = self._without_embedded_assets(wire)
             event = BufferedRoomEvent(event_id, buffered, visibility)
             self._events.append(event)
+            self._trim_events_unlocked()
             recipients = [
                 connection
                 for connection in self._connections.values()
                 if self._can_receive(connection, visibility)
             ]
             deliveries = [
-                self._queue_send_unlocked(connection, dict(wire))
-                for connection in recipients
+                self._queue_send_unlocked(connection, dict(wire)) for connection in recipients
             ]
+            if on_enqueued is not None:
+                on_enqueued()
         if deliveries:
             await asyncio.gather(*deliveries)
         return event_id
@@ -176,9 +347,7 @@ class RoomEventHub:
         payload: dict[str, Any],
     ) -> asyncio.Task[bool]:
         previous = connection.send_tail
-        delivery = asyncio.create_task(
-            self._deliver_after(connection, previous, payload)
-        )
+        delivery = asyncio.create_task(self._deliver_after(connection, previous, payload))
         connection.send_tail = delivery
         return delivery
 
@@ -195,6 +364,9 @@ class RoomEventHub:
                 return False
         async with self._lock:
             if self._connections.get(connection.connection_id) is not connection:
+                return False
+            if not self._is_authorized(connection):
+                self._connections.pop(connection.connection_id, None)
                 return False
         try:
             await asyncio.wait_for(
@@ -214,6 +386,15 @@ class RoomEventHub:
                 removed = True
         if removed:
             await self._close_failed_connection(connection)
+            callback = connection.transport_failure_callback
+            if callback is not None:
+                try:
+                    await callback()
+                except Exception:
+                    # Presence cleanup is best-effort here. The WebSocket
+                    # receive loop still runs the same idempotent callback in
+                    # its finally block when the close frame is observed.
+                    pass
 
     async def _close_failed_connection(self, connection: RoomConnection) -> None:
         close = getattr(connection.socket, "close", None)
@@ -242,7 +423,12 @@ class RoomEventHub:
     async def acknowledge(self, connection_id: str, event_id: int) -> bool:
         async with self._lock:
             connection = self._connections.get(connection_id)
-            if connection is None or event_id < connection.last_ack or event_id > self._event_id:
+            if (
+                connection is None
+                or not self._is_authorized(connection)
+                or event_id < connection.last_ack
+                or event_id > self._event_id
+            ):
                 return False
             connection.last_ack = event_id
             return True
@@ -250,7 +436,7 @@ class RoomEventHub:
     async def replay_after(self, connection_id: str, after_event_id: int) -> dict:
         async with self._lock:
             connection = self._connections.get(connection_id)
-            if connection is None:
+            if connection is None or not self._is_authorized(connection):
                 return {"gap": True, "events": [], "latest_event_id": self._event_id}
             oldest = self._events[0].event_id if self._events else self._event_id + 1
             # A value ahead of the server is not "fully caught up": it means
@@ -269,6 +455,42 @@ class RoomEventHub:
             )
             return {"gap": gap, "events": events, "latest_event_id": self._event_id}
 
+    async def replay_to_connection(
+        self,
+        connection_id: str,
+        after_event_id: int,
+    ) -> dict:
+        """Atomically enqueue replay events before any newer live event."""
+        async with self._lock:
+            connection = self._connections.get(connection_id)
+            if connection is None or not self._is_authorized(connection):
+                return {
+                    "gap": True,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
+            oldest = self._events[0].event_id if self._events else self._event_id + 1
+            gap = after_event_id < oldest - 1 or after_event_id > self._event_id
+            if gap:
+                return {
+                    "gap": True,
+                    "latest_event_id": self._event_id,
+                    "delivered": False,
+                }
+            deliveries = [
+                self._queue_send_unlocked(connection, dict(event.payload))
+                for event in self._events
+                if event.event_id > after_event_id
+                and self._can_receive(connection, event.visibility)
+            ]
+            latest_event_id = self._event_id
+        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        return {
+            "gap": False,
+            "latest_event_id": latest_event_id,
+            "delivered": delivered,
+        }
+
     async def connection_snapshot(self) -> list[dict]:
         async with self._lock:
             return [
@@ -285,14 +507,53 @@ class RoomEventHub:
         async with self._lock:
             return self._event_id
 
+    async def pin_replay_boundary(self) -> int:
+        """Keep every event after the returned action-start cursor."""
+        async with self._lock:
+            self._pinned_after_event_id = self._event_id
+            self._trim_events_unlocked()
+            return self._event_id
+
+    def _trim_events_unlocked(self) -> None:
+        while len(self._events) > self._replay_limit:
+            if (
+                self._pinned_after_event_id is not None
+                and self._events[0].event_id > self._pinned_after_event_id
+            ):
+                break
+            self._events.popleft()
+
     @staticmethod
-    def _can_receive(connection: RoomConnection, visibility: str) -> bool:
+    def _is_authorized(connection: RoomConnection) -> bool:
+        check = connection.authorization_check
+        if check is None:
+            return True
+        try:
+            return bool(check())
+        except Exception:
+            return False
+
+    @classmethod
+    def _can_receive(cls, connection: RoomConnection, visibility: str) -> bool:
+        return (
+            connection.active
+            and cls._is_authorized(connection)
+            and cls._visibility_allows(connection, visibility)
+        )
+
+    @staticmethod
+    def _visibility_allows(connection: RoomConnection, visibility: str) -> bool:
         if visibility == "public":
             return True
         if visibility == "owner":
             return connection.role == "owner"
+        if visibility.startswith("user:"):
+            return connection.user_id == visibility.removeprefix("user:")
         if visibility.startswith("player:"):
-            return connection.user_id == visibility.removeprefix("player:")
+            return connection.role in {
+                "owner",
+                "player",
+            } and connection.user_id == visibility.removeprefix("player:")
         return False
 
 
@@ -332,10 +593,15 @@ class RoomDriverTransport:
             "decision_request",
             "decision_resolved",
         }:
-            actor_user_id = room.current_actor_user_id
-            visibility = (
-                f"player:{actor_user_id}" if actor_user_id else "server_only"
+            responding_investigator_id = str(
+                wire.get("responding_investigator_id") or ""
             )
+            actor_user_id = (
+                self._investigator_controller(responding_investigator_id)
+                if responding_investigator_id
+                else room.current_actor_user_id
+            )
+            visibility = f"player:{actor_user_id}" if actor_user_id else "server_only"
             if wire.get("type") == "suggest_check":
                 room.set_pending_reply("suggest", actor_user_id)
             elif wire.get("type") == "decision_request":
@@ -346,10 +612,7 @@ class RoomDriverTransport:
                 )
             elif wire.get("type") == "decision_resolved":
                 room.clear_pending_reply()
-        terminal_error = (
-            payload.get("type") == "error"
-            and payload.get("terminal") is True
-        )
+        terminal_error = payload.get("type") == "error" and payload.get("terminal") is True
         if terminal_error:
             room.mark_action_failed()
         control_terminal = room.control_action_active and payload.get("type") in {
@@ -358,27 +621,153 @@ class RoomDriverTransport:
             "save_renamed",
             "case_settled",
         }
-        control_terminal = control_terminal or (
-            room.control_action_active and terminal_error
-        )
-        turn_terminal = payload.get("type") in {
-            "done",
-            "turn_rejected",
-            "turn_rewritten",
-            "turn_rewrite_failed",
-        } or terminal_error
-        # Release the authoritative lease before publishing the terminal frame.
-        # A fast client is then free to retry as soon as it observes that frame.
-        if control_terminal or turn_terminal:
-            room.clear_pending_reply()
-            failed_terminal = payload.get("type") in {
+        control_terminal = control_terminal or (room.control_action_active and terminal_error)
+        turn_terminal = (
+            payload.get("type")
+            in {
+                "done",
                 "turn_rejected",
+                "turn_rewritten",
                 "turn_rewrite_failed",
-            } or terminal_error
-            room.release_action(
-                terminal_status="failed" if failed_terminal else "completed"
+            }
+            or terminal_error
+        )
+        recovered_start_state: dict[str, Any] | None = None
+        combat_actor_changed = False
+        if control_terminal or turn_terminal:
+            room.terminal_event_pending = True
+            if payload.get("type") == "done":
+                combat_actor_user_id = self.combat_actor_controller()
+                if (
+                    combat_actor_user_id
+                    and combat_actor_user_id != room.current_actor_user_id
+                ):
+                    room.assign_actor(combat_actor_user_id)
+                    if room.control_state_callback is not None:
+                        try:
+                            room.control_state_callback()
+                        except Exception:
+                            pass
+                    combat_actor_changed = True
+            if room.status == "starting":
+                room.apply_status("playing" if payload.get("type") == "done" else "lobby")
+                recovered_start_state = {
+                    "type": "room_state",
+                    "status": room.status,
+                    "owner_user_id": room.owner_user_id,
+                    "current_actor_user_id": room.current_actor_user_id,
+                    "ready_user_ids": sorted(room.ready_users),
+                    "online_user_ids": sorted(room.connected_users),
+                }
+            room.clear_pending_reply()
+            failed_terminal = (
+                payload.get("type")
+                in {
+                    "turn_rejected",
+                    "turn_rewrite_failed",
+                }
+                or terminal_error
             )
-        await room.hub.broadcast(wire, visibility=visibility)
+            room.release_action(terminal_status="failed" if failed_terminal else "completed")
+        if recovered_start_state is not None:
+            await room.hub.broadcast(recovered_start_state)
+        if control_terminal or turn_terminal:
+            history: list[dict] | None = None
+            if room.history_snapshot_callback is not None:
+                try:
+                    history = room.history_snapshot_callback()
+                except Exception:
+                    history = None
+
+            def finalize_terminal() -> None:
+                if history is not None:
+                    room.recovery_history = copy.deepcopy(history)
+                room.terminal_event_pending = False
+                room.hub._pinned_after_event_id = None
+                room.hub._trim_events_unlocked()
+
+            await room.hub.broadcast(
+                wire,
+                visibility=visibility,
+                on_enqueued=finalize_terminal,
+            )
+            if combat_actor_changed:
+                await room.hub.broadcast(
+                    {
+                        "type": "actor_changed",
+                        "user_id": room.current_actor_user_id,
+                        "reason": "combat_turn",
+                    }
+                )
+                await room.hub.broadcast(
+                    {
+                        "type": "room_state",
+                        "status": room.status,
+                        "owner_user_id": room.owner_user_id,
+                        "current_actor_user_id": room.current_actor_user_id,
+                        "ready_user_ids": sorted(room.ready_users),
+                        "online_user_ids": sorted(room.connected_users),
+                    }
+                )
+        else:
+            await room.hub.broadcast(wire, visibility=visibility)
+
+    def _investigator_controller(self, investigator_id: str) -> str | None:
+        room = self.room
+        if room is None:
+            return None
+        try:
+            state = room.engine.context.world_store.load()
+        except Exception:
+            return None
+        return investigator_controller_user_id(state, investigator_id)
+
+    def combat_actor_controller(self) -> str | None:
+        room = self.room
+        if room is None:
+            return None
+        try:
+            state = room.engine.context.world_store.load()
+            combat = state.get("combat_state")
+            if not isinstance(combat, dict) or not combat.get("active"):
+                return None
+            actor_id = str(combat.get("current_actor") or "")
+            participant = next(
+                (
+                    item
+                    for item in combat.get("participants", [])
+                    if isinstance(item, dict) and str(item.get("id") or "") == actor_id
+                ),
+                None,
+            )
+            if not isinstance(participant, dict) or participant.get("kind") != "pc":
+                return None
+            return investigator_controller_user_id(state, actor_id)
+        except Exception:
+            return None
+
+    def combat_participant_controllers(self) -> set[str]:
+        room = self.room
+        if room is None:
+            return set()
+        try:
+            state = room.engine.context.world_store.load()
+            combat = state.get("combat_state")
+            if not isinstance(combat, dict) or not combat.get("active"):
+                return set()
+            return {
+                controller
+                for participant in combat.get("participants", [])
+                if isinstance(participant, dict) and participant.get("kind") == "pc"
+                if (
+                    controller := investigator_controller_user_id(
+                        state,
+                        str(participant.get("id") or ""),
+                    )
+                )
+            }
+        except Exception:
+            return set()
 
     async def close_input(self) -> None:
         if self._closed:
@@ -419,7 +808,22 @@ class GameRoom:
     control_action_active: bool = False
     active_action_id: str | None = None
     active_action_failed: bool = False
+    active_action_start_event_id: int = 0
+    terminal_event_pending: bool = False
+    recovery_history: list[dict] = field(default_factory=list, repr=False)
+    history_snapshot_callback: Callable[[], list[dict]] | None = field(
+        default=None,
+        repr=False,
+    )
     action_status_callback: Callable[[str, str, str], None] | None = field(
+        default=None,
+        repr=False,
+    )
+    status_change_callback: Callable[[str], None] | None = field(
+        default=None,
+        repr=False,
+    )
+    control_state_callback: Callable[[], None] | None = field(
         default=None,
         repr=False,
     )
@@ -448,6 +852,25 @@ class GameRoom:
 
     def assign_actor(self, actor_user_id: str | None) -> None:
         self.current_actor_user_id = actor_user_id
+
+    def protected_member_user_ids(self) -> set[str]:
+        users = {
+            user_id
+            for user_id in (
+                self.current_actor_user_id,
+                self.pending_reply_user_id,
+            )
+            if user_id
+        }
+        if self.driver_transport is not None:
+            users.update(self.driver_transport.combat_participant_controllers())
+        return users
+
+    def apply_status(self, status: str) -> None:
+        if self.status_change_callback is not None:
+            self.status_change_callback(status)
+        else:
+            self.status = status
 
     def set_pending_reply(
         self,
@@ -493,9 +916,14 @@ class GameRoom:
             raise ActionReservationError("not_current_actor", "现在还没有轮到你行动")
         if action_id in self._action_id_set:
             raise ActionReservationError("duplicate_action", "该行动已经提交")
-        if self._action_lock.locked():
+        if self._action_lock.locked() or self.terminal_event_pending:
             raise ActionReservationError("room_turn_in_progress", "房间正在处理上一项行动")
         await self._action_lock.acquire()
+        try:
+            self.active_action_start_event_id = await self.hub.pin_replay_boundary()
+        except BaseException:
+            self._action_lock.release()
+            raise
         self.active_action_id = action_id
         self.active_action_failed = False
         if len(self._action_ids) == self._action_ids.maxlen:
@@ -547,6 +975,9 @@ class GameRoom:
         self.control_action_active = False
         self.active_action_id = None
         self.active_action_failed = False
+        if not self.terminal_event_pending:
+            self.hub._pinned_after_event_id = None
+            self.hub._trim_events_unlocked()
         if self._action_lock.locked():
             self._action_lock.release()
 
@@ -605,6 +1036,14 @@ class RoomManager:
         async with self._lock:
             return self._rooms.get(world_id)
 
+    async def remove(self, world_id: str, expected_room: GameRoom) -> bool:
+        """Remove exactly one known room without racing a replacement."""
+        async with self._lock:
+            if self._rooms.get(world_id) is not expected_room:
+                return False
+            self._rooms.pop(world_id, None)
+            return True
+
     async def remove_if_idle(self, world_id: str, *, idle_seconds: float = 30) -> bool:
         async with self._lock:
             room = self._rooms.get(world_id)
@@ -628,3 +1067,12 @@ class RoomManager:
                 }
                 for room in self._rooms.values()
             ]
+
+    async def disconnect_session(self, session_hash: str) -> int:
+        """Disconnect one revoked login from every currently loaded room."""
+        async with self._lock:
+            rooms = list(self._rooms.values())
+        disconnected = await asyncio.gather(
+            *(room.hub.disconnect_session(session_hash) for room in rooms)
+        )
+        return sum(disconnected)

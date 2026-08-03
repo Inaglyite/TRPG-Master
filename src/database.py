@@ -26,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
@@ -329,6 +330,22 @@ def get_engine(url: str) -> Engine:
                     pool_recycle=1800,
                 )
             engine = create_engine(url, **kwargs)
+            if url.startswith("sqlite:"):
+                # SQLite parses foreign keys but does not enforce them unless
+                # every connection explicitly enables the pragma. Desktop and
+                # test storage must keep the same CASCADE/RESTRICT guarantees
+                # as PostgreSQL rather than silently accepting orphan rows.
+                @event.listens_for(engine, "connect")
+                def _enable_sqlite_foreign_keys(
+                    dbapi_connection,
+                    _connection_record,
+                ) -> None:
+                    cursor = dbapi_connection.cursor()
+                    try:
+                        cursor.execute("PRAGMA foreign_keys=ON")
+                    finally:
+                        cursor.close()
+
             _ENGINES[url] = engine
         return engine
 

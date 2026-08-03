@@ -1,176 +1,124 @@
 # 多人功能执行状态与接续说明
 
-更新日期：2026-07-26
+更新日期：2026-08-03
 开发分支：`feat/multiplayer`  
-文档性质：持续更新的工程台账，不是完成报告。
+文档性质：当前工作树的工程台账；最终发布仍以 staging 和 CI 验收为准。
 
-本文用于在对话中断、上下文压缩或执行者切换后继续多人功能开发。每次开始工作时，先阅读
-[`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md) 确认不可缩水的验收范围，再阅读
-本文确定当前状态。技术路线以 [`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md) 为准；接口、架构、
-数据库和部署细节分别以对应专题文档为准。
+本文与 [`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md) 一起作为接续入口。产品范围不因
+“页面已经存在”或“接口已经存在”而缩减；接口、架构、数据库、部署和玩家操作分别以专题文档为准。
 
-## 1. 最终目标
+## 1. 当前结论
 
-交付一个真正可游玩的 2–4 人 Azure 权威服务器联机版本，同时保留 Electron 单机模式。完成标准不是
-“接口存在”或“页面出现”，而是浏览器和 Electron 的两个真实客户端能够完成注册、登录、建房、邀请、
-选角、准备、开始游戏、轮流行动、私人事件、掉线恢复、存读档和房间管理，并通过安全、并发、迁移、
-PostgreSQL、部署和恢复测试。
+多人第一阶段的核心代码已经落地，当前分支已经具备：
 
-不得擅自把以下内容移出范围：
+- Electron 启动后选择单机或多人；单机按需启动并由 Electron 回收本地后端，联机不启动本地后端；
+- 账号、Argon2id 密码哈希、可撤销 Session、登录限流、世界所有权、成员角色和邀请；
+- Azure 权威服务器模型，单进程 `RoomManager` 按 `world_id` 复用一个 `GameRoom`/`GameEngine`；
+- 调查员服务端占用、当前行动者、准备/开局门槛、行动幂等、房主管理和跨调查员工具路由；
+- 公共/玩家/房主/服务端事件过滤、房间事件游标、ACK、增量和完整恢复；
+- 断线、刷新、进程重启、存档读档和数据库权威 roster 对账；
+- PostgreSQL 控制平面与 JSONB 世界/快照数据、Alembic head `20260728_0006`；
+- 受限发布归档提取、备份加密/解密验证、同目录原子发布、回滚状态恢复和安装器权限边界；
+- 浏览器与 Electron 双客户端联机 E2E，以及 Linux 源码启动/退出进程组验收。
 
-- Electron 单机/多人模式选择和单机回归；
-- 完整认证、大厅、建房、加入、房间和多人游戏 UI；
-- Azure 权威服务器，不改成 P2P；
-- 多调查员状态、当前行动者裁决、幂等和单房间单引擎；
-- 私人事件隔离、断线补发和完整恢复；
-- PostgreSQL、Alembic、Azure staging、备份/恢复/回滚；
-- 浏览器与 Electron 双客户端 E2E 和非开发者用户文档。
+尚未能称为正式生产发布的事项只有外部交付门禁：推送后的 GitHub quality/Windows workflow、当前
+代码重新部署后的 Azure staging 验收，以及正式域名和受信任 TLS 证书。当前 Azure IP 自签名证书只
+适合受控测试，不应要求普通玩家绕过证书警告。
 
-## 2. 已完成的后端能力
+## 2. 当前代码边界
 
-以下能力已落在当前分支并分阶段提交：
+```text
+Browser / Electron
+        │ HTTPS + WSS
+        ▼
+Azure Nginx → FastAPI（单 worker）
+              ├─ Session / 世界成员权限
+              ├─ RoomManager → 一个 world 一个 GameRoom / GameEngine
+              ├─ 公共与私密事件过滤、ACK、恢复
+              └─ PostgreSQL（控制面） + JSONB 世界/回合/快照
 
-- 用户、服务端 Session、世界所有权和成员关系的数据库控制平面；
-- 邀请创建、列出、撤销和接受，邀请令牌只以哈希保存；
-- 成员权限修改、移除和房主移交；
-- 调查员选项、占用、释放以及服务端角色绑定；
-- `RoomManager`、共享 `GameRoom` 和每个世界单个 `GameEngine`；
-- `/ws/room` 的 Session 认证、成员校验、当前行动者校验和串行行动；
-- 持久化 `action_id` 幂等、准备/在线/选角开局门槛和房间容量限制；
-- 公共、指定玩家、房主、`server_only` 可见性过滤；
-- 私人决定、私人回复、玩家笔记和私人线索；
-- 单调 `room_event_id`、ACK、增量同步、事件缺口后的完整状态恢复；
-- 房间控制状态持久化、进程重启恢复、空闲房间安全退休；
-- 多标签页在线状态去重、逐消息 Session/角色复验；
-- 多调查员与旧 `state.pc` 的兼容投影，HP/SAN/物品和工具作用于当前调查员；
-- 云端认证开启时拒绝旧 `/ws`，避免绕过 `/ws/room` 权限；
-- staging 独立 Cookie 名、单 worker 和最大活跃房间数配置；
-- Azure staging 的 systemd、Nginx、安装脚本和部署工作流骨架。
+Electron 单机 → 按需启动本地 FastAPI → SQLite
+```
 
-关键迁移为：
+`src/agent_graph.py` 中的 Story/Combat 是同一个 `GameEngine` 内的职责节点，不是多 Agent；它们共享
+消息历史、模型会话和世界状态。当前世界运行事实由数据库 `world_states.state`（SQLite 桌面、PostgreSQL
+云端）保存；旧 `worlds/` 文件只用于一次性导入和兼容测试。
 
-- `20260722_0002`
-- `20260722_0003`
-- `20260722_0004`
+## 3. 测试证据
 
-## 3. 当前测试基线
+在当前工作树、无外部 staging 凭据的本机环境中已执行：
 
-最近一次完整后端测试结果：
+| 门禁 | 结果 |
+|---|---|
+| `python -m pytest -q`（SQLite） | `443 passed, 3 skipped` |
+| `TRPG_TEST_POSTGRES_URL=... python -m pytest -q`（PostgreSQL 17） | `446 passed` |
+| PostgreSQL Alembic `downgrade base → upgrade head → check` | 通过，当前 `20260728_0006` |
+| Ruff、架构门禁、compileall、`git diff --check` | 全部通过 |
+| 部署/备份/归档安全测试 | `43 passed`，三个 Bash 脚本 `bash -n` 通过 |
+| 前端 Vitest | `32` 个文件、`268` 个用例通过 |
+| Prettier、TypeScript、Vite production build | 全部通过 |
+| `multiplayer.spec.ts` Playwright | `3 passed`：双浏览器、Electron 双端、Electron 单机生命周期 |
 
-- Python：`315 passed, 1 skipped`（使用 `venv/bin/python -m pytest -q`）；
-- Ruff：通过；
-- 最近的多人存档控制改动已通过 `18 passed` 的针对性测试；
-- 本机真实 PostgreSQL 17 已通过迁移、JSONB 深层往返、邀请/成员、调查员绑定和行动幂等测试；
-- Ruff 与 `tools/check_architecture.py`：通过；
-- 前端：`27` 个测试文件、`219` 个用例，TypeScript、Prettier、生产构建均通过；
-- 本机 Playwright：双浏览器联机、Electron 云端往返和 Electron 单机三条 E2E 均通过；
-- Azure 公网 Playwright：双浏览器 HTTPS/WSS、真实模型开场与玩家行动、回合内并发拒绝、快速
-  存档/读档、真实 Electron 云端往返均通过；
-- Azure 服务重启后：既有账号重新登录，公开历史、当前行动权和可读存档恢复通过。
+当前架构行数仍在既定 ratchet 内：`server.py 1697/1699`、`src/multiplayer_ws.py 710/740`、
+`src/multiplayer_http.py 419/420`、`src/engine.py 2125/2126`、`src/tools.py 1492/1503`、
+`tools/state_manager.py 780/797`、`src/model_streamer.py 412/412`。
 
-架构门禁已经恢复通过：认证 HTTP、多人 HTTP 和多人 WebSocket 适配层已分别抽取到
-`src/auth_http.py`、`src/multiplayer_http.py` 和 `src/multiplayer_ws.py`，`server.py` 已降至主线历史
-基线以下。CI 已改为执行完整 `pytest`，staging 工作流会启动真实 PostgreSQL 17、运行迁移和集成测试，
-不能再退回只执行 `unittest discover` 或通过放宽阈值绕开门禁。
+Playwright 的 staging 恢复用例和真实 Azure 用例需要显式提供环境变量才会运行；没有凭据时必须是
+skip，不能写入测试账号密码，也不能把自签名证书全局放行。
 
-## 4. 前端协作状态
+## 4. 已处理的高风险边界
 
-Kimi 完成了首轮模式选择、认证、大厅、房间组件和状态管理；Codex 随后按实际 HTTP/WS 契约完成逐文件
-审查、联调和安全修正。首轮中使用不存在接口、成员调查员结构错误、未接入 `/ws/room` 和 Electron
-跨站 Cookie 等问题均已纠正，不再有待审的 Kimi 工作区成果。
+- 模型供应商异常只回传通用提示，原始 endpoint、tenant、key 等只进服务端日志；
+- WebSocket 内部故障使用 `1011`/`1012` 并保留房间恢复记录，只有明确认证/成员拒绝使用 `4401`/`4403`；
+  角色降级使用 `4409`，前端清除旧玩家私态后以新角色重连；
+- 玩家笔记、完整恢复和工具错误不会把服务器路径、DSML、模型参数或秘密发给客户端；
+- 游戏开始后不能用 player 邀请加入、viewer 升级或 viewer 直接接任房主；已有玩家之间仍可移交，玩家
+  降为 viewer 会释放调查员控制权；
+- 开局取得 room action lease 后会重新读取数据库 roster/准备/在线状态，避免 claim/release race 用旧
+  roster 开场；save/load 后再次按数据库 roster 对账，不复活旧 snapshot controller；
+- 发布包在提取前进行流式 tar header/数量/大小/类型/路径校验，拒绝软硬链接和特殊文件；candidate
+  源码/config 保持 root-owned，只有 venv 临时由构建账号写入，随后重新收回并复核；
+- 备份使用独占文件描述符锁、隔离 `GNUPGHOME`、同目录 hidden partial、实际解密 tar 校验和
+  `mv --no-clobber` 原子发布；失败/信号不会留下可发布 partial。
 
-当前实现统一使用 `/ws/room` 传输联机游戏，按数字处理事件 ID，在首次完整状态恢复前排队命令，并用
-`room_full_state` 恢复公共状态和当前账号的私密状态。多人存档命令携带稳定 `action_id`；Electron 联机
-模式同源加载 HTTPS 应用，并限制 origin、导航、窗口创建、权限请求和 IPC 来源。
+## 5. 部署事实与剩余门禁
 
-Codex 同时修复了房间 WebSocket 生命周期、事件去重、房主权限显示、退出房间失败恢复、公开/私人
-线索分类、跨账号私密面板残留、生产同源端口推导、服务端 Session 撤销失败处理，以及 Electron 从云端
-安全返回内置启动器。当前前端
-`27` 个测试文件、`219` 个用例、TypeScript、Prettier、生产构建和 Electron 脚本语法均通过；模式选择
-与认证页已在真实 Chromium 中渲染检查。新增 Playwright E2E 已用两个隔离浏览器上下文验证注册、
-建房、邀请、不同调查员选角、刷新回房、私人笔记实时/恢复隔离、双方准备和开局；另用真实 Electron
-进程验证内置启动器与 HTTPS 多人页安全往返，以及选择单机后连接真实本地 FastAPI。三条 E2E 均通过
-并已加入普通 CI 与 staging 部署前门禁。
+部署拓扑、systemd/Nginx、备份恢复流程见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。当前仓库声明：
 
-Codex 已完成逐项审查、修正、提交和推送；Kimi 的工作成果不再作为未审查工作区改动保留。
+- production `8765` / staging `8766`，两个环境使用独立运行目录、Cookie、数据库和备份；
+- 应用保持一个 Uvicorn worker，`/api/health` 只查进程，`/api/ready` 执行数据库往返；
+- staging 必须先于生产部署，发布安装器会迁移数据库、健康检查并保留旧 release；
+- 发布失败回滚会恢复旧 symlink、Nginx/systemd 配置以及服务和 timer 原先的 enabled/active 状态；
+- 归档/备份脚本级测试不等于真实恢复。正式候选仍需在 Azure staging 做 pg_restore、重启、备份、
+  回滚、双客户端权限/隐私和 WSS 验收；
+- Windows 的 NSIS/portable 构建与打包后端 smoke 已加入 `.github/workflows/windows-package.yml`，
+  但当前 Linux 工作站没有 Windows 运行时，必须以 GitHub Windows runner 结果为准；Linux 不提供
+  AppImage。
 
-## 5. Azure staging 现状
+## 6. 下一步固定顺序
 
-Azure VM 已完成隔离部署：
+1. 完成当前工作树的最终文档审校和一次完整门禁；
+2. 在 `feat/multiplayer` 产生有意图的提交并推送，检查 GitHub quality；
+3. 手动触发 Windows workflow，保留 NSIS/portable/backend smoke artifact；
+4. 用同一提交部署 Azure staging，执行 `/api/ready`、TLS/WSS 双客户端、重启恢复、备份解密/pg_restore
+   和 release/Nginx 回滚；
+5. 记录真实 SHA、迁移号、测试证据和剩余 TLS 域名风险；未有受信任域名证书前不宣称面向普通玩家上线；
+6. 只有交付约定第 6 节全部满足后，才讨论合入 `master`。
 
-- PostgreSQL 16 仅监听 `127.0.0.1`，使用独立 staging 数据库与最小权限角色；
-- Alembic 已迁移至 `20260722_0004`；
-- staging 使用独立 systemd 服务、运行目录、环境文件、Cookie、备份目录和单 worker；
-- 受内存约束，已配置 1 GiB 专用 swap 和 PostgreSQL 连接/内存限额；
-- 旧应用服务保持停止，旧应用目录、世界目录、数据库文件和原 Nginx 配置备份均保留；
-- Azure NSG 未开放 8443，因此验收通过后将可回滚的公网 443 入口切到联机 staging；
-- 公网 `/api/health`、HTTPS 页面、WSS 双客户端联机和 Electron 云端往返均通过；
-- 每日加密备份 timer 已启用。恢复演练发现并修复校验文件使用绝对临时路径的问题；修复后的
-  GPG 归档已完成 SHA256 校验、隔离数据库 `pg_restore` 和 Alembic 版本核对，演练库随后删除；
-- systemd 重启后健康检查与数据库迁移状态保持正常。
-- 已在两个保留 release 之间执行 symlink 前进、回滚、再前进；三次重启后的健康检查均通过。
-- Nginx 已实际回滚到旧入口并观察到旧 Basic Auth `401`，随后恢复联机配置；配置检查与公网健康
-  检查均通过。
-- Azure 完整回合验收发现 PostgreSQL 会将已有自动槽的 FK 更新排在新 snapshot 插入之前，导致快速
-  存档失败；现已显式 flush snapshot、加入回归测试，并在公网重新验证存档与读档成功。同步协议处理
-  异常也不再杀死整个共享房间驱动。
+## 7. 接续规则
 
-## 6. 尚未完成的工作
+- 始终保持在 `feat/multiplayer`，不要 `reset --hard` 或覆盖用户/Kimi 的未提交改动；
+- 先看 `git status`、本文和 `MULTIPLAYER_DELIVERY_BRIEF.md`，再按专题文档修改；
+- 数据库变化必须有 Alembic、SQLite 和真实 PostgreSQL 证据；HTTP/WS 变化必须同步 `API.md`；
+- 不把密码、Session、API Key、数据库 DSN、邀请明文或 Azure 凭据写进仓库、日志、测试输出或回复；
+- 测试失败要区分代码失败、测试环境误配置和外部 staging 状态，不能用放宽门禁掩盖问题。
 
-按当前优先级继续：
+## 8. 相关文档
 
-1. ~~补充非开发者最终用户操作文档；~~ 已完成：
-   [`MULTIPLAYER_USER_GUIDE.md`](MULTIPLAYER_USER_GUIDE.md)；
-2. 决定正式域名与受信任证书方案；
-3. 完成最终安全审计与完整回归；
-4. 全部验收通过后，才讨论合入 `master`。
-
-## 7. 当前风险与禁止事项
-
-- Electron 从 `file://` 跨站请求云端并依赖 `SameSite=Lax` Cookie 不可靠；联机模式应加载受信任的
-  Azure HTTPS 同源应用，并限制导航、窗口创建和 IPC 来源。
-- `RoomManager` 是进程内单例，服务必须保持一个 Uvicorn worker，除非未来引入跨进程协调层。
-- 成员 HTTP 数据没有实时在线/准备状态，前端必须与 `room_state` 合并，不能凭空推断。
-- 完整恢复会按连接附加当前玩家自己的角色、可见线索和私人笔记；真实双客户端 E2E 已验证交叉账号
-  无法从实时消息和恢复数据看到秘密，后续协议修改必须持续运行这组隐私回归。
-- staging 与生产必须使用独立数据库、运行目录、端口、Cookie 名和环境文件。
-- 当前公网入口使用 IP 地址和现有自签名证书；自动化通过忽略测试证书错误验证，但面向普通玩家前
-  必须配置域名和受信任证书，不能要求用户长期绕过浏览器证书警告。
-- 可以停止旧应用服务，但不得误删 Nginx、PostgreSQL、备份和已有世界数据。
-- 不修改用户 SSH 密码或凭据；任何密码、Session、API Key、邀请明文和数据库 DSN 都不得写进仓库、
-  测试输出、日志或对话回复。
-- 不允许未经测试直接替换 Azure 生产，不允许在验收前合入 `master`。
-
-## 8. 每次继续开发时的固定流程
-
-1. 确认当前分支为 `feat/multiplayer`，检查 `git status`，识别用户和 Kimi 的未提交改动；
-2. 阅读本文件及交付约定，不根据聊天记忆自行缩减范围；
-3. 若有并行协作者，先检查共享工作区并重新划分文件范围，避免覆盖未提交改动；
-4. 选取一个可验证阶段，先确认协议、权限、隐私、失败恢复和单机影响；
-5. 实现后运行对应测试，并同步 API/架构/数据库/部署文档；
-6. 由 Codex 审核后分阶段提交和推送；
-7. 更新本文的已完成项、测试基线、风险和下一步；
-8. 只有 [`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md) 第 6 节全部满足，才可将
-   本文标记为完成。
-
-## 9. 相关文档
-
-- 产品范围与最终验收：[`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md)
-- 技术路线：[`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md)
+- 产品范围与完成定义：[`MULTIPLAYER_DELIVERY_BRIEF.md`](MULTIPLAYER_DELIVERY_BRIEF.md)
+- 技术路线与扩展边界：[`MULTIPLAYER_PLAN.md`](MULTIPLAYER_PLAN.md)
 - HTTP/WS 契约：[`API.md`](API.md)
-- 系统边界：[`ARCHITECTURE.md`](ARCHITECTURE.md)
+- 实际架构：[`ARCHITECTURE.md`](ARCHITECTURE.md)
 - 数据模型与迁移：[`DATABASE.md`](DATABASE.md)
-- staging/生产部署：[`DEPLOYMENT.md`](DEPLOYMENT.md)
-- 普通玩家操作：[`MULTIPLAYER_USER_GUIDE.md`](MULTIPLAYER_USER_GUIDE.md)
-
-## 10. 上下文恢复契约
-
-若聊天中断、上下文被压缩或换由新的执行者继续，以下规则优先于对话中的模糊记忆：
-
-1. 先读 `MULTIPLAYER_DELIVERY_BRIEF.md` 与本文，再看 Git 分支、工作区和 Kimi tmux 状态；
-2. 不得根据“页面已有”或“接口已有”宣布完成，必须以交付约定第 6 节的端到端证据为准；
-3. 不得遗漏 Electron、浏览器、单机回归、双客户端、隐私隔离、PostgreSQL 和 Azure staging；
-4. Kimi 负责前端实现不代表 Codex 可以跳过审查、联调、安全检查和最终修正；
-5. 未完成全部验收前保持在 `feat/multiplayer`，不合入 `master`、不替换生产；
-6. 任何凭据只用于获准的部署会话，不写入代码、文档、命令输出或提交，也不擅自更改；
-7. 每完成一个阶段，都要在本文留下提交、测试证据、剩余风险和下一步，使后续工作不依赖聊天记忆。
+- 部署、备份和恢复：[`DEPLOYMENT.md`](DEPLOYMENT.md)
+- 玩家操作：[`MULTIPLAYER_USER_GUIDE.md`](MULTIPLAYER_USER_GUIDE.md)

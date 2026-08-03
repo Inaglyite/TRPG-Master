@@ -544,6 +544,46 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(tool_calls, [])
 
+    def test_provider_request_failure_does_not_expose_exception_details(self):
+        secret_detail = "https://tenant-secret.example/v1 key=never-show-this"
+
+        def create(**_kwargs):
+            raise RuntimeError(secret_detail)
+
+        engine = GameEngine.__new__(GameEngine)
+        engine.client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        engine.messages = []
+        visible = []
+        errors = []
+        server_logs = []
+        engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
+
+        with (
+            patch("src.engine.log_model_call"),
+            patch("src.engine.log_error", side_effect=server_logs.append),
+            patch("src.engine.time.sleep"),
+        ):
+            text, tool_calls = engine._stream_llm("test-model")
+
+        self.assertEqual(text, "")
+        self.assertEqual(tool_calls, [])
+        self.assertEqual(visible, [])
+        self.assertEqual(errors, ["模型服务暂时不可用，请稍后重试。"])
+        self.assertNotIn(secret_detail, errors[0])
+        self.assertTrue(any(secret_detail in entry for entry in server_logs))
+
+    def test_multiplayer_websocket_close_reason_never_echoes_exception(self):
+        source = (
+            PROJECT_ROOT / "src" / "multiplayer_ws.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("reason=str(exc)", source)
+        self.assertIn('reason="房间连接发生内部错误"', source)
+        self.assertIn('reason="房间连接被拒绝"', source)
+        self.assertIn('"房间连接暂时不可用"', source)
+
     def test_normal_empty_response_retries_once(self):
         calls = []
 

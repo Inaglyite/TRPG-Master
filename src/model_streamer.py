@@ -183,7 +183,7 @@ class ModelStreamer:
                                    buffer_if_tools=buffer_if_tools,
                                    messages_override=messages_override, retry_on_empty=False)
             self.log_error(f"API: {exc}")
-            host.cb.on_error(f"API 错误: {exc}")
+            host.cb.on_error("模型服务暂时不可用，请稍后重试。")
             return "", []
 
         full_text = ""

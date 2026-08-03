@@ -108,6 +108,8 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const myInvestigator = me?.investigator ?? null;
   // 规则：服务端拒绝房主退出（含独处）；房主需先移交，关闭房间另做。
   const ownerBlockedFromLeaving = isOwner;
+  // 游戏进行中换绑调查员必然被后端拒绝，控件直接禁用。
+  const claimsLocked = roomStatus === "playing";
   const privateClues = privateState
     ? Object.values(privateState.clues)
         .flat()
@@ -394,7 +396,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                         <button
                           type="button"
                           className="btn-ghost"
-                          disabled={roomBusy || !myInvestigator}
+                          disabled={roomBusy || !myInvestigator || claimsLocked}
+                          title={
+                            claimsLocked
+                              ? "游戏进行中不能更换调查员"
+                              : undefined
+                          }
                           onClick={() => void releaseClaim(myInvestigator!.id)}
                         >
                           释放
@@ -403,7 +410,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                         <button
                           type="button"
                           className="btn-ghost"
-                          disabled={roomBusy || holder != null}
+                          disabled={roomBusy || holder != null || claimsLocked}
+                          title={
+                            claimsLocked
+                              ? "游戏进行中不能更换调查员"
+                              : undefined
+                          }
                           onClick={() => void claimByKey(option.id)}
                         >
                           {holder ? "已被占用" : "选择"}

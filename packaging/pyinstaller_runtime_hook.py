@@ -166,10 +166,12 @@ def run_packaged_migrations(
             command.stamp(config, baseline)
         command.upgrade(config, "head")
     finally:
-        os.environ["TRPG_DATABASE_URL"] = url
-        if previous_url is not None and previous_url != url:
-            # An explicit caller URL always wins; this branch primarily keeps
-            # direct unit-test calls from silently changing unrelated state.
+        if previous_url is None:
+            os.environ.pop("TRPG_DATABASE_URL", None)
+        else:
+            # The caller's environment is process-global.  Restore it exactly;
+            # bootstrap_packaged_database installs the migrated URL explicitly
+            # after this helper returns.
             os.environ["TRPG_DATABASE_URL"] = previous_url
     return url
 

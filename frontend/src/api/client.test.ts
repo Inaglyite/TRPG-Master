@@ -10,6 +10,7 @@ import {
   onUnauthorized,
   setCloudOrigin,
 } from "./client";
+import { acceptInvite } from "./worlds";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -91,6 +92,21 @@ describe("apiFetch", () => {
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
     expect(init.body).toBe(
       JSON.stringify({ username: "alice", password: "secret" }),
+    );
+  });
+
+  it("接受邀请只在 JSON 请求体传递 token", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ world_id: "world-1", role: "player" }),
+    );
+
+    await acceptInvite("invite/secret?not-in-url");
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:8765/api/invites/accept");
+    expect(url).not.toContain("invite/secret");
+    expect(init.body).toBe(
+      JSON.stringify({ token: "invite/secret?not-in-url" }),
     );
   });
 

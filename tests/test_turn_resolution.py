@@ -445,6 +445,30 @@ class TurnCommitTests(unittest.TestCase):
 
 
 class FinalizeTurnTests(unittest.TestCase):
+    def test_empty_opening_fails_before_commit_or_done(self):
+        events: list[str] = []
+        engine = SimpleNamespace(
+            messages=[],
+            cb=SimpleNamespace(
+                on_error=lambda _message: events.append("error"),
+                on_done=lambda: events.append("done"),
+            ),
+            _complete_turn_record=lambda **_kwargs: events.append("commit"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "开场模型未生成任何叙述"):
+            _finalize_turn({
+                "engine": engine,
+                "opening_turn": True,
+                "narrative": "",
+                "text": "",
+                "tool_calls": [],
+                "executed_tools": [],
+                "turn_had_check": False,
+            })
+
+        self.assertEqual(events, [])
+
     def test_explicit_action_menu_is_emitted_before_done(self):
         events: list[object] = []
         engine = SimpleNamespace(

@@ -9,7 +9,8 @@ import secrets
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import UTC, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -27,9 +28,7 @@ from .database import (
 
 _SESSION_COOKIE = os.environ.get("TRPG_SESSION_COOKIE", "trpg_session").strip()
 SESSION_COOKIE = (
-    _SESSION_COOKIE
-    if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", _SESSION_COOKIE)
-    else "trpg_session"
+    _SESSION_COOKIE if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", _SESSION_COOKIE) else "trpg_session"
 )
 SESSION_DAYS = 30
 USERNAME = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{3,40}$")
@@ -71,8 +70,33 @@ class LoginRateLimiter:
         with self._lock:
             self._attempts.pop(key, None)
 
+    def reset(self) -> None:
+        """Clear process-local counters (primarily for isolated test cases)."""
+        with self._lock:
+            self._attempts.clear()
+
 
 LOGIN_LIMITER = LoginRateLimiter()
+_REVOKED_SESSION_HASHES: dict[str, float] = {}
+_REVOKED_SESSION_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class AuthenticatedSession:
+    """A verified login plus the immutable data needed by a live WebSocket."""
+
+    user: User
+    token_hash: str
+    expires_at: datetime
+
+    def locally_valid(self) -> bool:
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at <= utcnow():
+            return False
+        with _REVOKED_SESSION_LOCK:
+            return self.token_hash not in _REVOKED_SESSION_HASHES
 
 
 def normalize_username(value: object) -> str:
@@ -161,15 +185,17 @@ def create_login_session(db_url: str, user: User, *, user_agent="", ip_address="
     return token
 
 
-def resolve_session(db_url: str, token: str | None) -> User | None:
+def resolve_session_identity(
+    db_url: str,
+    token: str | None,
+) -> AuthenticatedSession | None:
     if not token:
         return None
     now = utcnow()
+    digest = token_hash(token)
     with session_scope(db_url) as session:
         login = (
-            session.query(LoginSession)
-            .filter_by(token_hash=token_hash(token), revoked_at=None)
-            .one_or_none()
+            session.query(LoginSession).filter_by(token_hash=digest, revoked_at=None).one_or_none()
         )
         expires_at = login.expires_at if login is not None else None
         if expires_at is not None and expires_at.tzinfo is None:
@@ -180,16 +206,34 @@ def resolve_session(db_url: str, token: str | None) -> User | None:
         if user is None or user.status != "active":
             return None
         login.last_seen_at = now
-        return user
+        return AuthenticatedSession(
+            user=user,
+            token_hash=digest,
+            expires_at=expires_at,
+        )
+
+
+def resolve_session(db_url: str, token: str | None) -> User | None:
+    identity = resolve_session_identity(db_url, token)
+    return identity.user if identity is not None else None
 
 
 def revoke_session(db_url: str, token: str | None) -> None:
     if not token:
         return
+    digest = token_hash(token)
     with session_scope(db_url) as session:
-        login = session.query(LoginSession).filter_by(token_hash=token_hash(token)).one_or_none()
+        login = session.query(LoginSession).filter_by(token_hash=digest).one_or_none()
         if login and login.revoked_at is None:
             login.revoked_at = utcnow()
+    # Existing WebSockets cannot consult the database for every outbound chunk.
+    # Keep an in-process revocation fence so a revoked session immediately stops
+    # receiving broadcasts even before its socket close finishes.
+    with _REVOKED_SESSION_LOCK:
+        _REVOKED_SESSION_HASHES[digest] = time.time()
+        if len(_REVOKED_SESSION_HASHES) > 100_000:
+            oldest = next(iter(_REVOKED_SESSION_HASHES))
+            _REVOKED_SESSION_HASHES.pop(oldest, None)
 
 
 def authorize_world(db_url: str, user_id: str, world_id: str, permission: str) -> str:
@@ -208,6 +252,13 @@ def request_user(request: Request, db_url: str) -> User | None:
 
 def websocket_user(websocket: WebSocket, db_url: str) -> User | None:
     return resolve_session(db_url, websocket.cookies.get(SESSION_COOKIE))
+
+
+def websocket_session(
+    websocket: WebSocket,
+    db_url: str,
+) -> AuthenticatedSession | None:
+    return resolve_session_identity(db_url, websocket.cookies.get(SESSION_COOKIE))
 
 
 def validate_websocket_origin(websocket: WebSocket) -> None:

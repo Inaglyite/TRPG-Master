@@ -1,13 +1,17 @@
+import copy
 import random
 import unittest
 
 from src.combat import (
     CombatError,
+    assign_combat_actor,
     combat_action,
     combat_decide,
+    combat_status,
     preview_player_escalation,
     start_combat,
 )
+from src.investigators import project_active_investigator
 
 
 class FixedRandom:
@@ -42,6 +46,41 @@ def make_world() -> dict:
             }
         ],
     }
+
+
+def make_multiplayer_world(*, active_id: str = "inv-alice") -> dict:
+    world = make_world()
+    alice = copy.deepcopy(world["pc"])
+    alice.update(
+        {
+            "name": "Alice",
+            "investigator_id": "inv-alice",
+            "controller_user_id": "user-alice",
+            "attributes": {"DEX": 80},
+            "inventory": [".38口径左轮手枪（6发）"],
+        }
+    )
+    bob = copy.deepcopy(world["pc"])
+    bob.update(
+        {
+            "name": "Bob",
+            "investigator_id": "inv-bob",
+            "controller_user_id": "user-bob",
+            "attributes": {"DEX": 70},
+            "inventory": [".38口径左轮手枪（6发）"],
+        }
+    )
+    world["investigators"] = {
+        "inv-alice": alice,
+        "inv-bob": bob,
+    }
+    world["investigator_controllers"] = {
+        "user-alice": "inv-alice",
+        "user-bob": "inv-bob",
+    }
+    world["active_investigator_id"] = active_id
+    world["pc"] = copy.deepcopy(world["investigators"][active_id])
+    return world
 
 
 class CombatStateMachineTests(unittest.TestCase):
@@ -107,6 +146,191 @@ class CombatStateMachineTests(unittest.TestCase):
         self.assertEqual(world["combat_state"]["turn_order"], ["cultist", "pc"])
         self.assertEqual(world["combat_state"]["current_actor"], "cultist")
         self.assertEqual(world["combat_state"]["round"], 1)
+
+    def test_multiplayer_combat_uses_stable_ids_and_damage_never_follows_projection(self):
+        world = make_multiplayer_world(active_id="inv-alice")
+        world["npcs"][0]["attributes"]["DEX"] = 90
+        start_combat(world, [{"id": "cultist", "damage_spec": "1d3"}], "伏击")
+        self.assertEqual(
+            world["combat_state"]["turn_order"],
+            ["cultist", "inv-alice", "inv-bob"],
+        )
+
+        # Simulate the legacy projection being switched while Alice remains the
+        # authoritative target stored in combat_state.
+        world["active_investigator_id"] = "inv-bob"
+        world["pc"] = copy.deepcopy(world["investigators"]["inv-bob"])
+        pending = combat_action(
+            world,
+            actor_id="cultist",
+            target_id="inv-alice",
+            action_type="melee",
+            description="教徒挥拳攻击 Alice",
+        )
+        self.assertEqual(
+            pending["decision"]["responding_investigator_id"],
+            "inv-alice",
+        )
+        self.assertEqual(
+            pending["decision"]["target_investigator_id"],
+            "inv-alice",
+        )
+
+        resolved = combat_decide(
+            world,
+            pending["decision"]["id"],
+            "no_defense",
+            rng=FixedRandom([1, 1, 2]),
+        )
+        self.assertEqual(resolved["damage"]["target"], "inv-alice")
+        self.assertEqual(world["investigators"]["inv-alice"]["hp"], 10)
+        self.assertEqual(world["pc"]["hp"], 12)
+        self.assertEqual(world["investigators"]["inv-bob"]["hp"], 12)
+
+    def test_multiplayer_firearm_ammo_is_charged_to_the_stable_actor(self):
+        world = make_multiplayer_world(active_id="inv-bob")
+        world["investigators"]["inv-bob"]["attributes"]["DEX"] = 95
+        world["pc"]["attributes"]["DEX"] = 95
+        world["npcs"][0]["attributes"]["DEX"] = 60
+        start_combat(world, [{"id": "cultist"}], "枪战")
+
+        result = combat_action(
+            world,
+            actor_id="inv-bob",
+            target_id="cultist",
+            action_type="firearm",
+            description="Bob 向教徒开枪",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+            rng=FixedRandom([9, 9]),
+        )
+        self.assertEqual(result["ammo"]["investigator_id"], "inv-bob")
+        self.assertEqual(world["pc"]["inventory"][0], ".38口径左轮手枪（5发）")
+        self.assertEqual(
+            world["investigators"]["inv-alice"]["inventory"][0],
+            ".38口径左轮手枪（6发）",
+        )
+        project_active_investigator(world)
+        self.assertEqual(
+            world["investigators"]["inv-bob"]["inventory"][0],
+            ".38口径左轮手枪（5发）",
+        )
+
+    def test_multiplayer_violence_confirmation_uses_the_acting_investigator_profile(self):
+        world = make_multiplayer_world(active_id="inv-bob")
+        world["investigators"]["inv-alice"]["backstory"] = {
+            "violence_stance": "avoidant"
+        }
+        world["investigators"]["inv-bob"]["backstory"] = {
+            "violence_stance": "unrestrained"
+        }
+        world["pc"] = copy.deepcopy(world["investigators"]["inv-bob"])
+        world["pc"]["attributes"]["DEX"] = 95
+        world["npcs"][0]["attributes"]["DEX"] = 60
+        world["npcs"][0]["disposition"] = "cooperative"
+        start_combat(world, [{"id": "cultist"}], "突然冲突")
+
+        pending = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="melee",
+            description="Bob 挥拳攻击",
+        )
+
+        self.assertEqual(
+            pending["decision"]["responding_investigator_id"],
+            "inv-bob",
+        )
+        self.assertEqual(
+            pending["decision"]["roleplay_context"]["violence_stance"],
+            "unrestrained",
+        )
+        self.assertIn("并不冲突", pending["decision"]["description"])
+
+    def test_owner_skip_updates_authoritative_combat_turn_before_next_player_action(self):
+        world = make_multiplayer_world(active_id="inv-alice")
+        world["npcs"][0]["attributes"]["DEX"] = 60
+        start_combat(world, [{"id": "cultist"}], "调查员遭到围攻")
+        self.assertEqual(
+            world["combat_state"]["turn_order"],
+            ["inv-alice", "inv-bob", "cultist"],
+        )
+
+        assignment = assign_combat_actor(world, "inv-bob")
+        self.assertEqual(assignment["actor_id"], "inv-bob")
+        self.assertEqual(assignment["skipped_actor_ids"], ["inv-alice"])
+        self.assertEqual(world["combat_state"]["turn_index"], 1)
+        self.assertEqual(world["combat_state"]["current_actor"], "inv-bob")
+        self.assertIn("跳过 inv-alice", world["combat_state"]["log"][-1]["text"])
+
+        result = combat_action(
+            world,
+            actor_id="inv-bob",
+            action_type="move",
+            description="Bob 寻找掩体",
+        )
+        self.assertEqual(result["event"], "action_resolved")
+        self.assertEqual(world["combat_state"]["current_actor"], "cultist")
+
+    def test_uncontrolled_defender_uses_safe_default_without_waiting_for_callback(self):
+        world = make_multiplayer_world(active_id="inv-alice")
+        world["npcs"][0]["attributes"]["DEX"] = 90
+        start_combat(world, [{"id": "cultist", "damage_spec": "1d3"}], "伏击")
+        world["investigator_controllers"].pop("user-bob")
+        world["investigators"]["inv-bob"]["controller_user_id"] = None
+
+        result = combat_action(
+            world,
+            actor_id="cultist",
+            target_id="inv-bob",
+            action_type="melee",
+            description="教徒攻击已经失去控制者的 Bob",
+            rng=FixedRandom([1, 1, 9, 9, 2]),
+        )
+
+        self.assertFalse(result.get("requires_decision", False))
+        self.assertTrue(result["decision"]["automatic"])
+        self.assertEqual(
+            result["decision"]["reason"],
+            "target_investigator_uncontrolled",
+        )
+        self.assertEqual(result["decision"]["selected"], "dodge")
+        self.assertIsNone(world["combat_state"]["pending_decision"])
+        self.assertEqual(world["investigators"]["inv-bob"]["hp"], 10)
+
+    def test_saved_legacy_pc_combat_is_normalized_without_breaking_singleplayer(self):
+        world = make_multiplayer_world(active_id="inv-alice")
+        world["npcs"][0]["attributes"]["DEX"] = 90
+        start_combat(world, [{"id": "cultist"}], "旧存档")
+        combat = world["combat_state"]
+        participant = next(
+            item for item in combat["participants"] if item["id"] == "inv-alice"
+        )
+        participant["id"] = "pc"
+        combat["turn_order"] = [
+            "pc" if value == "inv-alice" else value
+            for value in combat["turn_order"]
+        ]
+        combat["pending_decision"] = {
+            "id": "legacy-decision",
+            "kind": "combat_defense",
+            "action": {"actor_id": "cultist", "target_id": "pc"},
+            "options": [{"id": "dodge"}],
+        }
+
+        status = combat_status(copy.deepcopy(world))
+        normalized = status["combat"]
+        self.assertIn("inv-alice", normalized["turn_order"])
+        self.assertNotIn("pc", normalized["turn_order"])
+        self.assertEqual(
+            normalized["pending_decision"]["responding_investigator_id"],
+            "inv-alice",
+        )
+
+        legacy = make_world()
+        start_combat(legacy, [{"id": "cultist"}], "单机")
+        self.assertIn("pc", legacy["combat_state"]["turn_order"])
 
     def test_npc_attack_waits_for_player_decision_before_advancing(self):
         world = make_world()

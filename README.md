@@ -20,7 +20,7 @@ Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **�
 - **Modules you can write and share.** Modules are safe, sandboxed `.trpgmod` ZIP packages (JSON + Markdown + assets) with JSON Schema validation, one-click import, side-by-side versions and a v2 format that guarantees the main investigation can never dead-end on a failed roll. A ready-to-copy [template](examples/module-template/manifest.json) is included.
 - **Lorebook-powered context.** Character Card V3 lorebooks retrieve module lore per turn with budgets, groups and cooldowns; tiered information boundaries keep the model from spoiling secrets it shouldn't know yet.
 - **Saves, journals and timeline branches.** Per-world save slots, a persistent turn journal that survives disconnects, and branching timelines: rewind to any decision point and play out a different choice without rerolling the past.
-- **Desktop or self-hosted.** Electron app for Linux/Windows out of the box; server deployments add shared 2–4 player rooms, Argon2id accounts, revocable sessions, turn ownership, private-event isolation and PostgreSQL persistence.
+- **Desktop or self-hosted.** Linux runs the Electron desktop from source; Windows supports NSIS and portable packages. Server deployments add shared 2–4 player rooms, Argon2id accounts, revocable sessions, turn ownership, private-event isolation and PostgreSQL persistence.
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **�
 
 - Python 3.12+
 - Node.js 20 LTS or newer
-- An API key for any OpenAI-compatible endpoint (DeepSeek by default)
+- For local play or server operation: an API key for any OpenAI-compatible endpoint (DeepSeek by default)
 - Optional: a Zhipu GLM API key for fast summaries and context compression
 
 ### Install
@@ -45,6 +45,8 @@ cd ..
 ```
 
 ### Configure the model
+
+Skip this section if you only join a multiplayer server; its operator owns the model configuration.
 
 Interactive setup (writes `.env.json` in the project root; the file is git-ignored):
 
@@ -90,7 +92,7 @@ Environment variables take precedence over the file. The full list — model-rol
 | `GLM_MODEL` | GLM model name | `glm-4-flash-250414` |
 | `TRPG_MODULE` | Module directory used at startup | `mansion_of_madness` |
 | `TRPG_PROJECT_ROOT` | Read-only root for modules, rules and skills | auto-detected |
-| `TRPG_RUNTIME_ROOT` | Writable root for `worlds/`, custom characters and profiles | project root in source mode; backend dir when packaged |
+| `TRPG_RUNTIME_ROOT` | Writable root for the database, compatibility data, custom characters and profiles | project root in source mode; Electron injects its per-user `userData/runtime` directory when packaged |
 | `TRPG_DATABASE_URL` | SQLAlchemy database URL; PostgreSQL required for cloud deployments | desktop defaults to SQLite at `TRPG_RUNTIME_ROOT/trpg-master.db` |
 | `TRPG_REQUIRE_AUTH` | Enable account, HTTP and WebSocket permission gates | `0`; the production service sets `1` |
 | `TRPG_ALLOWED_ORIGINS` | Origins allowed to carry the login cookie over HTTP/WebSocket | must be set explicitly in production |
@@ -98,13 +100,20 @@ Environment variables take precedence over the file. The full list — model-rol
 
 </details>
 
-### Run the desktop app
+### Run the Linux desktop app from source
 
 ```bash
-./start_desktop.sh
+bash start_desktop.sh
 ```
 
-The launcher activates the venv, installs missing backend dependencies, applies database migrations, and imports legacy save data on first run, then starts the backend and the Electron window. Closing the last window stops the backend automatically.
+The launcher builds the UI and opens Electron without touching the local database. Choosing **local play** then
+activates the venv, installs missing backend dependencies, applies migrations, imports legacy saves once and starts
+the local backend; choosing **multiplayer** never starts it. Closing the last Electron window stops a backend owned
+by that window. In an attended terminal, failure to start Electron falls back to a local browser session that runs
+until you press Ctrl+C.
+
+The project does not currently produce a Linux AppImage. The Windows package is built separately as described
+under **Windows packaging** below.
 
 ### Multiplayer
 
@@ -113,6 +122,10 @@ In a browser, open the HTTPS address supplied by the server operator. In Electro
 room or join one with an invitation code. See the Chinese
 [multiplayer user guide](docs/MULTIPLAYER_USER_GUIDE.md) for the complete room, character, turn, save,
 reconnection and ownership-transfer flow.
+
+Online players do not need a local model API key and Electron does not start its embedded backend in multiplayer
+mode. Model credentials and inference configuration stay on the server. Multiplayer currently offers only
+default and module-provided investigators; local profile and custom-character files are not uploaded.
 
 Ordinary players need an HTTPS endpoint with a publicly trusted certificate. The current Azure acceptance
 environment still uses an IP address and a self-signed certificate; it is not a production player endpoint, and
@@ -205,7 +218,10 @@ The full module map lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 ```
 
-Builds `trpg-server.exe` with PyInstaller, then the NSIS installer and portable builds with electron-builder. Output lands in `frontend/release/`. `.env.json` is never bundled — the Electron setup window collects the endpoint and key on first run.
+Run this on Windows. It builds `trpg-server.exe` with PyInstaller, then the NSIS installer and portable builds
+with electron-builder. Output lands in `frontend/release/`. `.env.json` is never bundled. The Electron setup
+window asks for a model endpoint and key only when the player selects local mode; multiplayer mode asks only for
+the server's HTTPS origin.
 
 ## Current Limitations
 

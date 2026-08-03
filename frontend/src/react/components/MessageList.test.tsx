@@ -202,3 +202,73 @@ describe("MessageList", () => {
     expect(screen.queryByText("不该显示的查看者")).not.toBeInTheDocument();
   });
 });
+
+describe("MessageList 联机回合操作按钮门禁", () => {
+  beforeEach(async () => {
+    const { initialOnlineState, useOnlineStore } =
+      await import("../../state/online-store");
+    useOnlineStore.setState({ ...initialOnlineState });
+    useMessageStore.setState({ messages: [], actionReset: 0 });
+    useAppStore.setState({ mode: "local", character: null });
+  });
+
+  async function setupRoom(role: "owner" | "player", mode: "online" | "local") {
+    const { initialOnlineState, useOnlineStore } =
+      await import("../../state/online-store");
+    useOnlineStore.setState({
+      ...initialOnlineState,
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      members: [{ user_id: "u1", username: "alice", role }],
+    });
+    useAppStore.setState({ mode });
+    act(() => {
+      useMessageStore.getState().replaceMessages([
+        {
+          id: "msg-1",
+          kind: "gm",
+          text: "守秘人的一段叙述",
+          turnId: "turn-1",
+          canRewrite: true,
+          canBranch: true,
+        },
+      ]);
+    });
+  }
+
+  const REWRITE_NAME = "重新叙述本回合，不改变判定结果";
+  const BRANCH_NAME = "回到本次行动前并创建独立时间线分支";
+
+  it("单机模式两个按钮都显示", async () => {
+    await setupRoom("player", "local");
+    render(<MessageList />);
+    expect(
+      screen.getByRole("button", { name: REWRITE_NAME }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: BRANCH_NAME }),
+    ).toBeInTheDocument();
+  });
+
+  it("联机非房主：rewrite 与 branch 都隐藏", async () => {
+    await setupRoom("player", "online");
+    render(<MessageList />);
+    expect(
+      screen.queryByRole("button", { name: REWRITE_NAME }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: BRANCH_NAME }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("联机房主：显示 rewrite，branch 仍隐藏", async () => {
+    await setupRoom("owner", "online");
+    render(<MessageList />);
+    expect(
+      screen.getByRole("button", { name: REWRITE_NAME }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: BRANCH_NAME }),
+    ).not.toBeInTheDocument();
+  });
+});

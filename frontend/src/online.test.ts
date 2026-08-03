@@ -22,6 +22,7 @@ import {
   leaveRoom,
   login,
   logout,
+  refreshRoom,
   register,
   refreshWorlds,
   resumeLastRoom,
@@ -251,6 +252,52 @@ describe("上次房间恢复", () => {
 });
 
 describe("异步 REST 归属隔离", () => {
+  it("角色降级后的成员刷新保留活动房间并应用 viewer 权限", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-a",
+      members: [
+        {
+          user_id: alice.id,
+          username: alice.username,
+          role: "player",
+          investigator: { id: "investigator-1", character_key: "detective" },
+        },
+      ],
+    });
+    vi.mocked(getRoomInfo).mockResolvedValue({
+      world_id: "world-a",
+      module: "",
+      metadata: { name: "房间 A", room_status: "playing" },
+      members: [
+        {
+          user_id: alice.id,
+          username: alice.username,
+          role: "viewer",
+          investigator: null,
+        },
+      ],
+    });
+
+    await refreshRoom();
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      view: "room",
+      activeWorldId: "world-a",
+      members: [
+        {
+          user_id: "u1",
+          role: "viewer",
+          investigator: null,
+        },
+      ],
+    });
+    expect(disconnectRoom).not.toHaveBeenCalled();
+  });
+
   it("换号后丢弃上一账号迟到的世界列表", async () => {
     useOnlineStore.setState({
       authStatus: "authenticated",
@@ -436,5 +483,40 @@ describe("退出房间", () => {
     expect(useOnlineStore.getState().view).toBe("room");
     expect(useOnlineStore.getState().roomError).toBe("房主需要先移交房主");
     expect(localStorage.getItem("trpg-online-world-id")).toBe("world-1");
+  });
+});
+
+describe("dismissInvite 撤销语义", () => {
+  beforeEach(() => {
+    useOnlineStore.setState({
+      activeWorldId: "world-1",
+      invite: { invite_id: "inv-1", token: "TOKEN-XYZ" },
+      roomError: null,
+    });
+  });
+
+  it("DELETE 成功后才从 UI 移除邀请码", async () => {
+    const { revokeInvite } = await import("./api/worlds");
+    const { dismissInvite } = await import("./online");
+    vi.mocked(revokeInvite).mockResolvedValue(undefined);
+    await dismissInvite();
+    expect(revokeInvite).toHaveBeenCalledWith("world-1", "inv-1");
+    expect(useOnlineStore.getState().invite).toBeNull();
+    expect(useOnlineStore.getState().roomError).toBeNull();
+  });
+
+  it("DELETE 失败保留邀请码并显示明确错误", async () => {
+    const { revokeInvite } = await import("./api/worlds");
+    const { dismissInvite } = await import("./online");
+    vi.mocked(revokeInvite).mockRejectedValue(
+      new ApiError("网络抖动", 0, "network_error"),
+    );
+    await dismissInvite();
+    const state = useOnlineStore.getState();
+    expect(state.invite).toMatchObject({
+      invite_id: "inv-1",
+      token: "TOKEN-XYZ",
+    });
+    expect(state.roomError).toBe("网络抖动");
   });
 });

@@ -5,6 +5,7 @@ export const serverMessageTypes = [
   "narrative_segment",
   "narrative_segments",
   "chat_events",
+  "connected",
   "tension",
   "dice_result",
   "glm_summary",
@@ -121,7 +122,12 @@ const gmTurnStartMessageSchema = z
       message.player_action &&
       typeof message.player_action === "object" &&
       message.player_action.actor;
-    if (hasPlayerInput && !message.actor && !nestedActor) {
+    // 权威行动者只对多人房间回合强制（房间事件携带 room_event_id/world_id）；
+    // 单机回合没有 actor 字段，不能按房间契约拒绝。
+    const isRoomTurn =
+      typeof (message as Record<string, unknown>).room_event_id === "number" ||
+      typeof (message as Record<string, unknown>).world_id === "string";
+    if (isRoomTurn && hasPlayerInput && !message.actor && !nestedActor) {
       context.addIssue({
         code: "custom",
         message: "player action requires an authoritative actor",

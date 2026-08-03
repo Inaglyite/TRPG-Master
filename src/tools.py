@@ -20,6 +20,8 @@ from .endings import validate_ending
 from .inventory import InventoryError
 from .inventory import use_item as apply_inventory_use
 from .runtime import RuntimeContext
+from .state_paths import resolve_path as _resolve_state_path
+from .state_paths import set_path as _set_state_path
 from .tool_runtime import ToolRuntime, UnknownToolError
 from .world_store import atomic_write_json
 
@@ -362,7 +364,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "combat_start",
-            "description": "进入战斗并建立唯一的服务端回合状态。玩家最新输入已明确包含首个攻击或武力威胁时，必须同时填写 initial_action，状态机会立即确认/结算，绝不能只开战后再次询问玩家。自动加入 PC 并按 DEX 排序；NPC 缺少战斗数值时可提供保守覆盖值。",
+            "description": "进入战斗并建立唯一的服务端回合状态。玩家最新输入已明确包含首个攻击或武力威胁时，必须同时填写 initial_action，状态机会立即确认/结算，绝不能只开战后再次询问玩家。自动加入全部受控调查员并按 DEX 排序；NPC 缺少战斗数值时可提供保守覆盖值。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -371,7 +373,7 @@ TOOLS = [
                         "type": "object",
                         "description": "玩家在最新输入中已经明确声明的开场攻击或武力威胁；没有明确行动时省略",
                         "properties": {
-                            "actor_id": {"type": "string", "description": "通常为 pc"},
+                            "actor_id": {"type": "string", "description": "当前调查员的稳定 id；旧单机可用 pc"},
                             "target_id": {"type": "string", "description": "目标 NPC id"},
                             "action_type": {
                                 "type": "string",
@@ -390,11 +392,11 @@ TOOLS = [
                     },
                     "participants": {
                         "type": "array",
-                        "description": "参战者配置。PC 可省略并会自动加入；NPC 必须使用 world_state 中的 id。",
+                        "description": "参战者配置。调查员可省略并会自动加入；NPC 必须使用 world_state 中的 id。",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "id": {"type": "string", "description": "pc 或 NPC id"},
+                                "id": {"type": "string", "description": "稳定调查员 id、旧单机 pc 或 NPC id"},
                                 "dex": {"type": "integer", "description": "可选 DEX 覆盖值"},
                                 "con": {"type": "integer", "description": "可选 CON 覆盖值，用于重伤检定"},
                                 "fighting_brawl": {"type": "integer", "description": "可选斗殴覆盖值"},
@@ -892,36 +894,6 @@ def _luck_check(_args: dict, context: RuntimeContext) -> str:
         "d100_roll": roll, "level": level, "success": roll <= luck,
         "bonus_dice": 0, "penalty_dice": 0, "is_push": False,
     })
-
-
-def _resolve_state_path(data: object, path: str) -> object:
-    current = data
-    for part in str(path).split("."):
-        if isinstance(current, list):
-            current = current[int(part)]
-        elif isinstance(current, dict):
-            current = current[part]
-        else:
-            raise KeyError(part)
-    return current
-
-
-def _set_state_path(data: dict, path: str, value: object) -> None:
-    parts = str(path).split(".")
-    current: object = data
-    for part in parts[:-1]:
-        if isinstance(current, list):
-            current = current[int(part)]
-        elif isinstance(current, dict):
-            current = current.setdefault(part, {})
-        else:
-            raise KeyError(part)
-    if isinstance(current, list):
-        current[int(parts[-1])] = value
-    elif isinstance(current, dict):
-        current[parts[-1]] = value
-    else:
-        raise KeyError(parts[-1])
 
 
 @TOOL_RUNTIME.handler("state_get")

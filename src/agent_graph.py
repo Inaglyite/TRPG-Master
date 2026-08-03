@@ -507,6 +507,9 @@ def _finalize_turn(state: TurnState) -> dict:
         ),
     )
     segment_dicts = [s.to_dict() for s in narrative_segments]
+    if state.get("opening_turn") and not narrative.strip():
+        log_error("开场失败：模型未生成任何叙述")
+        raise RuntimeError("开场模型未生成任何叙述")
     commit_memory = getattr(engine, "_commit_npc_conversations", None)
     if commit_memory and segment_dicts:
         commit_memory(segment_dicts)

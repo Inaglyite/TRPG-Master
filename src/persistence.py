@@ -74,15 +74,6 @@ def _import_legacy_slot(context: RuntimeContext, slot_id: str) -> SaveSlot | Non
             .filter_by(world_id=context.world_id, slot_key=slot_id)
             .one_or_none()
         )
-        if row is None:
-            row = SaveSlot(
-                id=new_id("save"),
-                world_id=context.world_id,
-                slot_key=slot_id,
-                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
-                snapshot_id="pending",
-            )
-            session.add(row)
         snapshot_row = Snapshot(
             id=new_id("snapshot"),
             world_id=context.world_id,
@@ -91,6 +82,19 @@ def _import_legacy_slot(context: RuntimeContext, slot_id: str) -> SaveSlot | Non
             state=snapshot,
         )
         session.add(snapshot_row)
+        # SaveSlot and Snapshot expose scalar foreign keys rather than an ORM
+        # relationship, so make the parent durable before adding/updating the
+        # child. This is required by PostgreSQL and by SQLite with FK checks on.
+        session.flush()
+        if row is None:
+            row = SaveSlot(
+                id=new_id("save"),
+                world_id=context.world_id,
+                slot_key=slot_id,
+                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
+                snapshot_id=snapshot_row.id,
+            )
+            session.add(row)
         row.messages = messages
         row.snapshot_id = snapshot_row.id
         row.metadata_json = meta
@@ -271,15 +275,6 @@ def save_game(
             .filter_by(world_id=context.world_id, slot_key=slot_id)
             .one_or_none()
         )
-        if row is None:
-            row = SaveSlot(
-                id=new_id("save"),
-                world_id=context.world_id,
-                slot_key=slot_id,
-                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
-                snapshot_id="pending",
-            )
-            session.add(row)
         snapshot_row = Snapshot(
             id=new_id("snapshot"),
             world_id=context.world_id,
@@ -288,11 +283,19 @@ def save_game(
             state=world_state,
         )
         session.add(snapshot_row)
-        # SaveSlot may already point at the snapshot created by the automatic
-        # turn journal. SQLAlchemy only sees scalar foreign-key IDs here, not a
-        # relationship dependency, so PostgreSQL can otherwise schedule the
-        # slot UPDATE before the new snapshot INSERT.
+        # SaveSlot and Snapshot expose scalar foreign keys rather than an ORM
+        # relationship, so make the parent durable before adding/updating the
+        # child. This is required by PostgreSQL and by SQLite with FK checks on.
         session.flush()
+        if row is None:
+            row = SaveSlot(
+                id=new_id("save"),
+                world_id=context.world_id,
+                slot_key=slot_id,
+                kind="auto" if slot_id == AUTO_SAVE_SLOT else "manual",
+                snapshot_id=snapshot_row.id,
+            )
+            session.add(row)
         row.metadata_json = meta
         row.messages = serializable
         row.snapshot_id = snapshot_row.id

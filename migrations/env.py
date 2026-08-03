@@ -12,7 +12,13 @@ config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
 if os.environ.get("TRPG_DATABASE_URL"):
-    config.set_main_option("sqlalchemy.url", os.environ["TRPG_DATABASE_URL"])
+    # ConfigParser treats ``%`` as interpolation syntax. Database passwords
+    # commonly contain percent-encoded characters, so escape them only while
+    # storing the URL in Alembic's Config; reading it back yields the original.
+    config.set_main_option(
+        "sqlalchemy.url",
+        os.environ["TRPG_DATABASE_URL"].replace("%", "%%"),
+    )
 target_metadata = Base.metadata
 
 

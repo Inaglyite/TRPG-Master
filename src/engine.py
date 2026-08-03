@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
+from . import investigators as investigator_roster
 from .action_checks import infer_action_check, infer_scene_transition
 from .action_resolution import ActionResolution, plan_player_action
 from .agent_graph import build_turn_graph
@@ -40,7 +41,6 @@ from .discovery import (
 from .encounters import SceneEncounterResolution, resolve_scene_encounters
 from .handouts import matching_handouts
 from .history_compactor import HistoryCompactor, build_summary_input, parse_summary_json
-from .investigators import project_active_investigator
 from .logger import error as log_error
 from .logger import game_event as log_game
 from .logger import model_call as log_model_call
@@ -59,6 +59,7 @@ from .model_streamer import (
     sanitize_visible_narrative,
 )
 from .npc_conversations import commit_npc_conversations
+from .npc_speaker_aliases import build_npc_speaker_aliases
 from .persistence import (
     has_save,
     list_saves,
@@ -433,48 +434,9 @@ class GameEngine:
             world = self.context.world_store.load()
         except Exception:
             return {}
-        aliases: dict[str, str] = {}
-
-        def add_aliases(name: str, npc_id: str) -> None:
-            name = name.strip()
-            if not name or not npc_id:
-                return
-            aliases[name] = npc_id
-            if "·" in name:
-                short = name.rsplit("·", 1)[-1].strip()
-                if short:
-                    aliases.setdefault(short, npc_id)
-                    for title in ("医生", "教授", "主任", "先生", "女士", "小姐"):
-                        if short.endswith(title) and len(short) > len(title):
-                            aliases.setdefault(short[: -len(title)], npc_id)
-        for npc in world.get("npcs", []):
-            if not isinstance(npc, dict):
-                continue
-            npc_id = str(npc.get("id") or "")
-            if not npc_id:
-                continue
-            for key in ("name", "display_name"):
-                name = str(npc.get(key) or "").strip()
-                if name:
-                    add_aliases(name, npc_id)
-        for npc_id, asset in ((world.get("asset_map") or {}).get("npcs") or {}).items():
-            if not isinstance(asset, dict):
-                continue
-            name = str(asset.get("label") or asset.get("name") or "").strip()
-            if name:
-                add_aliases(name, str(npc_id))
-        try:
-            catalog = json.loads(self.context.initial_state_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            catalog = {}
-        for npc in catalog.get("npcs", []):
-            if not isinstance(npc, dict):
-                continue
-            npc_id = str(npc.get("id") or "")
-            name = str(npc.get("name") or npc.get("display_name") or "").strip()
-            if npc_id and name and self.is_valid_npc_id(npc_id):
-                add_aliases(name, npc_id)
-        return aliases
+        return build_npc_speaker_aliases(
+            world, self.context.initial_state_file, is_valid_npc_id=self.is_valid_npc_id
+        )
 
     def _complete_turn_record(
         self,
@@ -501,7 +463,7 @@ class GameEngine:
         # Fold it into the roster before the one transaction writes WorldState,
         # Turn, Snapshot and auto-save, so a crash after commit cannot expose an
         # older investigator copy during recovery.
-        project_active_investigator(world_state)
+        investigator_roster.project_active_investigator(world_state)
         with self.performance_span("journal_commit"):
             record = journal.complete(
             turn_id,
@@ -908,6 +870,7 @@ class GameEngine:
             world = self.context.world_store.load()
         except Exception:
             return {}
+        investigator_roster.normalize_legacy_combat_investigator_ids(world)
         combat = world.get("combat_state")
         return combat if isinstance(combat, dict) else {}
 
@@ -1498,7 +1461,7 @@ class GameEngine:
         if not isinstance(pending, dict) or not pending.get("id"):
             return
         decision = {key: value for key, value in pending.items() if key != "action"}
-        selected = self.cb.on_decision(decision)
+        selected = self.cb.on_decision(decision) if not getattr(self, "_multiplayer_roster_active", False) or investigator_roster.decision_has_controller(self.context, decision) else decision.get("default_option")
         valid_options = {
             option.get("id")
             for option in decision.get("options", [])

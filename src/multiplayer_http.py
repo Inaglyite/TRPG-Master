@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import audit, authorize_world, request_user
 from .characters import list_character_options
-from .database import User, World, WorldMember, new_id, session_scope
+from .database import World, WorldMember, session_scope
 from .module_registry import ModuleRegistry
 from .multiplayer import (
     MultiplayerError,
@@ -29,7 +26,9 @@ from .multiplayer import (
     transfer_owner,
     update_member_role,
 )
+from .multiplayer_private_state import release_world_controller
 from .multiplayer_room_events import broadcast_investigator_change
+from .multiplayer_world_creation import create_owned_world
 from .room_runtime import GameRoom, RoomManager
 from .runtime import RuntimeContext
 
@@ -99,111 +98,26 @@ def create_multiplayer_http_router(
         user = request_user(request, db_url())
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
-        module = str(data.get("module") or deps.default_module_name).strip()
         try:
-            module_record = deps.module_registry.resolve(module)
-        except (FileNotFoundError, ValueError):
-            return JSONResponse(
-                {"detail": "模组不存在", "code": "module_not_found"},
-                status_code=404,
-            )
-        try:
-            max_players = int(data.get("max_players") or 4)
-        except (TypeError, ValueError):
-            return JSONResponse(
-                {"detail": "玩家上限必须是 2–4 的整数", "code": "invalid_max_players"},
-                status_code=400,
-            )
-        if max_players < 2 or max_players > 4:
-            return JSONResponse(
-                {"detail": "玩家上限必须是 2–4 的整数", "code": "invalid_max_players"},
-                status_code=400,
-            )
-        name = str(data.get("name") or "").strip()[:120] or f"{user.username} 的房间"
-        try:
-            world_limit = max(
-                1,
-                min(100, int(os.environ.get("TRPG_MAX_WORLDS_PER_USER", "8"))),
-            )
-        except ValueError:
-            world_limit = 8
-        world_id = f"world-{secrets.token_hex(12)}"
-        with session_scope(db_url()) as session:
-            # Lock the account so concurrent create requests cannot both pass
-            # the quota check on PostgreSQL.
-            account = (
-                session.query(User)
-                .filter_by(id=user.id)
-                .with_for_update()
-                .one()
-            )
-            del account
-            existing_count = (
-                session.query(World)
-                .filter(
-                    World.created_by == user.id,
-                    World.status.in_(("active", "pending")),
-                )
-                .count()
-            )
-            if existing_count >= world_limit:
-                return JSONResponse(
-                    {
-                        "detail": f"每个账号最多保留 {world_limit} 个房间",
-                        "code": "world_limit_reached",
-                    },
-                    status_code=429,
-                )
-            session.add(
-                World(
-                    id=world_id,
-                    module_name=module,
-                    module_id=module_record.package_id,
-                    module_version=module_record.version,
-                    created_by=user.id,
-                    status="pending",
-                    metadata_json={
-                        "name": name,
-                        "room_status": "lobby",
-                        "max_players": max_players,
-                    },
-                )
-            )
-            session.add(
-                WorldMember(
-                    id=new_id("member"),
-                    world_id=world_id,
-                    user_id=user.id,
-                    role="owner",
-                )
-            )
-        try:
-            context = await asyncio.to_thread(
-                RuntimeContext.create,
-                world_id,
-                module,
+            result = await create_owned_world(
+                database_url=db_url(),
+                creator_id=user.id,
+                creator_username=user.username,
+                data=data,
+                module_registry=deps.module_registry,
+                default_module_name=deps.default_module_name,
                 project_root=deps.project_root,
                 runtime_root=deps.runtime_root,
             )
-        except Exception:
-            # Keep the failed control-plane row non-active for diagnosis and
-            # cleanup; it can never appear as an ownerless joinable room.
-            with session_scope(db_url()) as session:
-                world = session.get(World, world_id)
-                if world is not None:
-                    world.status = "failed"
-            raise
-        with session_scope(db_url()) as session:
-            world = session.get(World, world_id)
-            world.status = "active"
-            world.metadata_json = {
-                **dict(world.metadata_json or {}),
-                "name": name,
-                "room_status": "lobby",
-                "max_players": max_players,
-            }
-        audit(db_url(), "world_created", user_id=user.id, world_id=world_id)
-        return {"world_id": context.world_id, "module": module}
+        except MultiplayerError as exc:
+            return _error(exc)
+        audit(
+            db_url(),
+            "world_created",
+            user_id=user.id,
+            world_id=result["world_id"],
+        )
+        return result
 
     @router.post("/api/worlds/{world_id}/invites", status_code=201)
     async def create_world_invite(world_id: str, data: dict, request: Request):
@@ -250,13 +164,13 @@ def create_multiplayer_http_router(
             return _error(exc)
         audit(db_url(), "world_invite_revoked", user_id=user.id, world_id=world_id)
 
-    @router.post("/api/invites/{token}/accept")
-    async def join_world_by_invite(token: str, request: Request):
+    @router.post("/api/invites/accept")
+    async def join_world_by_invite(data: dict, request: Request):
         user = request_user(request, db_url())
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
         try:
-            result = accept_invite(db_url(), token, user.id)
+            result = accept_invite(db_url(), str(data.get("token") or ""), user.id)
         except MultiplayerError as exc:
             return _error(exc)
         audit(
@@ -331,6 +245,12 @@ def create_multiplayer_http_router(
                 if room.current_actor_user_id == target_user_id:
                     room.assign_actor(room.owner_user_id)
                     deps.persist_room_control(room)
+                await room.hub.disconnect_user(
+                    target_user_id, code=4409, reason="房间角色已更新，请重新连接"
+                )
+        if result["role"] == "viewer":
+            release_world_controller(db_url(), deps.runtime_root, world_id, target_user_id, room)
+        if room is not None:
             await deps.broadcast_room_state(room)
         audit(
             db_url(),
@@ -392,9 +312,9 @@ def create_multiplayer_http_router(
                 room.assign_actor(room.owner_user_id)
                 deps.persist_room_control(room)
             await room.hub.disconnect_user(target_user_id)
-            room.connected_users.pop(target_user_id, None)
             await room.hub.broadcast({"type": "member_removed", "user_id": target_user_id})
             await deps.broadcast_room_state(room)
+        release_world_controller(db_url(), deps.runtime_root, world_id, target_user_id, room)
         audit(
             db_url(),
             "world_member_removed",

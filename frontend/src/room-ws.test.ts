@@ -183,6 +183,56 @@ describe("connectRoom", () => {
 });
 
 describe("终止性关闭码", () => {
+  it("1011 内部故障保留房间恢复记录并自动重连", () => {
+    vi.useFakeTimers();
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+
+    FakeWebSocket.latest().close(1011);
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      view: "room",
+      activeWorldId: "world-1",
+      roomConnection: "disconnected",
+    });
+    expect(localStorage.getItem("trpg-online-world-id")).toBe("world-1");
+    vi.advanceTimersByTime(1100);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("1012 服务重启保留房间恢复记录并自动重连", () => {
+    vi.useFakeTimers();
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+
+    FakeWebSocket.latest().close(1012);
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      view: "room",
+      activeWorldId: "world-1",
+      roomConnection: "disconnected",
+    });
+    expect(localStorage.getItem("trpg-online-world-id")).toBe("world-1");
+    vi.advanceTimersByTime(1100);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
   it("4401 进入登录页并停止重连", () => {
     vi.useFakeTimers();
     useOnlineStore.setState({
@@ -229,6 +279,89 @@ describe("终止性关闭码", () => {
     await vi.waitFor(() => expect(enterLobby).toHaveBeenCalled());
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("4409 保留登录与活动房间、清除旧玩家私态并以 viewer 重连", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "player",
+          investigator: null,
+        },
+      ],
+      privateEvents: [{ kind: "clue", clue: { text: "旧玩家秘密" } }],
+      privateState: {
+        investigatorId: "investigator-1",
+        pc: { name: "旧调查员" },
+        clues: { private: [{ text: "旧玩家秘密" }] },
+        playerNotes: "旧私人笔记",
+        playerNotesRevision: 2,
+      },
+    });
+    useAppStore.setState({
+      character: { name: "旧调查员" },
+      clues: { private: [{ text: "旧玩家秘密" }] },
+      notesText: "旧私人笔记",
+    });
+    vi.mocked(refreshRoom).mockImplementation(async () => {
+      useOnlineStore.setState({
+        members: [
+          {
+            user_id: "u1",
+            username: "alice",
+            role: "viewer",
+            investigator: null,
+          },
+        ],
+      });
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+
+    FakeWebSocket.latest().close(4409);
+    await vi.waitFor(() => expect(refreshRoom).toHaveBeenCalled());
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      view: "room",
+      activeWorldId: "world-1",
+      members: [{ user_id: "u1", role: "viewer" }],
+      privateEvents: [],
+      privateState: null,
+    });
+    expect(useAppStore.getState()).toMatchObject({
+      character: null,
+      clues: {},
+      notesText: "",
+      inputEnabled: false,
+    });
+    expect(localStorage.getItem("trpg-online-world-id")).toBe("world-1");
+
+    vi.advanceTimersByTime(1100);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.latest().open();
+    expect(useOnlineStore.getState().roomConnection).toBe("connected");
+    expect(useOnlineStore.getState().roomError).toBe(
+      "房间角色已更新，正在重新连接……",
+    );
+    FakeWebSocket.latest().message(
+      JSON.stringify({
+        type: "room_full_state",
+        latest_event_id: 0,
+        status: "playing",
+        history: [],
+        private_state: null,
+      }),
+    );
+    expect(useOnlineStore.getState().roomError).toBeNull();
   });
 });
 

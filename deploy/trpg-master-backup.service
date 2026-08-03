@@ -6,6 +6,7 @@ After=postgresql.service
 Type=oneshot
 User=trpgdeploy
 Group=trpgdeploy
+UMask=0077
 EnvironmentFile=/etc/trpg-master/trpg-master.env
 ExecStart=/opt/trpg-master/current/deploy/backup-trpg-master.sh
 PrivateTmp=true

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request, Response
@@ -19,12 +19,14 @@ from .auth import (
     create_user,
     request_user,
     revoke_session,
+    token_hash,
 )
 
 
 @dataclass(frozen=True)
 class AuthHttpDependencies:
     database_url: Callable[[], str]
+    disconnect_session: Callable[[str], Awaitable[int]] | None = None
 
 
 def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
@@ -94,9 +96,12 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
         return {"id": user.id, "username": user.username}
 
     @router.post("/api/auth/logout", status_code=204)
-    def logout(request: Request, response: Response):
+    async def logout(request: Request, response: Response):
+        token = request.cookies.get(SESSION_COOKIE)
         user = request_user(request, db_url())
-        revoke_session(db_url(), request.cookies.get(SESSION_COOKIE))
+        revoke_session(db_url(), token)
+        if token and deps.disconnect_session is not None:
+            await deps.disconnect_session(token_hash(token))
         response.delete_cookie(SESSION_COOKIE, path="/")
         if user:
             audit(db_url(), "logout", user_id=user.id)

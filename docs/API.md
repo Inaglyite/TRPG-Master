@@ -18,7 +18,11 @@
 桌面模式默认关闭账号门禁。云端设置 `TRPG_REQUIRE_AUTH=1` 后使用 Argon2id 账号、可撤销
 HttpOnly Session Cookie、登录限流、Origin/CSRF 校验和世界成员权限；TLS 由前置反向代理
 （如 Nginx）提供。WebSocket 握手和每次世界切换都会校验成员权限，握手失败时以关闭码
-`4401`（未登录）、`4403`（连接被拒绝）、`4404`（世界不存在）结束连接。
+`4401`（未登录）、`4403`（成员资格已撤销或连接被拒绝）、`4404`（世界不存在）结束连接。
+成员仍在房间但角色被房主修改时，现有连接使用 `4409` 关闭；客户端应清除旧角色的私密状态和
+待发送动作，保留登录态、房间恢复游标，并按数据库中的新角色自动重连。
+服务端内部异常使用 `1011`，房间运行时重启或恢复游标失效使用 `1012`；这两类关闭都不能让客户端
+清除活动房间或当作成员被踢，应保留恢复记录并自动重连。
 
 WebSocket 消息都有一个字符串字段 `type`：
 
@@ -41,8 +45,9 @@ WebSocket 消息都有一个字符串字段 `type`：
   客户端必须容忍未知字段。字段或消息弃用时，先在本文标注"已弃用"并集中列入 §7，
   再考虑移除。
 - **回合标识**：GM 回合的 `turn_id + seq` 生命周期规则（§3、§5.2）稳定。
-- **错误**：WebSocket `error` 事件只携带面向用户的 `message`，没有稳定错误码，客户端
-  不得按文案分支业务逻辑；模组导入与编辑器 HTTP API 使用稳定 `error_code`。
+- **错误**：WebSocket `error` 至少携带面向用户的 `message`；部分控制操作会增加本文明确记录的
+  `code`/`operation`，已预留房间行动失败还会增加 `terminal:true`。未记录的错误码不构成稳定
+  契约，客户端不得按文案分支业务逻辑；模组导入与编辑器 HTTP API 使用稳定 `error_code`。
 - **枚举**：文中以"当前包含"列出的枚举值（如 `turn_phase.phase`、`tension.category`、
   `turn_rejected.reason`）可能增加，客户端遇到未知值时应能展示通用文案或忽略。
 
@@ -66,7 +71,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/health` | 后端就绪检查 |
+| `GET` | `/api/health` | 进程存活检查（不访问数据库） |
+| `GET` | `/api/ready` | 部署就绪检查（包含数据库往返） |
 | `GET` | `/api/theme` | 当前活动模组主题 |
 | `POST` | `/api/auth/register` | 注册账号并建立登录 Session |
 | `POST` | `/api/auth/login` | 登录并建立 Session |
@@ -75,7 +81,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET/POST` | `/api/worlds` | 列出有权访问的世界或创建世界 |
 | `GET/POST` | `/api/worlds/{id}/invites` | 房主列出或创建邀请 |
 | `DELETE` | `/api/worlds/{id}/invites/{invite_id}` | 房主撤销邀请 |
-| `POST` | `/api/invites/{token}/accept` | 接受邀请 |
+| `POST` | `/api/invites/accept` | 接受邀请；JSON 请求体为 `{"token":"…"}` |
 | `GET` | `/api/worlds/{id}/members` | 房间成员与调查员占用 |
 | `PATCH/DELETE` | `/api/worlds/{id}/members/{user_id}` | 修改角色或移除/退出成员 |
 | `POST` | `/api/worlds/{id}/owner` | 移交房主 |
@@ -100,7 +106,8 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 ### 2.2 `GET /api/health`
 
-用于启动脚本和桌面壳等待后端就绪。
+用于启动脚本和桌面壳确认本地后端进程已经能够响应。该接口只表示进程存活，刻意不访问数据库，
+不能作为云端发布、负载均衡或发布脚本的数据库就绪门禁。
 
 响应：
 
@@ -111,6 +118,21 @@ WebSocket 消息都有一个字符串字段 `type`：
   "world_id": "local-mansion_of_madness"
 }
 ```
+
+### 2.2.1 `GET /api/ready`
+
+用于云端部署就绪检查。服务端会通过当前 `TRPG_DATABASE_URL` 执行一次真实的 `SELECT 1`；成功响应
+与 `/api/health` 相同。数据库不可用时返回 HTTP 503：
+
+```json
+{
+  "ok": false,
+  "detail": "database unavailable"
+}
+```
+
+部署脚本、systemd 启动验证和外部 readiness probe 应使用此接口；桌面壳仍可用
+`/api/health` 等待它自己刚启动的本地进程。
 
 ### 2.3 账号与 Session
 
@@ -148,14 +170,21 @@ WebSocket 消息都有一个字符串字段 `type`：
 
 邀请明文 token 只在 `POST .../invites` 的创建响应返回一次；数据库只存 SHA-256 哈希，
 `GET .../invites` 仅返回用途、使用次数、过期时间与 active/revoked/expired/exhausted 状态。接受
-玩家邀请时，服务端在事务内按 `max_players` 校验 owner/player 总数；旁观者不占玩家名额。
+玩家邀请时，服务端在事务内按 `max_players` 校验 owner/player 总数；旁观者不占玩家名额。游戏
+开始后不能再通过玩家邀请加入，但仍可通过旁观者邀请加入；已有成员重复接受任何邀请都按当前成员
+角色幂等返回，不会借此升级权限。开局后的新玩家加入或 viewer 升级会返回
+HTTP 409 / `room_already_started`。
 
 `GET .../members` 返回 owner/player/viewer、用户名和当前调查员占用。角色更新、移除成员、撤销
 邀请和房主移交都要求服务端 Session 中的当前房主；普通成员只能移除自己，房主必须先移交才能
-退出。房主移交请求为 `{"user_id":"目标账号 ID"}`。
+退出。房主移交请求为 `{"user_id":"目标账号 ID"}`。开局后允许在现有 owner/player 之间移交房主，
+也允许把玩家降为 viewer；不能把 viewer 提升为 player 或直接移交为 owner。降级不会移除成员，
+服务端会释放其调查员控制权并以 `4409` 触发客户端按旁观者权限恢复；真正移除成员仍使用 `4403`。
 
 调查员占用请求为 `{"character_key":"服务端 options 返回的 id"}`。服务端会重新解析模组角色并
 保存可信 `character_ref`，客户端提交的 `user_id`、`investigator_id` 或角色正文均不作为授权事实。
+多人调查员接口只列出并接受 `default` 与 `module` 来源；本地
+`profiles/player_profile.json` 和 `characters/custom/` 不属于服务器账号数据，不会作为联机候选项。
 认领与释放只允许在 `room_status=lobby` 时进行；开局后返回
 `room_already_started`，防止进行中切换权威角色。若房间运行时已加载，成功操作会广播
 `investigator_claimed` 或 `investigator_released`，并取消受影响玩家的 ready 状态。
@@ -430,6 +459,9 @@ X-Module-Filename: example.trpgmod
 | `module` | 当前模组运行目录下的 `characters/*.json` |
 | `custom` | `characters/custom/*.json` |
 
+本节描述单机 `/api/characters` 的完整候选集合。多人房间必须改用
+`GET /api/worlds/{id}/investigators/options`；后者不会返回个人长期角色或自定义角色。
+
 ### 2.12 `POST /api/modules/switch`
 
 请求：
@@ -619,6 +651,9 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 房间事件边界据此只投递给该调查员的控制者，并在出站前删除内部 `target_user_id`。其他玩家只接收
 `room_full_state.investigators` 中允许公开的摘要。
 
+多人初始化会向所有房间连接发送仅含槽位摘要的 `save_list`，任意成员也可请求刷新该列表；完整快照
+和消息历史不在列表 payload 中。`save`、`save_load` 及其他存档变更仍全部要求房主权限。
+
 房间控制消息：
 
 - `room_ready {ready}`：owner/player 准备或取消准备；
@@ -769,6 +804,9 @@ HTTP 创建对应模组的世界后使用 `world_switch`。
 
 `character_ref` 可为 `null`，此时按 `profile -> default -> module -> custom` 的顺序选择第一个
 可用角色。
+
+这一选择规则属于单机 `/ws`。多人 `/ws/room` 的开局角色来自此前由房间调查员接口完成的服务端
+占用，只允许 `default` 或 `module` 来源；客户端不能在 `start` 中另行注入个人角色引用。
 
 角色引用支持四种形态：
 
@@ -948,7 +986,8 @@ done
 
 常见 `ending_type`：`good`、`secret`、`neutral`、`bad`。成功后服务端：
 
-1. 把案件结果写入长期角色履历。
+1. 单机模式把案件结果写入长期角色履历；开启账号门禁的多人模式不写
+   `profiles/player_profile.json`。
 2. 更新当前 PC 的 career。
 3. 保存 `slot_000`。
 4. 发送 `case_settled`。
@@ -1802,11 +1841,15 @@ diagnostics 中。字段含义见 `docs/PERFORMANCE.md`。
 ```json
 {
   "type": "error",
-  "message": "未找到存档。"
+  "message": "未找到存档。",
+  "terminal": true
 }
 ```
 
-错误事件只有面向用户的 `message`，没有稳定错误码。客户端不应通过文案分支业务逻辑（§1.1）。
+`message` 始终面向用户。`terminal:true` 只表示当前已经持久预留的房间行动以失败终止，服务端会据此
+释放/记录行动生命周期；普通可恢复通知可以省略该字段，不能把所有 `error` 都当作房间驱动终止。
+部分控制操作还会带本文对应小节记录的 `code` 与 `operation`。客户端不应通过文案分支业务逻辑
+（§1.1）。
 
 客户端发送了服务端不支持的消息 `type` 时，收到：
 

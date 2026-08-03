@@ -54,7 +54,7 @@ flowchart LR
     Engine <--> DB
     Server --> Auth[Session + World Authorization]
     Auth <--> DB
-    Engine <--> Profile[profiles/player_profile.json]
+    LocalEngine <--> Profile["profiles/player_profile.json<br/>本地单机"]
     Server --> Registry[ModuleRegistry]
     Registry --> Builtin[mod/module]
     Registry --> UserModules[modules/id/version]
@@ -67,19 +67,27 @@ flowchart LR
 
 `start_desktop.sh` 是进程所有者：
 
-1. 优先激活 `venv`，回退 `.venv`，并自动补齐缺失的 Python 依赖。
-2. 设置桌面 SQLite URL，执行 Alembic；首次运行以数据库审计标记保护的 `--once --replace` 导入旧 `worlds/`。
-3. 检查前端依赖与构建产物。
-4. 启动 `python3 -u server.py`，轮询 `/api/health`。
-5. 启动 Electron，并以前台 `wait` 等待 Electron 主进程。
-6. Electron 最后一个窗口关闭后，脚本终止 Uvicorn 并等待其正常退出。
-7. Ctrl+C、SIGTERM 与异常退出统一进入清理函数。
+1. 检查前端依赖与构建产物，启动 Electron 模式选择页；此时不接触 Python 依赖、SQLite 或旧世界。
+2. 选择多人模式时，Electron 直接加载受信任的云端 HTTPS origin，不启动本机后端。
+3. 选择单机模式时，Electron 调用脚本的 `--backend-only` 模式；该子进程才激活 `venv`（回退
+   `.venv`）并自动补齐缺失的 Python 依赖。
+4. 后端子进程设置桌面 SQLite URL，执行 Alembic；首次运行以数据库审计标记保护的
+   `--once --replace` 导入旧 `worlds/`，随后启动 `server.py`。Electron 轮询 `/api/health` 后进入游戏。
+5. Electron 最后一个窗口关闭或成功切换到多人模式时，向自己拥有的整个后端进程组发送 TERM，
+   超时后发送 KILL，避免依赖安装、迁移或 Uvicorn 子进程残留。
+6. 仅当有交互终端且 Electron 立即失败时，脚本才启动同样隔离进程组的后端并打开
+   `http://localhost:8765/?mode=local`；Ctrl+C 负责关闭它。无终端桌面启动不使用浏览器回退。
+7. SIGINT、SIGTERM 与异常退出统一进入幂等清理函数。
 
-终端模式继承 stdout/stderr；`--desktop` 模式重定向到 `/tmp/trpg-desktop.log`。后端日志同时写入 `/tmp/trpg-server.log`。
+终端模式继承 stdout/stderr；`--desktop` 模式重定向到 `/tmp/trpg-desktop.log`。浏览器回退的后端
+日志同时写入 `/tmp/trpg-server.log`；Electron 按需启动的后端由 Electron 主进程继承并管理。
 
-### 3.2 打包桌面模式
+### 3.2 Windows 打包桌面模式
 
-打包后的 Electron 由 `frontend/electron/main.cjs` 提供单机/多人双模式：
+当前仓库只生成 Windows NSIS 安装版和便携版；Linux 使用 §3.1 的源码启动脚本，不提供
+AppImage。`frontend` 的通用 `npm run dist` 会主动拒绝 Linux 打包，防止把 Windows 后端误装进
+不可运行的 AppImage。Windows 打包后的 Electron 由 `frontend/electron/main.cjs` 提供单机/多人
+双模式：
 
 1. 启动时只加载打包内置的 `dist/index.html` 模式选择页，不提前启动后端。
 2. 选择单机后才定位 `resources/backend/trpg-server(.exe)`，完成本地配置、设置用户数据下的
@@ -396,7 +404,13 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 
 ### 8.4 调查员与长期履历
 
-新游戏从 `profile/default/module/custom` 四类来源解析角色引用，把角色复制到当前 `world_state.pc`。游戏内变化只作用于案件状态；案件结算后，`settle_case()` 才把结局、HP/SAN 变化、声望、人脉与最后角色状态写入 `profiles/player_profile.json`。
+单机新游戏从 `profile/default/module/custom` 四类来源解析角色引用，把角色复制到当前
+`world_state.pc`。游戏内变化只作用于案件状态；案件结算后，`settle_case()` 才把结局、HP/SAN
+变化、声望、人脉与最后角色状态写入 `profiles/player_profile.json`。
+
+多人房间只允许版本化的 `default` 与 `module` 调查员。房间候选接口和 WebSocket 初始化都以
+`include_personal=False` 构建列表，`profile` 与 `custom` 既不作为云端账号资料，也不进入共享房间。
+多人角色占用与案件内状态保存在数据库成员关系及世界状态中，不读写本机长期履历文件。
 
 ### 8.5 模组包与注册表
 
@@ -473,7 +487,12 @@ sequenceDiagram
 | `utility.ts` | 不注入模型的玩家笔记，以及仅发送普通 action 的快捷行动 |
 | `style.css` | 主题变量、素材化控件和响应式布局 |
 
-前端在 Electron 中通过 `file://` 加载生产资源，因此主题和动态状态主要经 WebSocket 下发。图片 handout 同时携带 `asset_data_uri` 与 HTTP `asset_url`：Electron 优先使用 data URI，浏览器可回退到 HTTP 资产路由。回合中若 handout 先于任何可见叙事到达，前端只缓存到第一段叙事；已有可见叙事时立即展示，不再统一等待 `done`。等待状态由 `turn_phase` 驱动，超过 8 秒后在同一状态条显示耗时；最终按钮优先使用结构化 `choices`。
+Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择多人后，主进程改为加载经过校验的
+云端 HTTPS origin，使 HTTP、WSS 和 Session Cookie 同源。图片 handout 同时携带
+`asset_data_uri` 与 HTTP `asset_url`：Electron 单机优先使用 data URI，浏览器和云端 Electron
+可回退到 HTTP 资产路由。回合中若 handout 先于任何可见叙事到达，前端只缓存到第一段叙事；已有
+可见叙事时立即展示，不再统一等待 `done`。等待状态由 `turn_phase` 驱动，超过 8 秒后在同一状态条
+显示耗时；最终按钮优先使用结构化 `choices`。
 
 断线时前端结束当前 loading、关闭失效决定并保留“本轮未确认完成”标记。重连使用有上限的指数
 退避，只维护一个连接提示，并按原 `turn_id` 请求持久状态：completed 记录重建完整 UI，active 记录

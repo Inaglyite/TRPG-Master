@@ -3,14 +3,11 @@
 """TRPG Agent WebSocket 服务器 —— GameEngine + FastAPI"""
 
 import asyncio
-import copy
 import json
-import mimetypes
 import os
 import runpy
 import secrets
 import sys
-import tempfile
 import threading
 from pathlib import Path
 
@@ -85,7 +82,7 @@ if _ENV_FILE.exists():
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -126,36 +123,29 @@ from src.editor_api import create_editor_router
 from src.editor_projects import EditorProjectStore
 from src.engine import EngineCallbacks, GameEngine
 from src.event_stream import OrderedTurnEventStream
+from src.frontend_payload import enrich_clues_for_frontend
 from src.game_application import (
     ApplicationUseCaseError,
     GameApplication,
     SaveNotFoundError,
 )
-from src.handouts import resolve_handout_asset
 from src.investigators import (
     activate_investigator,
     initialize_investigator_roster,
     public_investigator_roster,
 )
-from src.lorebook import lorebook_json_schema
 from src.model_settings import ModelSettings, persist_model_settings
-from src.module_compiler import compile_payload
-from src.module_format import (
-    manifest_json_schema,
-    manifest_v2_json_schema,
-    module_json_schema,
-    module_v2_json_schema,
+from src.module_http import (
+    ModuleHttpDependencies,
+    create_module_http_router,
+    serve_module_asset,
 )
-from src.module_registry import (
-    MAX_PACKAGE_BYTES,
-    ModulePackageError,
-    ModuleRegistry,
-    inspect_package,
-)
+from src.module_registry import ModuleRegistry
 from src.multiplayer_http import (
     MultiplayerHttpDependencies,
     create_multiplayer_http_router,
 )
+from src.multiplayer_private_state import reconcile_world_investigator_roster
 from src.multiplayer_ws import MultiplayerWsController, MultiplayerWsDependencies
 from src.narrative_history import enrich_public_history_record
 from src.persistence import delete_save, load_game
@@ -185,7 +175,16 @@ _active_model_settings = ModelSettings.validated(NARRATIVE_MODEL, JUDGEMENT_MODE
 _world_turn_locks: dict[str, threading.Lock] = {}
 _world_turn_locks_guard = threading.Lock()
 ROOM_MANAGER = RoomManager(max_rooms=max(1, int(os.environ.get("TRPG_MAX_ACTIVE_ROOMS", "8"))))
-app.include_router(create_auth_router(AuthHttpDependencies(lambda: DATABASE_URL)))
+app.include_router(
+    create_auth_router(
+        AuthHttpDependencies(
+            lambda: DATABASE_URL,
+            disconnect_session=lambda session_hash: ROOM_MANAGER.disconnect_session(
+                session_hash
+            ),
+        )
+    )
+)
 MULTIPLAYER_WS = MultiplayerWsController(
     MultiplayerWsDependencies(
         database_url=lambda: DATABASE_URL,
@@ -196,9 +195,7 @@ MULTIPLAYER_WS = MultiplayerWsController(
         list_modules=lambda: _list_mods(),
         load_theme=lambda context: _load_theme(context),
         model_settings_payload=lambda settings: _model_settings_payload(settings),
-        enrich_clues=lambda clues, state, context: _enrich_clues_for_frontend(
-            clues, state, context
-        ),
+        enrich_clues=lambda clues, state, context: enrich_clues_for_frontend(clues, state, context),
         project_root=PROJECT_ROOT,
         runtime_root=RUNTIME_ROOT,
     )
@@ -252,9 +249,14 @@ async def _reserve_current_actor_member_mutation(
     world_id, target_user_id = target
     room = await ROOM_MANAGER.get(world_id)
     target_user_id = target_user_id or (room.owner_user_id if room is not None else "")
-    if room is None or room.current_actor_user_id != target_user_id:
+    if room is None or target_user_id not in room.protected_member_user_ids():
         return None, None
-    if MULTIPLAYER_WS.room_control_change_blocked(room):
+    combat_member = bool(
+        room.driver_transport
+        and target_user_id
+        in room.driver_transport.combat_participant_controllers()
+    )
+    if MULTIPLAYER_WS.room_control_change_blocked(room) or combat_member:
         return None, JSONResponse(
             {
                 "detail": "当前回合或确认请求结束前不能更换、降级或移除行动者",
@@ -278,7 +280,7 @@ async def _reserve_current_actor_member_mutation(
         )
     # Actor assignment and pending prompts are also event-loop operations. Check
     # again after acquiring the room lease so a mutation cannot cross their edge.
-    if room.current_actor_user_id != target_user_id:
+    if target_user_id not in room.protected_member_user_ids():
         room.release_action()
         return None, None
     if room.pending_reply_kind is not None:
@@ -345,9 +347,7 @@ async def authentication_gate(request: Request, call_next):
                 )
             if not origin or origin not in allowed:
                 return JSONResponse({"detail": "请求 Origin 不受信任"}, status_code=403)
-        actor_mutation_room, rejection = await _reserve_current_actor_member_mutation(
-            request
-        )
+        actor_mutation_room, rejection = await _reserve_current_actor_member_mutation(request)
         if rejection is not None:
             return rejection
         request.state.user = user
@@ -369,6 +369,20 @@ def _set_active_context(context: RuntimeContext) -> None:
     _active_context = context
 
 
+app.include_router(
+    create_module_http_router(
+        ModuleHttpDependencies(
+            registry=lambda: MODULE_REGISTRY,
+            project_root=PROJECT_ROOT,
+            runtime_root=lambda: RUNTIME_ROOT,
+            active_context=lambda: _active_context,
+            set_active_context=_set_active_context,
+            auth_required=lambda: auth_required(),
+        )
+    )
+)
+
+
 def _model_settings_payload(settings: ModelSettings | None = None) -> dict:
     settings = settings or _active_model_settings
     return {
@@ -388,101 +402,6 @@ def _load_theme(context: RuntimeContext | None = None) -> dict:
 def _list_mods() -> list:
     """列出所有可用模组"""
     return [record.to_dict() for record in MODULE_REGISTRY.list_modules()]
-
-
-def _collect_known_npc_ids(world_state: dict) -> list[str]:
-    """收集已发放过人物展示材料的 NPC ID，不把仅被提及的人物提前入册。"""
-    known: list[str] = []
-
-    def add(npc_id: str):
-        if npc_id and npc_id not in known:
-            known.append(npc_id)
-
-    seen = world_state.get("seen_handouts", {}) if isinstance(world_state, dict) else {}
-    seen_npcs = seen.get("npcs", []) if isinstance(seen, dict) else []
-    if isinstance(seen_npcs, list):
-        for npc_id in seen_npcs:
-            if isinstance(npc_id, str):
-                add(npc_id)
-
-    return known
-
-
-def _append_npc_profiles(enriched: dict, world_state: dict):
-    """把已知 NPC 的公开档案追加到人物线索，不发送 secret/技能等守秘信息。"""
-    if not isinstance(enriched, dict) or not isinstance(world_state, dict):
-        return
-
-    npc_assets = world_state.get("asset_map", {}).get("npcs", {})
-    if not isinstance(npc_assets, dict):
-        return
-
-    npc_by_id = {
-        npc.get("id"): npc
-        for npc in world_state.get("npcs", [])
-        if isinstance(npc, dict) and npc.get("id")
-    }
-    profiles = []
-    for npc_id in _collect_known_npc_ids(world_state):
-        npc = npc_by_id.get(npc_id)
-        _, asset = resolve_handout_asset(world_state, "npc", npc_id)
-        if not npc or not isinstance(asset, dict) or not asset.get("file"):
-            continue
-
-        tags = npc.get("visible_tags", [])
-        public_tags = "、".join(str(tag) for tag in tags[:4]) if isinstance(tags, list) else ""
-        name = npc.get("name") or asset.get("label") or npc_id
-        text = f"{name}：{public_tags}" if public_tags else str(name)
-        profiles.append(
-            {
-                "id": f"profile_{npc_id}",
-                "text": text,
-                "type": "profile",
-                "tier": 0,
-                "source": "npc_profile",
-                "related_npcs": [npc_id],
-                "related_scenes": [],
-                "discovered_at": None,
-                "asset": {
-                    "id": npc_id,
-                    "file": asset.get("file"),
-                    "label": asset.get("label", name),
-                },
-            }
-        )
-
-    if not profiles:
-        return
-
-    existing = enriched.get("npc", [])
-    if not isinstance(existing, list):
-        existing = []
-    existing_ids = {item.get("id") for item in existing if isinstance(item, dict)}
-    new_profiles = [item for item in profiles if item["id"] not in existing_ids]
-    enriched["npc"] = new_profiles + existing
-
-
-def _enrich_clues_for_frontend(
-    clues: dict,
-    world_state: dict | None = None,
-    context: RuntimeContext | None = None,
-) -> dict:
-    """为线索面板补齐图片 data URI，避免 Electron file:// 下无法直接取 HTTP 图。"""
-    enriched = copy.deepcopy(clues) if isinstance(clues, dict) else clues
-    if not isinstance(enriched, dict):
-        return enriched
-    if isinstance(world_state, dict):
-        _append_npc_profiles(enriched, world_state)
-    for items in enriched.values():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            asset = item.get("asset")
-            if isinstance(asset, dict) and asset.get("file"):
-                asset.update(asset_payload(asset["file"], context))
-    return enriched
 
 
 # ---------------------------------------------------------------------------
@@ -638,10 +557,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         run_reserved_turn(
             coro_fn,
             *args,
-            room_start=(
-                turn_kind == "opening"
-                and getattr(ws, "room", None) is not None
-            ),
+            room_start=(turn_kind == "opening" and getattr(ws, "room", None) is not None),
         )
 
     async def launch_rewrite(turn_id: str) -> None:
@@ -802,6 +718,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 "decision_id": decision_id,
                 "option_id": selected,
                 "automatic": result is None,
+                "responding_investigator_id": info.get("responding_investigator_id"),
             }
         )
         return selected
@@ -1100,9 +1017,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         try:
             count = engine.load()
         except StaleRevisionError as exc:
-            await outbound.send(
-                {"type": "error", "message": str(exc), "terminal": True}
-            )
+            await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         await outbound.send(
             {
@@ -1117,7 +1032,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         try:
             world_state = engine.context.world_store.load()
             pc_data = enrich_pc_for_frontend(world_state.get("pc", {}), engine.context)
-            clues_data = _enrich_clues_for_frontend(
+            clues_data = enrich_clues_for_frontend(
                 world_state.get("clues_found", {}),
                 world_state,
                 engine.context,
@@ -1376,9 +1291,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         except ValueError as exc:
             finish_room_start(False)
             release_turn()
-            await outbound.send(
-                {"type": "error", "message": str(exc), "terminal": True}
-            )
+            await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         except Exception as exc:
             finish_room_start(False)
@@ -1443,18 +1356,24 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             return
         try:
             intent = game_app.resume_game.execute(slot_id)
+            if investigator_id:
+                controllers = reconcile_world_investigator_roster(
+                    DATABASE_URL, engine.context, engine.context.world_id,
+                    preferred_user_id=target_user_id,
+                )
+                investigator_id = controllers.get(str(target_user_id or ""))
+                if not investigator_id:
+                    release_turn()
+                    await outbound.send({"type": "error", "message": "当前行动者已没有可操作的调查员", "terminal": True})
+                    return
         except StaleRevisionError as exc:
             release_turn()
-            await outbound.send(
-                {"type": "error", "message": str(exc), "terminal": True}
-            )
+            await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         except SaveNotFoundError:
             release_turn()
             message = "未找到存档。" if announce_loaded else "未找到存档，请开始新游戏。"
-            await outbound.send(
-                {"type": "error", "message": message, "terminal": True}
-            )
+            await outbound.send({"type": "error", "message": message, "terminal": True})
             return
         except Exception:
             release_turn()
@@ -1529,9 +1448,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     }
         except ApplicationUseCaseError as exc:
             release_turn()
-            await outbound.send(
-                {"type": "error", "message": str(exc), "terminal": True}
-            )
+            await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         except Exception:
             release_turn()
@@ -1618,8 +1535,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 import traceback
 
                 print(
-                    f"[ws] {data.get('type', 'unknown')} 处理异常: "
-                    f"{type(exc).__name__}: {exc}",
+                    f"[ws] {data.get('type', 'unknown')} 处理异常: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
                 traceback.print_exc(file=sys.stderr)
@@ -1696,143 +1612,6 @@ def readiness():
     }
 
 
-@app.get("/api/modules")
-async def list_modules():
-    """列出所有可用模组"""
-    return {"modules": _list_mods(), "active": _active_context.module_name}
-
-
-def _module_error_response(exc: ModulePackageError) -> JSONResponse:
-    status = {
-        "version_conflict": 409,
-        "package_too_large": 413,
-        "expanded_too_large": 413,
-        "file_too_large": 413,
-        "too_many_files": 413,
-    }.get(exc.code, 400)
-    return JSONResponse(
-        {
-            "ok": False,
-            "error_code": exc.code,
-            "error": exc.message,
-            "details": exc.details,
-        },
-        status_code=status,
-    )
-
-
-async def _receive_module_upload(request: Request) -> Path:
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > MAX_PACKAGE_BYTES:
-                raise ModulePackageError("package_too_large", "模组包超过 64 MiB 上限")
-        except ValueError as exc:
-            raise ModulePackageError("invalid_length", "Content-Length 无效") from exc
-
-    import_dir = RUNTIME_ROOT / ".module-imports"
-    import_dir.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile(
-        mode="wb",
-        prefix="upload-",
-        suffix=".trpgmod",
-        dir=import_dir,
-        delete=False,
-    )
-    path = Path(handle.name)
-    total = 0
-    try:
-        async for chunk in request.stream():
-            total += len(chunk)
-            if total > MAX_PACKAGE_BYTES:
-                raise ModulePackageError("package_too_large", "模组包超过 64 MiB 上限")
-            handle.write(chunk)
-        handle.close()
-        if total == 0:
-            raise ModulePackageError("empty_upload", "没有收到模组包内容")
-        return path
-    except Exception:
-        handle.close()
-        path.unlink(missing_ok=True)
-        raise
-
-
-@app.get("/api/modules/schema/manifest-v1")
-async def get_module_manifest_schema():
-    return manifest_json_schema()
-
-
-@app.get("/api/modules/schema/module-v1")
-async def get_module_definition_schema():
-    return module_json_schema()
-
-
-@app.get("/api/modules/schema/manifest-v2")
-async def get_module_manifest_v2_schema():
-    return manifest_v2_json_schema()
-
-
-@app.get("/api/modules/schema/module-v2")
-async def get_module_definition_v2_schema():
-    return module_v2_json_schema()
-
-
-@app.get("/api/modules/schema/lorebook-v3")
-async def get_lorebook_schema():
-    return lorebook_json_schema()
-
-
-@app.post("/api/modules/compile")
-async def compile_module_preview(data: dict):
-    """无副作用地校验并编译作者态数据，供编辑器实时预览。"""
-    preview = await asyncio.to_thread(
-        compile_payload,
-        data.get("manifest"),
-        data.get("module"),
-        data.get("keeper_document", ""),
-        data.get("lorebook"),
-    )
-    return preview.to_dict()
-
-
-@app.post("/api/modules/inspect")
-async def inspect_module_upload(request: Request):
-    """只校验上传包，供导入预览和未来编辑器使用。"""
-    try:
-        path = await _receive_module_upload(request)
-        inspection = await asyncio.to_thread(inspect_package, path)
-        return {"ok": True, "module": inspection.summary()}
-    except ModulePackageError as exc:
-        return _module_error_response(exc)
-    finally:
-        if "path" in locals():
-            path.unlink(missing_ok=True)
-
-
-@app.post("/api/modules/import")
-async def import_module_upload(request: Request):
-    """安全校验并版本化安装 .trpgmod。"""
-    try:
-        path = await _receive_module_upload(request)
-        record, inspection, already_installed = await asyncio.to_thread(
-            MODULE_REGISTRY.install, path
-        )
-        return JSONResponse(
-            {
-                "ok": True,
-                "already_installed": already_installed,
-                "module": record.to_dict(),
-                "inspection": inspection.summary(),
-            },
-            status_code=200 if already_installed else 201,
-        )
-    except ModulePackageError as exc:
-        return _module_error_response(exc)
-    finally:
-        if "path" in locals():
-            path.unlink(missing_ok=True)
-
-
 @app.get("/api/characters")
 async def list_characters():
     """列出可用于当前模组的新游戏调查员。"""
@@ -1841,25 +1620,6 @@ async def list_characters():
         context=_active_context,
         include_personal=not auth_required(),
     )
-
-
-@app.post("/api/modules/switch")
-async def switch_module(data: dict):
-    """切换活跃模组"""
-    if auth_required():
-        return JSONResponse({"detail": "账号模式下请创建对应模组的新世界"}, status_code=409)
-    name = data.get("module", _active_context.module_name)
-    try:
-        MODULE_REGISTRY.resolve(name)
-    except FileNotFoundError:
-        return {"ok": False, "error": f"模组'{name}'不存在"}
-    context = RuntimeContext.local(
-        name,
-        project_root=PROJECT_ROOT,
-        runtime_root=RUNTIME_ROOT,
-    )
-    _set_active_context(context)
-    return {"ok": True, "module": name, "world_id": context.world_id}
 
 
 @app.websocket("/ws")
@@ -1906,27 +1666,14 @@ async def game_ws(ws: WebSocket):
     await run_ws_session(ws, engine, user_id=user.id if user else None)
 
 
-# ---- 资产文件 ----
-@app.get("/api/assets/{module_name}/{filename:path}")
 async def serve_asset(module_name: str, filename: str):
-    """服务模组资产图片，带路径遍历保护。"""
-    if auth_required():
-        # Hosted assets include keeper-only and not-yet-discovered material.
-        # Authorized room events carry the approved image as a data URI, so a
-        # path-shaped public endpoint must not become a spoiler oracle.
-        return JSONResponse({"error": "not found"}, status_code=404)
-    try:
-        record = MODULE_REGISTRY.resolve(module_name)
-    except FileNotFoundError:
-        return JSONResponse({"error": "module not found"}, status_code=404)
-    asset_path = (record.path / "assets" / filename).resolve()
-    allowed = (record.path / "assets").resolve()
-    if not asset_path.is_relative_to(allowed):
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    if not asset_path.is_file():
-        return JSONResponse({"error": "not found"}, status_code=404)
-    mime, _ = mimetypes.guess_type(str(asset_path))
-    return FileResponse(asset_path, media_type=mime or "image/png")
+    """Compatibility entry point for callers that imported this endpoint."""
+    return serve_module_asset(
+        MODULE_REGISTRY,
+        hosted=auth_required(),
+        module_name=module_name,
+        filename=filename,
+    )
 
 
 # ---- 静态文件 ----

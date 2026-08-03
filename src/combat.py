@@ -12,7 +12,17 @@ import re
 import uuid
 from typing import Any
 
-from .inventory import InventoryError, check_firearm_ammo, consume_firearm_ammo
+from .inventory import (
+    InventoryError,
+    check_investigator_firearm_ammo,
+    consume_investigator_firearm_ammo,
+)
+from .investigators import (
+    investigator_controller_user_id,
+    investigator_entity,
+    normalize_legacy_combat_investigator_ids,
+    stable_investigator_id,
+)
 from .personality import investigator_roleplay_profile
 
 COMBAT_KEY = "combat_state"
@@ -91,11 +101,21 @@ def _number(value: Any, default: int) -> int:
 
 
 def _entity_for(world: dict, entity_id: str) -> tuple[dict, str, str]:
-    if entity_id == "pc":
-        pc = world.get("pc")
-        if isinstance(pc, dict):
-            return pc, "pc", "pc"
-        raise CombatError("world_state.pc 不存在")
+    stable_id = stable_investigator_id(world, entity_id)
+    investigator = investigator_entity(world, stable_id)
+    investigators = world.get("investigators")
+    if (
+        stable_id == "pc"
+        or (
+            isinstance(investigators, dict)
+            and isinstance(investigators.get(stable_id), dict)
+        )
+    ):
+        if isinstance(investigator, dict):
+            active_id = str(world.get("active_investigator_id") or "")
+            path = "pc" if stable_id in {"pc", active_id} else f"investigators.{stable_id}"
+            return investigator, "pc", path
+        raise CombatError(f"找不到调查员: {stable_id}")
 
     for index, npc in enumerate(world.get("npcs", [])):
         if isinstance(npc, dict) and npc.get("id") == entity_id:
@@ -207,9 +227,14 @@ def start_combat(
     if isinstance(current, dict) and current.get("active"):
         raise CombatError("已有进行中的战斗，请继续当前战斗或先调用 combat_end")
 
+    normalize_legacy_combat_investigator_ids(world)
     specs = [dict(item) for item in participants if isinstance(item, dict)]
-    if not any(item.get("id") == "pc" for item in specs):
-        specs.insert(0, {"id": "pc"})
+    for spec in specs:
+        raw_id = str(spec.get("id") or "")
+        spec["id"] = stable_investigator_id(world, raw_id) if raw_id else ""
+    player_ids = _player_investigator_ids(world)
+    present_ids = {str(item.get("id") or "") for item in specs}
+    specs[0:0] = [{"id": investigator_id} for investigator_id in player_ids if investigator_id not in present_ids]
 
     resolved: list[dict] = []
     seen: set[str] = set()
@@ -251,7 +276,15 @@ def start_combat(
                 "bonus_dice", "penalty_dice",
             }
         }
-        params.setdefault("actor_id", "pc")
+        params["actor_id"] = stable_investigator_id(
+            world,
+            str(params.get("actor_id") or player_ids[0]),
+        )
+        if params.get("target_id"):
+            params["target_id"] = stable_investigator_id(
+                world,
+                str(params["target_id"]),
+            )
         return combat_action(world, **params, started_combat=True)
     return _public_result(combat, event="combat_started")
 
@@ -260,6 +293,7 @@ def combat_status(world: dict) -> dict:
     combat = world.get(COMBAT_KEY)
     if not isinstance(combat, dict):
         return {"ok": True, "active": False, "event": "no_combat"}
+    normalize_legacy_combat_investigator_ids(world)
     return _public_result(combat, event="combat_status")
 
 
@@ -282,7 +316,7 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
         }
 
     action = {
-        "actor_id": "pc",
+        "actor_id": stable_investigator_id(world, "pc"),
         "target_id": target.get("id"),
         "action_type": action_type,
         "description": content.strip(),
@@ -324,6 +358,62 @@ def end_combat(world: dict, reason: str = "") -> dict:
     return _public_result(combat, event="combat_ended")
 
 
+def assign_combat_actor(
+    world: dict,
+    investigator_id: str,
+    *,
+    reason: str = "房主跳过离线行动者",
+) -> dict:
+    """Move an active combat turn to one controlled investigator deterministically."""
+    combat = _require_combat(world)
+    if combat.get("pending_decision"):
+        raise CombatError("仍有玩家决定尚未处理，不能跳过战斗行动者")
+    investigator_id = stable_investigator_id(world, investigator_id)
+    target = _find_participant(combat, investigator_id)
+    if target.get("kind") != "pc":
+        raise CombatError("只能把战斗行动权交给调查员")
+    if (
+        isinstance(world.get("investigators"), dict)
+        and not investigator_controller_user_id(world, investigator_id)
+    ):
+        raise CombatError("目标调查员当前没有控制者")
+    if not _can_act(target):
+        raise CombatError(f"{target['name']} 已无法行动")
+
+    order = list(combat.get("turn_order") or [])
+    current_id = str(combat.get("current_actor") or "")
+    if current_id not in order or investigator_id not in order:
+        raise CombatError("战斗行动顺序已损坏")
+    current_index = order.index(current_id)
+    target_index = order.index(investigator_id)
+    distance = (target_index - current_index) % len(order)
+    skipped_ids = [
+        order[(current_index + offset) % len(order)]
+        for offset in range(distance)
+    ]
+    if distance and target_index <= current_index:
+        combat["round"] = int(combat.get("round", 1)) + 1
+        combat["defense_counts"] = {}
+    combat["turn_index"] = target_index
+    combat["current_actor"] = investigator_id
+    combat["phase"] = "awaiting_action"
+    if skipped_ids:
+        _append_log(
+            combat,
+            f"{reason}：跳过 {', '.join(skipped_ids)}，由 {target['name']} 行动",
+        )
+    return _with_state(
+        {
+            "ok": True,
+            "event": "combat_actor_assigned",
+            "actor_id": investigator_id,
+            "skipped_actor_ids": skipped_ids,
+            "round": combat.get("round", 1),
+        },
+        combat,
+    )
+
+
 def combat_action(
     world: dict,
     *,
@@ -342,6 +432,12 @@ def combat_action(
     started_combat: bool = False,
 ) -> dict:
     combat = _require_combat(world)
+    actor_id = stable_investigator_id(world, actor_id)
+    target_id = (
+        stable_investigator_id(world, target_id)
+        if target_id is not None
+        else None
+    )
     if combat.get("pending_decision"):
         raise CombatError("仍有玩家决定尚未处理")
     if actor_id != combat.get("current_actor"):
@@ -392,6 +488,26 @@ def combat_action(
 
     if target["kind"] == "pc" and actor["kind"] == "npc":
         _mark_hostile_to_pc(world, actor, action.get("description", ""))
+        if (
+            isinstance(world.get("investigators"), dict)
+            and not investigator_controller_user_id(world, target["id"])
+        ):
+            action["defender_choice"] = (
+                "dodge" if action_type == "melee" else "take_cover"
+            )
+            resolved = _resolve_action(
+                world,
+                combat,
+                action,
+                rng or random.Random(),
+            )
+            resolved["decision"] = {
+                "automatic": True,
+                "reason": "target_investigator_uncontrolled",
+                "selected": action["defender_choice"],
+                "responding_investigator_id": target["id"],
+            }
+            return resolved
         return _request_player_defense(combat, action, actor, target)
 
     if not defender_choice and action_type == "melee":
@@ -510,7 +626,8 @@ def _request_violence_confirmation(
 def _build_violence_decision(world: dict, action: dict, target: dict) -> dict:
     scene = world.get("current_scene", {})
     scene_name = scene.get("name") if isinstance(scene, dict) else ""
-    profile = investigator_roleplay_profile(world.get("pc", {}))
+    actor = investigator_entity(world, str(action.get("actor_id") or "pc"))
+    profile = investigator_roleplay_profile(actor or {})
     disposition = target.get("disposition", "unknown")
     disposition_label = _DISPOSITION_LABELS.get(disposition, disposition)
     context = f"{target['name']}目前并未主动敌对，并且与你的关系是“{disposition_label}”"
@@ -532,6 +649,7 @@ def _build_violence_decision(world: dict, action: dict, target: dict) -> dict:
         ],
         "default_option": "cancel_violence",
         "roleplay_context": profile,
+        "responding_investigator_id": action.get("actor_id"),
         "action": action,
     }
     return pending
@@ -559,7 +677,8 @@ def _request_threat_confirmation(
 def _build_threat_decision(world: dict, action: dict, target: dict) -> dict:
     scene = world.get("current_scene", {})
     scene_name = scene.get("name") if isinstance(scene, dict) else ""
-    profile = investigator_roleplay_profile(world.get("pc", {}))
+    actor = investigator_entity(world, str(action.get("actor_id") or "pc"))
+    profile = investigator_roleplay_profile(actor or {})
     disposition = target.get("disposition", "unknown")
     disposition_label = _DISPOSITION_LABELS.get(disposition, disposition)
     context = f"{target['name']}目前并未主动敌对，并且与你的关系是“{disposition_label}”"
@@ -581,6 +700,7 @@ def _build_threat_decision(world: dict, action: dict, target: dict) -> dict:
         ],
         "default_option": "cancel_threat",
         "roleplay_context": profile,
+        "responding_investigator_id": action.get("actor_id"),
         "action": action,
     }
     return pending
@@ -762,6 +882,8 @@ def _request_player_defense(combat: dict, action: dict, actor: dict, target: dic
         "description": action.get("description") or f"{actor['name']} 对 {target['name']} 发动攻击。",
         "options": options,
         "default_option": default_option,
+        "target_investigator_id": target["id"],
+        "responding_investigator_id": target["id"],
         "action": action,
     }
     combat["pending_decision"] = pending
@@ -845,7 +967,12 @@ def _resolve_melee(world: dict, combat: dict, action: dict, actor: dict, target:
 def _resolve_firearm(world: dict, combat: dict, action: dict, actor: dict, target: dict, rng: random.Random) -> dict:
     if actor.get("kind") == "pc":
         try:
-            check_firearm_ammo(world, action.get("weapon"), 1)
+            check_investigator_firearm_ammo(
+                world,
+                actor["id"],
+                action.get("weapon"),
+                1,
+            )
         except InventoryError as exc:
             raise CombatError(str(exc)) from exc
 
@@ -873,8 +1000,9 @@ def _resolve_firearm(world: dict, combat: dict, action: dict, actor: dict, targe
     ammo = None
     if actor.get("kind") == "pc":
         try:
-            ammo = consume_firearm_ammo(
+            ammo = consume_investigator_firearm_ammo(
                 world,
+                actor["id"],
                 action.get("weapon"),
                 amount=1,
                 reason=action.get("description", ""),
@@ -1027,10 +1155,29 @@ def _roll_damage(spec: str, rng: random.Random) -> tuple[list[int], int, int]:
 
 
 def _require_combat(world: dict) -> dict:
+    normalize_legacy_combat_investigator_ids(world)
     combat = world.get(COMBAT_KEY)
     if not isinstance(combat, dict) or not combat.get("active"):
         raise CombatError("当前没有进行中的战斗")
     return combat
+
+
+def _player_investigator_ids(world: dict) -> list[str]:
+    investigators = world.get("investigators")
+    if isinstance(investigators, dict):
+        ids = [
+            str(investigator_id)
+            for investigator_id, entity in investigators.items()
+            if (
+                investigator_id
+                and isinstance(entity, dict)
+                and entity.get("controller_user_id")
+            )
+        ]
+        if ids:
+            active_id = str(world.get("active_investigator_id") or "")
+            return sorted(ids, key=lambda value: (value != active_id, value))
+    return ["pc"]
 
 
 def _find_participant(combat: dict, participant_id: str) -> dict:

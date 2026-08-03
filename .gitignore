@@ -7,6 +7,7 @@ saves/
 worlds/
 trpg-master.db*
 .claude/
+.collab/
 node_modules/
 frontend/dist/
 frontend/release/
@@ -23,5 +24,6 @@ release/
 .vscode/
 modules/
 .module-imports/
+.editor-projects/
 *.trpgmod
 .screenshots/

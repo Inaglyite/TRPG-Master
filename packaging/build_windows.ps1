@@ -1,3 +1,8 @@
+param(
+  [switch]$SkipDependencyInstall,
+  [switch]$UseChinaMirrors
+)
+
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -36,11 +41,23 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 Require-Command npm "Install Node.js LTS first."
 Require-Command git "Install Git and build from a Git checkout so only tracked release assets are packaged."
 
-Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
-python -m pip install --upgrade pip
-Assert-LastCommand "pip upgrade"
-python -m pip install --index-url https://pypi.org/simple -r requirements.txt pyinstaller
-Assert-LastCommand "pip install"
+if (-not $SkipDependencyInstall) {
+  Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
+  python -m pip install --upgrade pip
+  Assert-LastCommand "pip upgrade"
+  python -m pip install --index-url https://pypi.org/simple -r requirements-packaging.txt
+  Assert-LastCommand "pip install"
+
+  Write-Host "Installing locked frontend dependencies..." -ForegroundColor Cyan
+  Push-Location (Join-Path $Root "frontend")
+  try {
+    npm ci
+    Assert-LastCommand "npm ci"
+  }
+  finally {
+    Pop-Location
+  }
+}
 
 Write-Host "Building backend executable..." -ForegroundColor Cyan
 $BackendOut = Join-Path $Root "release-backend\win\trpg-server"
@@ -63,13 +80,15 @@ Assert-LastCommand "backend bundle verification"
 Write-Host "Building Electron package..." -ForegroundColor Cyan
 Push-Location (Join-Path $Root "frontend")
 try {
+  if (Test-Path "release") {
+    Remove-Item "release" -Recurse -Force
+  }
+
+  if ($UseChinaMirrors) {
     $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
     $env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
-
-    if (-not (Test-Path "node_modules")) {
-        npm install
-        Assert-LastCommand "npm install"
   }
+
   npm run dist:win
   Assert-LastCommand "electron-builder"
 }

@@ -7,6 +7,10 @@
 SQLAlchemy Repository；运行时不再读取 `world_state.json`、`turns/`、`saves/` 或
 `player_notes.json`。
 
+SQLite 连接会显式执行 `PRAGMA foreign_keys=ON`，所以桌面版同样执行外键、
+`ON DELETE CASCADE` 和 `RESTRICT` 约束；不要用未启用外键的第三方 SQLite 工具直接修改数据库。
+当前 Alembic head 是 `20260728_0006`。
+
 ## 多人控制面与运行记录
 
 多人功能继续把动态世界正文放在 `world_states.state` JSON/JSONB 中，同时用关系表保证身份、唯一
@@ -34,7 +38,9 @@ SQLAlchemy Repository；运行时不再读取 `world_state.json`、`turns/`、`s
 bash start_desktop.sh
 ```
 
-脚本会自动同步 `requirements.txt` 中缺失的后端依赖，设置桌面 SQLite URL，执行 Alembic，然后运行：
+该命令先打开 Electron 模式选择页；选择多人模式不会接触本地数据库。只有选择单机模式后，
+Electron 才以 `start_desktop.sh --backend-only` 启动受管后端，同步 `requirements.txt` 中缺失的
+依赖，设置桌面 SQLite URL，执行 Alembic，然后运行：
 
 ```bash
 venv/bin/python tools/import_worlds_to_database.py \
@@ -45,6 +51,10 @@ venv/bin/python tools/import_worlds_to_database.py \
 `--replace` 只会在第一次运行时生效；`--once` 会查询数据库中的
 `audit_events.event_type=legacy_import_completed`。成功导入后，后续启动不会再次读取旧目录覆盖数据库。
 如果数据库文件被删除，完成标记也会随数据库消失，脚本会从保留的旧 `worlds/` 重新导入。
+
+导入器会在写数据库前解析并校验所有候选世界的 JSON、revision、回合事件、字段长度和 owner
+冲突。`--owner` 只会认领没有现有房主的世界；如果 `worlds.created_by` 或 owner 成员记录属于
+其他账号，导入会失败，不会隐式转移所有权。损坏输入应先修复后重试，不要用 `--replace` 绕过校验。
 
 遇到新增依赖缺失时可手动修复：
 
@@ -92,8 +102,10 @@ cd /opt/trpg-master/current
 导入器是幂等的，默认跳过已存在世界。确认数据库内容与备份可恢复之前，不要删除旧目录；
 旧目录在新服务中只是离线导入来源。
 
-生产发布由 systemd 的 `ExecStartPre` 执行 Alembic。每日 timer 同时导出 PostgreSQL 和运行
-目录，计算校验和后用 GPG 加密；必须定期在隔离环境执行恢复演练。
+生产发布由 systemd 的 `ExecStartPre` 执行 Alembic。每日 timer 在每个备份根目录持有独占锁，
+同时导出 PostgreSQL 和运行目录，计算校验和并用 GPG 加密到隐藏临时文件；脚本会立即解密并完整
+遍历归档，验证成功后才在同一文件系统原子发布，且不会覆盖同秒已有备份。必须定期在隔离环境执行
+数据库恢复演练。
 
 安装 timer 后执行：
 

@@ -15,6 +15,7 @@ import {
 import { useMessageStore, type ChatMessage } from "../../state/message-store";
 import type { NarrativeSegment } from "../../state/message-store";
 import { useAppStore } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
 
 function LoadingMessage({ label }: { label: string }) {
@@ -155,6 +156,19 @@ function Message({
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
   const character = useAppStore((state) => state.character);
   const mode = useAppStore((state) => state.mode);
+  // 联机：时间线分支后端不支持，按钮直接隐藏；回合改写仅房主可用
+  // （服务端仍按 Session 再校验），单机行为不变。
+  const isRoomOwner = useOnlineStore((state) => {
+    const uid = state.user?.id;
+    return (
+      uid != null &&
+      state.members.some(
+        (member) => member.user_id === uid && member.role === "owner",
+      )
+    );
+  });
+  const rewriteVisible = mode !== "online" || isRoomOwner;
+  const branchVisible = mode !== "online";
   const playerName =
     message.speaker?.name ||
     (mode !== "online" ? character?.name : undefined) ||
@@ -241,40 +255,42 @@ function Message({
       ) : (
         <div dangerouslySetInnerHTML={{ __html: html }} />
       )}
-      {(message.canRewrite || message.canBranch) && message.turnId && (
-        <div className="turn-message-actions">
-          {message.canRewrite && (
-            <button
-              type="button"
-              className="turn-rewrite-button"
-              disabled={actionsDisabled}
-              title="重新叙述（不重新判定）"
-              aria-label="重新叙述本回合，不改变判定结果"
-              onClick={() => {
-                setActionsDisabled(true);
-                invokeTurnRewrite(message.turnId!);
-              }}
-            >
-              ↻
-            </button>
-          )}
-          {message.canBranch && (
-            <button
-              type="button"
-              className="turn-branch-button"
-              disabled={actionsDisabled}
-              title="从本次行动前创建时间线分支"
-              aria-label="回到本次行动前并创建独立时间线分支"
-              onClick={() => {
-                setActionsDisabled(true);
-                invokeTurnBranch(message.turnId!);
-              }}
-            >
-              ⑂
-            </button>
-          )}
-        </div>
-      )}
+      {((rewriteVisible && message.canRewrite) ||
+        (branchVisible && message.canBranch)) &&
+        message.turnId && (
+          <div className="turn-message-actions">
+            {rewriteVisible && message.canRewrite && (
+              <button
+                type="button"
+                className="turn-rewrite-button"
+                disabled={actionsDisabled}
+                title="重新叙述（不重新判定）"
+                aria-label="重新叙述本回合，不改变判定结果"
+                onClick={() => {
+                  setActionsDisabled(true);
+                  invokeTurnRewrite(message.turnId!);
+                }}
+              >
+                ↻
+              </button>
+            )}
+            {branchVisible && message.canBranch && (
+              <button
+                type="button"
+                className="turn-branch-button"
+                disabled={actionsDisabled}
+                title="从本次行动前创建时间线分支"
+                aria-label="回到本次行动前并创建独立时间线分支"
+                onClick={() => {
+                  setActionsDisabled(true);
+                  invokeTurnBranch(message.turnId!);
+                }}
+              >
+                ⑂
+              </button>
+            )}
+          </div>
+        )}
     </div>
   );
 }

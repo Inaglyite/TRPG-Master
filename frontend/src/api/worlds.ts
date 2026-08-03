@@ -192,12 +192,12 @@ export const acceptedInviteSchema = z.looseObject({
 });
 export type AcceptedInvite = z.infer<typeof acceptedInviteSchema>;
 
+/** 接受邀请（token 经请求体提交）。 */
 export function acceptInvite(token: string): Promise<AcceptedInvite> {
-  return apiFetch(
-    `/api/invites/${encodeURIComponent(token)}/accept`,
-    acceptedInviteSchema,
-    { method: "POST" },
-  );
+  return apiFetch(`/api/invites/accept`, acceptedInviteSchema, {
+    method: "POST",
+    body: { token },
+  });
 }
 
 // —— 调查员绑定 ——

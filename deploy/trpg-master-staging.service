@@ -8,6 +8,7 @@ Requires=postgresql.service
 Type=simple
 User=trpgdeploy
 Group=trpgdeploy
+UMask=0077
 WorkingDirectory=/opt/trpg-master-staging/current
 EnvironmentFile=/etc/trpg-master/staging.env
 Environment=TRPG_RUNTIME_ROOT=/var/lib/trpg-master-staging
