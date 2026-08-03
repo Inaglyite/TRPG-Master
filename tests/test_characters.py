@@ -70,7 +70,9 @@ class CharacterListTests(unittest.TestCase):
             self.assertEqual([], groups["profile"])
             self.assertEqual([], groups["custom"])
             self.assertTrue(groups["default"])
-            self.assertTrue(groups["module"])
+            # 模组角色目录可能只由本地安装的模组包提供；这个隐私测试不应
+            # 依赖开发机上被 .gitignore 忽略的用户角色文件。
+            self.assertIsInstance(groups["module"], list)
 
     def test_new_game_applies_selected_character_before_opening_prompt(self):
         with tempfile.TemporaryDirectory() as temp_dir:
