@@ -104,7 +104,11 @@ function Assert-DesktopLaunch(
       -RedirectStandardError $Stderr `
       -PassThru
 
-    $Deadline = [DateTime]::UtcNow.AddSeconds(45)
+    # Portable builds may need to extract the complete Electron runtime on
+    # their first launch.  This is especially slow on a clean hosted runner;
+    # keep the acceptance deterministic without treating extraction latency as
+    # an application failure.
+    $Deadline = [DateTime]::UtcNow.AddSeconds(120)
     $ReadyPage = $null
     while ([DateTime]::UtcNow -lt $Deadline) {
       try {
@@ -131,7 +135,20 @@ function Assert-DesktopLaunch(
     }
     if ($null -eq $ReadyPage) {
       $StderrText = if (Test-Path $Stderr) { Get-Content $Stderr -Raw } else { "" }
-      throw "$Label Electron did not expose a ready launcher window within 45 seconds.`n$StderrText"
+      $ProcessSnapshot = @(
+        Get-CimInstance Win32_Process |
+          Where-Object {
+            $_.CommandLine -and (
+              $_.CommandLine.Contains($Token) -or
+              $_.ExecutablePath -eq $Executable
+            )
+          } |
+          Select-Object ProcessId, Name, ExecutablePath, CommandLine
+      ) | ConvertTo-Json -Depth 3 -Compress
+      $ProcessSnapshot | Set-Content `
+        -Path (Join-Path $DiagnosticsDirectory "$Label.processes.json") `
+        -Encoding utf8
+      throw "$Label Electron did not expose a ready launcher window within 120 seconds.`n$StderrText`nProcesses: $ProcessSnapshot"
     }
     @{
       label = $Label
