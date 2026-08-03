@@ -11,6 +11,7 @@ import {
   type Speaker,
   type VisualDie,
 } from "./state/message-store";
+import { getNarrationSpeed, narrationTickMs } from "./narration-speed";
 
 let messageCounter = 0;
 let displayTurnId: string | null = null;
@@ -19,7 +20,6 @@ let streamBuffer = "";
 let playbackTimer: number | null = null;
 let networkStreamFinished = false;
 let authoritativeSegments: NarrativeSegment[] | null = null;
-let choiceFastMode = false;
 const presentationCallbacks: Array<() => void> = [];
 const visibilityCallbacks: Array<() => void> = [];
 let replacement: { sourceTurnId: string; targetId: string } | null = null;
@@ -29,14 +29,18 @@ const branchCallbacks = new Map<string, () => void>();
 // ---- 发言者段状态（流式期间实时构建，finalize 由权威段覆盖）----
 let streamSegments: NarrativeSegment[] = [];
 let streamNpc: string | null = null;
-type PlaybackPiece = { chars: string[]; npcId: string | null; fast?: boolean };
+type PlaybackPiece = { chars: string[]; npcId: string | null };
 const playbackQueue: PlaybackPiece[] = [];
 const liveSpeakers = new Map<string, Speaker>();
 
-const BASE_TICK_MS = 34;
+// 播放节奏只由用户档位决定（见 narration-speed.ts）；
+// 不再根据 API 返回速度、缓存长度或选项标记自动变化。
 const COMMA_PAUSE_MS = 72;
 const SENTENCE_PAUSE_MS = 185;
 const SPEAKER_PAUSE_MS = 240;
+const NEWLINE_PAUSE_MS = 110;
+const LONG_PRESS_BOOST = 3;
+let narrationBoost = false;
 
 export type TurnHistoryItem = {
   turn_id?: string;
@@ -273,7 +277,6 @@ export function beginNarrativeReplacement(sourceTurnId: string) {
   streamNpc = null;
   networkStreamFinished = false;
   authoritativeSegments = null;
-  choiceFastMode = false;
   replacement = { sourceTurnId, targetId };
   scrollDown(true);
 }
@@ -485,7 +488,6 @@ function finalizePresentedStream() {
   if (!streamMessageId) {
     networkStreamFinished = false;
     authoritativeSegments = null;
-    choiceFastMode = false;
     notifyPresentationComplete();
     return;
   }
@@ -501,7 +503,7 @@ function finalizePresentedStream() {
   streamNpc = null;
   authoritativeSegments = null;
   networkStreamFinished = false;
-  choiceFastMode = false;
+  narrationBoost = false;
   notifyPresentationComplete();
 }
 
@@ -517,7 +519,7 @@ function clearStream() {
   streamNpc = null;
   authoritativeSegments = null;
   networkStreamFinished = false;
-  choiceFastMode = false;
+  narrationBoost = false;
   presentationCallbacks.splice(0);
   visibilityCallbacks.splice(0);
 }
@@ -576,37 +578,30 @@ function renderPlaybackText(text: string, npcId: string | null) {
   }
 }
 
-function queuedCharacterCount() {
-  return playbackQueue.reduce((total, piece) => total + piece.chars.length, 0);
+function boostFactor() {
+  return narrationBoost ? LONG_PRESS_BOOST : 1;
 }
 
-function charactersPerTick(backlog: number, fast = false) {
-  if (fast) return 6;
-  if (backlog > 500) return 3;
-  if (backlog > 160) return 2;
-  return 1;
+/** 用户档位的单字节拍；同一档位内每拍固定 1 字，不受缓存长度影响。 */
+function baseTickMs() {
+  return narrationTickMs(getNarrationSpeed());
 }
 
-function playbackDelay(
-  lastChar: string,
-  speakerChanged: boolean,
-  fast = false,
-) {
-  if (fast) return /[。！？!?]/u.test(lastChar) ? 46 : 18;
+function playbackDelay(lastChar: string, speakerChanged: boolean) {
   if (speakerChanged) return SPEAKER_PAUSE_MS;
   if (/[。！？!?]/u.test(lastChar)) return SENTENCE_PAUSE_MS;
   if (/[,，、；;：:]/u.test(lastChar)) return COMMA_PAUSE_MS;
-  if (lastChar === "\n") return 110;
-  return BASE_TICK_MS;
+  if (lastChar === "\n") return NEWLINE_PAUSE_MS;
+  return baseTickMs();
 }
 
-function schedulePlayback(delay = BASE_TICK_MS) {
+function schedulePlayback(delay = baseTickMs()) {
   if (playbackTimer !== null || !playbackQueue.length) return;
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
     flushNarrativeStream();
     return;
   }
-  playbackTimer = window.setTimeout(playbackStep, delay);
+  playbackTimer = window.setTimeout(playbackStep, delay / boostFactor());
 }
 
 function playbackStep() {
@@ -616,19 +611,15 @@ function playbackStep() {
     if (networkStreamFinished) finalizePresentedStream();
     return;
   }
-  const count = charactersPerTick(queuedCharacterCount(), piece.fast);
-  const text = piece.chars.splice(0, count).join("");
+  // 每拍固定 1 字：短缓存与大缓存在同一档位下呈现节奏一致。
+  const text = piece.chars.splice(0, 1).join("");
   renderPlaybackText(text, piece.npcId);
   if (!piece.chars.length) playbackQueue.shift();
   const speakerChanged =
     Boolean(playbackQueue.length) && playbackQueue[0].npcId !== piece.npcId;
   if (playbackQueue.length) {
     schedulePlayback(
-      playbackDelay(
-        Array.from(text).at(-1) || "",
-        speakerChanged,
-        playbackQueue[0].fast,
-      ),
+      playbackDelay(Array.from(text).at(-1) || "", speakerChanged),
     );
   } else if (networkStreamFinished) {
     finalizePresentedStream();
@@ -652,53 +643,23 @@ export function onNarrativeChunk(text: string, npcId?: string | null) {
   if (!text) return;
   removeLoading();
   ensureStreamMessage();
-  const markerIndex = choiceFastMode
-    ? 0
-    : text.search(/你可以|您可以|\n\s*1[.、]/u);
-  if (markerIndex > 0) {
-    playbackQueue.push({
-      chars: Array.from(text.slice(0, markerIndex)),
-      npcId: npcId || null,
-    });
-  }
+  // 不再依据"你可以/选项"标记切换播放速度；分块只负责进入缓存。
   playbackQueue.push({
-    chars: Array.from(markerIndex >= 0 ? text.slice(markerIndex) : text),
+    chars: Array.from(text),
     npcId: npcId || null,
-    fast: choiceFastMode || markerIndex >= 0,
   });
-  if (markerIndex >= 0) choiceFastMode = true;
-  else accelerateNarrativeChoices();
   schedulePlayback();
 }
 
-export function accelerateNarrativeChoices(force = false) {
-  let tail = "";
-  let choicesStarted = false;
-  let foundMarker = false;
-  for (const piece of playbackQueue) {
-    const text = piece.chars.join("");
-    if (!choicesStarted && /你可以|您可以|\n\s*1[.、]/u.test(tail + text)) {
-      choicesStarted = true;
-      foundMarker = true;
-    }
-    if (choicesStarted) piece.fast = true;
-    tail = (tail + text).slice(-24);
-  }
-  if (!foundMarker && (choiceFastMode || force)) {
-    playbackQueue.forEach((piece) => {
-      piece.fast = true;
-    });
-  }
-  choiceFastMode = choiceFastMode || foundMarker || force;
-  if (choicesStarted && playbackTimer !== null) {
-    window.clearTimeout(playbackTimer);
-    playbackTimer = null;
-    schedulePlayback(18);
-  }
-}
-
-export function revealNarrativeImmediately() {
-  flushNarrativeStream();
+/** 长按叙述区域临时加速（约 3 倍）；松开/移出/取消/失焦恢复所选档位。 */
+export function setNarrationBoost(active: boolean) {
+  if (narrationBoost === active) return;
+  narrationBoost = active;
+  if (playbackTimer === null || !playbackQueue.length) return;
+  // 立即按新速率重排当前一拍，避免等待旧定时器走完。
+  window.clearTimeout(playbackTimer);
+  playbackTimer = null;
+  schedulePlayback(baseTickMs());
 }
 
 export function whenNarrativePresented(callback: () => void) {
@@ -791,7 +752,7 @@ function rebasePlaybackOnAuthoritativeSegments(segments: NarrativeSegment[]) {
           ? segment.npcId || segment.npc_id || segment.speaker?.id || null
           : null;
       if (npcId && segment.speaker) liveSpeakers.set(npcId, segment.speaker);
-      queued.push({ chars: rest, npcId, fast: choiceFastMode });
+      queued.push({ chars: rest, npcId });
     }
   }
 
@@ -810,7 +771,7 @@ function rebasePlaybackOnAuthoritativeSegments(segments: NarrativeSegment[]) {
     ),
   );
   authoritativeSegments = null;
-  accelerateNarrativeChoices(choiceFastMode);
+  schedulePlayback();
 }
 
 function applyAuthoritativeSegments() {

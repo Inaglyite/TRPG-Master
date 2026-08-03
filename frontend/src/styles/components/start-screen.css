@@ -26,10 +26,122 @@
   display: none;
 }
 #start-box {
+  position: relative;
   width: min(1080px, calc(100vw - 48px));
   max-height: calc(100vh - 40px);
   min-height: 0;
   filter: drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
+}
+
+/* ---- 模组切换“卷宗换页”过渡（docs/ARCHITECTURE.md §9.2） ---- */
+/* 双层背景交叉渐变：过渡期间由图层承载模组背景，
+   避免 --module-bg-image 变量跳变造成不可控闪切；两层始终不透明兜底，不闪白。 */
+.start-bg-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--ink) 52%, transparent),
+      color-mix(in srgb, var(--ink) 8%, transparent) 48%,
+      color-mix(in srgb, var(--ink) 58%, transparent)
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ink) 10%, transparent),
+      color-mix(in srgb, var(--ink) 58%, transparent)
+    ),
+    var(--layer-image, var(--ui-start-bg)) center / cover no-repeat,
+    var(--bg);
+}
+.start-bg-layer.incoming {
+  opacity: 0;
+}
+#start-overlay.module-entering .start-bg-layer.incoming {
+  opacity: 1;
+  transition: opacity 240ms ease-in-out;
+}
+#start-overlay.module-entering .start-bg-layer.outgoing {
+  opacity: 0;
+  transition: opacity 240ms ease-in-out;
+}
+
+/* 旧内容只允许轻微缩小、降亮度和模糊 */
+#start-box.module-leaving {
+  transform: scale(0.98);
+  filter: brightness(0.72) blur(1.5px)
+    drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
+  transition:
+    transform 120ms ease-in,
+    filter 120ms ease-in;
+}
+/* 新内容由下方 8px 归位，整体一次进入，不做按钮瀑布 */
+#start-box.module-entering {
+  animation: module-content-enter 180ms ease-out;
+}
+@keyframes module-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 标志性元素：很窄的暗金“卷宗纸边”，仅在交接点掠过一次 */
+.module-page-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--gold) 82%, transparent) 38%,
+    color-mix(in srgb, var(--gold) 82%, transparent) 62%,
+    transparent
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+#start-overlay.module-entering .module-page-edge {
+  animation: module-page-edge 300ms ease-in-out;
+}
+@keyframes module-page-edge {
+  0% {
+    transform: translateX(-4vw);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(104vw);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #start-overlay.module-entering .start-bg-layer.incoming,
+  #start-overlay.module-entering .start-bg-layer.outgoing {
+    transition: none;
+  }
+  #start-box.module-leaving {
+    transition: none;
+    transform: none;
+    filter: drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
+  }
+  #start-box.module-entering {
+    animation: none;
+  }
+  #start-overlay.module-entering .module-page-edge {
+    animation: none;
+  }
 }
 .start-view {
   width: 100%;

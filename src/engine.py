@@ -31,6 +31,7 @@ from .config import (
     OPTIONAL_SKILL_HINTS,
     PROMPT_PROFILE,
     STORY_THINKING_MODE,
+    model_timeout_seconds,
 )
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
 from .discovery import (
@@ -191,7 +192,9 @@ class GameEngine:
 
     def __init__(self, context: RuntimeContext | None = None):
         self.context = context or RuntimeContext.local()
-        self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+        self.client = OpenAI(
+            api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds()
+        )
         self._model_session = ModelSession()
         self._history_compactor = HistoryCompactor(self)
         self.narrative_model = NARRATIVE_MODEL

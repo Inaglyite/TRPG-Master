@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   cancelDice3D,
@@ -7,16 +14,71 @@ import {
   rollDice3D,
 } from "../../dice3d/controller";
 import { renderMarkdown } from "../../markdown";
+import { NARRATION_LONG_PRESS_MS } from "../../narration-speed";
 import {
   invokeTurnBranch,
   invokeTurnRewrite,
-  revealNarrativeImmediately,
+  setNarrationBoost,
 } from "../../renderer";
 import { useMessageStore, type ChatMessage } from "../../state/message-store";
 import type { NarrativeSegment } from "../../state/message-store";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
+
+/**
+ * 流式叙述区域的长按加速：按住达到阈值后约 3 倍速播放，
+ * 松开、移出、指针取消、窗口失焦或流结束时立即恢复所选档位。
+ * 普通单击不产生任何播放行为。
+ */
+function useNarrationLongPress(enabled: boolean) {
+  const [boosting, setBoosting] = useState(false);
+  const pressTimer = useRef<number | null>(null);
+  const boostActive = useRef(false);
+
+  const endBoost = useCallback(() => {
+    if (pressTimer.current !== null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    if (boostActive.current) {
+      boostActive.current = false;
+      setNarrationBoost(false);
+    }
+    setBoosting(false);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      endBoost();
+      return;
+    }
+    const onWindowBlur = () => endBoost();
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      endBoost();
+    };
+  }, [enabled, endBoost]);
+
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (!enabled || boostActive.current || pressTimer.current !== null)
+        return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      if ((event.target as HTMLElement).closest("a, button")) return;
+      pressTimer.current = window.setTimeout(() => {
+        pressTimer.current = null;
+        boostActive.current = true;
+        setNarrationBoost(true);
+        setBoosting(true);
+      }, NARRATION_LONG_PRESS_MS);
+    },
+    [enabled],
+  );
+
+  return { boosting, onPointerDown, endBoost };
+}
 
 function LoadingMessage({ label }: { label: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -169,6 +231,10 @@ function Message({
   });
   const rewriteVisible = mode !== "online" || isRoomOwner;
   const branchVisible = mode !== "online";
+  // 仅流式呈现中的守秘人叙述区域响应长按加速；单击不做任何播放操作。
+  const longPress = useNarrationLongPress(
+    message.kind === "gm" && Boolean(message.streaming),
+  );
   const playerName =
     message.speaker?.name ||
     (mode !== "online" ? character?.name : undefined) ||
@@ -182,6 +248,7 @@ function Message({
     "msg",
     message.kind,
     message.streaming ? "streaming-cursor" : "",
+    longPress.boosting ? "narration-boosting" : "",
     message.rewriteTarget ? "rewrite-target" : "",
     sameTurn ? "same-turn" : "",
   ]
@@ -191,7 +258,15 @@ function Message({
     message.kind === "gm" && Boolean(message.segments?.length);
 
   return (
-    <div id={message.id} className={className} data-turn-id={message.turnId}>
+    <div
+      id={message.id}
+      className={className}
+      data-turn-id={message.turnId}
+      onPointerDown={longPress.onPointerDown}
+      onPointerUp={longPress.endBoost}
+      onPointerLeave={longPress.endBoost}
+      onPointerCancel={longPress.endBoost}
+    >
       {message.kind === "gm" && !hasSegments && (
         <div className="msg-attribution">
           守秘人<span>THE KEEPER</span>
@@ -220,15 +295,7 @@ function Message({
           <div className="dice-result">{message.text}</div>
         </>
       ) : hasSegments ? (
-        <div
-          className="chat-event-list"
-          title={message.streaming ? "点击立即显示完整叙述" : undefined}
-          onClick={(event) => {
-            if (!message.streaming) return;
-            if ((event.target as HTMLElement).closest("a, button")) return;
-            revealNarrativeImmediately();
-          }}
-        >
+        <div className="chat-event-list">
           {message.segments!.map((segment, index) =>
             segment.kind === "speech" ? (
               <SpeechUnit key={segment.eventId || index} segment={segment} />
@@ -238,18 +305,6 @@ function Message({
                 text={segment.text}
               />
             ),
-          )}
-          {message.streaming && (
-            <button
-              type="button"
-              className="narrative-reveal-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                revealNarrativeImmediately();
-              }}
-            >
-              显示全文
-            </button>
           )}
         </div>
       ) : (

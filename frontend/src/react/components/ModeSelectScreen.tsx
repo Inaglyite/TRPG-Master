@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 
-import { getCloudOrigin, normalizeOrigin } from "../../api/client";
+import {
+  getCloudOrigin,
+  normalizeOrigin,
+  OFFICIAL_CLOUD_ORIGIN,
+} from "../../api/client";
 import { desktopBridge } from "../../desktop";
 import { useAppStore } from "../../state/app-store";
 
@@ -16,7 +20,11 @@ export function ModeSelectScreen() {
 
   const [busyMode, setBusyMode] = useState<"local" | "online" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [originDraft, setOriginDraft] = useState(getCloudOrigin() ?? "");
+  // 默认官方服务器；自定义 origin 仅开发/验收用，普通流程折叠不展示。
+  const [originDraft, setOriginDraft] = useState(
+    getCloudOrigin() ?? OFFICIAL_CLOUD_ORIGIN,
+  );
+  const [originConfigOpen, setOriginConfigOpen] = useState(false);
 
   const bridge = desktopBridge();
 
@@ -26,6 +34,8 @@ export function ModeSelectScreen() {
     void bridge.getOnlineOrigin().then((result) => {
       if (active && result.ok && result.origin) {
         setOriginDraft(result.origin);
+        // 已保存的自定义 origin 直接展开，让用户看到自己不在官方服。
+        if (result.origin !== OFFICIAL_CLOUD_ORIGIN) setOriginConfigOpen(true);
       }
     });
     return () => {
@@ -54,7 +64,11 @@ export function ModeSelectScreen() {
       setMode("online");
       return;
     }
-    const normalized = normalizeOrigin(originDraft);
+    const trimmed = originDraft.trim();
+    // 留空即官方服务器；只有显式填写时才校验自定义地址。
+    const normalized = trimmed
+      ? normalizeOrigin(trimmed)
+      : OFFICIAL_CLOUD_ORIGIN;
     if (!normalized || !normalized.startsWith("https://")) {
       setError("请输入云端的 https 服务器地址，例如 https://trpg.example.com");
       return;
@@ -110,12 +124,22 @@ export function ModeSelectScreen() {
             </span>
           </button>
         </div>
-        {bridge && (
+        {bridge && !originConfigOpen && (
+          <button
+            type="button"
+            className="btn-ghost mode-select-origin-toggle"
+            disabled={busyMode !== null}
+            onClick={() => setOriginConfigOpen(true)}
+          >
+            自定义服务器（开发/验收）
+          </button>
+        )}
+        {bridge && originConfigOpen && (
           <div className="mode-select-origin">
             <input
               value={originDraft}
               onChange={(event) => setOriginDraft(event.target.value)}
-              placeholder="云端服务器：https://trpg.example.com"
+              placeholder={`留空使用官方服务器 ${OFFICIAL_CLOUD_ORIGIN}`}
               aria-label="云端服务器地址"
               disabled={busyMode !== null}
             />

@@ -7,6 +7,7 @@ import {
   apiHttpOrigin,
   getCloudOrigin,
   normalizeOrigin,
+  OFFICIAL_CLOUD_ORIGIN,
   onUnauthorized,
   setCloudOrigin,
 } from "./client";
@@ -47,6 +48,11 @@ describe("云端 origin 配置", () => {
     expect(getCloudOrigin()).toBe("https://trpg.example.com");
     expect(setCloudOrigin(null)).toBe(true);
     expect(getCloudOrigin()).toBeNull();
+  });
+
+  it("官方 origin 固定为 https 裸 origin", () => {
+    expect(OFFICIAL_CLOUD_ORIGIN).toBe("https://trpggame.xyz");
+    expect(normalizeOrigin(OFFICIAL_CLOUD_ORIGIN)).toBe(OFFICIAL_CLOUD_ORIGIN);
   });
 
   it("apiHttpOrigin 优先使用云端配置，未配置时回退本地推导", () => {

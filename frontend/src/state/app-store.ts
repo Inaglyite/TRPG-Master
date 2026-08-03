@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export const DEFAULT_TITLE = "疯狂宅邸";
+export const DEFAULT_TITLE = "TRPG Game";
 export const DEFAULT_SUBTITLE = "A TRPG of Madness & Mystery";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";

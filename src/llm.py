@@ -5,7 +5,7 @@ import random
 
 from openai import OpenAI
 
-from .config import GLM_API_KEY, GLM_BASE_URL, GLM_MODEL
+from .config import GLM_API_KEY, GLM_BASE_URL, GLM_MODEL, model_timeout_seconds
 
 # ---------------------------------------------------------------------------
 # 沉浸式等待文本
@@ -58,7 +58,9 @@ def _get_glm() -> OpenAI | None:
     if _glm_client is not None:
         return _glm_client
     if GLM_API_KEY:
-        _glm_client = OpenAI(api_key=GLM_API_KEY, base_url=GLM_BASE_URL)
+        _glm_client = OpenAI(
+            api_key=GLM_API_KEY, base_url=GLM_BASE_URL, timeout=model_timeout_seconds()
+        )
         return _glm_client
     return None
 

@@ -57,6 +57,27 @@ WORLDS_DIR = RUNTIME_ROOT / "worlds"
 # ---- DeepSeek API ----
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com")
+
+
+def _bounded_float_env(name: str, default: float, low: float, high: float) -> float:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+# 模型 HTTP 调用超时（秒）。默认与 openai SDK 默认一致（600s），运维可用
+# TRPG_MODEL_TIMEOUT 收紧，范围 1-3600。
+MODEL_TIMEOUT = _bounded_float_env("TRPG_MODEL_TIMEOUT", 600.0, 1.0, 3600.0)
+
+
+def model_timeout_seconds() -> float:
+    """运行时读取模型超时，便于测试与运维动态调整（未设置时回退到启动值）。"""
+    return _bounded_float_env("TRPG_MODEL_TIMEOUT", MODEL_TIMEOUT, 1.0, 3600.0)
 MODEL_FLASH = os.environ.get("TRPG_FLASH_MODEL", "deepseek-v4-flash")
 MODEL_PRO = os.environ.get("TRPG_PRO_MODEL", "deepseek-v4-pro")
 _legacy_force_pro = os.environ.get("TRPG_FORCE_PRO")

@@ -62,7 +62,7 @@ export function LobbyScreen() {
   }
 
   return (
-    <div className="online-box online-card online-card--wide">
+    <div className="online-box online-card online-card--wide lobby-screen">
       <header className="online-header">
         <div>
           <h1 className="online-title online-title--small">联机大厅</h1>
@@ -82,12 +82,18 @@ export function LobbyScreen() {
         </div>
       </header>
 
-      <section className="online-section" aria-labelledby="lobby-rooms-title">
+      <section
+        className="online-section lobby-section"
+        aria-labelledby="lobby-rooms-title"
+      >
         <div className="online-section-head">
-          <h2 id="lobby-rooms-title">我的房间</h2>
+          <div>
+            <h2 id="lobby-rooms-title">我的房间</h2>
+            <p className="online-section-desc">你参与的全部调查档案</p>
+          </div>
           <button
             type="button"
-            className="btn-ghost"
+            className="btn-ghost lobby-refresh"
             onClick={() => void refreshWorlds()}
             disabled={worldsStatus === "loading"}
           >
@@ -115,9 +121,12 @@ export function LobbyScreen() {
           </div>
         )}
         {worldsStatus === "ready" && worlds.length === 0 && (
-          <p className="online-empty">
-            还没有房间。创建一个，或在下方输入邀请码加入。
-          </p>
+          <div className="online-empty lobby-empty">
+            <p className="lobby-empty-mark" aria-hidden="true">
+              ❧
+            </p>
+            <p>还没有房间。创建一个，或在下方输入邀请码加入。</p>
+          </div>
         )}
         {worlds.length > 0 && (
           <ul className="room-list">
@@ -128,25 +137,36 @@ export function LobbyScreen() {
                   className="room-card"
                   onClick={() => void enterRoom(world.world_id)}
                 >
-                  <span className="room-card-title">
-                    {world.metadata?.name || moduleTitle(world.module)}
+                  <span className="room-card-top">
+                    <span className="room-card-title">
+                      {world.metadata?.name || moduleTitle(world.module)}
+                    </span>
+                    {world.metadata?.room_status && (
+                      <span className="online-badge online-badge--status">
+                        {world.metadata.room_status}
+                      </span>
+                    )}
+                  </span>
+                  <span className="room-card-module">
+                    {moduleTitle(world.module)}
                   </span>
                   <span className="room-card-meta">
-                    <span className="online-badge">
+                    <span
+                      className={
+                        world.role === "owner"
+                          ? "online-badge online-badge--owner"
+                          : "online-badge online-badge--role"
+                      }
+                    >
                       {ROLE_LABELS[world.role] ?? world.role}
                     </span>
                     {typeof world.member_count === "number" && (
-                      <span className="online-badge">
+                      <span className="room-card-count">
                         {world.member_count}
                         {world.metadata?.max_players
                           ? `/${world.metadata.max_players}`
                           : ""}{" "}
                         人
-                      </span>
-                    )}
-                    {world.metadata?.room_status && (
-                      <span className="online-badge">
-                        {world.metadata.room_status}
                       </span>
                     )}
                     {formatTime(world.updated_at) && (
@@ -162,9 +182,17 @@ export function LobbyScreen() {
         )}
       </section>
 
-      <section className="online-section" aria-labelledby="lobby-create-title">
-        <h2 id="lobby-create-title">创建房间</h2>
-        <div className="online-inline-form">
+      <section
+        className="online-section lobby-section"
+        aria-labelledby="lobby-create-title"
+      >
+        <div>
+          <h2 id="lobby-create-title">创建房间</h2>
+          <p className="online-section-desc">
+            选择模组与人数，开一份新的调查档案
+          </p>
+        </div>
+        <div className="online-inline-form lobby-form">
           <input
             value={roomName}
             onChange={(event) => setRoomName(event.target.value)}
@@ -216,9 +244,15 @@ export function LobbyScreen() {
         )}
       </section>
 
-      <section className="online-section" aria-labelledby="lobby-join-title">
-        <h2 id="lobby-join-title">邀请码加入</h2>
-        <div className="online-inline-form">
+      <section
+        className="online-section lobby-section"
+        aria-labelledby="lobby-join-title"
+      >
+        <div>
+          <h2 id="lobby-join-title">邀请码加入</h2>
+          <p className="online-section-desc">输入朋友分享的邀请码</p>
+        </div>
+        <div className="online-inline-form lobby-form">
           <input
             value={token}
             onChange={(event) => setToken(event.target.value)}

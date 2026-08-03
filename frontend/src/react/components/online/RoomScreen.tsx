@@ -135,7 +135,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   }
 
   return (
-    <div className="online-box online-card online-card--wide">
+    <div className="online-box online-card online-card--wide online-room-screen">
       <header className="online-header">
         <div>
           <h1 className="online-title online-title--small">{roomTitle}</h1>

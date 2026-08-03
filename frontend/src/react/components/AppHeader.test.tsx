@@ -6,12 +6,12 @@ import { AppHeader } from "./AppHeader";
 
 describe("AppHeader", () => {
   beforeEach(() => {
-    useAppStore.setState({ connection: "connecting", title: "疯狂宅邸" });
+    useAppStore.setState({ connection: "connecting", title: "TRPG Game" });
   });
 
   it("reacts to connection and module theme state", () => {
     const { container } = render(<AppHeader />);
-    expect(screen.getByRole("heading")).toHaveTextContent("疯狂宅邸");
+    expect(screen.getByRole("heading")).toHaveTextContent("TRPG Game");
     expect(container.querySelector("#conn-status")).toHaveClass("connecting");
 
     act(() => {

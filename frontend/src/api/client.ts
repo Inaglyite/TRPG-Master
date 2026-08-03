@@ -4,6 +4,13 @@ import { backendHttpOrigin } from "../backend-url";
 
 const CLOUD_ORIGIN_KEY = "trpg-cloud-origin";
 
+/**
+ * 官方多人服务器 origin（见 docs/ROADMAP.md“中心化多人服务”）。
+ * 普通用户无需配置即默认连接；自定义 origin 仅保留
+ * 给开发/验收流程。
+ */
+export const OFFICIAL_CLOUD_ORIGIN = "https://trpggame.xyz";
+
 /** 读取用户保存的云端服务器 origin；未设置时返回 null。 */
 export function getCloudOrigin(): string | null {
   try {

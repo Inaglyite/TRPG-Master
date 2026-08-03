@@ -5,7 +5,7 @@ import { apiFetch } from "./client";
 /**
  * 世界/房间相关的云端 API。
  *
- * 契约状态说明（与 docs/MULTIPLAYER_PLAN.md §6.1 对齐）：
+ * 契约状态说明（与 docs/API.md 的多人房间控制面对齐）：
  * - 已实现（后端多人接口）：worlds 创建/列表、成员列表/改角色/移除、邀请
  *   创建/列表/撤销/接受、调查员 options/认领/释放、房主移交。
  *   ready/start/actor 走 /ws/room 房间 WS（room_ready、start{action_id}、

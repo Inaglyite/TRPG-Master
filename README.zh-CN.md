@@ -1,4 +1,4 @@
-# TRPG Master
+# TRPG Game
 
 **[English README](README.md)**
 
@@ -143,8 +143,8 @@ bash start_desktop.sh
 
 ### 多人游戏
 
-浏览器直接打开服务器维护者提供的 HTTPS 地址；Electron 启动后选择“多人游戏”，并填写不带路径或
-参数的 HTTPS 服务器 origin。登录后可以创建房间，或用房主生成的邀请码加入。完整的建房、邀请、
+浏览器直接打开官方地址 `https://trpggame.xyz`；Electron 启动后选择“多人游戏”即可自动连接官方
+服务器。自定义 HTTPS origin 仅保留给开发和验收。登录后可以创建房间，或用房主生成的邀请码加入。完整的建房、邀请、
 选角、准备、行动顺序、私密内容、存档、重连和房主移交说明见
 [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
 
@@ -153,8 +153,7 @@ bash start_desktop.sh
 API Key 设置窗口。多人当前只提供默认/模组调查员，不会上传或读取玩家电脑上的长期履历与自定义
 角色文件。
 
-普通玩家必须使用受信任的 TLS 证书。当前 Azure 验收环境仍使用 IP 地址和自签名证书，不是面向普通
-玩家的正式入口；不要绕过浏览器证书警告。
+官方入口使用受信任的 TLS 证书；若仍出现证书警告，请联系维护者排查，不要绕过警告。
 
 ### 启动终端版
 
@@ -227,22 +226,17 @@ powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 脚本安装/检查 Python 与 Node.js 依赖，用 PyInstaller 构建 `trpg-server.exe`，再用
 electron-builder 构建 NSIS 安装版和便携版。输出位于 `frontend/release/`。`.env.json`
 不会被打进安装包；只有选择单机模式时，Electron 配置窗口才会收集模型 API 地址和 Key。多人模式
-只要求填写服务器的 HTTPS origin。
+默认连接官方 HTTPS 服务，自定义 origin 仅用于开发和验收。
 
 ## 文档
 
 - [架构文档](docs/ARCHITECTURE.md)：进程、模块、回合时序、数据所有权、扩展点与多人化边界。
 - [接口文档](docs/API.md)：HTTP 路由、WebSocket 双向消息、事件顺序与数据结构。
-- [数据库与账号](docs/DATABASE.md)：迁移、旧世界导入、PostgreSQL、备份与恢复。
+- [部署与恢复](docs/DEPLOYMENT.md)：正式服务、PostgreSQL、迁移、备份、监控与恢复。
 - [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)：浏览器/Electron 登录、房间、选角、行动、存档和重连。
 - [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 目录、字段、校验、安全和版本规范。
-- [前端架构](docs/FRONTEND_ARCHITECTURE.md)：React 组件、Zustand 状态、协议边界与扩展约束。
-- [回合性能](docs/PERFORMANCE.md)：阶段指标、进程内工具、回合缓存与本地基准。
 - [开发路线图](docs/ROADMAP.md)：当前单机/多人基线、上线收口和未来可选 Agent 的进入条件。
-- [模组编辑器规划](docs/MODULE_EDITOR_PLAN.md)：编辑器需求与技术规划（内部文档，非使用手册）。
-- [设计依据](docs/DESIGN_RATIONALE.md)：关键设计决策参考的外部资料。
 - [模组工程模板](examples/module-template/manifest.json)：可直接打包的示例。
-- 历史交接与试玩报告归档在 [docs/archive/](docs/archive/)。
 
 ## 开发校验
 
@@ -285,7 +279,7 @@ trpg-master/
   单房间 2–4 人，服务端保持单个 Uvicorn worker，尚未引入跨进程房间协调。
 - 桌面单机模式默认关闭账号门禁，不应直接暴露到公网；云端必须设置
   `TRPG_REQUIRE_AUTH=1`、受信任的 TLS 和明确的允许 Origin，见
-  [数据库与账号](docs/DATABASE.md)与[多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
+  [部署与恢复](docs/DEPLOYMENT.md)与[多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md)。
 
 ## 参与贡献
 

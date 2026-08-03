@@ -1,10 +1,10 @@
-# 架构文档
+# TRPG Game 架构
 
 本文描述当前仓库的实际运行结构。目标读者是准备修改引擎、前端、模组、存档或多人功能的开发者。
 
 ## 1. 系统定位
 
-TRPG Master 同时支持本地桌面和账号化云端运行。Electron 提供桌面窗口，FastAPI 提供 HTTP/WebSocket 服务。单机 `/ws` 仍为每条连接创建 `GameEngine`；多人 `/ws/room` 由 `RoomManager` 按 `world_id` 只创建一个 `GameRoom`、一个共享 `GameEngine` 和一份 `ModelSession`。工作流在普通叙事节点与临时战斗职责节点间路由；这两个节点不是独立 Agent。Python 工具通过 `DatabaseWorldStore` 执行确定性规则与状态写入。
+TRPG Game 同时支持本地桌面和账号化云端运行。Electron 提供桌面窗口，FastAPI 提供 HTTP/WebSocket 服务。单机 `/ws` 仍为每条连接创建 `GameEngine`；多人 `/ws/room` 由 `RoomManager` 按 `world_id` 只创建一个 `GameRoom`、一个共享 `GameEngine` 和一份 `ModelSession`。工作流在普通叙事节点与临时战斗职责节点间路由；这两个节点不是独立 Agent。Python 工具通过 `DatabaseWorldStore` 执行确定性规则与状态写入。
 
 核心边界：
 
@@ -252,7 +252,7 @@ flowchart TD
 - 开头首句经过内部控制语过滤；流式协议防火墙会短暂保留可能构成工具协议起始符的尾部，确认是普通文本后再通过 `on_narrative` 发送，因此仍保留细粒度流式输出。
 - 结构化工具调用按 index 累积并在流结束后交给路由节点。兼容供应商误放进 `delta.content` 的 DSML 工具协议：完整区块被隔离并转换为内部工具调用，损坏、过长或未闭合区块直接丢弃，参数不会进入叙事、消息历史或诊断日志。
 - 玩家展示不以原始模型正文为权威：服务端把正文定稿为 `chat_events`，补齐守秘人/NPC 身份并只下发公开 schema 字段。显式 NPC 标签用于低延迟流式归因；漏标签时仅允许当前世界已知公开姓名的 `姓名：台词` 行恢复为人物发言。
-- 浏览器用独立展示队列消费安全的叙事增量，网络接收速度不直接决定逐字播放速度；标点和人物切换带节奏停顿，长积压自动追赶。`done` 与玩家可交互的 presentation complete 分离，骰点、素材和选项不会越过尚未展示的相关叙事。
+- 浏览器用独立展示队列消费安全的叙事增量，网络接收速度、缓存积压和选项到达都不能改变玩家选择的固定播放档位；标点和人物切换可以保留节奏停顿，长按叙述区域只做临时加速。`done` 与玩家可交互的 presentation complete 分离，骰点、素材和选项不会越过尚未展示的相关叙事。
 - 普通叙事使用 `narrative_model`；战斗、复杂工具命中后的同回合续写、可选回合审计和上下文摘要兜底使用 `judgement_model`。
 - 故事模型只看到需要其判断的 `MODEL_TOOLS`。项目文件读取、状态快照读取、素材展示、场景缓存和私有摘要写入仍保留兼容实现，但不再制造同步工具循环。
 - 发送请求前会修复旧存档中被控制消息打断的工具响应批次，避免 OpenAI 兼容接口拒绝历史。
@@ -363,7 +363,29 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 | 模型配置 | `.env.json` | 配置向导/`start.py` | 本地机密 |
 | 运行日志 | `logs/`、`/tmp/trpg-*.log` | 后端/启动脚本 | 诊断数据 |
 
-### 8.1 运行时上下文
+### 8.1 数据库与账号
+
+服务端事实统一通过 SQLAlchemy 2 Repository 访问：桌面环境默认使用
+`TRPG_RUNTIME_ROOT/trpg-master.db` 的 SQLite，云端使用 PostgreSQL。SQLite 连接显式启用
+`PRAGMA foreign_keys=ON`；两种数据库共享同一套 Alembic 迁移，当前版本以
+`venv/bin/python -m alembic -c alembic.ini heads` 输出为准，不在文档里复制易过时的 revision。
+
+数据库职责分为三组：
+
+- 身份与权限：`users`、`sessions`、`worlds`、`world_members`、`world_invites`、
+  `world_investigators` 和 `audit_events`；密码使用 Argon2id，登录态使用可撤销的服务端 Session，
+  明文邀请 token 不落库。
+- 运行世界：`world_states.state` 保存动态 JSON/JSONB 聚合；`room_actions` 以
+  `world_id + action_id` 保证进程重启后的行动幂等。
+- 历史与恢复：`turns`、`turn_events`、`snapshots`、`save_slots` 和 `player_notes` 保存父链、
+  公开事件、不可变快照、存档元数据和按用户隔离的笔记。
+
+运行时不再从 `world_state.json`、`turns/`、`saves/` 或 `player_notes.json` 读取事实。旧
+`worlds/` 只由 `tools/import_worlds_to_database.py --once --replace` 做一次性幂等导入；完成标记写在
+`audit_events`，导入前会校验 JSON、revision、字段长度和 owner 冲突。生产数据库只监听回环地址，
+应用使用独立最小权限账号；环境变量、迁移、备份与恢复命令统一见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
+
+### 8.2 运行时上下文
 
 `RuntimeContext` 是世界与模组绑定的运行时入口，包含 `world_id`、`module_name`、数据库 URL、
 只读 `module_dir`、兼容导入目录和对应 `DatabaseWorldStore`。`GameEngine`、持久化、角色服务和
@@ -374,7 +396,7 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 事务和行锁内读取最新状态、执行 mutator 并检查可选 `expected_revision`。过期版本抛出
 `StaleRevisionError`，提交失败则由数据库整体回滚。
 
-### 8.2 存档
+### 8.3 存档
 
 `save_slots` 保存槽位、消息与 UI 摘要，`snapshots` 保存不可变 JSONB 状态并由外键关联。
 
@@ -387,7 +409,7 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 - 旧快照通过 `src.world_migrations` 补充 schema、私有记忆、NPC 揭示与 PC 心理档案。
 - 进行中的 `combat_state` 位于完整世界状态内，读档后 LangGraph 会路由到战斗职责节点。
 
-### 8.3 回合记录、重新叙述与时间线
+### 8.4 回合记录、重新叙述与时间线
 
 `turns` 保存父链、状态、消息和快照引用，`turn_events` 保存有序公开事件；桌面兼容导出可生成旧 `record.json`，但它不是事实来源。公开恢复数据不包含 system prompt、Lorebook 正文或工具私有输出。
 
@@ -402,7 +424,7 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 状态、存档、回合日志和笔记均独立。存档面板按模组列出这些时间线，前端把当前 world/module
 记入本地连接偏好。
 
-### 8.4 调查员与长期履历
+### 8.5 调查员与长期履历
 
 单机新游戏从 `profile/default/module/custom` 四类来源解析角色引用，把角色复制到当前
 `world_state.pc`。游戏内变化只作用于案件状态；案件结算后，`settle_case()` 才把结局、HP/SAN
@@ -412,7 +434,7 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 `include_personal=False` 构建列表，`profile` 与 `custom` 既不作为云端账号资料，也不进入共享房间。
 多人角色占用与案件内状态保存在数据库成员关系及世界状态中，不读写本机长期履历文件。
 
-### 8.5 模组包与注册表
+### 8.6 模组包与注册表
 
 `ModuleRegistry` 合并两类来源：
 
@@ -471,12 +493,31 @@ sequenceDiagram
 
 ## 9. 前端结构
 
+前端使用 Electron + Vite + React + TypeScript。FastAPI 是规则与世界状态的权威；React 只管理
+客户端展示和交互。依赖方向固定为：
+
+```text
+React components
+      ↓
+Zustand client state ← Zod 校验后的 WebSocket 消息
+      ↓
+typed HTTP / WebSocket services
+      ↓
+FastAPI authoritative state
+```
+
+`GameShell` 组合玩家可见区域，业务状态写入 Zustand，组件只按状态渲染。新增页面、地图或面板
+必须直接实现为 React 组件，不得重新引入 `document.getElementById` 一类命令式业务渲染。
+
 | 模块 | 职责 |
 |---|---|
 | `react-main.tsx` / `react/App.tsx` | 创建 React 根节点并启动 WebSocket 生命周期 |
 | `react/GameShell.tsx` | 组合主界面、开始菜单与所有覆盖层 |
 | `react/components/` | 聊天、控制区、存档、设置、笔记、模组导入等声明式视图 |
-| `state/` | Zustand 客户端状态；服务写入、组件订阅 |
+| `state/app-store.ts` | 连接、角色、线索、存档、覆盖层与客户端偏好 |
+| `state/message-store.ts` | 聊天段、叙述播放队列、滚动和回合操作状态 |
+| `state/start-store.ts` / `state/model-store.ts` | 开局流程、模组/调查员选择、模型配置与诊断 |
+| `state/online-store.ts` | 登录态、联机大厅、房间成员、调查员占用与当前行动者 |
 | `ws.ts` | 连接、有界退避、断线恢复入口、发送队列、回合序号校验与事件分发 |
 | `start.ts` | 模组/调查员选择、新游戏与继续游戏入口 |
 | `react/components/ModuleImporter.tsx` | `.trpgmod` 文件选择、HTTP 预检、确认安装与自动切换 |
@@ -485,7 +526,16 @@ sequenceDiagram
 | `panels.ts` | 角色、线索、结局、存档与快速存档命令适配 |
 | `settings.ts` | 模型路由、回合耗时/context 分区与 Lorebook trace 诊断 |
 | `utility.ts` | 不注入模型的玩家笔记，以及仅发送普通 action 的快捷行动 |
-| `style.css` | 主题变量、素材化控件和响应式布局 |
+| `styles/` | 全局令牌、基础样式、氛围效果、布局和按区域拆分的组件样式 |
+
+### 9.1 协议与恢复
+
+`ws.ts` 持有唯一连接，断线按 1/2/5/10/30 秒有界退避重连；主动断开不重连。所有服务端消息先经
+`protocol/server-message.ts` 的白名单与 Zod schema 校验，未知类型、非法载荷和任何 DSML 工具协议
+文本都在进入业务处理器前拒绝。`chat_events` 只保留公开展示字段，并在定稿时覆盖流式临时布局。
+
+时间线按钮使用公开历史的 `parent_turn_id`，含义始终是“回到本次行动之前”，历史回放、实时回合、
+断线恢复和重新叙述不得各自推断不同锚点。
 
 Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择多人后，主进程改为加载经过校验的
 云端 HTTPS origin，使 HTTP、WSS 和 Session Cookie 同源。图片 handout 同时携带
@@ -502,6 +552,38 @@ Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择
 `private_state`，用于恢复其角色详情、可见线索和私人笔记；这一部分不进入公共事件缓冲，也不会
 广播给房间内其他连接。
 
+### 9.2 产品身份、主题与动效
+
+产品级可见名称统一为 `TRPG Game`：浏览器标题、Electron 窗口、Windows `productName` 和安装产物
+都不能使用某个模组名。仓库目录、Python 包、环境变量、协议路径、数据库字段和 Electron `appId`
+属于兼容身份，不随展示名改动；“疯狂宅邸”等名称只在模组列表、房间和游戏内作为模组标题出现。
+守秘人 system prompt 中的 `TRPG Master` 是内部角色身份，终端调试文案也不构成发行产品名；两者
+不得反向覆盖浏览器、窗口或安装包的 `TRPG Game` 标题。
+
+模组 `theme.json` 由 `theme.ts` 校验后映射到 `styles/tokens.css` 的受管 CSS 变量；颜色、字体和
+`backgroundImage` 都经过白名单与路径检查，每次切换先清理上一模组的变量。组件不得硬编码主题色。
+`prefers-reduced-motion` 会关闭粒子、闪烁和位移动画。
+
+开始页切换模组采用一次 350–450ms 的“卷宗换页”过渡：首次挂载不播放，旧内容先离场，服务端确认
+主题且新背景预加载后再进入；快速连续选择只保留最新目标，请求失败恢复旧内容。动效不替代真实
+加载状态，不能闪白、丢焦点或绕过现有 `moduleSwitchPending` 门禁。
+
+### 9.3 发言者与叙述播放
+
+玩家可见叙述以服务端归因的段为单位：守秘人和 NPC 在左侧，调查员行动在右侧；系统、骰点、线索
+和错误继续使用居中事件卡。`narrative_chunk.npc_id` 只提供流式临时归因，最终以严格过滤的
+`chat_events` 为权威；前端不得从正文、头像或模型自报身份猜测角色。旧记录没有段结构时按单段
+守秘人叙述回放。
+
+网络流和可见播放相互解耦。`narration-speed.ts` 提供慢、标准、快三档并保存到本地存储；同一档位
+每拍固定一个字符，缓存长度和选项到达不能自动提速。按住正在播放的叙述约 250ms 后临时按当前
+档位约三倍速度播放，松开、移出、取消或窗口失焦立即恢复；普通单击不跳过，也不显示“显示全文”
+按钮或鼠标悬浮提示。内部 `flushNarrativeStream()` 只供取消回合、切换世界和历史重载等生命周期
+收尾。`done` 只表示网络完成，输入与选项须等展示队列排空；reduced-motion 可直接完成展示。
+
+检定骰点仍由服务端权威，3D 骰只负责表现并用预定结果落面；WebGL、非标准面数、超时或
+reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果。
+
 ## 10. 错误与可观测性
 
 - 引擎初始化失败：WebSocket 发送 `error` 后关闭连接。
@@ -515,14 +597,40 @@ Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择
 
 `src/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。
 
-隔离 WebSocket 对照显示，声明式预结算把“检查遗体”这类命中发现规则的动作从约 6 次模型请求
-降为 1 次，回合耗时约减半；模型请求前 1 秒内即可完成检定、SAN、图片与线索状态提交，模型
-首 token 延迟仍是等待的主要来源。Lorebook 本地确定性检索在格式上限规模下仍是毫秒级，无需
-向量数据库或额外 Agent。上述结论的历史基准数据见 `docs/archive/benchmarks_2026-07.md`。
+### 10.1 回合性能
 
-### 10.1 设计依据
+`TurnPerformance` 记录准备、模型、工具、实体同步、模型审计和数据库提交阶段；指标通过
+`turn_performance` 事件发送并保存在回合 diagnostics，字段契约见 [`API.md`](API.md)。当前性能边界：
 
-各决策的外部参考与推导笔记已移至 `docs/DESIGN_RATIONALE.md`。
+- 模型工具在服务进程内执行，不为每次调用创建 Python 子进程；每个 `GameEngine` 复用一个模型客户端
+  及 HTTP 连接池。
+- `DatabaseWorldStore.turn_cache()` 在世界锁内复用读取、缓冲 mutation，并由 TurnJournal 按起始
+  revision 一次事务提交；自动存档和回合日志复用同一不可变 Snapshot。
+- `TurnMutationLedger` 让已确定落账的变化跳过冗余模型审计；纯叙事不确定性仍可保守回退审计。
+- 明确移动、调查、检定、发现和战斗确认先走确定性 `ActionResolution`，模型只叙述已经结算的结果。
+- 首个 `narrative_chunk` 立即发送；后续文本默认在 `TRPG_STREAM_BATCH_MS=25` 的窗口内合并，事件边界
+  不跨批。设置为 `0` 可关闭，允许范围为 0–100ms。
+
+本地无模型、临时数据库基准使用 `venv/bin/python tools/benchmark_turn_performance.py 100`。2026-07-22
+同机参考值为：进程内 `2d6+1` 平均约 0.009ms，普通 SQLite 世界读取约 0.618ms，turn cache 读取
+约 0.125ms；这些数字只用于同机版本对比，不是其他硬件的承诺。隔离回合对照中，声明式预结算曾把
+命中发现规则的动作从约 6 次模型请求降到 1 次，模型首 token 延迟仍是主要等待来源。
+
+### 10.2 设计依据
+
+架构优先使用确定工作流和单一事实来源，只把开放叙事判断交给模型。主要参考包括：
+
+- [Anthropic：Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) 与
+  [ReAct](https://arxiv.org/abs/2210.03629)：区分可预测工作流、开放判断和环境行动。
+- [LangGraph 幂等执行说明](https://docs.langchain.com/oss/python/langgraph/functional-api#idempotency) 与
+  [AWS Transactional Outbox](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html)：
+  副作用必须处于可识别、可恢复且幂等的边界。
+- [AG-UI 事件协议](https://docs.ag-ui.com/concepts/events)：事件使用稳定 ID、有序序列和明确生命周期。
+- [SillyTavern World Info](https://docs.sillytavern.app/usage/core-concepts/worldinfo/)：借鉴有预算的动态知识注入，
+  本项目另加场景、NPC、线索、flag 门槛与不含正文的命中 trace。
+- [Ink](https://github.com/inkle/ink/blob/master/Documentation/RunningYourInk.md) 与
+  [Yarn Spinner](https://github.com/YarnSpinnerTool/YSDocs/blob/main/docs/yarn-spinner-for-unity/components/dialogue-runner.md)：
+  叙事文本、运行时命令和变量状态分层处理。
 
 ## 11. 并发边界
 

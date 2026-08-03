@@ -266,27 +266,6 @@
     color-mix(in srgb, var(--bg2) 96%, black)
   );
 }
-.narrative-reveal-button {
-  align-self: flex-start;
-  margin: -6px 0 0 51px;
-  padding: 3px 9px;
-  border: 1px solid color-mix(in srgb, var(--gold) 22%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg2) 86%, transparent);
-  color: var(--text-faint);
-  font: 500 10px/1.4 var(--font);
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.16s ease, border-color 0.16s ease;
-}
-.narrative-reveal-button:hover,
-.narrative-reveal-button:focus-visible {
-  opacity: 1;
-  border-color: var(--gold-dim);
-  color: var(--gold-bright);
-  outline: none;
-}
 .speech-unit {
   margin: 0;
 }
@@ -564,6 +543,13 @@
 @keyframes ink-cursor {
   0%, 100% { opacity: 0.22; transform: scaleY(0.72); }
   48% { opacity: 0.9; transform: scaleY(1); }
+}
+
+/* 长按加速期间唯一视觉反馈：流式光标略微提亮 */
+.msg.narration-boosting .chat-row:last-of-type .chat-bubble::after,
+.msg.narration-boosting:not(:has(.chat-event-list))::after {
+  background: var(--gold-bright);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold-bright) 70%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

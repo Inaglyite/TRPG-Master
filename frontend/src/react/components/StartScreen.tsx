@@ -5,6 +5,7 @@ import { useAppStore } from "../../state/app-store";
 import { useStartStore, type CharacterOption } from "../../state/start-store";
 import { ModelSettingsTrigger } from "./ModelSettingsPanel";
 import { ModuleImporter } from "./ModuleImporter";
+import { useModuleTransition } from "./module-transition";
 
 const attributes: Record<string, string> = {
   STR: "力量",
@@ -176,6 +177,7 @@ export function StartScreen() {
   const subtitle = useAppStore((value) => value.subtitle);
   const description = useAppStore((value) => value.description);
   const startButtonText = useAppStore((value) => value.startButtonText);
+  const transition = useModuleTransition();
   const characters = state.characterGroups.flatMap(
     (group) => group.characters || [],
   );
@@ -200,9 +202,34 @@ export function StartScreen() {
     return () => document.removeEventListener("keydown", listener);
   }, [state.view, state.gameStarting]);
   if (state.gameStarted) return <div id="start-overlay" className="hidden" />;
+  const overlayClass = [
+    transition.phase !== "idle" ? "module-transition" : "",
+    transition.phase === "leaving" ? "module-leaving" : "",
+    transition.phase === "entering" ? "module-entering" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const boxClass =
+    transition.phase === "idle" ? undefined : `module-${transition.phase}`;
+  const layerImage = (value: string | null) =>
+    ({ "--layer-image": value || "var(--ui-start-bg)" }) as React.CSSProperties;
   return (
-    <div id="start-overlay">
-      <div id="start-box">
+    <div id="start-overlay" className={overlayClass || undefined}>
+      {transition.phase !== "idle" && (
+        <>
+          <div
+            className="start-bg-layer outgoing"
+            aria-hidden="true"
+            style={layerImage(transition.outgoingBg)}
+          />
+          <div
+            className="start-bg-layer incoming"
+            aria-hidden="true"
+            style={layerImage(transition.incomingBg)}
+          />
+        </>
+      )}
+      <div id="start-box" className={boxClass}>
         {state.view === "menu" ? (
           <section
             id="start-menu-view"
@@ -363,6 +390,9 @@ export function StartScreen() {
           </section>
         )}
       </div>
+      {transition.phase === "entering" && (
+        <div className="module-page-edge" aria-hidden="true" />
+      )}
     </div>
   );
 }

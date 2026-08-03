@@ -1,6 +1,6 @@
 # 接口文档
 
-本文是 TRPG Master 服务端（`server.py`）HTTP 与 WebSocket 协议的规范，面向需要实现或对接
+本文是 TRPG Game 服务端（`server.py`）HTTP 与 WebSocket 协议的规范，面向需要实现或对接
 客户端的开发者。文中所有消息与事件的 payload 均按服务端源码核实。协议不携带版本号，
 演进规则见 §1.1。
 
@@ -1637,7 +1637,7 @@ system prompt、Lorebook 扫描或 `world_state`。
 ```
 
 完整回合提交后、`done` 前发送。它用于开发诊断，不参与游戏状态恢复；同一数据保存在该回合的
-diagnostics 中。字段含义见 `docs/PERFORMANCE.md`。
+diagnostics 中。字段含义与采集边界见 [`ARCHITECTURE.md`](ARCHITECTURE.md) 的“回合性能”。
 
 #### `done`
 

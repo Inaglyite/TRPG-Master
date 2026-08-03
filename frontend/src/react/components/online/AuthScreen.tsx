@@ -30,7 +30,7 @@ export function AuthScreen() {
 
   if (authStatus === "checking") {
     return (
-      <div className="online-box online-card">
+      <div className="online-box online-card online-auth-screen">
         <p className="online-loading" role="status">
           正在检查登录状态……
         </p>
@@ -84,7 +84,7 @@ export function AuthScreen() {
   const error = formError ?? authError;
 
   return (
-    <div className="online-box online-card">
+    <div className="online-box online-card online-auth-screen">
       <div className="start-brand">
         <h1 className="online-title online-title--small">多人游戏</h1>
         <p className="online-subtitle">登录云端守秘人</p>

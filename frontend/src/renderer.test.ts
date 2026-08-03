@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  accelerateNarrativeChoices,
   addMsg,
   applyAuthoritativePlayerAction,
   beginNarrativeReplacement,
@@ -13,10 +12,11 @@ import {
   onNarrativeSegment,
   onNarrativeSegments,
   renderTurnHistory,
-  revealNarrativeImmediately,
   setDisplayTurnId,
+  setNarrationBoost,
   whenNarrativePresented,
 } from "./renderer";
+import { setNarrationSpeed } from "./narration-speed";
 import { useMessageStore } from "./state/message-store";
 
 describe("React message renderer adapter", () => {
@@ -27,7 +27,9 @@ describe("React message renderer adapter", () => {
       forceScrollRequest: 0,
     });
     // 清理 renderer 模块级的流状态（streamMessageId/段结构），保证测试隔离
-    revealNarrativeImmediately();
+    setNarrationBoost(false);
+    setNarrationSpeed("standard");
+    flushNarrativeStream();
     finishNarrativeStream();
     vi.stubGlobal("requestAnimationFrame", () => 1);
     vi.stubGlobal("cancelAnimationFrame", () => undefined);
@@ -123,18 +125,19 @@ describe("React message renderer adapter", () => {
     try {
       setDisplayTurnId("turn-paced");
       onNarrativeChunk("雨。风");
+      // 标准档：1000/28ms 单字节拍，句号后停顿 185ms
 
       expect(useMessageStore.getState().messages[0].text).toBe("");
-      vi.advanceTimersByTime(34);
+      vi.advanceTimersByTime(36);
       expect(useMessageStore.getState().messages[0].text).toBe("雨");
-      vi.advanceTimersByTime(34);
+      vi.advanceTimersByTime(36);
       expect(useMessageStore.getState().messages[0].text).toBe("雨。");
-      vi.advanceTimersByTime(120);
+      vi.advanceTimersByTime(100);
       expect(useMessageStore.getState().messages[0].text).toBe("雨。");
-      vi.advanceTimersByTime(65);
+      vi.advanceTimersByTime(86);
       expect(useMessageStore.getState().messages[0].text).toBe("雨。风");
     } finally {
-      revealNarrativeImmediately();
+      flushNarrativeStream();
       finishNarrativeStream();
       vi.useRealTimers();
     }
@@ -163,40 +166,89 @@ describe("React message renderer adapter", () => {
     }
   });
 
-  it("accelerates when a large provider backlog accumulates", () => {
+  it("keeps a fixed per-tick pace regardless of provider backlog", () => {
     vi.useFakeTimers();
     try {
       setDisplayTurnId("turn-catch-up");
       onNarrativeChunk("字".repeat(600));
-      vi.advanceTimersByTime(34);
+      // 大缓存不再触发每拍多字：与短缓存同一档位节奏一致
+      vi.advanceTimersByTime(36);
 
-      expect(useMessageStore.getState().messages[0].text).toBe("字字字");
+      expect(useMessageStore.getState().messages[0].text).toBe("字");
+      vi.advanceTimersByTime(36);
+      expect(useMessageStore.getState().messages[0].text).toBe("字字");
     } finally {
-      revealNarrativeImmediately();
+      flushNarrativeStream();
       finishNarrativeStream();
       vi.useRealTimers();
     }
   });
 
-  it("switches the final action menu to fast playback", () => {
+  it("keeps the chosen pace when action choices arrive", () => {
     vi.useFakeTimers();
     try {
       setDisplayTurnId("turn-fast-choices");
       onNarrativeChunk("正文你可以——1. 去办公室");
 
-      vi.advanceTimersByTime(68);
-      expect(useMessageStore.getState().messages[0].text).toBe("正文");
-      vi.advanceTimersByTime(34);
-      expect(
-        useMessageStore.getState().messages[0].text.length,
-      ).toBeGreaterThan(3);
+      // 选项标记不再切换播放速度：每拍仍是 1 字
+      vi.advanceTimersByTime(36 * 4);
+      expect(useMessageStore.getState().messages[0].text).toBe("正文你可");
+      vi.advanceTimersByTime(36 * 8);
+      expect(useMessageStore.getState().messages[0].text).toBe(
+        "正文你可以——1. 去办",
+      );
 
       onNarrativeChunk("2. 去小屋");
-      accelerateNarrativeChoices(true);
       vi.runAllTimers();
       expect(useMessageStore.getState().messages[0].text).toContain("去小屋");
     } finally {
-      revealNarrativeImmediately();
+      flushNarrativeStream();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("boosts playback about 3x on long press and restores the tier pace", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-boost");
+      onNarrativeChunk("一二三四五六");
+      vi.advanceTimersByTime(36);
+      expect(useMessageStore.getState().messages[0].text).toBe("一");
+
+      // 长按加速：标准档 35.7ms/字 → 约 11.9ms/字
+      setNarrationBoost(true);
+      vi.advanceTimersByTime(12);
+      expect(useMessageStore.getState().messages[0].text).toBe("一二");
+
+      // 松开恢复所选档位节奏
+      setNarrationBoost(false);
+      vi.advanceTimersByTime(11);
+      expect(useMessageStore.getState().messages[0].text).toBe("一二");
+      vi.advanceTimersByTime(25);
+      expect(useMessageStore.getState().messages[0].text).toBe("一二三");
+    } finally {
+      setNarrationBoost(false);
+      flushNarrativeStream();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies the saved speed tier from the next playback step", () => {
+    vi.useFakeTimers();
+    try {
+      setNarrationSpeed("fast");
+      setDisplayTurnId("turn-tier");
+      onNarrativeChunk("风雨");
+      // 快档：1000/42 ≈ 23.8ms/字
+      vi.advanceTimersByTime(20);
+      expect(useMessageStore.getState().messages[0].text).toBe("");
+      vi.advanceTimersByTime(4);
+      expect(useMessageStore.getState().messages[0].text).toBe("风");
+    } finally {
+      setNarrationSpeed("standard");
+      flushNarrativeStream();
       finishNarrativeStream();
       vi.useRealTimers();
     }
@@ -374,7 +426,7 @@ describe("React message renderer adapter", () => {
       expect(gm.segments?.[1].speaker?.name).toBe("法伦");
       expect(gm.text).toBe("雨声。“请坐。”门关上了。");
     } finally {
-      revealNarrativeImmediately();
+      flushNarrativeStream();
       finishNarrativeStream();
       vi.useRealTimers();
     }

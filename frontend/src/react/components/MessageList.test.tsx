@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "../../state/app-store";
@@ -111,7 +111,7 @@ describe("MessageList", () => {
     expect(document.querySelector(".npc-bubble")).toBeInTheDocument();
   });
 
-  it("offers an accessible immediate reveal control while presenting", () => {
+  it("removes click-to-reveal interactions while presenting", () => {
     render(<MessageList />);
     act(() => {
       useMessageStore.getState().replaceMessages([
@@ -126,8 +126,88 @@ describe("MessageList", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: "显示全文" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "显示全文" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector(".chat-event-list")).not.toHaveAttribute(
+      "title",
+    );
+  });
+
+  function renderStreamingGm() {
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([
+        {
+          id: "streaming-lp",
+          kind: "gm",
+          text: "雨声。",
+          streaming: true,
+          segments: [{ kind: "narration", text: "雨声。" }],
+        },
+      ]);
+    });
+    return document.querySelector(".msg.gm") as HTMLElement;
+  }
+
+  it("boosts narration after a 250ms long press and restores on release", () => {
+    vi.useFakeTimers();
+    try {
+      const region = renderStreamingGm();
+      fireEvent.pointerDown(region);
+      act(() => {
+        vi.advanceTimersByTime(249);
+      });
+      expect(region).not.toHaveClass("narration-boosting");
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(region).toHaveClass("narration-boosting");
+      fireEvent.pointerUp(region);
+      expect(region).not.toHaveClass("narration-boosting");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a plain click never triggers the boost", () => {
+    vi.useFakeTimers();
+    try {
+      const region = renderStreamingGm();
+      fireEvent.pointerDown(region);
+      fireEvent.pointerUp(region);
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(region).not.toHaveClass("narration-boosting");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restores the tier pace on pointer cancel and window blur", () => {
+    vi.useFakeTimers();
+    try {
+      const region = renderStreamingGm();
+      fireEvent.pointerDown(region);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(region).toHaveClass("narration-boosting");
+      fireEvent.pointerCancel(region);
+      expect(region).not.toHaveClass("narration-boosting");
+
+      fireEvent.pointerDown(region);
+      act(() => {
+        vi.advanceTimersByTime(250);
+      });
+      expect(region).toHaveClass("narration-boosting");
+      act(() => {
+        window.dispatchEvent(new Event("blur"));
+      });
+      expect(region).not.toHaveClass("narration-boosting");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders plain gm messages without segments unchanged", () => {

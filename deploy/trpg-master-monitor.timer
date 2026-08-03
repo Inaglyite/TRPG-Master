@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily TRPG Master health monitor
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=trpg-master-monitor.service
+
+[Install]
+WantedBy=timers.target

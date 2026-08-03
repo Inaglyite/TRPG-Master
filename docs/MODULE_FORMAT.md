@@ -1,8 +1,8 @@
-# TRPG Master 模组格式（.trpgmod）
+# TRPG Game 模组格式（.trpgmod）
 
 本文定义 `.trpgmod` 模组包格式，面向两类读者：
 
-- **模组作者**：想为 TRPG Master 创作可导入、可游玩的模组；
+- **模组作者**：想为 TRPG Game 创作可导入、可游玩的模组；
 - **工具开发者**：构建模组编辑器、校验器或第三方工具（编译器内部契约另见
   [架构文档](ARCHITECTURE.md)的「扩展方式」一章）。
 

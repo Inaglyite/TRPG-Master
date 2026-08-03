@@ -265,7 +265,7 @@ fi
 if [ "$DESKTOP_MODE" = true ]; then
     echo "❌ Electron 不可用，已停止启动，避免后端在后台残留。"
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send "疯狂宅邸启动失败" "Electron 不可用，请查看 $DESKTOP_LOG"
+        notify-send "TRPG Game 启动失败" "Electron 不可用，请查看 $DESKTOP_LOG"
     fi
     exit 1
 fi

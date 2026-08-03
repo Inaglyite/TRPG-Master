@@ -2,7 +2,7 @@
   "name": "trpg-desktop",
   "private": true,
   "version": "1.0.0",
-  "description": "疯狂宅邸 — TRPG Agent 桌面应用",
+  "description": "TRPG Game 桌面应用",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -34,7 +34,7 @@
   },
   "build": {
     "appId": "com.trpg.mansion-of-madness",
-    "productName": "疯狂宅邸",
+    "productName": "TRPG Game",
     "directories": {
       "output": "release"
     },
@@ -65,13 +65,13 @@
       ]
     },
     "nsis": {
-      "artifactName": "trpg-master-setup-${version}-${arch}.${ext}",
+      "artifactName": "trpg-game-setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
     },
     "portable": {
-      "artifactName": "trpg-master-portable-${version}-${arch}.${ext}"
+      "artifactName": "trpg-game-portable-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {

@@ -96,6 +96,24 @@
   color: var(--gold-bright);
   box-shadow: inset 0 -3px 0 var(--gold);
 }
+.narration-speed-section {
+  margin: 0 0 18px;
+}
+.narration-speed-section h3 {
+  margin: 0 0 10px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.narration-speed-section .model-preset-control {
+  margin-bottom: 8px;
+}
+.narration-speed-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
 .model-role-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

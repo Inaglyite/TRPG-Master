@@ -557,7 +557,7 @@ function createWindow() {
     height: 800,
     minWidth: 860,
     minHeight: 540,
-    title: "疯狂宅邸 — TRPG Agent",
+    title: "TRPG Game",
     backgroundColor: "#140f0b",
     autoHideMenuBar: true,
     webPreferences: {
@@ -636,7 +636,7 @@ function createWindow() {
       buttons: ["继续游戏", "退出"],
       defaultId: 0,
       cancelId: 0,
-      title: "疯狂宅邸",
+      title: "TRPG Game",
       message: "确定要退出吗？",
       detail: "（建议先点 💾 存档；退出后游戏进度不会自动保存）",
     });

@@ -92,7 +92,7 @@ def game_loop():
     engine.reset()
 
     print("=" * 55)
-    print("  🎲  TRPG Agent 内核 — 疯狂宅邸")
+    print("  🎲  TRPG Game 内核")
     print("  /quit 退出  /save 存档  /load 读档  /state 状态")
     print("=" * 55)
 

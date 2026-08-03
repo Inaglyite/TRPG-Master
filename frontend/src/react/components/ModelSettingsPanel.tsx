@@ -1,5 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
+import {
+  getNarrationSpeed,
+  NARRATION_SPEED_OPTIONS,
+  setNarrationSpeed,
+  type NarrationSpeed,
+} from "../../narration-speed";
 import {
   closeSettings,
   openSettings,
@@ -188,6 +194,10 @@ function Diagnostics({ data }: { data: TurnDiagnostics }) {
 
 export function ModelSettingsPanel() {
   const state = useModelStore();
+  // 叙述速度是客户端本地偏好，点击立即生效并持久化，不随"应用设置"提交后端。
+  const [narrationSpeed, setNarrationSpeedState] = useState<NarrationSpeed>(
+    () => getNarrationSpeed(),
+  );
   const flash =
     state.availableModels.find((option) => option.label === "Flash")?.id || "";
   const pro =
@@ -301,6 +311,36 @@ export function ModelSettingsPanel() {
               ))}
             </datalist>
           </div>
+          <section
+            className="narration-speed-section"
+            aria-labelledby="narration-speed-title"
+          >
+            <h3 id="narration-speed-title">叙述速度</h3>
+            <div id="narration-speed-control" className="model-preset-control">
+              {NARRATION_SPEED_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={narrationSpeed === option.value ? "selected" : ""}
+                  aria-pressed={narrationSpeed === option.value}
+                  onClick={() => {
+                    setNarrationSpeed(option.value);
+                    setNarrationSpeedState(option.value);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="narration-speed-hint">
+              {
+                NARRATION_SPEED_OPTIONS.find(
+                  (option) => option.value === narrationSpeed,
+                )?.hint
+              }
+              ；立即生效并保存在本机，单机与联机共用。
+            </p>
+          </section>
           <div
             id="model-settings-status"
             data-state={state.statusKind || undefined}

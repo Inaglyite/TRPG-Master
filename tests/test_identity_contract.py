@@ -920,6 +920,14 @@ class IdentityContractTests(unittest.TestCase):
         self.assertIn("黄先生，请坐", npc_text)
         self.assertIn("这件事不能声张", npc_text)
 
+    def test_cli_kernel_banner_uses_product_name_not_module_name(self):
+        source = (
+            PROJECT_ROOT / "src" / "game_loop.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('print("  🎲  TRPG Game 内核")', source)
+        self.assertNotIn("疯狂宅邸", source)
+
 
 if __name__ == "__main__":
     unittest.main()

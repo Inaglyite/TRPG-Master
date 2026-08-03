@@ -104,6 +104,25 @@ def test_production_release_is_same_origin_complete_and_resource_bounded() -> No
     assert "auth_basic" not in nginx
     assert "client_max_body_size 64m" in nginx
     assert "limit_req zone=trpg_auth" in nginx
+    assert "zone=trpg_api:10m rate=20r/s" in nginx
+    assert "limit_req zone=trpg_api burst=60 nodelay" in nginx
+    assert "limit_req_status 429" in nginx
+    assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains" always' in nginx
+    assert "X-Forwarded-For $remote_addr" in nginx
+    assert "$proxy_add_x_forwarded_for" not in nginx
+
+
+def test_staging_nginx_global_rate_limit_and_hsts() -> None:
+    nginx = (PROJECT_ROOT / "deploy" / "nginx-trpg-master-staging.conf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "zone=trpg_staging_api:10m rate=20r/s" in nginx
+    assert "limit_req zone=trpg_staging_api burst=60 nodelay" in nginx
+    assert "limit_req_status 429" in nginx
+    assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains" always' in nginx
+    assert "X-Forwarded-For $remote_addr" in nginx
+    assert "$proxy_add_x_forwarded_for" not in nginx
 
 
 def test_production_deploy_provenance_and_manual_dispatch_quality_gate() -> None:
@@ -260,11 +279,14 @@ previous="$2"
 CALLS="$3"
 service_name=trpg-master.service
 backup_timer=trpg-master-backup.timer
+monitor_timer=trpg-master-monitor.timer
 health_url=http://127.0.0.1:8765/api/ready
 service_was_enabled=1
 service_was_active={int(service_was_active)}
 timer_was_enabled=1
 timer_was_active=0
+monitor_timer_was_enabled=1
+monitor_timer_was_active=0
 unit_dir=/tmp/unit
 nginx_enabled=/tmp/nginx-enabled
 nginx_available=/tmp/nginx-available
@@ -339,3 +361,407 @@ def test_windows_packaging_enforces_python_312() -> None:
     assert "Install Python 3.12+ first." in script
     assert '[version]$PythonVersion -lt [version]"3.12"' in script
     assert "Python 3.11" not in script
+
+
+def _write_stub(bin_dir: Path, name: str, body: str) -> None:
+    path = bin_dir / name
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _monitor_environment(tmp_path: Path) -> dict[str, str]:
+    """Prepare stub tooling and a writable fake backup root for the monitor script."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    _write_stub(
+        bin_dir,
+        "curl",
+        """#!/usr/bin/env bash
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--data-binary" ]]; then
+        printf '%s\\n' "$arg" > "$WEBHOOK_LOG"
+    fi
+    prev="$arg"
+done
+if [[ "$*" == *"--data-binary"* ]]; then
+    exit "${STUB_WEBHOOK_FAIL:-0}"
+fi
+exit "${STUB_READY_OK:-0}"
+""",
+    )
+    _write_stub(
+        bin_dir,
+        "systemctl",
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == "is-active" ]]; then
+    exit "${STUB_SERVICE_OK:-0}"
+fi
+exit 0
+""",
+    )
+    _write_stub(
+        bin_dir,
+        "openssl",
+        """#!/usr/bin/env bash
+printf 'notAfter=%s\\n' "${STUB_CERT_ENDDATE:-Jan  1 00:00:00 2038 GMT}"
+""",
+    )
+    _write_stub(
+        bin_dir,
+        "df",
+        """#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf '/dev/stub 1000000 500000 500000 %s /\\n' "${STUB_DISK_PCT:-50}"
+""",
+    )
+
+    backup_root = tmp_path / "backups" / "trpg-master"
+    backup_root.mkdir(parents=True)
+    (backup_root / "trpg-master-20260101T000000Z.tar.gpg").write_bytes(b"x")
+
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "TRPG_MONITOR_BACKUP_ROOT": str(backup_root),
+        "TRPG_MONITOR_CERT_PATH": str(tmp_path / "fullchain.pem"),
+        "TRPG_MONITOR_DISK_PATHS": f"{backup_root} /",
+    }
+    (tmp_path / "fullchain.pem").write_text("stub certificate", encoding="utf-8")
+    return env
+
+
+def test_monitor_script_all_checks_pass_without_webhook(tmp_path: Path) -> None:
+    script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=PROJECT_ROOT,
+        env=_monitor_environment(tmp_path),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[OK]   ready:" in result.stdout
+    assert "[OK]   service:" in result.stdout
+    assert "[OK]   backup:" in result.stdout
+    assert "[OK]   certificate:" in result.stdout
+    assert "[OK]   disk:/" in result.stdout
+    assert "all checks passed" in result.stdout
+
+
+def test_monitor_script_failures_exit_nonzero_and_send_webhook(
+    tmp_path: Path,
+) -> None:
+    script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
+    env = _monitor_environment(tmp_path)
+    webhook_log = tmp_path / "webhook.log"
+    env.update(
+        {
+            "TRPG_MONITOR_WEBHOOK_URL": "https://webhook.invalid/trpg",
+            "STUB_READY_OK": "1",
+            "STUB_SERVICE_OK": "1",
+            "STUB_CERT_ENDDATE": "Jan  1 00:00:00 2020 GMT",
+            "STUB_DISK_PCT": "97",
+            "WEBHOOK_LOG": str(webhook_log),
+        }
+    )
+    backup_file = (
+        tmp_path / "backups" / "trpg-master" / "trpg-master-20260101T000000Z.tar.gpg"
+    )
+    subprocess.run(["touch", "-d", "30 hours ago", str(backup_file)], check=True)
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "[FAIL] ready:" in result.stderr
+    assert "[FAIL] service:" in result.stderr
+    assert "[FAIL] backup:" in result.stderr
+    assert "[FAIL] certificate:" in result.stderr
+    assert "[FAIL] disk:/" in result.stderr
+    assert "6 check(s) failed" in result.stderr
+    assert webhook_log.exists()
+    payload = webhook_log.read_text(encoding="utf-8")
+    assert '"ok":false' in payload
+    assert '"failed":6' in payload
+    assert '"name":"ready"' in payload
+    assert '"name":"certificate"' in payload
+
+
+def test_monitor_script_rejects_unsafe_configuration(tmp_path: Path) -> None:
+    script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
+    base_env = _monitor_environment(tmp_path)
+    cases = (
+        ({"TRPG_MONITOR_BACKUP_ROOT": "relative/backups"}, "backup root must be an absolute path"),
+        (
+            {"TRPG_MONITOR_DISK_MAX_PERCENT": "abc"},
+            "invalid TRPG_MONITOR_DISK_MAX_PERCENT",
+        ),
+        (
+            {"TRPG_MONITOR_BACKUP_MAX_AGE_HOURS": "0"},
+            "invalid TRPG_MONITOR_BACKUP_MAX_AGE_HOURS",
+        ),
+        ({"TRPG_MONITOR_CERT_PATH": "relative.pem"}, "certificate path must be absolute"),
+    )
+    for overrides, expected_error in cases:
+        result = subprocess.run(
+            ["bash", str(script)],
+            cwd=PROJECT_ROOT,
+            env={**base_env, **overrides},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert expected_error in result.stderr
+
+
+def test_monitor_script_splits_space_separated_disk_paths(tmp_path: Path) -> None:
+    """Regression: TRPG_MONITOR_DISK_PATHS 是空格分隔列表，两条路径必须分别检查。"""
+    script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
+    env = _monitor_environment(tmp_path)
+    first = tmp_path / "first-disk-path"
+    first.mkdir()
+    backup_root = tmp_path / "backups" / "trpg-master"
+    env["TRPG_MONITOR_DISK_PATHS"] = f"{first} {backup_root}"
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"[OK]   disk:{first}:" in result.stdout
+    assert f"[OK]   disk:{backup_root}:" in result.stdout
+    # 两条路径被分别检查，而不是被当成一个整体路径。
+    assert result.stdout.count("[OK]   disk:") == 2
+    # 若被错误合并为 "<first> <backup_root>" 单个路径，df 检查会失败（exit 1）。
+    assert "disk:" not in result.stderr
+
+
+def test_monitor_systemd_units_reference_release_script() -> None:
+    service = (PROJECT_ROOT / "deploy" / "trpg-master-monitor.service").read_text(
+        encoding="utf-8"
+    )
+    timer = (PROJECT_ROOT / "deploy" / "trpg-master-monitor.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Type=oneshot" in service
+    assert "User=root" in service
+    assert "NoNewPrivileges=true" in service
+    assert "ProtectSystem=strict" in service
+    assert "ExecStart=/opt/trpg-master/current/deploy/monitor-trpg-master.sh" in service
+    assert "TRPG_MONITOR_HEALTH_URL=http://127.0.0.1:8765/api/ready" in service
+    assert "TRPG_MONITOR_SERVICE=trpg-master.service" in service
+    assert "TRPG_MONITOR_BACKUP_ROOT=/var/backups/trpg-master" in service
+    assert 'TRPG_MONITOR_DISK_PATHS="/ /var/backups/trpg-master"' in service
+    assert "TRPG_MONITOR_CERT_PATH=/etc/letsencrypt/live/trpggame.xyz/fullchain.pem" in service
+    assert "OnCalendar=*-*-* 04:20:00" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=trpg-master-monitor.service" in timer
+
+
+def test_production_installer_installs_and_rolls_back_monitor_units(
+    tmp_path: Path,
+) -> None:
+    installer = (PROJECT_ROOT / "deploy" / "install-release.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "monitor_timer=trpg-master-monitor.timer" in installer
+    assert "monitor_timer_was_enabled=0" in installer
+    assert "monitor_timer_was_active=0" in installer
+    assert 'systemctl is-active --quiet "$monitor_timer"' in installer
+    assert (
+        'restore_managed_path "$unit_dir/trpg-master-monitor.timer" monitor-timer'
+        in installer
+    )
+    assert (
+        'restore_managed_path "$unit_dir/trpg-master-monitor.service" monitor-service'
+        in installer
+    )
+    assert 'systemctl enable "$monitor_timer" || failed=1' in installer
+    assert 'install_managed_file "$release/deploy/trpg-master-monitor.service"' in installer
+    assert 'install_managed_file "$release/deploy/trpg-master-monitor.timer"' in installer
+    assert 'systemctl enable --now "$monitor_timer"' in installer
+    assert "deploy/trpg-master-monitor.service" in installer
+    assert "deploy/trpg-master-monitor.timer" in installer
+    assert "deploy/monitor-trpg-master.sh" in installer
+    assert "deploy/restore-drill.sh" in installer
+    assert '"$candidate/deploy/monitor-trpg-master.sh" \\' in installer
+    assert '"$candidate/deploy/restore-drill.sh"' in installer
+
+    result = _run_rollback_harness(
+        tmp_path,
+        service_was_active=False,
+        ready=True,
+    )
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    assert "systemctl enable trpg-master-monitor.timer" in calls
+    assert "systemctl stop trpg-master-monitor.timer" in calls
+
+
+def test_restore_drill_requires_pg_restore() -> None:
+    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
+    result = subprocess.run(
+        ["bash", str(script), "--dry-run"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "TRPG_PG_RESTORE": "/nonexistent/pg_restore"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "pg_restore is required" in result.stderr
+    assert "TRPG_PG_RESTORE" in result.stderr
+
+
+def test_restore_drill_refuses_production_database_target() -> None:
+    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
+    env = {
+        **os.environ,
+        "TRPG_PG_RESTORE": "/bin/true",
+        "TRPG_BACKUP_PASSPHRASE_FILE": "/dev/null",
+    }
+
+    without_prefix = subprocess.run(
+        ["bash", str(script), "--restore", "postgresql+psycopg://u:p@h/trpg_master"],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert without_prefix.returncode == 2
+    assert "does not start with the drill prefix" in without_prefix.stderr
+    assert "trpg_drill_" in without_prefix.stderr
+
+    same_as_production = subprocess.run(
+        ["bash", str(script), "--restore", "postgresql+psycopg://u:p@h/trpg_drill_x"],
+        cwd=PROJECT_ROOT,
+        env={
+            **env,
+            "TRPG_PRODUCTION_DATABASE_URL": "postgresql+psycopg://u:p@h/trpg_drill_x",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert same_as_production.returncode == 2
+    assert "is the configured production database" in same_as_production.stderr
+
+
+def test_restore_drill_has_no_destructive_statements() -> None:
+    import re
+
+    script = (PROJECT_ROOT / "deploy" / "restore-drill.sh").read_text(
+        encoding="utf-8"
+    )
+
+    # 只检查可执行语句行（排除注释与 echo/printf 提示文本，提示里会教运维
+    # 手动清理演练库，但脚本自身绝不执行破坏性 SQL）。
+    executable = [
+        line
+        for line in script.splitlines()
+        if line.strip()
+        and not line.lstrip().startswith(("#", "echo ", "printf "))
+    ]
+    joined = "\n".join(executable)
+    assert not re.search(r"DROP\s+DATABASE", joined, re.IGNORECASE)
+    assert not re.search(r"DROP\s+TABLE", joined, re.IGNORECASE)
+    assert not re.search(r"\bTRUNCATE\b", joined, re.IGNORECASE)
+    assert "--clean" not in joined
+    assert "--if-exists" not in joined
+    assert "--drop" not in joined
+    assert "unset PGPASSWORD PGPASSFILE PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER" in script
+    assert 'pg_restore_bin" --list "$work/database.dump"' in script
+    assert 'pg_restore_bin" --no-owner --no-acl' in script
+
+
+def test_restore_drill_dry_run_is_isolated_from_databases(tmp_path: Path) -> None:
+    """Build a real backup bundle and stub gpg/pg_restore."""
+    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
+    backup_root = tmp_path / "backups" / "trpg-master"
+    backup_root.mkdir(parents=True)
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "database.dump").write_bytes(b"fake custom-format dump")
+    (bundle / "runtime.tar.gz").write_bytes(b"runtime")
+    with (bundle / "SHA256SUMS").open("w", encoding="utf-8") as handle:
+        subprocess.run(
+            ["sha256sum", "database.dump", "runtime.tar.gz"],
+            cwd=bundle,
+            stdout=handle,
+            check=True,
+        )
+    archive = backup_root / "trpg-master-drill-test.tar.gpg"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(bundle), "."], check=True)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "pg_restore_calls"
+    _write_stub(
+        bin_dir,
+        "gpg",
+        """#!/usr/bin/env bash
+prev=""
+for arg in "$@"; do
+    if [[ "$prev" == "--decrypt" ]]; then
+        cat "$arg"
+        exit 0
+    fi
+    prev="$arg"
+done
+exit 2
+""",
+    )
+    _write_stub(
+        bin_dir,
+        "pg_restore",
+        f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> {calls}
+printf 'table users\\ntable worlds\\n'
+""",
+    )
+    passphrase = tmp_path / "passphrase"
+    passphrase.write_text("secret", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(script), "--dry-run"],
+        cwd=PROJECT_ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "TRPG_PG_RESTORE": str(bin_dir / "pg_restore"),
+            "TRPG_BACKUP_PASSPHRASE_FILE": str(passphrase),
+            "TRPG_BACKUP_ROOT": str(backup_root),
+            "TRPG_BACKUP_PREFIX": "trpg-master",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "dry-run passed" in result.stdout
+    assert "table users" in result.stdout
+    pg_restore_call = calls.read_text(encoding="utf-8")
+    assert "--list" in pg_restore_call
+    assert "--dbname" not in pg_restore_call
+    assert "-d" not in pg_restore_call.split()

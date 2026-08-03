@@ -17,10 +17,10 @@ def test_windows_package_uses_distinct_deterministic_artifacts() -> None:
         "npm run build && electron-builder --win nsis portable --x64 --publish never"
     )
     assert package["build"]["nsis"]["artifactName"] == (
-        "trpg-master-setup-${version}-${arch}.${ext}"
+        "trpg-game-setup-${version}-${arch}.${ext}"
     )
     assert package["build"]["portable"]["artifactName"] == (
-        "trpg-master-portable-${version}-${arch}.${ext}"
+        "trpg-game-portable-${version}-${arch}.${ext}"
     )
 
 

@@ -89,14 +89,45 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     vi.mocked(desktopBridge).mockReturnValue(bridge);
   });
 
-  it("未输入 https 地址时给出提示", () => {
+  it("首次进入默认连接官方服务器，无需手填地址", async () => {
+    bridge.selectOnlineMode.mockResolvedValue({ ok: true });
     render(<ModeSelectScreen />);
+    expect(screen.queryByLabelText("云端服务器地址")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("多人游戏"));
+    await waitFor(() =>
+      expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
+        "https://trpggame.xyz",
+      ),
+    );
+  });
+
+  it("自定义配置默认折叠，展开后留空仍走官方服务器", async () => {
+    bridge.selectOnlineMode.mockResolvedValue({ ok: true });
+    render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByText("自定义服务器（开发/验收）"));
+    const input = screen.getByLabelText("云端服务器地址");
+    expect(input).toHaveValue("https://trpggame.xyz");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.click(screen.getByText("多人游戏"));
+    await waitFor(() =>
+      expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
+        "https://trpggame.xyz",
+      ),
+    );
+  });
+
+  it("自定义地址非 https 时给出提示，不调用主进程", () => {
+    render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByText("自定义服务器（开发/验收）"));
+    fireEvent.change(screen.getByLabelText("云端服务器地址"), {
+      target: { value: "http://insecure.example" },
+    });
     fireEvent.click(screen.getByText("多人游戏"));
     expect(screen.getByRole("alert")).toHaveTextContent("https");
     expect(bridge.selectOnlineMode).not.toHaveBeenCalled();
   });
 
-  it("从主进程读取上次保存的地址", async () => {
+  it("从主进程读取已保存的自定义地址并自动展开", async () => {
     bridge.getOnlineOrigin.mockResolvedValue({
       ok: true,
       origin: "https://saved.example",
@@ -109,9 +140,20 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     );
   });
 
+  it("已保存官方地址时保持折叠，不展示自定义配置", async () => {
+    bridge.getOnlineOrigin.mockResolvedValue({
+      ok: true,
+      origin: "https://trpggame.xyz",
+    });
+    render(<ModeSelectScreen />);
+    await waitFor(() => expect(bridge.getOnlineOrigin).toHaveBeenCalled());
+    expect(screen.queryByLabelText("云端服务器地址")).not.toBeInTheDocument();
+  });
+
   it("校验通过后交由主进程持久化并同源加载", async () => {
     bridge.selectOnlineMode.mockResolvedValue({ ok: true });
     render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByText("自定义服务器（开发/验收）"));
     fireEvent.change(screen.getByLabelText("云端服务器地址"), {
       target: { value: "https://trpg.example.com/" },
     });
@@ -130,6 +172,7 @@ describe("ModeSelectScreen（Electron 联机）", () => {
       error: "invalid-origin",
     });
     render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByText("自定义服务器（开发/验收）"));
     fireEvent.change(screen.getByLabelText("云端服务器地址"), {
       target: { value: "https://trpg.example.com" },
     });

@@ -14,9 +14,13 @@ service_was_enabled=0
 service_was_active=0
 timer_was_enabled=0
 timer_was_active=0
+monitor_timer_was_enabled=0
+monitor_timer_was_active=0
 
 service_name=trpg-master.service
 backup_timer=trpg-master-backup.timer
+monitor_service=trpg-master-monitor.service
+monitor_timer=trpg-master-monitor.timer
 health_url=http://127.0.0.1:8765/api/ready
 unit_dir=/etc/systemd/system
 nginx_available=/etc/nginx/sites-available/trpg-master
@@ -61,6 +65,8 @@ systemctl is-enabled --quiet "$service_name" >/dev/null 2>&1 && service_was_enab
 systemctl is-active --quiet "$service_name" >/dev/null 2>&1 && service_was_active=1
 systemctl is-enabled --quiet "$backup_timer" >/dev/null 2>&1 && timer_was_enabled=1
 systemctl is-active --quiet "$backup_timer" >/dev/null 2>&1 && timer_was_active=1
+systemctl is-enabled --quiet "$monitor_timer" >/dev/null 2>&1 && monitor_timer_was_enabled=1
+systemctl is-active --quiet "$monitor_timer" >/dev/null 2>&1 && monitor_timer_was_active=1
 
 cleanup_stale_release_artifacts() {
     local entry name
@@ -146,6 +152,8 @@ rollback_release() {
     restore_managed_path "$nginx_available" nginx-available || failed=1
     restore_managed_path "$unit_dir/trpg-master-backup.timer" backup-timer || failed=1
     restore_managed_path "$unit_dir/trpg-master-backup.service" backup-service || failed=1
+    restore_managed_path "$unit_dir/trpg-master-monitor.timer" monitor-timer || failed=1
+    restore_managed_path "$unit_dir/trpg-master-monitor.service" monitor-service || failed=1
     restore_managed_path "$unit_dir/trpg-master.service" app-service || failed=1
     restore_managed_path "$installer_target" installer || failed=1
 
@@ -173,6 +181,16 @@ rollback_release() {
         systemctl start "$backup_timer" || failed=1
     else
         systemctl stop "$backup_timer" || failed=1
+    fi
+    if [[ "$monitor_timer_was_enabled" -eq 1 ]]; then
+        systemctl enable "$monitor_timer" || failed=1
+    else
+        systemctl disable "$monitor_timer" || failed=1
+    fi
+    if [[ "$monitor_timer_was_active" -eq 1 ]]; then
+        systemctl start "$monitor_timer" || failed=1
+    else
+        systemctl stop "$monitor_timer" || failed=1
     fi
     if nginx -t; then
         systemctl reload nginx.service || failed=1
@@ -467,6 +485,10 @@ PY
         deploy/trpg-master.service
         deploy/trpg-master-backup.service
         deploy/trpg-master-backup.timer
+        deploy/trpg-master-monitor.service
+        deploy/trpg-master-monitor.timer
+        deploy/monitor-trpg-master.sh
+        deploy/restore-drill.sh
         deploy/nginx-trpg-master.conf
     )
     validate_required_release_files() {
@@ -481,7 +503,9 @@ PY
     validate_required_release_files
 
     chmod 0755 "$candidate/deploy/install-release.sh" \
-        "$candidate/deploy/backup-trpg-master.sh"
+        "$candidate/deploy/backup-trpg-master.sh" \
+        "$candidate/deploy/monitor-trpg-master.sh" \
+        "$candidate/deploy/restore-drill.sh"
     chmod 0755 "$candidate"
     install -d -m 0700 -o trpgdeploy -g trpgdeploy "$candidate/.venv"
     runuser -u trpgdeploy -- python3 -m venv "$candidate/.venv"
@@ -509,6 +533,8 @@ backup_managed_path "$installer_target" installer
 backup_managed_path "$unit_dir/trpg-master.service" app-service
 backup_managed_path "$unit_dir/trpg-master-backup.service" backup-service
 backup_managed_path "$unit_dir/trpg-master-backup.timer" backup-timer
+backup_managed_path "$unit_dir/trpg-master-monitor.service" monitor-service
+backup_managed_path "$unit_dir/trpg-master-monitor.timer" monitor-timer
 backup_managed_path "$nginx_available" nginx-available
 backup_managed_path "$nginx_enabled" nginx-enabled
 
@@ -520,6 +546,10 @@ install_managed_file "$release/deploy/trpg-master-backup.service" \
     "$unit_dir/trpg-master-backup.service" 0644
 install_managed_file "$release/deploy/trpg-master-backup.timer" \
     "$unit_dir/trpg-master-backup.timer" 0644
+install_managed_file "$release/deploy/trpg-master-monitor.service" \
+    "$unit_dir/trpg-master-monitor.service" 0644
+install_managed_file "$release/deploy/trpg-master-monitor.timer" \
+    "$unit_dir/trpg-master-monitor.timer" 0644
 install_managed_file "$release/deploy/nginx-trpg-master.conf" "$nginx_available" 0644
 ln -sfn "$nginx_available" "$nginx_enabled.next"
 mv -Tf "$nginx_enabled.next" "$nginx_enabled"
@@ -540,6 +570,7 @@ fi
 systemctl reload nginx.service
 systemctl enable "$service_name"
 systemctl enable --now "$backup_timer"
+systemctl enable --now "$monitor_timer"
 rollback_needed=0
 
 # Keep the current and immediate rollback targets regardless of mtime, plus

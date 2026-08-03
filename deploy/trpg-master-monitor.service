@@ -1,0 +1,30 @@
+[Unit]
+Description=TRPG Master health monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+Environment=TRPG_MONITOR_ENV=production
+Environment=TRPG_MONITOR_HEALTH_URL=http://127.0.0.1:8765/api/ready
+Environment=TRPG_MONITOR_SERVICE=trpg-master.service
+Environment=TRPG_MONITOR_BACKUP_ROOT=/var/backups/trpg-master
+Environment=TRPG_MONITOR_BACKUP_PREFIX=trpg-master
+Environment=TRPG_MONITOR_BACKUP_MAX_AGE_HOURS=26
+Environment=TRPG_MONITOR_CERT_PATH=/etc/letsencrypt/live/trpggame.xyz/fullchain.pem
+Environment=TRPG_MONITOR_CERT_MIN_DAYS=14
+Environment=TRPG_MONITOR_DISK_PATHS="/ /var/backups/trpg-master"
+Environment=TRPG_MONITOR_DISK_MAX_PERCENT=90
+Environment=TRPG_MONITOR_DISK_MIN_FREE_MB=1024
+ExecStart=/opt/trpg-master/current/deploy/monitor-trpg-master.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/trpg-master /var/backups/trpg-master /etc/letsencrypt
+
+[Install]
+WantedBy=multi-user.target
