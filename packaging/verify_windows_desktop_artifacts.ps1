@@ -87,6 +87,8 @@ function Assert-DesktopLaunch(
   $Marker = "--trpg-acceptance-token=$Token"
   $Arguments = (
     "--user-data-dir=`"$UserData`" " +
+    "--headless=new " +
+    "--disable-gpu " +
     "--remote-debugging-address=127.0.0.1 " +
     "--remote-debugging-port=$DebugPort " +
     $Marker
