@@ -89,6 +89,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --index-url https://pypi.org/simple -r requirements-packaging.txt
           npm ci --prefix frontend
+          node frontend/node_modules/electron/install.js
 
       - name: Build backend, NSIS, and portable packages
         shell: pwsh

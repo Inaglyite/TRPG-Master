@@ -59,5 +59,8 @@ jobs:
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
+      - name: Install Electron runtime for E2E
+        run: node node_modules/electron/install.js
+        working-directory: frontend
       - run: xvfb-run --auto-servernum npm run test:e2e
         working-directory: frontend
