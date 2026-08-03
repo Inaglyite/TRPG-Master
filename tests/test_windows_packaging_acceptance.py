@@ -66,6 +66,7 @@ def test_windows_workflow_builds_smokes_installs_and_uploads() -> None:
     assert "Get-FileHash $InstalledBackend" in verifier
     assert "Uninstall*.exe" in verifier
     assert "SHA256SUMS.txt" in verifier
-    assert "Assert-DesktopLaunch $Portable[0].FullName" in verifier
+    assert "Assert-PortableBootstrap $Portable[0].FullName" in verifier
+    assert 'Assert-DesktopLaunch $UnpackedApp[0].FullName "unpacked"' in verifier
     assert "Assert-DesktopLaunch $InstalledApp[0].FullName" in verifier
     assert "/json/list" in verifier
