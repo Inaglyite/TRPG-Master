@@ -84,7 +84,7 @@ function Assert-PortableBootstrap([string]$Executable) {
     -FilePath $Executable `
     -WorkingDirectory (Split-Path $Executable -Parent) `
     -ArgumentList "--headless=new --disable-gpu $Token" `
-    -PassThru `
+    -PassThru
   try {
     Start-Sleep -Seconds 8
     if ($Probe.HasExited) {
