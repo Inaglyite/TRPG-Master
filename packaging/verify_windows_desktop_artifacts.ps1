@@ -74,17 +74,42 @@ function Remove-LaunchDirectory([string]$Path) {
   throw "Could not clean Electron acceptance userData '$Path': $LastError"
 }
 
+function Start-ElectronAcceptanceProcess(
+  [string]$Executable,
+  [string]$WorkingDirectory,
+  [string]$Arguments
+) {
+  # Start-Process inherits machine/user environment entries even when the
+  # current PowerShell process removed them.  Electron treats the mere
+  # presence of ELECTRON_RUN_AS_NODE as Node mode, so construct the child
+  # environment explicitly and remove the switch before starting the app.
+  $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $StartInfo.FileName = $Executable
+  $StartInfo.WorkingDirectory = $WorkingDirectory
+  $StartInfo.Arguments = $Arguments
+  $StartInfo.UseShellExecute = $false
+  $StartInfo.CreateNoWindow = $true
+  [void]$StartInfo.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE")
+  [void]$StartInfo.EnvironmentVariables.Remove("NODE_ENV")
+  $StartInfo.EnvironmentVariables["TRPG_EXTERNAL_BACKEND"] = "1"
+  $Process = [System.Diagnostics.Process]::new()
+  $Process.StartInfo = $StartInfo
+  if (-not $Process.Start()) {
+    throw "Could not start Electron acceptance process '$Executable'."
+  }
+  return $Process
+}
+
 function Assert-PortableBootstrap([string]$Executable) {
   # The portable target is an extraction wrapper.  On a non-interactive
   # hosted runner it does not reliably forward Chromium's remote-debugging
   # endpoint, so verify its own bootstrap separately and reserve UI probing
   # for the unpacked/installed Electron executable below.
   $Token = "--trpg-portable-probe=$([guid]::NewGuid().ToString('N'))"
-  $Probe = Start-Process `
-    -FilePath $Executable `
-    -WorkingDirectory (Split-Path $Executable -Parent) `
-    -ArgumentList "--headless=new --disable-gpu $Token" `
-    -PassThru
+  $Probe = Start-ElectronAcceptanceProcess `
+    $Executable `
+    (Split-Path $Executable -Parent) `
+    "--headless=new --disable-gpu $Token"
   try {
     Start-Sleep -Seconds 8
     if ($Probe.HasExited) {
@@ -120,13 +145,10 @@ function Assert-DesktopLaunch(
   $Launcher = $null
   try {
     New-Item -ItemType Directory -Path $UserData | Out-Null
-    $Launcher = Start-Process `
-      -FilePath $Executable `
-      -WorkingDirectory (Split-Path $Executable -Parent) `
-      -ArgumentList $Arguments `
-      -RedirectStandardOutput $Stdout `
-      -RedirectStandardError $Stderr `
-      -PassThru
+    $Launcher = Start-ElectronAcceptanceProcess `
+      $Executable `
+      (Split-Path $Executable -Parent) `
+      $Arguments
 
     # Portable builds may need to extract the complete Electron runtime on
     # their first launch.  This is especially slow on a clean hosted runner;
@@ -216,10 +238,9 @@ $PreviousElectronRunAsNode = [Environment]::GetEnvironmentVariable(
 $PreviousNodeEnv = [Environment]::GetEnvironmentVariable("NODE_ENV", "Process")
 [Environment]::SetEnvironmentVariable("TRPG_EXTERNAL_BACKEND", "1", "Process")
 [Environment]::SetEnvironmentVariable("ELECTRON_ENABLE_LOGGING", "1", "Process")
-# Some hosted runners/tooling leave this variable in the inherited process
-# environment.  An explicit false value is safer than relying on removal:
-# Electron must start the packaged app, not Node's argument parser.
-[Environment]::SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", "0", "Process")
+# The child launcher above removes this variable from the actual Electron
+# process environment; keep the verifier process itself clean as well.
+[Environment]::SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", $null, "Process")
 [Environment]::SetEnvironmentVariable("NODE_ENV", $null, "Process")
 
 try {
