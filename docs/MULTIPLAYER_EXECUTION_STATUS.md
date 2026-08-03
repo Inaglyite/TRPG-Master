@@ -21,9 +21,9 @@
 - 受限发布归档提取、备份加密/解密验证、同目录原子发布、回滚状态恢复和安装器权限边界；
 - 浏览器与 Electron 双客户端联机 E2E，以及 Linux 源码启动/退出进程组验收。
 
-尚未能称为正式生产发布的事项只有外部交付门禁：推送后的 GitHub quality/Windows workflow、当前
-代码重新部署后的 Azure staging 验收，以及正式域名和受信任 TLS 证书。当前 Azure IP 自签名证书只
-适合受控测试，不应要求普通玩家绕过证书警告。
+尚未能称为正式生产发布的事项只有外部交付门禁：当前提交的 GitHub Windows workflow、重新部署后的
+Azure staging 验收，以及正式域名和受信任 TLS 证书。当前 Azure IP 自签名证书只适合受控测试，不应
+要求普通玩家绕过证书警告。
 
 ## 2. 当前代码边界
 
@@ -50,14 +50,16 @@ Electron 单机 → 按需启动本地 FastAPI → SQLite
 
 | 门禁 | 结果 |
 |---|---|
-| `python -m pytest -q`（SQLite） | `443 passed, 3 skipped` |
+| `python -m pytest -q`（SQLite） | `444 passed, 3 skipped` |
 | `TRPG_TEST_POSTGRES_URL=... python -m pytest -q`（PostgreSQL 17） | `446 passed` |
 | PostgreSQL Alembic `downgrade base → upgrade head → check` | 通过，当前 `20260728_0006` |
 | Ruff、架构门禁、compileall、`git diff --check` | 全部通过 |
 | 部署/备份/归档安全测试 | `43 passed`，三个 Bash 脚本 `bash -n` 通过 |
-| 前端 Vitest | `32` 个文件、`268` 个用例通过 |
+| 前端 Vitest（Linux） | `32` 个文件、`274` 个用例通过 |
 | Prettier、TypeScript、Vite production build | 全部通过 |
 | `multiplayer.spec.ts` Playwright | `3 passed`：双浏览器、Electron 双端、Electron 单机生命周期 |
+| Windows VM（`192.168.12.129`）前端构建/测试 | `npm run build`、`npm run format:check`、`npm test -- --run` 全部通过；`32` 个文件、`274` 个用例 |
+| Windows VM Electron 无头启动 | 成功打开 `file:///.../frontend/dist/index.html` 并暴露 DevTools 页面 |
 
 当前架构行数仍在既定 ratchet 内：`server.py 1697/1699`、`src/multiplayer_ws.py 710/740`、
 `src/multiplayer_http.py 419/420`、`src/engine.py 2125/2126`、`src/tools.py 1492/1503`、
@@ -91,9 +93,8 @@ skip，不能写入测试账号密码，也不能把自签名证书全局放行�
 - 发布失败回滚会恢复旧 symlink、Nginx/systemd 配置以及服务和 timer 原先的 enabled/active 状态；
 - 归档/备份脚本级测试不等于真实恢复。正式候选仍需在 Azure staging 做 pg_restore、重启、备份、
   回滚、双客户端权限/隐私和 WSS 验收；
-- Windows 的 NSIS/portable 构建与打包后端 smoke 已加入 `.github/workflows/windows-package.yml`，
-  但当前 Linux 工作站没有 Windows 运行时，必须以 GitHub Windows runner 结果为准；Linux 不提供
-  AppImage。
+- Windows 的 NSIS/portable 构建与打包后端 smoke 已加入 `.github/workflows/windows-package.yml`；Windows
+  VM 已完成源码级 Electron 验收，最终安装包仍以 GitHub Windows runner 结果为准。Linux 不提供 AppImage。
 
 ## 6. 下一步固定顺序
 
