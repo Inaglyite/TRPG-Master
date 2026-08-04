@@ -83,7 +83,6 @@ if _ENV_FILE.exists():
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from src.asset_payload import (
@@ -123,6 +122,7 @@ from src.editor_api import create_editor_router
 from src.editor_projects import EditorProjectStore
 from src.engine import EngineCallbacks, GameEngine
 from src.event_stream import OrderedTurnEventStream
+from src.frontend_http import FrontendStaticFiles
 from src.frontend_payload import enrich_clues_for_frontend
 from src.game_application import (
     ApplicationUseCaseError,
@@ -1679,7 +1679,7 @@ async def serve_asset(module_name: str, filename: str):
 # ---- 静态文件 ----
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+    app.mount("/", FrontendStaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 else:
 
     @app.get("/")
