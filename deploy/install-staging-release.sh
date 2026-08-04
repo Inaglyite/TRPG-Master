@@ -489,6 +489,12 @@ PY
     runuser -u trpgdeploy -- "$candidate/.venv/bin/pip" \
         install --disable-pip-version-check --no-cache-dir \
         -r "$candidate/requirements.txt"
+    # pip writes absolute shebangs to console scripts.  The venv is built in
+    # a temporary directory and then atomically renamed to the release path,
+    # so repair those entry points before activation; otherwise systemd's
+    # ExecStartPre would keep pointing at the removed .install-* directory.
+    find "$candidate/.venv/bin" -maxdepth 1 -type f -perm /111 -exec \
+        sed -i "1s|^#!$candidate/.venv/bin/python.*$|#!$release/.venv/bin/python3|" {} +
     chown -R root:root "$candidate/.venv"
     chmod 0755 "$candidate/.venv"
     validate_required_release_files
