@@ -261,9 +261,10 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                         {characterKeyName(member.investigator.character_key)}
                       </span>
                     )}
-                    {isOwner &&
-                      member.user_id !== user?.id &&
-                      member.role !== "viewer" && (
+                  </span>
+                  {isOwner && member.user_id !== user?.id && (
+                    <span className="member-actions">
+                      {member.role !== "viewer" && (
                         <button
                           type="button"
                           className="btn-ghost"
@@ -273,28 +274,53 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                           指定行动
                         </button>
                       )}
-                    {manageable && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={roomBusy || admissionLocked}
-                          title={
-                            admissionLocked
-                              ? "游戏进行中不能将旁观者提升为玩家"
-                              : undefined
-                          }
-                          onClick={() =>
-                            void changeMemberRole(
-                              member.user_id,
-                              member.role === "viewer" ? "player" : "viewer",
-                            )
-                          }
-                        >
-                          {member.role === "viewer" ? "设为玩家" : "设为旁观"}
-                        </button>
-                        {confirmingTransfer === member.user_id ? (
-                          <>
+                      {manageable && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={roomBusy || admissionLocked}
+                            title={
+                              admissionLocked
+                                ? "游戏进行中不能将旁观者提升为玩家"
+                                : undefined
+                            }
+                            onClick={() =>
+                              void changeMemberRole(
+                                member.user_id,
+                                member.role === "viewer" ? "player" : "viewer",
+                              )
+                            }
+                          >
+                            {member.role === "viewer" ? "设为玩家" : "设为旁观"}
+                          </button>
+                          {confirmingTransfer === member.user_id ? (
+                            <span className="member-action-group">
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                disabled={roomBusy || admissionLocked}
+                                title={
+                                  admissionLocked
+                                    ? "游戏进行中不能将旁观者设为房主"
+                                    : undefined
+                                }
+                                onClick={() => {
+                                  setConfirmingTransfer(null);
+                                  void handOverOwnership(member.user_id);
+                                }}
+                              >
+                                确认移交房主
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => setConfirmingTransfer(null)}
+                              >
+                                取消
+                              </button>
+                            </span>
+                          ) : (
                             <button
                               type="button"
                               className="btn-ghost"
@@ -304,72 +330,48 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                                   ? "游戏进行中不能将旁观者设为房主"
                                   : undefined
                               }
-                              onClick={() => {
-                                setConfirmingTransfer(null);
-                                void handOverOwnership(member.user_id);
-                              }}
+                              onClick={() =>
+                                setConfirmingTransfer(member.user_id)
+                              }
                             >
-                              确认移交房主
+                              移交
                             </button>
+                          )}
+                          {confirmingKick === member.user_id ? (
+                            <span className="member-action-group">
+                              <button
+                                type="button"
+                                className="btn-ghost online-danger"
+                                disabled={roomBusy}
+                                onClick={() => {
+                                  setConfirmingKick(null);
+                                  void kickMember(member.user_id);
+                                }}
+                              >
+                                确认移除
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => setConfirmingKick(null)}
+                              >
+                                取消
+                              </button>
+                            </span>
+                          ) : (
                             <button
                               type="button"
                               className="btn-ghost"
-                              onClick={() => setConfirmingTransfer(null)}
-                            >
-                              取消
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-ghost"
-                            disabled={roomBusy || admissionLocked}
-                            title={
-                              admissionLocked
-                                ? "游戏进行中不能将旁观者设为房主"
-                                : undefined
-                            }
-                            onClick={() =>
-                              setConfirmingTransfer(member.user_id)
-                            }
-                          >
-                            移交
-                          </button>
-                        )}
-                        {confirmingKick === member.user_id ? (
-                          <>
-                            <button
-                              type="button"
-                              className="btn-ghost online-danger"
                               disabled={roomBusy}
-                              onClick={() => {
-                                setConfirmingKick(null);
-                                void kickMember(member.user_id);
-                              }}
+                              onClick={() => setConfirmingKick(member.user_id)}
                             >
-                              确认移除
+                              移除
                             </button>
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              onClick={() => setConfirmingKick(null)}
-                            >
-                              取消
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-ghost"
-                            disabled={roomBusy}
-                            onClick={() => setConfirmingKick(member.user_id)}
-                          >
-                            移除
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </span>
+                          )}
+                        </>
+                      )}
+                    </span>
+                  )}
                 </li>
               );
             })}
