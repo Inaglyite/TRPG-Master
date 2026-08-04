@@ -2694,3 +2694,142 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 )
                 duplicate = _receive_until(player_ws, "room_action_rejected")
                 assert duplicate["code"] == "duplicate_action"
+def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
+    """Every /ws/room entry gets exactly one theme frame for the current world.
+
+    The room creator receives the theme from the shared driver's five-message
+    join broadcast (mirroring server.run_ws_session); joiners receive it from
+    the room bootstrap. Neither path may emit a second initialization frame,
+    and no extra theme may be injected by the WebSocket layer itself.
+    """
+    import server
+    from src import multiplayer_ws
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    env = {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_REQUIRE_AUTH": "1",
+        "TRPG_ALLOW_REGISTRATION": "1",
+        "TRPG_ALLOWED_ORIGINS": "https://testserver",
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
+    }
+    origin = {"origin": "https://testserver"}
+    manager = RoomManager()
+
+    class FakeEngine:
+        def __init__(self, context):
+            self.context = context
+            self.narrative_model = "test-narrative"
+            self.judgement_model = "test-judgement"
+
+        def configure_models(self, narrative, judgement):
+            self.narrative_model = narrative
+            self.judgement_model = judgement
+
+        def prepare_session(self):
+            return None
+
+        def list_saves(self):
+            return []
+
+    def engine_factory(*args, **_kwargs):
+        return FakeEngine(*args)
+
+    def fake_load_theme(context):
+        return {"title": f"theme-{context.module_name}", "colors": {}, "fonts": {}}
+
+    async def fake_room_driver(transport, _engine, *, user_id=None):
+        del user_id
+        # Mirror server.run_ws_session: the shared room driver broadcasts the
+        # five initial frames (module_list/character_list/theme/model_settings/
+        # save_list) to the room exactly once, before its message loop.
+        await transport.send_json(
+            {
+                "type": "module_list",
+                "modules": [],
+                "active": _engine.context.module_name,
+                "world_id": _engine.context.world_id,
+                "module_name": _engine.context.module_name,
+            }
+        )
+        await transport.send_json({"type": "character_list", "groups": []})
+        await transport.send_json(
+            {"type": "theme", "theme": fake_load_theme(_engine.context)}
+        )
+        await transport.send_json({"type": "model_settings"})
+        await transport.send_json({"type": "save_list", "saves": _engine.list_saves()})
+        try:
+            while True:
+                await transport.receive_text()
+        except RuntimeError:
+            return
+
+    def collect_until_save_list(websocket) -> list[dict]:
+        messages = []
+        for _ in range(60):
+            message = websocket.receive_json()
+            messages.append(message)
+            if message.get("type") == "save_list":
+                return messages
+        raise AssertionError("did not reach save_list before timeout")
+
+    def theme_frames(messages: list[dict]) -> list[dict]:
+        return [message for message in messages if message.get("type") == "theme"]
+
+    with (
+        patch.dict(os.environ, env),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        patch.object(server, "GameEngine", side_effect=engine_factory),
+        patch.object(server, "run_ws_session", new=fake_room_driver),
+        patch.object(server, "_load_theme", side_effect=fake_load_theme),
+        patch.object(server, "_list_mods", return_value=[]),
+        patch.object(
+            server, "_model_settings_payload", return_value={"type": "model_settings"}
+        ),
+        patch.object(multiplayer_ws, "list_character_options", return_value={"groups": []}),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        client.post(
+            "/api/auth/register",
+            json={"username": "theme_owner", "password": "owner password 123"},
+        )
+        owner_cookie = client.cookies.get("trpg_session")
+        created = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "name": "主题房"},
+            headers=origin,
+        )
+        world_id = created.json()["world_id"]
+        invite = client.post(
+            f"/api/worlds/{world_id}/invites",
+            json={"max_uses": 1},
+            headers=origin,
+        ).json()["token"]
+        client.post(
+            "/api/auth/register",
+            json={"username": "theme_player", "password": "player password 123"},
+        )
+        player_cookie = client.cookies.get("trpg_session")
+        client.post(
+            "/api/invites/accept",
+            json={"token": invite},
+            headers=origin,
+        )
+
+        with client.websocket_connect(
+            f"/ws/room?world_id={world_id}",
+            headers={**origin, "cookie": f"trpg_session={owner_cookie}"},
+        ) as owner_ws:
+            owner_themes = theme_frames(collect_until_save_list(owner_ws))
+            assert len(owner_themes) == 1
+            assert owner_themes[0]["theme"]["title"] == "theme-mansion_of_madness"
+            with client.websocket_connect(
+                f"/ws/room?world_id={world_id}",
+                headers={**origin, "cookie": f"trpg_session={player_cookie}"},
+            ) as player_ws:
+                player_themes = theme_frames(collect_until_save_list(player_ws))
+                assert len(player_themes) == 1
+                assert player_themes[0]["theme"]["title"] == "theme-mansion_of_madness"
