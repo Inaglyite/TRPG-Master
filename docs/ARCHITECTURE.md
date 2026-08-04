@@ -385,6 +385,12 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 `audit_events`，导入前会校验 JSON、revision、字段长度和 owner 冲突。生产数据库只监听回环地址，
 应用使用独立最小权限账号；环境变量、迁移、备份与恢复命令统一见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
 
+> **规划边界（尚未实现）**：场景地图、区域、Token、互动对象和迷雾不会另起一套文件存储。
+> 模组包保存静态作者态定义，运行中的位置、对象、可见性和导演临时布置先写入
+> `world_states.state` 的版本化 JSON/JSONB 聚合，并复用当前事务、`revision`、快照、回合事件与
+> 房间可见性过滤。只有出现稳定的跨世界查询或协作需求时才拆成关系表；详细阶段与兼容策略见
+> [`ROADMAP.md`](ROADMAP.md#3-场景化多人-trpg-与模组工坊多人收口后)。
+
 ### 8.2 运行时上下文
 
 `RuntimeContext` 是世界与模组绑定的运行时入口，包含 `world_id`、`module_name`、数据库 URL、
@@ -470,6 +476,10 @@ sequenceDiagram
 作者态 `module.json` 保存全部内容定义，运行时编译器只把初始已知线索写入 `clues_found`，并将
 完整定义保存到私有 `clue_catalog`/`scene_catalog`。模组版本和世界状态 schema 分别迁移，不能
 共用一个版本号。完整契约见 `docs/MODULE_FORMAT.md`。
+
+当前 v1/v2 还没有场景地图、区域、Token、互动对象或迷雾的作者态 schema。未来添加这些可选能力时，
+必须先升级 `module_format`、`module_compiler`、诊断和兼容测试，再让编辑器或运行时消费；不能以
+未校验的自定义字段绕过编译边界。
 
 素材触发同样在编译边界内：实体上的 `asset_id` 会生成精确的 `npc_revealed`、`scene_entered` 或
 `clue_discovered` 规则，`reveal_on` 也只有稳定 `entity_id` 能授权展示。旧包里的文本条件可以

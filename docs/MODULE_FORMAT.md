@@ -14,6 +14,10 @@
 - 长篇正文：UTF-8 Markdown
 - JSON Schema：Draft 2020-12（生成产物见 `schemas/trpgmod/`）
 
+> **规划说明**：场景地图、区域/房间连接、Token、互动对象和迷雾目前不属于 v1/v2 格式。它们会以
+> 向后兼容的可选能力进入未来 schema；在那之前，作者不应向当前包手写未识别字段。产品目标和
+> 迁移原则见 [`ROADMAP.md`](ROADMAP.md#3-场景化多人-trpg-与模组工坊多人收口后)。
+
 ## 1. 快速开始
 
 仓库自带一个完整的最小工程 [examples/module-template](../examples/module-template/manifest.json)
