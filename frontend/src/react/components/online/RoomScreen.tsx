@@ -673,7 +673,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
         )}
       {ownerBlockedFromLeaving && (
         <p className="online-hint">
-          你是房主：服务端不允许房主直接退出房间。请先移交房主；（关闭房间功能另做）。
+          你是房主：服务端不允许房主直接退出房间。请先把房主移交给其他成员。
         </p>
       )}
     </div>

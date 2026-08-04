@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Pin to the C locale so text checks (stat -c %F, grep/sort/awk) behave
+# identically on hosts with non-English locales (e.g. zh_CN.UTF-8).
+export LC_ALL=C
+
 backup_root="${TRPG_BACKUP_ROOT:-/var/backups/trpg-master}"
 runtime_root="${TRPG_BACKUP_RUNTIME_ROOT:-/var/lib/trpg-master}"
 backup_prefix="${TRPG_BACKUP_PREFIX:-trpg-master}"
