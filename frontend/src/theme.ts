@@ -125,11 +125,11 @@ export function applyTheme(theme: any) {
   }
 
   const store = useAppStore.getState();
-  // 模组标题只用于模组卡片/开始页的模组区域，不能覆盖产品级身份。
-  // 否则收到 theme 消息后，浏览器标签、Electron 窗口和顶部产品标题会
-  // 从 TRPG Game 变成“疯狂宅邸”等具体模组名。
-  document.title = DEFAULT_TITLE;
-  store.setTitle(DEFAULT_TITLE);
+  // TRPG Game 是启动器和安装包的产品名称；进入模组后，浏览器标签、
+  // Electron 窗口和游戏内标题应切换为当前模组名，明确玩家正在哪个世界里。
+  const title = isSafeText(theme.title, 120) ? theme.title : DEFAULT_TITLE;
+  document.title = title;
+  store.setTitle(title);
   store.setSubtitle(
     isSafeText(theme.subtitle, 200) ? theme.subtitle : DEFAULT_SUBTITLE,
   );

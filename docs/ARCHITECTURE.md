@@ -554,19 +554,18 @@ Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择
 
 ### 9.2 产品身份、主题与动效
 
-产品级可见名称统一为 `TRPG Game`：浏览器标题、Electron 窗口、Windows `productName` 和安装产物
-都不能使用某个模组名。仓库目录、Python 包、环境变量、协议路径、数据库字段和 Electron `appId`
-属于兼容身份，不随展示名改动；“疯狂宅邸”等名称只在模组列表、房间和游戏内作为模组标题出现。
-守秘人 system prompt 中的 `TRPG Master` 是内部角色身份，终端调试文案也不构成发行产品名；两者
-不得反向覆盖浏览器、窗口或安装包的 `TRPG Game` 标题。
+产品启动器、Electron 默认窗口、Windows `productName` 和安装产物统一使用 `TRPG Game`；仓库目录、
+Python 包、环境变量、协议路径、数据库字段和 Electron `appId` 属于兼容身份，不随展示名改动。
+玩家进入或切换模组后，浏览器标签、Electron 窗口和游戏内标题使用当前模组名（如“疯狂宅邸”或
+“猩红文档”），让当前世界明确可见。守秘人 system prompt 中的 `TRPG Master` 是内部角色身份，终端
+调试文案也不构成发行产品名。
 
 模组 `theme.json` 由 `theme.ts` 校验后映射到 `styles/tokens.css` 的受管 CSS 变量；颜色、字体和
 `backgroundImage` 都经过白名单与路径检查，每次切换先清理上一模组的变量。组件不得硬编码主题色。
 `prefers-reduced-motion` 会关闭粒子、闪烁和位移动画。
 
 前端入口 HTML 必须返回 `no-cache, no-store, must-revalidate`，确保发布后不会继续启动旧版应用壳；
-Vite 生成的带内容指纹 `/assets/` 文件则使用长期 `immutable` 缓存。模组主题不得改写浏览器标题或
-产品标题。
+Vite 生成的带内容指纹 `/assets/` 文件则使用长期 `immutable` 缓存。
 
 开始页切换模组采用一次 350–450ms 的“卷宗换页”过渡：首次挂载不播放，旧内容先离场，服务端确认
 主题且新背景预加载后再进入；快速连续选择只保留最新目标，请求失败恢复旧内容。动效不替代真实

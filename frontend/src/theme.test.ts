@@ -97,11 +97,11 @@ describe("applyTheme", () => {
       startButtonText: "打开猩红文档",
     });
     const state = useAppStore.getState();
-    expect(state.title).toBe(DEFAULT_TITLE);
+    expect(state.title).toBe("猩红文档");
     expect(state.subtitle).toBe("Crimson Letters");
     expect(state.description).toBe("密斯卡托尼克大学学者离奇死亡……");
     expect(state.startButtonText).toBe("打开猩红文档");
-    expect(document.title).toBe(DEFAULT_TITLE);
+    expect(document.title).toBe("猩红文档");
   });
 
   it("resets text fields to defaults when the theme omits them", () => {
