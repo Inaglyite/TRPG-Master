@@ -87,6 +87,7 @@ jobs:
           npm run format:check
           npm run build
           npx playwright install --with-deps chromium
+          node node_modules/electron/install.js
           xvfb-run --auto-servernum npm run test:e2e
 
       - name: Package release
