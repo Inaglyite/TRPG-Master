@@ -813,7 +813,8 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     expect(peerFrames.some((frame) => frame.includes("narrative_"))).toBe(true);
 
     // 经大厅返回内置启动器（return-launcher IPC）。
-    await page.getByRole("button", { name: "房间", exact: true }).click();
+    await page.locator(".online-room-dock-toggle").click();
+    await page.getByRole("button", { name: "房间管理" }).click();
     await page.getByRole("button", { name: "← 大厅" }).click();
     await expect(page.getByRole("heading", { name: "联机大厅" })).toBeVisible();
     await page.getByRole("button", { name: "← 返回模式选择" }).click();
