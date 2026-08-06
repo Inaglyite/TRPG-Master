@@ -730,6 +730,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     await expect(page.getByTestId("mode-select")).toBeVisible();
     await expect(page.getByText("本地单人", { exact: true })).toBeVisible();
     await expect(page.getByText("多人游戏", { exact: true })).toBeVisible();
+    await page.getByText("自定义服务器", { exact: false }).click();
     await page.getByLabel("云端服务器地址").fill(baseUrl);
     await page.getByText("多人游戏", { exact: true }).click();
 
