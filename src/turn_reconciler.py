@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from .config import JUDGEMENT_MODEL
+from .llm_concurrency import llm_call_slot
 from .logger import error as log_error
 from .logger import game_event as log_game
 from .logger import model_call as log_model_call
@@ -642,20 +643,24 @@ def reconcile_turn(
     started_at = time.monotonic()
     audit_model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
     try:
-        response = engine.client.chat.completions.create(
+        with llm_call_slot(
             model=audit_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "只做保守的结构化状态审计，宁可漏记也不虚构。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=1400,
-            tools=[COMMIT_TURN_TOOL],
-            tool_choice="auto",
-        )
+            world_id=str(getattr(getattr(engine, "context", None), "world_id", "") or ""),
+        ):
+            response = engine.client.chat.completions.create(
+                model=audit_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "只做保守的结构化状态审计，宁可漏记也不虚构。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=1400,
+                tools=[COMMIT_TURN_TOOL],
+                tool_choice="auto",
+            )
     except Exception as exc:
         log_error(f"回合审计调用失败: {exc}")
         return {"applied": [], "skipped": [], "error": str(exc)}

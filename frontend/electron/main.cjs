@@ -492,7 +492,7 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle("trpg:select-online", async (event, rawOrigin) => {
+  ipcMain.handle("trpg:select-online", async (event, rawOrigin, rawIntent) => {
     if (!trustedSender(event.senderFrame?.url ?? "")) {
       log("拒绝来自不可信页面的 select-online:", event.senderFrame?.url);
       return { ok: false, error: "untrusted-sender" };
@@ -500,6 +500,8 @@ function registerIpcHandlers() {
     const origin = validateCloudOrigin(rawOrigin);
     if (!origin) return { ok: false, error: "invalid-origin" };
     if (!mainWindow) return { ok: false, error: "窗口尚未就绪" };
+    // 联机落点意图（云端单人/多人大厅）经 URL 传给云端页面；只放行白名单值。
+    const intentSuffix = rawIntent === "solo" ? "&intent=solo" : "";
     // 地址由主进程持久化；renderer 随 loadURL 销毁也不会丢失设置。
     const previousOrigin = approvedCloudOrigin;
     const userDataPath = app.getPath("userData");
@@ -511,7 +513,7 @@ function registerIpcHandlers() {
     try {
       // 同源加载云端页面：认证 Cookie 与 WebSocket 都在该 origin 下工作，
       // 不依赖跨站 Cookie（SameSite=None）。
-      await mainWindow.loadURL(`${origin}/?mode=online`);
+      await mainWindow.loadURL(`${origin}/?mode=online${intentSuffix}`);
       // A renderer can return to the launcher after using local mode. Once the
       // cloud page has loaded successfully, an owned local backend is no longer
       // part of this mode and must not keep running in the background.

@@ -409,6 +409,41 @@
   color: var(--blue-bright);
 }
 
+/* 云端单人徽章 */
+.online-badge--solo {
+  border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+  color: var(--blue-bright);
+}
+
+/* 云端单人“我的冒险”列表行：卡片 + 行内删除（二次确认） */
+.solo-world-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+
+.solo-world-row .room-card {
+  flex: 1 1 auto;
+}
+
+.solo-world-actions {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+
+/* 云端单人自动开局等待页 */
+.solo-start-screen {
+  width: min(100% - 24px, 480px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  text-align: center;
+}
+
 /* 房间卡片与成员行 */
 .room-list,
 .member-list {
@@ -614,61 +649,150 @@
   color: var(--red-bright);
 }
 
-/* 多人游戏进行中的顶部房间条（不遮挡游戏区） */
-.game-room-bar {
-  position: fixed;
-  top: 52px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 900;
+/* 多人游戏进行中的房间坞：聊天面板顶部的正常布局区域（不是浮层）。
+   收起为紧凑入口条，展开为房间管理卡片；不遮挡导航/正文/输入/场景提示。 */
+.online-room-dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) var(--sp-3) 0;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.online-room-dock-toggle {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  max-width: min(860px, calc(100vw - 32px));
-  padding: 6px var(--sp-3);
+  gap: var(--sp-2);
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px var(--sp-3);
   border: 1px solid var(--border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg2) 88%, black);
-  box-shadow: var(--shadow-2);
+  color: var(--text);
   font-size: 12px;
+  cursor: pointer;
 }
 
-.game-room-bar-title {
+.online-room-dock-toggle:hover {
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+}
+
+.online-status-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.online-status-dot--connected {
+  background: var(--green);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--green) 72%, transparent);
+}
+
+.online-status-dot--connecting {
+  background: var(--gold);
+  animation: blink 1s infinite;
+}
+
+.online-status-dot--disconnected {
+  background: var(--red-bright);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--red-bright) 72%, transparent);
+}
+
+.online-room-dock-title {
   color: var(--gold-bright);
   font-family: var(--font-display);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  max-width: 200px;
 }
 
-.game-room-bar-actor {
+.online-room-dock-turn {
   color: var(--text-dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.game-room-bar-actor--me {
+.online-room-dock-turn--me {
+  color: var(--gold-bright);
+}
+
+.online-room-dock-chevron {
+  color: var(--text-faint);
+}
+
+.online-room-dock-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: 560px;
+  max-height: min(46vh, 420px);
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg2) 92%, black);
+  box-shadow: var(--shadow-2);
+}
+
+.online-room-dock-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.online-room-dock-card-title {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+.online-room-dock-close {
+  margin-left: auto;
+}
+
+.online-room-dock-actor {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.online-room-dock-actor--me {
   color: var(--gold-bright);
   text-shadow: 0 0 8px color-mix(in srgb, var(--gold) 45%, transparent);
 }
 
-.game-room-bar-actions {
+.online-room-dock-members {
+  gap: var(--sp-2);
+}
+
+.online-room-dock-actions {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  margin-left: auto;
+  flex-wrap: wrap;
 }
 
-@media (max-width: 640px) {
-  .game-room-bar {
-    top: 46px;
-    gap: var(--sp-2);
-    font-size: 11px;
+@media (max-width: 720px) {
+  .online-room-dock-toggle {
+    align-self: stretch;
   }
 
-  .game-room-bar-title {
-    max-width: 120px;
+  .online-room-dock-title {
+    max-width: 40%;
+  }
+
+  .online-room-dock-card {
+    max-width: none;
   }
 }
 

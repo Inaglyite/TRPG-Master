@@ -7,18 +7,21 @@ import {
 } from "../../api/client";
 import { desktopBridge } from "../../desktop";
 import { useAppStore } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
 
 /**
- * 启动后的第一个界面：选择单机（本地后端、匿名游玩）或多人（云端账号）。
- * Electron 中两种模式都经主进程完成：单机按需拉起本地后端，联机由主进程
- * 校验 https origin 后同源加载云端页面（认证 Cookie/WS 同源，不靠跨站 Cookie）。
+ * 启动后的第一个界面：本地单人（桌面版本地后端）、云端单人（账号 + 私密世界）
+ * 或多人游戏（云端账号）。Electron 中联机两种入口都经主进程完成：主进程校验
+ * https origin 后同源加载云端页面（认证 Cookie/WS 同源，不靠跨站 Cookie）。
  */
 export function ModeSelectScreen() {
   const title = useAppStore((state) => state.title);
   const subtitle = useAppStore((state) => state.subtitle);
   const setMode = useAppStore((state) => state.setMode);
 
-  const [busyMode, setBusyMode] = useState<"local" | "online" | null>(null);
+  const [busyMode, setBusyMode] = useState<"local" | "solo" | "online" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   // 默认官方服务器；自定义 origin 仅开发/验收用，普通流程折叠不展示。
   const [originDraft, setOriginDraft] = useState(
@@ -44,10 +47,8 @@ export function ModeSelectScreen() {
   }, [bridge]);
 
   async function chooseLocal() {
-    if (!bridge) {
-      setMode("local");
-      return;
-    }
+    // 纯浏览器没有本地后端可连：本地单人只桌面版可用，按钮已禁用。
+    if (!bridge) return;
     setBusyMode("local");
     setError(null);
     const result = await bridge.selectLocalMode();
@@ -59,8 +60,10 @@ export function ModeSelectScreen() {
     }
   }
 
-  async function chooseOnline() {
+  /** 联机入口公共部分：浏览器直接切 online 模式；Electron 由主进程同源加载云端页。 */
+  async function connectCloud(intent: "lobby" | "solo") {
     if (!bridge) {
+      useOnlineStore.setState({ pendingIntent: intent });
       setMode("online");
       return;
     }
@@ -73,12 +76,12 @@ export function ModeSelectScreen() {
       setError("请输入云端的 https 服务器地址，例如 https://trpg.example.com");
       return;
     }
-    setBusyMode("online");
+    setBusyMode(intent === "solo" ? "solo" : "online");
     setError(null);
-    const result = await bridge.selectOnlineMode(normalized);
+    const result = await bridge.selectOnlineMode(normalized, intent);
     setBusyMode(null);
     if (result.ok) {
-      // 主进程已经持久化地址并同源加载云端页面。
+      // 主进程已经持久化地址并同源加载云端页面（intent 经 URL 传递）。
       return;
     }
     setError(
@@ -86,6 +89,14 @@ export function ModeSelectScreen() {
         ? "服务器地址无效：只允许裸 https origin（无路径与参数）"
         : (result.error ?? "无法连接服务器"),
     );
+  }
+
+  async function chooseSolo() {
+    await connectCloud("solo");
+  }
+
+  async function chooseOnline() {
+    await connectCloud("lobby");
   }
 
   return (
@@ -100,14 +111,30 @@ export function ModeSelectScreen() {
           <button
             type="button"
             className="start-art-button mode-card"
-            disabled={busyMode !== null}
+            disabled={busyMode !== null || !bridge}
+            title={bridge ? undefined : "本地单人请使用桌面版"}
             onClick={() => void chooseLocal()}
           >
             <span className="start-art-label mode-card-title">
-              {busyMode === "local" ? "正在启动…" : "单机游戏"}
+              {busyMode === "local" ? "正在启动…" : "本地单人"}
             </span>
             <span className="mode-card-desc">
-              连接本地服务 · 使用本地存档 · 无需账号
+              {bridge
+                ? "连接本地服务 · 使用本地存档 · 无需账号"
+                : "本地单人请使用桌面版"}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="start-art-button mode-card"
+            disabled={busyMode !== null}
+            onClick={() => void chooseSolo()}
+          >
+            <span className="start-art-label mode-card-title">
+              {busyMode === "solo" ? "正在连接…" : "云端单人"}
+            </span>
+            <span className="mode-card-desc">
+              登录云端账号 · 私密世界 · 随时随地继续冒险
             </span>
           </button>
           <button

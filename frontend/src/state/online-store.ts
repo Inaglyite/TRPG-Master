@@ -12,7 +12,9 @@ import type {
 } from "../api/worlds";
 
 export type AuthStatus = "checking" | "anonymous" | "authenticated";
-export type OnlineView = "auth" | "lobby" | "room";
+export type OnlineView = "auth" | "lobby" | "solo" | "room";
+/** 认证成功后的落点意图：多人大厅或云端单人“我的冒险”。 */
+export type OnlineIntent = "lobby" | "solo";
 /** 异步数据的读取状态；unsupported 表示接口意外返回 404/405/501。 */
 export type AsyncStatus =
   "idle" | "loading" | "ready" | "error" | "unsupported";
@@ -53,6 +55,8 @@ export type OnlineState = {
   sessionExpired: boolean;
   // 联机外壳内的界面
   view: OnlineView;
+  /** 认证成功后的目标界面（云端单人入口会先把意图置为 "solo"）。 */
+  pendingIntent: OnlineIntent;
   // 大厅
   worlds: WorldSummary[];
   worldsStatus: AsyncStatus;
@@ -89,6 +93,8 @@ export type OnlineState = {
   privateState: PrivateState | null;
   roomBusy: boolean;
   roomError: string | null;
+  /** playing 中是否打开了完整房间管理页（OnlineRoomDock 的“房间管理”入口）。 */
+  roomOpen: boolean;
 };
 
 export const initialOnlineState: OnlineState = {
@@ -98,6 +104,7 @@ export const initialOnlineState: OnlineState = {
   authError: null,
   sessionExpired: false,
   view: "auth",
+  pendingIntent: "lobby",
   worlds: [],
   worldsStatus: "idle",
   worldsError: null,
@@ -130,6 +137,7 @@ export const initialOnlineState: OnlineState = {
   privateState: null,
   roomBusy: false,
   roomError: null,
+  roomOpen: false,
 };
 
 export const useOnlineStore = create<OnlineState>(() => ({

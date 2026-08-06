@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { desktopBridge } from "../../desktop";
 import { useAppStore, detectInitialMode } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
 import { ModeSelectScreen } from "./ModeSelectScreen";
 
 vi.mock("../../desktop", () => ({
@@ -18,6 +19,7 @@ const bridge = {
 
 beforeEach(() => {
   useAppStore.setState({ mode: "select" });
+  useOnlineStore.setState({ pendingIntent: "lobby" });
   vi.clearAllMocks();
   vi.mocked(desktopBridge).mockReturnValue(null);
   bridge.getOnlineOrigin.mockResolvedValue({ ok: true, origin: null });
@@ -26,22 +28,36 @@ beforeEach(() => {
 });
 
 describe("ModeSelectScreen（浏览器流程）", () => {
-  it("展示单机与多人两个入口", () => {
+  it("展示本地单人、云端单人与多人三个入口", () => {
     render(<ModeSelectScreen />);
-    expect(screen.getByText("单机游戏")).toBeInTheDocument();
+    expect(screen.getByText("本地单人")).toBeInTheDocument();
+    expect(screen.getByText("云端单人")).toBeInTheDocument();
     expect(screen.getByText("多人游戏")).toBeInTheDocument();
   });
 
-  it("选择单机进入 local 模式", () => {
+  it("浏览器禁用本地单人并注明使用桌面版", () => {
     render(<ModeSelectScreen />);
-    fireEvent.click(screen.getByText("单机游戏"));
-    expect(useAppStore.getState().mode).toBe("local");
+    const localButton = screen.getByRole("button", { name: /本地单人/ });
+    expect(localButton).toBeDisabled();
+    expect(screen.getAllByText("本地单人请使用桌面版").length).toBeGreaterThan(
+      0,
+    );
+    fireEvent.click(localButton);
+    expect(useAppStore.getState().mode).toBe("select");
+  });
+
+  it("选择云端单人进入 online 模式并记录 solo 意图", () => {
+    render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /云端单人/ }));
+    expect(useAppStore.getState().mode).toBe("online");
+    expect(useOnlineStore.getState().pendingIntent).toBe("solo");
   });
 
   it("选择多人进入 online 模式", () => {
     render(<ModeSelectScreen />);
     fireEvent.click(screen.getByText("多人游戏"));
     expect(useAppStore.getState().mode).toBe("online");
+    expect(useOnlineStore.getState().pendingIntent).toBe("lobby");
   });
 
   it("浏览器环境不显示云端地址输入框", () => {
@@ -58,7 +74,7 @@ describe("ModeSelectScreen（Electron 单机）", () => {
   it("经主进程启动本地后端成功后进入 local", async () => {
     bridge.selectLocalMode.mockResolvedValue({ ok: true });
     render(<ModeSelectScreen />);
-    fireEvent.click(screen.getByText("单机游戏"));
+    fireEvent.click(screen.getByRole("button", { name: /本地单人/ }));
     await waitFor(() => expect(bridge.selectLocalMode).toHaveBeenCalled());
     await waitFor(() => expect(useAppStore.getState().mode).toBe("local"));
   });
@@ -66,7 +82,7 @@ describe("ModeSelectScreen（Electron 单机）", () => {
   it("用户取消配置时静默返回，不报错也不切模式", async () => {
     bridge.selectLocalMode.mockResolvedValue({ ok: false, cancelled: true });
     render(<ModeSelectScreen />);
-    fireEvent.click(screen.getByText("单机游戏"));
+    fireEvent.click(screen.getByRole("button", { name: /本地单人/ }));
     await waitFor(() => expect(bridge.selectLocalMode).toHaveBeenCalled());
     expect(useAppStore.getState().mode).toBe("select");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -78,7 +94,7 @@ describe("ModeSelectScreen（Electron 单机）", () => {
       error: "后端启动超时",
     });
     render(<ModeSelectScreen />);
-    fireEvent.click(screen.getByText("单机游戏"));
+    fireEvent.click(screen.getByRole("button", { name: /本地单人/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("后端启动超时");
     expect(useAppStore.getState().mode).toBe("select");
   });
@@ -97,6 +113,19 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     await waitFor(() =>
       expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
         "https://trpggame.xyz",
+        "lobby",
+      ),
+    );
+  });
+
+  it("云端单人入口把 solo 意图交给主进程", async () => {
+    bridge.selectOnlineMode.mockResolvedValue({ ok: true });
+    render(<ModeSelectScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /云端单人/ }));
+    await waitFor(() =>
+      expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
+        "https://trpggame.xyz",
+        "solo",
       ),
     );
   });
@@ -112,6 +141,7 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     await waitFor(() =>
       expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
         "https://trpggame.xyz",
+        "lobby",
       ),
     );
   });
@@ -161,6 +191,7 @@ describe("ModeSelectScreen（Electron 联机）", () => {
     await waitFor(() =>
       expect(bridge.selectOnlineMode).toHaveBeenCalledWith(
         "https://trpg.example.com",
+        "lobby",
       ),
     );
     expect(localStorage.getItem("trpg-cloud-origin")).toBeNull();

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .database import User, World, WorldMember, new_id, session_scope
 from .module_registry import ModuleRegistry
-from .multiplayer import MultiplayerError
+from .multiplayer import PLAY_MODES, MultiplayerError
 from .runtime import RuntimeContext
 
 
@@ -39,6 +39,36 @@ def _max_players(data: dict) -> int:
     return value
 
 
+def _play_mode_and_max_players(data: dict) -> tuple[str, int]:
+    """Validate the explicit play mode; solo worlds are capped at one member."""
+    play_mode = str(data.get("play_mode") or "multiplayer").strip()
+    if play_mode not in PLAY_MODES:
+        raise MultiplayerError(
+            "invalid_play_mode",
+            "play_mode 必须是 solo 或 multiplayer",
+            400,
+        )
+    if play_mode == "solo":
+        raw_max_players = data.get("max_players")
+        if raw_max_players is not None:
+            try:
+                requested = int(raw_max_players)
+            except (TypeError, ValueError) as exc:
+                raise MultiplayerError(
+                    "invalid_play_mode",
+                    "私密单人世界不支持设置玩家上限",
+                    400,
+                ) from exc
+            if requested != 1:
+                raise MultiplayerError(
+                    "invalid_play_mode",
+                    "私密单人世界不支持设置玩家上限",
+                    400,
+                )
+        return play_mode, 1
+    return play_mode, _max_players(data)
+
+
 async def create_owned_world(
     *,
     database_url: str,
@@ -56,7 +86,7 @@ async def create_owned_world(
         module_record = module_registry.resolve(module)
     except (FileNotFoundError, ValueError) as exc:
         raise MultiplayerError("module_not_found", "模组不存在", 404) from exc
-    max_players = _max_players(data)
+    play_mode, max_players = _play_mode_and_max_players(data)
     name = str(data.get("name") or "").strip()[:120]
     name = name or f"{creator_username} 的房间"
     world_id = f"world-{secrets.token_hex(12)}"
@@ -83,6 +113,7 @@ async def create_owned_world(
             "name": name,
             "room_status": "lobby",
             "max_players": max_players,
+            "play_mode": play_mode,
         }
         session.add(
             World(
@@ -130,5 +161,6 @@ async def create_owned_world(
             "name": name,
             "room_status": "lobby",
             "max_players": max_players,
+            "play_mode": play_mode,
         }
     return {"world_id": context.world_id, "module": module}

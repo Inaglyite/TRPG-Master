@@ -4,6 +4,7 @@ import {
   assignActor,
   changeMemberRole,
   claimByKey,
+  deleteCurrentRoom,
   dismissInvite,
   enterLobby,
   handOverOwnership,
@@ -64,6 +65,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const roomError = useOnlineStore((state) => state.roomError);
 
   const [confirmingLeave, setConfirmingLeave] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingKick, setConfirmingKick] = useState<string | null>(null);
   const [confirmingTransfer, setConfirmingTransfer] = useState<string | null>(
     null,
@@ -571,6 +573,58 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
               ))}
             </ul>
           )}
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="online-section" aria-labelledby="room-danger-title">
+          <h2 id="room-danger-title">房间处置</h2>
+          {roomStatus === "lobby" ? (
+            confirmingDelete ? (
+              <span className="online-server-actions">
+                <button
+                  type="button"
+                  className="btn-primary online-danger"
+                  disabled={roomBusy}
+                  onClick={() => {
+                    setConfirmingDelete(false);
+                    void deleteCurrentRoom();
+                  }}
+                >
+                  确认删除房间
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                删除房间
+              </button>
+            )
+          ) : (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled
+              title="游戏进行中无法删除房间"
+            >
+              删除房间
+            </button>
+          )}
+          <p className="online-hint">
+            {roomStatus === "lobby"
+              ? "删除为逻辑归档：房间将从普通房间列表消失，当前无法从列表恢复；全部邀请码立即失效。服务端会断开所有成员连接。"
+              : "游戏进行中无法删除房间，请先结束当前游戏（服务端仍会最终校验）。"}
+          </p>
         </section>
       )}
 

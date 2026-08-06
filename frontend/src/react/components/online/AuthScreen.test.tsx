@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { checkSession, enterLobby, login, register } from "../../../online";
+import {
+  checkSession,
+  enterLobby,
+  enterSoloLobby,
+  login,
+  register,
+} from "../../../online";
 import { useAppStore } from "../../../state/app-store";
 import {
   initialOnlineState,
@@ -12,6 +18,7 @@ import { AuthScreen } from "./AuthScreen";
 vi.mock("../../../online", () => ({
   checkSession: vi.fn(),
   enterLobby: vi.fn(),
+  enterSoloLobby: vi.fn(),
   login: vi.fn(),
   register: vi.fn(),
 }));
@@ -60,6 +67,24 @@ describe("AuthScreen 登录", () => {
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
     await waitFor(() => expect(login).toHaveBeenCalledWith("alice", "secret"));
     await waitFor(() => expect(enterLobby).toHaveBeenCalled());
+    expect(enterSoloLobby).not.toHaveBeenCalled();
+  });
+
+  it("solo 意图下登录成功落到我的冒险", async () => {
+    vi.mocked(login).mockResolvedValue(true);
+    useOnlineStore.setState({ pendingIntent: "solo" });
+    render(<AuthScreen />);
+    expect(screen.getByText("云端单人")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("用户名"), {
+      target: { value: "alice" },
+    });
+    fireEvent.change(screen.getByLabelText("密码"), {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(login).toHaveBeenCalledWith("alice", "secret"));
+    await waitFor(() => expect(enterSoloLobby).toHaveBeenCalled());
+    expect(enterLobby).not.toHaveBeenCalled();
   });
 
   it("展示 store 中的认证错误", () => {

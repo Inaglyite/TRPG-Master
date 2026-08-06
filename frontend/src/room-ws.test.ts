@@ -27,6 +27,7 @@ import {
 
 vi.mock("./online", () => ({
   enterLobby: vi.fn(),
+  enterSoloLobby: vi.fn(),
   refreshRoom: vi.fn(),
 }));
 
@@ -796,6 +797,36 @@ describe("房间控制事件", () => {
       "房主需要先移交房主才能退出房间",
     );
     expect(recoverRejectedRoomAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("room_action_rejected 映射云端单人新拒绝码", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(
+      JSON.stringify({
+        type: "room_action_rejected",
+        code: "action_in_progress",
+      }),
+    );
+    expect(useOnlineStore.getState().roomError).toBe(
+      "上一个回合仍在进行中，请稍候",
+    );
+    ws.message(
+      JSON.stringify({ type: "room_action_rejected", code: "rate_limited" }),
+    );
+    expect(useOnlineStore.getState().roomError).toBe(
+      "操作过于频繁，请稍后再试",
+    );
+    ws.message(
+      JSON.stringify({
+        type: "room_action_rejected",
+        code: "daily_quota_exceeded",
+      }),
+    );
+    expect(useOnlineStore.getState().roomError).toBe(
+      "今日使用额度已用完，请明天再来",
+    );
   });
 
   it("room_error 展示服务端错误", () => {

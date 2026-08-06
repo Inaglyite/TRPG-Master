@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from typing import Any
 
@@ -12,10 +13,22 @@ from .characters import list_character_options
 from .combat import CombatError, assign_combat_actor
 from .investigators import investigator_entity, visible_clues_for_investigator
 from .model_settings import ModelSettings
-from .multiplayer import MultiplayerError, reserve_room_action, room_members
+from .multiplayer import (
+    MultiplayerError,
+    claim_investigator,
+    reserve_room_action,
+    room_members,
+)
+from .multiplayer_guards import (
+    GUARDED_TURN_TYPES,
+    USER_TURN_GUARD,
+    check_action_guards,
+)
 from .multiplayer_recovery import turn_recovery_payload
 from .player_notes import PlayerNotesConflict, PlayerNotesStore
 from .room_runtime import ActionReservationError, GameRoom
+
+logger = logging.getLogger("trpg.multiplayer_messages")
 
 UNSUPPORTED_ROOM_TYPES = frozenset(
     {
@@ -526,6 +539,48 @@ async def run_room_message_loop(
             except Exception:
                 room.release_action()
                 raise
+            solo_start = message_type == "start" and room.play_mode == "solo"
+            if solo_start:
+                # 私密单人世界：行动者固定为房主本人。
+                actor_id = room.owner_user_id
+                actor_claim = claims_by_user.get(actor_id)
+            if actor_claim is None and solo_start and user.id == room.owner_user_id:
+                # 无认领调查员时自动认领第一个可用的默认/模组调查员；
+                # include_personal=False 沿用 personal_character_unavailable
+                # 规则，排除 profile/custom 来源。
+                try:
+                    options = list_character_options(
+                        room.engine.context.module_name,
+                        context=room.engine.context,
+                        include_personal=False,
+                    )
+                    selected = next(
+                        (
+                            character
+                            for group in options.get("groups", [])
+                            for character in group.get("characters", [])
+                            if isinstance(character.get("ref"), dict)
+                        ),
+                        None,
+                    )
+                    if selected is not None:
+                        claim_investigator(
+                            controller.deps.database_url(),
+                            world_id,
+                            str(selected.get("id") or ""),
+                            user.id,
+                            character_ref=selected["ref"],
+                        )
+                        roster, playable_members = controller.room_roster(world_id)
+                        claims_by_user = {
+                            str(item["user_id"]): item
+                            for item in roster
+                            if item.get("user_id")
+                        }
+                        actor_claim = claims_by_user.get(actor_id)
+                except Exception:
+                    room.release_action()
+                    raise
             if actor_claim is None:
                 room.release_action()
                 await _reject(
@@ -535,9 +590,6 @@ async def run_room_message_loop(
                 )
                 continue
             if message_type == "start":
-                missing_claims = sorted(playable_members - claims_by_user.keys())
-                missing_ready = sorted(playable_members - room.ready_users)
-                missing_online = sorted(playable_members - room.connected_users.keys())
                 if room.status != "lobby":
                     room.release_action()
                     await _reject(
@@ -546,30 +598,52 @@ async def run_room_message_loop(
                         "房间已经开始游戏",
                     )
                     continue
-                if missing_claims or missing_ready or missing_online:
+                if solo_start:
+                    # 私密单人世界跳过 ready/claims/online 全量门禁，
+                    # 仅要求房主本人已连接（发起者即房主，此为防御性检查）。
+                    if room.owner_user_id not in room.connected_users:
+                        room.release_action()
+                        await _reject(
+                            ws,
+                            "owner_offline",
+                            "房主不在线，无法开始游戏",
+                        )
+                        continue
+                else:
+                    missing_claims = sorted(playable_members - claims_by_user.keys())
+                    missing_ready = sorted(playable_members - room.ready_users)
+                    missing_online = sorted(playable_members - room.connected_users.keys())
+                    if missing_claims or missing_ready or missing_online:
+                        room.release_action()
+                        await ws.send_json(
+                            {
+                                "type": "room_action_rejected",
+                                "code": "room_not_ready",
+                                "message": "所有玩家选择调查员并准备后才能开始",
+                                "missing_claim_user_ids": missing_claims,
+                                "missing_ready_user_ids": missing_ready,
+                                "missing_online_user_ids": missing_online,
+                            }
+                        )
+                        continue
+                    if any(
+                        str((item.get("character_ref") or {}).get("source") or "")
+                        in {"profile", "custom"}
+                        for item in roster
+                    ):
+                        room.release_action()
+                        await _reject(
+                            ws,
+                            "personal_character_unavailable",
+                            "联机模式暂不读取服务器上的本地长期或自定义角色；请改选默认或模组调查员",
+                        )
+                        continue
+            if message_type in GUARDED_TURN_TYPES:
+                try:
+                    check_action_guards(user.id, world_id, action_id)
+                except MultiplayerError as exc:
                     room.release_action()
-                    await ws.send_json(
-                        {
-                            "type": "room_action_rejected",
-                            "code": "room_not_ready",
-                            "message": "所有玩家选择调查员并准备后才能开始",
-                            "missing_claim_user_ids": missing_claims,
-                            "missing_ready_user_ids": missing_ready,
-                            "missing_online_user_ids": missing_online,
-                        }
-                    )
-                    continue
-                if any(
-                    str((item.get("character_ref") or {}).get("source") or "")
-                    in {"profile", "custom"}
-                    for item in roster
-                ):
-                    room.release_action()
-                    await _reject(
-                        ws,
-                        "personal_character_unavailable",
-                        "联机模式暂不读取服务器上的本地长期或自定义角色；请改选默认或模组调查员",
-                    )
+                    await _reject(ws, exc.code, str(exc))
                     continue
             try:
                 reserve_room_action(
@@ -582,10 +656,14 @@ async def run_room_message_loop(
                 )
             except MultiplayerError as exc:
                 room.release_action()
+                if message_type in GUARDED_TURN_TYPES:
+                    USER_TURN_GUARD.release(user.id, world_id, action_id)
                 await _reject(ws, exc.code, str(exc))
                 continue
             except Exception:
                 room.release_action()
+                if message_type in GUARDED_TURN_TYPES:
+                    USER_TURN_GUARD.release(user.id, world_id, action_id)
                 await _reject(
                     ws,
                     "reservation_unavailable",
@@ -593,6 +671,14 @@ async def run_room_message_loop(
                 )
                 continue
             data["_room_reserved_action"] = True
+            if message_type in GUARDED_TURN_TYPES:
+                logger.info(
+                    "房间生成行动已登记 user_id=%s world_id=%s action_id=%s type=%s",
+                    user.id,
+                    world_id,
+                    action_id,
+                    message_type,
+                )
             if message_type == "start":
                 controller.set_room_status(room, "starting")
                 room.control_action_active = True

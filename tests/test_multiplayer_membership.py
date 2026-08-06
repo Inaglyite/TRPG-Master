@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from src.auth import (
@@ -23,6 +23,7 @@ from src.auth import (
 )
 from src.auth_http import AuthHttpDependencies, create_auth_router
 from src.database import (
+    AuditEvent,
     Base,
     RoomAction,
     Turn,
@@ -39,6 +40,7 @@ from src.database_store import DatabaseWorldStore
 from src.multiplayer import (
     MultiplayerError,
     accept_invite,
+    archive_world,
     claim_investigator,
     create_invite,
     finish_room_action,
@@ -47,6 +49,7 @@ from src.multiplayer import (
     release_investigator,
     remove_member,
     reserve_room_action,
+    revoke_invite,
     room_members,
     transfer_owner,
     update_member_role,
@@ -139,12 +142,15 @@ def test_turn_recovery_payload_uses_public_records_and_enriches_assets():
         },
     )
 
-    with patch(
-        "src.multiplayer_recovery.enrich_public_history_record",
-        side_effect=lambda record, _engine: dict(record),
-    ), patch(
-        "src.multiplayer_recovery.asset_payload",
-        return_value={"asset_url": "/api/assets/letter.png"},
+    with (
+        patch(
+            "src.multiplayer_recovery.enrich_public_history_record",
+            side_effect=lambda record, _engine: dict(record),
+        ),
+        patch(
+            "src.multiplayer_recovery.asset_payload",
+            return_value={"asset_url": "/api/assets/letter.png"},
+        ),
     ):
         payload = turn_recovery_payload(engine, "turn-public")
 
@@ -979,9 +985,7 @@ def test_unclaimed_owner_state_request_never_falls_back_to_active_player():
                 )
 
     asyncio.run(scenario())
-    state_payload = next(
-        payload for payload in socket.messages if payload["type"] == "state_data"
-    )
+    state_payload = next(payload for payload in socket.messages if payload["type"] == "state_data")
     assert json.loads(state_payload["data"]) == {}
     assert secret not in state_payload["data"]
     assert secret not in state_payload["clues"]
@@ -1056,9 +1060,10 @@ def test_current_actor_member_mutation_is_serialized_with_turn_and_prompt(
             room.clear_pending_reply()
 
             room.set_pending_reply("decision", "user-defender", request_id="defend-1")
-            defender_lease, defender_rejection = (
-                await server._reserve_current_actor_member_mutation(defender_request)
-            )
+            (
+                defender_lease,
+                defender_rejection,
+            ) = await server._reserve_current_actor_member_mutation(defender_request)
             room.clear_pending_reply()
 
             combat_world_state["combat_state"] = {
@@ -1067,11 +1072,9 @@ def test_current_actor_member_mutation_is_serialized_with_turn_and_prompt(
                     {"id": "inv-defender", "kind": "pc"},
                 ],
             }
-            combat_world_state["investigator_controllers"] = {
-                "user-defender": "inv-defender"
-            }
-            combat_lease, combat_rejection = (
-                await server._reserve_current_actor_member_mutation(defender_request)
+            combat_world_state["investigator_controllers"] = {"user-defender": "inv-defender"}
+            combat_lease, combat_rejection = await server._reserve_current_actor_member_mutation(
+                defender_request
             )
             combat_world_state["combat_state"] = {"active": False}
 
@@ -1231,9 +1234,7 @@ def test_start_revalidates_roster_after_room_action_lease():
         asyncio.run(scenario())
 
     rejection = next(
-        message
-        for message in socket.messages
-        if message.get("type") == "room_action_rejected"
+        message for message in socket.messages if message.get("type") == "room_action_rejected"
     )
     assert rejection["code"] == "room_not_ready"
     assert rejection["missing_claim_user_ids"] == ["player"]
@@ -2694,6 +2695,8 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 )
                 duplicate = _receive_until(player_ws, "room_action_rejected")
                 assert duplicate["code"] == "duplicate_action"
+
+
 def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
     """Every /ws/room entry gets exactly one theme frame for the current world.
 
@@ -2755,9 +2758,7 @@ def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
             }
         )
         await transport.send_json({"type": "character_list", "groups": []})
-        await transport.send_json(
-            {"type": "theme", "theme": fake_load_theme(_engine.context)}
-        )
+        await transport.send_json({"type": "theme", "theme": fake_load_theme(_engine.context)})
         await transport.send_json({"type": "model_settings"})
         await transport.send_json({"type": "save_list", "saves": _engine.list_saves()})
         try:
@@ -2786,9 +2787,7 @@ def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
         patch.object(server, "run_ws_session", new=fake_room_driver),
         patch.object(server, "_load_theme", side_effect=fake_load_theme),
         patch.object(server, "_list_mods", return_value=[]),
-        patch.object(
-            server, "_model_settings_payload", return_value={"type": "model_settings"}
-        ),
+        patch.object(server, "_model_settings_payload", return_value={"type": "model_settings"}),
         patch.object(multiplayer_ws, "list_character_options", return_value={"groups": []}),
         TestClient(server.app, base_url="https://testserver") as client,
     ):
@@ -2833,3 +2832,379 @@ def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
                 player_themes = theme_frames(collect_until_save_list(player_ws))
                 assert len(player_themes) == 1
                 assert player_themes[0]["theme"]["title"] == "theme-mansion_of_madness"
+
+
+def test_owner_archive_world_is_logical_delete_and_revokes_invites(tmp_path: Path):
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    env = {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_REQUIRE_AUTH": "1",
+        "TRPG_ALLOW_REGISTRATION": "1",
+        "TRPG_ALLOWED_ORIGINS": "https://testserver",
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
+    }
+    headers = {"origin": "https://testserver"}
+    with patch.dict(os.environ, env), patch.object(server, "DATABASE_URL", url):
+        with TestClient(server.app, base_url="https://testserver") as owner_client:
+            assert (
+                owner_client.post(
+                    "/api/auth/register",
+                    json={"username": "del_owner", "password": "owner password 123"},
+                ).status_code
+                == 201
+            )
+            created = owner_client.post(
+                "/api/worlds",
+                json={"module": "mansion_of_madness", "name": "待删房间"},
+                headers=headers,
+            ).json()
+            world_id = created["world_id"]
+            invite = owner_client.post(
+                f"/api/worlds/{world_id}/invites",
+                json={"max_uses": 2},
+                headers=headers,
+            ).json()
+
+            with TestClient(server.app, base_url="https://testserver") as player_client:
+                assert (
+                    player_client.post(
+                        "/api/auth/register",
+                        json={"username": "del_player", "password": "player password 123"},
+                    ).status_code
+                    == 201
+                )
+                accepted = player_client.post(
+                    "/api/invites/accept",
+                    json={"token": invite["token"]},
+                    headers=headers,
+                )
+                assert accepted.status_code == 200
+                # 非 owner 删除 -> 403 owner_required
+                denied = player_client.delete(f"/api/worlds/{world_id}", headers=headers)
+                assert denied.status_code == 403
+                assert denied.json()["code"] == "owner_required"
+
+            # 未登录 -> 401
+            with TestClient(server.app, base_url="https://testserver") as anonymous:
+                assert (
+                    anonymous.delete(f"/api/worlds/{world_id}", headers=headers).status_code == 401
+                )
+
+            # 世界不存在 -> 404 world_not_found
+            missing = owner_client.delete("/api/worlds/world-missing", headers=headers)
+            assert missing.status_code == 404
+            assert missing.json()["code"] == "world_not_found"
+
+            # room_status=playing -> 409 room_active
+            with session_scope(url) as session:
+                world = session.get(World, world_id)
+                world.metadata_json = {
+                    **dict(world.metadata_json or {}),
+                    "room_status": "playing",
+                }
+            # 非房主在活动状态下删除 -> 403（owner 校验先于活动状态检查，
+            # 非房主/非成员无法探测房间是否忙碌，只能得到 403 而非 409）
+            with TestClient(server.app, base_url="https://testserver") as snooper:
+                snooper.post(
+                    "/api/auth/register",
+                    json={"username": "del_snooper", "password": "snooper password 123"},
+                )
+                probe = snooper.delete(f"/api/worlds/{world_id}", headers=headers)
+                assert probe.status_code == 403
+                assert probe.json()["code"] == "not_a_member"
+            active = owner_client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert active.status_code == 409
+            assert active.json()["code"] == "room_active"
+
+            # 回到 lobby 后删除 -> 204
+            with session_scope(url) as session:
+                world = session.get(World, world_id)
+                world.metadata_json = {
+                    **dict(world.metadata_json or {}),
+                    "room_status": "lobby",
+                }
+            deleted = owner_client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert deleted.status_code == 204
+
+            # 幂等：已归档再删 -> 204
+            again = owner_client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert again.status_code == 204
+
+            # 逻辑删除：world/turn/member/audit 行保留，仅 status=archived
+            with session_scope(url) as session:
+                world = session.get(World, world_id)
+                assert world is not None
+                assert world.status == "archived"
+                invite_row = session.get(WorldInvite, invite["invite_id"])
+                assert invite_row is not None
+                assert invite_row.revoked_at is not None
+                audit_rows = (
+                    session.query(AuditEvent)
+                    .filter_by(world_id=world_id, event_type="world_archived")
+                    .all()
+                )
+                assert len(audit_rows) == 1
+                assert audit_rows[0].details["invites_revoked"] == 1
+                member_count = session.query(WorldMember).filter_by(world_id=world_id).count()
+                assert member_count >= 2
+
+            # 从正常房间列表移除
+            listed = owner_client.get("/api/worlds", headers=headers).json()
+            assert world_id not in {item["world_id"] for item in listed["worlds"]}
+
+            # 迟到邀请接受 -> 邀请已撤销 410（删除时撤销了未撤销邀请）
+            with TestClient(server.app, base_url="https://testserver") as stranger:
+                stranger.post(
+                    "/api/auth/register",
+                    json={"username": "del_stranger", "password": "stranger password 123"},
+                )
+                late = stranger.post(
+                    "/api/invites/accept",
+                    json={"token": invite["token"]},
+                    headers=headers,
+                )
+                assert late.status_code == 410
+                assert late.json()["code"] == "invite_revoked"
+
+
+def test_archive_world_tears_down_loaded_room_and_blocks_rejoin(tmp_path: Path):
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    env = {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_REQUIRE_AUTH": "1",
+        "TRPG_ALLOW_REGISTRATION": "1",
+        "TRPG_ALLOWED_ORIGINS": "https://testserver",
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
+    }
+    headers = {"origin": "https://testserver"}
+    manager = RoomManager()
+
+    class FakeEngine:
+        def __init__(self, context):
+            self.context = context
+            self.narrative_model = "test-narrative"
+            self.judgement_model = "test-judgement"
+
+        def configure_models(self, narrative, judgement):
+            self.narrative_model = narrative
+            self.judgement_model = judgement
+
+        def prepare_session(self):
+            return None
+
+        def list_saves(self):
+            return []
+
+    def engine_factory(*args, **_kwargs):
+        return FakeEngine(*args)
+
+    async def fake_room_driver(transport, _engine, *, user_id=None):
+        del user_id
+        try:
+            while True:
+                await transport.receive_text()
+        except RuntimeError:
+            return
+
+    with (
+        patch.dict(os.environ, env),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        patch.object(server, "GameEngine", side_effect=engine_factory),
+        patch.object(server, "run_ws_session", new=fake_room_driver),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        registered = client.post(
+            "/api/auth/register",
+            json={"username": "teardown_owner", "password": "owner password 123"},
+        )
+        owner_id = registered.json()["id"]
+        owner_cookie = client.cookies.get("trpg_session")
+        created = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "name": "拆除房"},
+            headers=headers,
+        ).json()
+        world_id = created["world_id"]
+
+        with client.websocket_connect(
+            f"/ws/room?world_id={world_id}",
+            headers={**headers, "cookie": f"trpg_session={owner_cookie}"},
+        ) as ws:
+            _receive_until(ws, "room_state")
+            room = asyncio.run(manager.get(world_id))
+            assert room is not None
+
+            # 进行中行动 -> 409 room_active（持久层 RoomAction.status==running，
+            # 即使 room_status 是 lobby）
+            reserve_room_action(url, world_id, "teardown-probe", owner_id, "action")
+            busy = client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert busy.status_code == 409
+            assert busy.json()["code"] == "room_active"
+            finish_room_action(url, world_id, "teardown-probe", "completed")
+
+            # 已加载房间处于 playing（DB metadata 仍为 lobby，可能滞后）-> 409
+            room.status = "playing"
+            stale = client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert stale.status_code == 409
+            assert stale.json()["code"] == "room_active"
+            room.status = "lobby"
+
+            # 已加载且有人连接（lobby）仍允许删除 -> 204
+            deleted = client.delete(f"/api/worlds/{world_id}", headers=headers)
+            assert deleted.status_code == 204
+
+            # 已加载房间广播 room_deleted 并以 4404 断开全部连接
+            deleted_msg = _receive_until(ws, "room_deleted")
+            assert deleted_msg["world_id"] == world_id
+            with pytest.raises(WebSocketDisconnect) as exc:
+                for _ in range(5):
+                    ws.receive_json()
+            assert exc.value.code == 4404
+
+            # RoomManager 不再提供该世界
+            assert asyncio.run(manager.get(world_id)) is None
+
+            # 迟到 WS 加入 -> 房间不存在（4404 关闭，world_not_found 语义）
+            with pytest.raises(WebSocketDisconnect) as exc:
+                with client.websocket_connect(
+                    f"/ws/room?world_id={world_id}",
+                    headers={**headers, "cookie": f"trpg_session={owner_cookie}"},
+                ) as late_ws:
+                    _receive_until(late_ws, "room_state")
+            assert exc.value.code == 4404
+
+
+def test_archived_world_rejects_claim_release_list_revoke_for_owner_and_member(
+    tmp_path: Path,
+):
+    """归档后旧 owner/member 的世界级操作一律 404 world_not_found。
+
+    回归护栏：_require_world 把 status != active 的世界当作不存在，因此
+    revoke_invite / list_invites / claim_investigator / release_investigator
+    在成员/房主校验之外先被一致拒绝；归档本身幂等。
+    """
+    url = sqlite_url(tmp_path)
+    owner, player, _stranger = seed_accounts_and_world(url)
+    invite = create_invite(url, "world-room", owner.id, max_uses=1)
+    accept_invite(url, invite["token"], player.id)
+    claim = claim_investigator(url, "world-room", "detective-owner", owner.id)
+
+    archived = archive_world(url, "world-room", owner.id)
+    assert archived == {"world_id": "world-room", "status": "archived"}
+
+    # 旧 owner：list / revoke / claim / release 全部 404 world_not_found
+    for operation in (
+        lambda: list_invites(url, "world-room", owner.id),
+        lambda: revoke_invite(url, "world-room", invite["invite_id"], owner.id),
+        lambda: claim_investigator(url, "world-room", "detective-owner", owner.id),
+        lambda: release_investigator(url, "world-room", claim["id"], owner.id),
+    ):
+        with pytest.raises(MultiplayerError) as exc:
+            operation()
+        assert exc.value.code == "world_not_found"
+        assert exc.value.status_code == 404
+
+    # 旧 member（非 owner）：成员行仍在但世界不可见，claim / release 同 404
+    for operation in (
+        lambda: claim_investigator(url, "world-room", "detective-player", player.id),
+        lambda: release_investigator(url, "world-room", claim["id"], player.id),
+    ):
+        with pytest.raises(MultiplayerError) as exc:
+            operation()
+        assert exc.value.code == "world_not_found"
+        assert exc.value.status_code == 404
+
+    # 归档幂等：再次归档成功且标记 already_archived
+    again = archive_world(url, "world-room", owner.id)
+    assert again["already_archived"] is True
+    assert again["status"] == "archived"
+
+
+def test_archived_world_http_claim_rejected_before_runtime_context_and_delete_idempotent(
+    tmp_path: Path,
+):
+    """HTTP claim 在 RuntimeContext.create / list_character_options 之前被拒。
+
+    回归护栏：/api/worlds/{id}/investigators/claim 的 prefetch 阶段检查
+    world.status == "active"，归档后必须 404 且绝不进入运行环境构建；
+    DELETE /api/worlds/{id} 对已归档世界幂等返回 204。
+    """
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    env = {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_REQUIRE_AUTH": "1",
+        "TRPG_ALLOW_REGISTRATION": "1",
+        "TRPG_ALLOWED_ORIGINS": "https://testserver",
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        "TRPG_ROOM_IDLE_SECONDS": "0",
+    }
+    headers = {"origin": "https://testserver"}
+    with patch.dict(os.environ, env), patch.object(server, "DATABASE_URL", url):
+        with TestClient(server.app, base_url="https://testserver") as owner_client:
+            assert (
+                owner_client.post(
+                    "/api/auth/register",
+                    json={"username": "guard_owner", "password": "owner password 123"},
+                ).status_code
+                == 201
+            )
+            created = owner_client.post(
+                "/api/worlds",
+                json={"module": "mansion_of_madness", "name": "守卫房间"},
+                headers=headers,
+            ).json()
+            world_id = created["world_id"]
+            invite = owner_client.post(
+                f"/api/worlds/{world_id}/invites",
+                json={"max_uses": 1},
+                headers=headers,
+            ).json()
+
+            with TestClient(server.app, base_url="https://testserver") as player_client:
+                assert (
+                    player_client.post(
+                        "/api/auth/register",
+                        json={"username": "guard_player", "password": "player password 123"},
+                    ).status_code
+                    == 201
+                )
+                accepted = player_client.post(
+                    "/api/invites/accept",
+                    json={"token": invite["token"]},
+                    headers=headers,
+                )
+                assert accepted.status_code == 200
+
+                # 归档 -> 204；幂等：已归档再删 -> 204
+                deleted = owner_client.delete(f"/api/worlds/{world_id}", headers=headers)
+                assert deleted.status_code == 204
+                again = owner_client.delete(f"/api/worlds/{world_id}", headers=headers)
+                assert again.status_code == 204
+
+                # claim 的 prefetch 在构建 RuntimeContext / 读取角色表之前拒绝
+                with (
+                    patch("src.multiplayer_http.RuntimeContext.create") as fake_create,
+                    patch("src.multiplayer_http.list_character_options") as fake_options,
+                ):
+                    for client in (owner_client, player_client):
+                        denied = client.post(
+                            f"/api/worlds/{world_id}/investigators/claim",
+                            json={"character_key": "detective-guard"},
+                            headers=headers,
+                        )
+                        assert denied.status_code == 404
+                        assert denied.json()["code"] == "world_not_found"
+                    fake_create.assert_not_called()
+                    fake_options.assert_not_called()

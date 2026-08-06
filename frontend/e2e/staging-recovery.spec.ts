@@ -26,7 +26,7 @@ test("服务重启后恢复房间历史、行动权和存档", async ({ page }) 
   await expect(page.locator(".online-subtitle").first()).toContainText(
     worldId!,
   );
-  await expect(page.getByTestId("game-room-bar")).toBeVisible();
+  await expect(page.getByTestId("online-room-dock")).toBeVisible();
   await expect(
     page.getByText(/验收行动-.*我检查门锁和附近的脚印/),
   ).toBeVisible();

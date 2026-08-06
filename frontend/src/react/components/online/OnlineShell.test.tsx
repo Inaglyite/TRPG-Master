@@ -11,8 +11,10 @@ vi.mock("../../../online", () => ({
   assignActor: vi.fn(),
   checkSession: vi.fn().mockResolvedValue(undefined),
   enterLobby: vi.fn(),
+  enterSoloLobby: vi.fn(),
   initOnlineSession: vi.fn(() => () => {}),
   resumeLastRoom: vi.fn(),
+  startGame: vi.fn(),
 }));
 
 vi.mock("../../../room-ws", () => ({
@@ -26,6 +28,10 @@ vi.mock("./AuthScreen", () => ({
 
 vi.mock("./LobbyScreen", () => ({
   LobbyScreen: () => <div data-testid="lobby-screen" />,
+}));
+
+vi.mock("./SoloLobbyScreen", () => ({
+  SoloLobbyScreen: () => <div data-testid="solo-lobby-screen" />,
 }));
 
 vi.mock("./RoomScreen", () => ({
@@ -61,6 +67,7 @@ function setupOnline(patch: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState({}, "", "/");
   setupOnline({ view: "auth", activeWorldId: null, roomStatus: null });
 });
 
@@ -69,30 +76,27 @@ describe("OnlineShell 界面切换", () => {
     setupOnline({ roomStatus: "waiting" });
     render(<OnlineShell />);
     expect(screen.getByTestId("room-screen")).toBeInTheDocument();
-    expect(screen.queryByTestId("game-room-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("online-shell")).toBeInTheDocument();
   });
 
-  it("playing 后切换到游戏房间条，不再覆盖游戏界面", () => {
+  it("playing 后不渲染任何覆盖层（房间状态由 OnlineRoomDock 呈现）", () => {
     setupOnline({ roomStatus: "playing", currentActorUserId: "u2" });
-    render(<OnlineShell />);
-    expect(screen.getByTestId("game-room-bar")).toBeInTheDocument();
+    const { container } = render(<OnlineShell />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("online-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
-    expect(screen.getByText("等待 bob 行动…")).toBeInTheDocument();
   });
 
-  it("playing + 轮到自己时显示轮到你行动", () => {
-    setupOnline({ roomStatus: "playing", currentActorUserId: "u1" });
+  it("playing + roomOpen 时渲染房间管理页，返回游戏后关闭", () => {
+    setupOnline({
+      roomStatus: "playing",
+      currentActorUserId: "u2",
+      roomOpen: true,
+    });
     render(<OnlineShell />);
-    expect(screen.getByText("轮到你行动")).toBeInTheDocument();
-  });
-
-  it("从房间条打开房间页，再返回游戏", () => {
-    setupOnline({ roomStatus: "playing", currentActorUserId: "u2" });
-    render(<OnlineShell />);
-    fireEvent.click(screen.getByRole("button", { name: "房间" }));
     expect(screen.getByTestId("room-screen")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回游戏" }));
-    expect(screen.getByTestId("game-room-bar")).toBeInTheDocument();
+    expect(useOnlineStore.getState().roomOpen).toBe(false);
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
@@ -106,8 +110,8 @@ describe("OnlineShell 界面切换", () => {
     expect(disconnectRoom).not.toHaveBeenCalled();
 
     act(() => useOnlineStore.setState({ roomStatus: "playing" }));
-    expect(screen.getByTestId("game-room-bar")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "房间" }));
+    act(() => useOnlineStore.setState({ roomOpen: true }));
+    expect(screen.getByTestId("room-screen")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回游戏" }));
 
     expect(connectRoom).toHaveBeenCalledTimes(1);
@@ -117,32 +121,77 @@ describe("OnlineShell 界面切换", () => {
     expect(disconnectRoom).toHaveBeenCalledTimes(1);
     unmount();
   });
+});
 
-  it("房主可以跳过当前行动者（循环指定下一位玩家）", async () => {
-    const { assignActor } = await import("../../../online");
-    setupOnline({ roomStatus: "playing", currentActorUserId: "u1" });
+describe("OnlineShell 云端单人", () => {
+  it("view=solo 渲染我的冒险", () => {
+    setupOnline({ view: "solo", activeWorldId: null, roomStatus: null });
     render(<OnlineShell />);
-    fireEvent.click(screen.getByRole("button", { name: "跳过行动者" }));
-    expect(assignActor).toHaveBeenCalledWith("u2");
+    expect(screen.getByTestId("solo-lobby-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
-  it("非房主不显示跳过按钮", () => {
+  it("solo 房间 lobby 状态渲染自动开局页而非 RoomScreen", () => {
     setupOnline({
-      roomStatus: "playing",
-      currentActorUserId: "u2",
+      roomStatus: "lobby",
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
       members: [
-        {
-          user_id: "u1",
-          username: "alice",
-          role: "player",
-          investigator: null,
-        },
-        { user_id: "u2", username: "bob", role: "owner", investigator: null },
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
       ],
     });
     render(<OnlineShell />);
-    expect(
-      screen.queryByRole("button", { name: "跳过行动者" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("solo-start-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
+  });
+
+  it("solo 房间连接且 lobby 时自动开局（每个世界一次）", async () => {
+    const { startGame } = await import("../../../online");
+    setupOnline({
+      roomStatus: "lobby",
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+      ],
+    });
+    render(<OnlineShell />);
+    expect(startGame).toHaveBeenCalledTimes(1);
+
+    // room_state 重放 lobby 不重复发送 start。
+    act(() => useOnlineStore.setState({ readyUserIds: ["u1"] }));
+    expect(startGame).toHaveBeenCalledTimes(1);
+  });
+
+  it("多人房间不自动开局", async () => {
+    const { startGame } = await import("../../../online");
+    setupOnline({ roomStatus: "lobby" });
+    render(<OnlineShell />);
+    expect(startGame).not.toHaveBeenCalled();
+  });
+
+  it("solo 房间 playing 后不渲染覆盖层，roomOpen 被兜底关闭", () => {
+    setupOnline({
+      roomStatus: "playing",
+      roomOpen: true,
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+      ],
+    });
+    const { container } = render(<OnlineShell />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
+    expect(useOnlineStore.getState().roomOpen).toBe(false);
+  });
+
+  it("从 solo 大厅进房、元数据未加载时不闪现多人等待页", () => {
+    setupOnline({
+      pendingIntent: "solo",
+      roomStatus: null,
+      roomMetadata: null,
+      roomConnection: "connecting",
+    });
+    render(<OnlineShell />);
+    expect(screen.getByTestId("solo-start-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 });

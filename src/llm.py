@@ -6,6 +6,7 @@ import random
 from openai import OpenAI
 
 from .config import GLM_API_KEY, GLM_BASE_URL, GLM_MODEL, model_timeout_seconds
+from .llm_concurrency import llm_call_slot
 
 # ---------------------------------------------------------------------------
 # 沉浸式等待文本
@@ -108,15 +109,16 @@ def glm_quick_summary(tool_outputs: list[tuple[str, str]], model_context: str) -
     )
 
     try:
-        resp = glm.chat.completions.create(
-            model=GLM_MODEL,
-            messages=[
-                {"role": "system", "content": "你是TRPG游戏检定播报员。用简洁有画面感的中文叙述检定结果。1-2句。不提问，不给选项。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=80,
-        )
+        with llm_call_slot(model=GLM_MODEL):
+            resp = glm.chat.completions.create(
+                model=GLM_MODEL,
+                messages=[
+                    {"role": "system", "content": "你是TRPG游戏检定播报员。用简洁有画面感的中文叙述检定结果。1-2句。不提问，不给选项。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=80,
+            )
         return resp.choices[0].message.content
     except Exception:
         return None

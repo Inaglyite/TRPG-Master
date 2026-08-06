@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .llm_concurrency import LlmBusyError, acquire_llm_slot
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
 from .speaker_parser import (
@@ -166,14 +167,25 @@ class ModelStreamer:
         if policy.thinking_type:
             kwargs["extra_body"] = {"thinking": {"type": policy.thinking_type}}
 
+        llm_slot = None
         try:
+            llm_slot = acquire_llm_slot(
+                model=model,
+                world_id=str(getattr(getattr(host, "context", None), "world_id", "") or ""),
+            )
             provider_stream = host.client.chat.completions.create(**kwargs)
         except Exception as exc:
+            if llm_slot is not None:
+                llm_slot.release(status="failed")
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型请求已取消") from exc
             self._diagnose(host, model, request_role, "request_error", started_at, None,
                            "request_error", 0, messages, context_sections, {}, policy,
                            error_type=type(exc).__name__)
+            if isinstance(exc, LlmBusyError):
+                self.log_error(f"模型并发已满: {exc}")
+                host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
+                return "", []
             if retry_on_empty:
                 self.log_error(f"API 建立流失败，正在重试: {exc}")
                 self.sleep(0.4)
@@ -314,6 +326,9 @@ class ModelStreamer:
             host.cb.on_error("模型连接中断，已保留本轮收到的内容。")
         finally:
             host._clear_active_stream(provider_stream)
+            if llm_slot is not None:
+                # Hold the global slot across the whole stream, not just connect.
+                llm_slot.release()
 
         trailing_public = protocol_filter.flush()
         full_text += trailing_public

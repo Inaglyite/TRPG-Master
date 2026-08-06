@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from .llm_concurrency import llm_call_slot
 from .logger import summary_event as log_summary
 
 
@@ -173,15 +174,16 @@ class HistoryCompactor:
         )
         for attempt in range(2):
             try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "你是TRPG记录员。保证信息完整。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.3,
-                    max_tokens=3000,
-                )
+                with llm_call_slot(model=model):
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": "你是TRPG记录员。保证信息完整。"},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,
+                        max_tokens=3000,
+                    )
                 raw = response.choices[0].message.content.strip()
             except Exception:
                 if attempt == 0:

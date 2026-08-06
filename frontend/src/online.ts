@@ -11,6 +11,7 @@ import {
   claimInvestigator,
   createInvite,
   createWorld,
+  deleteWorld,
   getInvestigatorOptions,
   getRoomInfo,
   listInvites,
@@ -241,10 +242,19 @@ export async function ensureModules(): Promise<void> {
 }
 
 export async function enterLobby(): Promise<void> {
+  await enterWorldList("lobby");
+}
+
+/** 云端单人“我的冒险”：与多人大厅共用世界列表数据，但落在 solo 视图。 */
+export async function enterSoloLobby(): Promise<void> {
+  await enterWorldList("solo");
+}
+
+async function enterWorldList(view: "lobby" | "solo"): Promise<void> {
   disconnectRoom();
   bumpOnlineRequestEpoch();
   useOnlineStore.setState({
-    view: "lobby",
+    view,
     activeWorldId: null,
     roomModule: null,
     roomMetadata: null,
@@ -269,6 +279,7 @@ export async function enterLobby(): Promise<void> {
     roomError: null,
     joinError: null,
     createError: null,
+    roomOpen: false,
   });
   await Promise.all([refreshWorlds(), ensureModules()]);
 }
@@ -295,6 +306,64 @@ export async function createRoom(
       createError: errorMessage(error, "创建房间失败，请重试"),
     });
   }
+}
+
+/**
+ * 新建云端私密单人冒险：play_mode=solo，服务端固定 max_players=1。
+ * 创建成功后直接进房（solo 房间流由 OnlineShell 自动开局）。
+ */
+export async function createSoloWorld(
+  module: string,
+  name: string,
+): Promise<void> {
+  const scope = captureRequestScope();
+  useOnlineStore.setState({ createBusy: true, createError: null });
+  try {
+    const world = await createWorld(module, {
+      ...(name.trim() ? { name: name.trim() } : {}),
+      max_players: 1,
+      play_mode: "solo",
+    });
+    if (!requestScopeIsCurrent(scope)) return;
+    useOnlineStore.setState({ createBusy: false });
+    await enterRoom(world.world_id);
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
+    useOnlineStore.setState({
+      createBusy: false,
+      createError: errorMessage(error, "创建冒险失败，请重试"),
+    });
+  }
+}
+
+/**
+ * 删除（逻辑归档）云端单人存档。与 deleteCurrentRoom 不同：调用时在
+ * “我的冒险”列表而非房间内，成功后留在 solo 视图并刷新列表。
+ */
+export async function deleteSoloWorld(worldId: string): Promise<boolean> {
+  const scope = captureRequestScope();
+  useOnlineStore.setState({ createError: null });
+  try {
+    await deleteWorld(worldId);
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return false;
+    const message =
+      error instanceof ApiError && error.status === 409
+        ? "游戏进行中无法删除存档，请先结束当前游戏"
+        : errorMessage(error, "删除存档失败，请重试");
+    useOnlineStore.setState({ createError: message });
+    return false;
+  }
+  if (!requestScopeIsCurrent(scope)) return true;
+  try {
+    if (localStorage.getItem(LAST_ROOM_KEY) === worldId) {
+      localStorage.removeItem(LAST_ROOM_KEY);
+    }
+  } catch {
+    /* localStorage 不可用不影响服务端已经完成的归档 */
+  }
+  await refreshWorlds();
+  return true;
 }
 
 export async function joinWithToken(token: string): Promise<void> {
@@ -358,6 +427,7 @@ export async function enterRoom(worldId: string): Promise<void> {
     activeInvestigatorId: null,
     roomBusy: false,
     roomError: null,
+    roomOpen: false,
   });
   await refreshRoom();
 }
@@ -489,6 +559,39 @@ export async function leaveRoom(): Promise<boolean> {
     /* localStorage 不可用不影响服务端已经完成的退出 */
   }
   useOnlineStore.setState({ roomBusy: false });
+  await enterLobby();
+  return true;
+}
+
+/**
+ * 房主删除（逻辑归档）当前房间。204 幂等成功后清掉“上次房间”本地记忆并回大厅；
+ * 服务端随后会以 4404 断开房间 WS（room-ws 已处理回大厅），这里走 HTTP 成功路径先行离开。
+ * 活动房间被服务端 409 room_active 拒绝时留在房间页并显示错误。
+ */
+export async function deleteCurrentRoom(): Promise<boolean> {
+  const { activeWorldId, user } = useOnlineStore.getState();
+  if (!activeWorldId || !user) return false;
+  const scope = captureRequestScope(activeWorldId);
+  useOnlineStore.setState({ roomBusy: true, roomError: null });
+  try {
+    await deleteWorld(activeWorldId);
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return false;
+    const message =
+      error instanceof ApiError && error.status === 409
+        ? "游戏进行中无法删除房间，请先结束当前游戏"
+        : errorMessage(error, "删除房间失败，请重试");
+    useOnlineStore.setState({ roomBusy: false, roomError: message });
+    return false;
+  }
+  // 请求期间用户可能已切房/退出：旧房间的迟到 204 绝不能清掉新房间的
+  // 本地记忆或把新房间踢回大厅（与 leaveRoom 成功路径同一门禁）。
+  if (!requestScopeIsCurrent(scope)) return true;
+  try {
+    localStorage.removeItem(LAST_ROOM_KEY);
+  } catch {
+    /* localStorage 不可用不影响服务端已经完成的归档 */
+  }
   await enterLobby();
   return true;
 }

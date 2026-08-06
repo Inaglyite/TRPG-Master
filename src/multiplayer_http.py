@@ -25,7 +25,9 @@ from .multiplayer import (
     room_members,
     transfer_owner,
     update_member_role,
+    world_play_mode,
 )
+from .multiplayer_archive_http import register_archive_world_route
 from .multiplayer_private_state import release_world_controller
 from .multiplayer_room_events import broadcast_investigator_change
 from .multiplayer_world_creation import create_owned_world
@@ -54,13 +56,10 @@ def _error(exc: MultiplayerError) -> JSONResponse:
     )
 
 
-def create_multiplayer_http_router(
-    deps: MultiplayerHttpDependencies,
-) -> APIRouter:
+def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRouter:
     router = APIRouter()
-
-    def db_url() -> str:
-        return deps.database_url()
+    db_url = deps.database_url
+    register_archive_world_route(router, database_url=db_url, room_manager=deps.room_manager)
 
     @router.get("/api/worlds")
     async def owned_worlds(request: Request):
@@ -85,6 +84,7 @@ def create_multiplayer_http_router(
                         "name": str((world.metadata_json or {}).get("name") or ""),
                         "status": str((world.metadata_json or {}).get("room_status") or "lobby"),
                         "max_players": int((world.metadata_json or {}).get("max_players") or 4),
+                        "play_mode": world_play_mode(world.metadata_json),
                         "member_count": session.query(WorldMember)
                         .filter_by(world_id=world.id)
                         .count(),
@@ -332,7 +332,7 @@ def create_multiplayer_http_router(
         try:
             with session_scope(db_url()) as db_session:
                 world = db_session.get(World, world_id)
-                if world is None:
+                if world is None or world.status != "active":
                     raise MultiplayerError("world_not_found", "房间不存在", 404)
                 module_name = world.module_name
             context = RuntimeContext.create(

@@ -6,6 +6,7 @@ import { MessageList } from "./components/MessageList";
 import { ModeSelectScreen } from "./components/ModeSelectScreen";
 import { ModelSettingsPanel } from "./components/ModelSettingsPanel";
 import { OnlineShell } from "./components/online/OnlineShell";
+import { OnlineRoomDock } from "./components/online/OnlineRoomDock";
 import {
   CharacterPanel,
   HandoutLayer,
@@ -25,6 +26,7 @@ export function GameShell() {
         </header>
         <main id="main">
           <div id="chat-panel">
+            {mode === "online" && <OnlineRoomDock />}
             <HandoutLayer />
             <ConnectionNotice />
             <MessageList />

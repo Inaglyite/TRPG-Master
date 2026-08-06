@@ -6,16 +6,23 @@ import {
   setCloudOrigin,
 } from "../../../api/client";
 import { desktopBridge } from "../../../desktop";
-import { checkSession, enterLobby, login, register } from "../../../online";
+import {
+  checkSession,
+  enterLobby,
+  enterSoloLobby,
+  login,
+  register,
+} from "../../../online";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 
-/** 多人模式认证页：登录/注册、会话恢复与过期提示、云端服务器地址配置。 */
+/** 联机认证页：登录/注册、会话恢复与过期提示、云端服务器地址配置。 */
 export function AuthScreen() {
   const authStatus = useOnlineStore((state) => state.authStatus);
   const authBusy = useOnlineStore((state) => state.authBusy);
   const authError = useOnlineStore((state) => state.authError);
   const sessionExpired = useOnlineStore((state) => state.sessionExpired);
+  const pendingIntent = useOnlineStore((state) => state.pendingIntent);
   const setMode = useAppStore((state) => state.setMode);
   const bridge = desktopBridge();
 
@@ -54,7 +61,14 @@ export function AuthScreen() {
       tab === "login"
         ? await login(name, password)
         : await register(name, password);
-    if (ok) await enterLobby();
+    // 认证成功后按入口意图落点：云端单人 → 我的冒险；多人 → 联机大厅。
+    if (ok) {
+      if (useOnlineStore.getState().pendingIntent === "solo") {
+        await enterSoloLobby();
+      } else {
+        await enterLobby();
+      }
+    }
   }
 
   function onSaveOrigin() {
@@ -86,7 +100,9 @@ export function AuthScreen() {
   return (
     <div className="online-box online-card online-auth-screen">
       <div className="start-brand">
-        <h1 className="online-title online-title--small">多人游戏</h1>
+        <h1 className="online-title online-title--small">
+          {pendingIntent === "solo" ? "云端单人" : "多人游戏"}
+        </h1>
         <p className="online-subtitle">登录云端守秘人</p>
       </div>
 

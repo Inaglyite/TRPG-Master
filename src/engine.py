@@ -192,9 +192,7 @@ class GameEngine:
 
     def __init__(self, context: RuntimeContext | None = None):
         self.context = context or RuntimeContext.local()
-        self.client = OpenAI(
-            api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds()
-        )
+        self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds())
         self._model_session = ModelSession()
         self._history_compactor = HistoryCompactor(self)
         self.narrative_model = NARRATIVE_MODEL

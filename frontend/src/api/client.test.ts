@@ -11,7 +11,7 @@ import {
   onUnauthorized,
   setCloudOrigin,
 } from "./client";
-import { acceptInvite } from "./worlds";
+import { acceptInvite, deleteWorld } from "./worlds";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -114,6 +114,28 @@ describe("apiFetch", () => {
     expect(init.body).toBe(
       JSON.stringify({ token: "invite/secret?not-in-url" }),
     );
+  });
+
+  it("deleteWorld 以 DELETE 请求归档端点，204 解析为 undefined", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(deleteWorld("world/1?x")).resolves.toBeUndefined();
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:8765/api/worlds/world%2F1%3Fx");
+    expect(init.method).toBe("DELETE");
+    expect(init.credentials).toBe("include");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("deleteWorld 透出 409 room_active 错误码", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ code: "room_active", error: "房间进行中" }, 409),
+    );
+    const error = await deleteWorld("world-1").catch((e) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    expect(error.code).toBe("room_active");
   });
 
   it("204 响应对 void 端点解析为 undefined", async () => {

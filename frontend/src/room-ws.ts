@@ -171,12 +171,17 @@ function open(): void {
         /* localStorage 不可用时仍可回到大厅 */
       }
       useOnlineStore.setState({
-        view: "lobby",
+        view:
+          useOnlineStore.getState().pendingIntent === "solo" ? "solo" : "lobby",
         activeWorldId: null,
         worldsStatus: "loading",
         worldsError: null,
       });
-      void import("./online").then(({ enterLobby }) => enterLobby());
+      void import("./online").then(({ enterLobby, enterSoloLobby }) =>
+        useOnlineStore.getState().pendingIntent === "solo"
+          ? enterSoloLobby()
+          : enterLobby(),
+      );
       return;
     }
     if (event.code === 4409) {
@@ -331,6 +336,9 @@ const REJECTION_TEXTS: Record<string, string> = {
   not_current_actor: "还没有轮到你行动",
   owner_cannot_leave: "房主需要先移交房主才能退出房间",
   invalid_actor: "旁观者不能被指定为行动者",
+  action_in_progress: "上一个回合仍在进行中，请稍候",
+  rate_limited: "操作过于频繁，请稍后再试",
+  daily_quota_exceeded: "今日使用额度已用完，请明天再来",
 };
 
 async function refreshRoomMembers(): Promise<void> {

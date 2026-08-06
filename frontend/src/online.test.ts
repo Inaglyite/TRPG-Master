@@ -9,15 +9,22 @@ import {
 } from "./api/auth";
 import {
   createWorld,
+  deleteWorld,
   getRoomInfo,
   listWorlds,
   removeMember,
 } from "./api/worlds";
+import { listModules } from "./api/modules";
 import {
   assignActor,
   checkSession,
   createRoom,
+  createSoloWorld,
+  deleteCurrentRoom,
+  deleteSoloWorld,
+  enterLobby,
   enterRoom,
+  enterSoloLobby,
   initOnlineSession,
   leaveRoom,
   login,
@@ -67,6 +74,7 @@ vi.mock("./api/worlds", () => ({
   claimInvestigator: vi.fn(),
   createInvite: vi.fn(),
   createWorld: vi.fn(),
+  deleteWorld: vi.fn(),
   getInvestigatorOptions: vi.fn(),
   getRoomInfo: vi.fn(),
   listWorlds: vi.fn(),
@@ -435,6 +443,242 @@ describe("异步 REST 归属隔离", () => {
       view: "lobby",
       activeWorldId: null,
     });
+  });
+});
+
+describe("roomOpen 生命周期", () => {
+  it("进入新房间时复位 roomOpen，playing 不再被管理页覆盖", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-old",
+      roomStatus: "playing",
+      roomOpen: true,
+    });
+    vi.mocked(getRoomInfo).mockResolvedValue({
+      world_id: "world-new",
+      module: "",
+      metadata: { name: "新房间" },
+      members: [],
+    });
+
+    await enterRoom("world-new");
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      activeWorldId: "world-new",
+      roomOpen: false,
+    });
+  });
+
+  it("返回大厅时复位 roomOpen", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-old",
+      roomStatus: "playing",
+      roomOpen: true,
+    });
+    vi.mocked(listWorlds).mockResolvedValue([]);
+    vi.mocked(listModules).mockResolvedValue([]);
+
+    await enterLobby();
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "lobby",
+      activeWorldId: null,
+      roomOpen: false,
+    });
+  });
+});
+
+describe("deleteCurrentRoom", () => {
+  it("204 后清掉上次房间记忆并回大厅", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-1",
+      roomStatus: "lobby",
+    });
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    vi.mocked(deleteWorld).mockResolvedValue(undefined);
+    vi.mocked(listWorlds).mockResolvedValue([]);
+    vi.mocked(listModules).mockResolvedValue([]);
+
+    const ok = await deleteCurrentRoom();
+
+    expect(ok).toBe(true);
+    expect(deleteWorld).toHaveBeenCalledWith("world-1");
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "lobby",
+      activeWorldId: null,
+      roomBusy: false,
+      roomError: null,
+    });
+  });
+
+  it("409 room_active 时留在房间并提示游戏进行中", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-1",
+      roomStatus: "playing",
+    });
+    vi.mocked(deleteWorld).mockRejectedValue(
+      new ApiError("房间进行中", 409, "room_active"),
+    );
+
+    const ok = await deleteCurrentRoom();
+
+    expect(ok).toBe(false);
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "room",
+      activeWorldId: "world-1",
+      roomBusy: false,
+    });
+    expect(useOnlineStore.getState().roomError).toContain("游戏进行中");
+  });
+
+  it("请求期间切房后，迟到的 204 不清新房间记忆也不回大厅", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-1",
+      roomStatus: "lobby",
+    });
+    localStorage.setItem("trpg-online-world-id", "world-1");
+    const pending = deferred<void>();
+    vi.mocked(deleteWorld).mockReturnValue(pending.promise);
+
+    const deleting = deleteCurrentRoom();
+    // 用户在删除请求飞行中切到 world-2（或退出）：旧 204 不得生效
+    useOnlineStore.setState({ activeWorldId: "world-2" });
+    localStorage.setItem("trpg-online-world-id", "world-2");
+    pending.resolve(undefined);
+    await deleting;
+
+    expect(localStorage.getItem("trpg-online-world-id")).toBe("world-2");
+    expect(useOnlineStore.getState().activeWorldId).toBe("world-2");
+    expect(listWorlds).not.toHaveBeenCalled();
+  });
+});
+
+describe("云端单人", () => {
+  it("enterSoloLobby 落在 solo 视图并刷新世界列表", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    vi.mocked(listWorlds).mockResolvedValue([]);
+    vi.mocked(listModules).mockResolvedValue([]);
+
+    await enterSoloLobby();
+
+    expect(listWorlds).toHaveBeenCalled();
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "solo",
+      activeWorldId: null,
+      roomOpen: false,
+    });
+  });
+
+  it("createSoloWorld 以 play_mode=solo 创建并直接进房", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "solo",
+    });
+    vi.mocked(createWorld).mockResolvedValue({
+      world_id: "world-solo",
+      module: "mansion_of_madness",
+    });
+    vi.mocked(getRoomInfo).mockResolvedValue({
+      world_id: "world-solo",
+      module: "mansion_of_madness",
+      metadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [],
+    });
+
+    await createSoloWorld("mansion_of_madness", "雾中宅邸");
+
+    expect(createWorld).toHaveBeenCalledWith("mansion_of_madness", {
+      name: "雾中宅邸",
+      max_players: 1,
+      play_mode: "solo",
+    });
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "room",
+      activeWorldId: "world-solo",
+      createBusy: false,
+    });
+  });
+
+  it("createSoloWorld 名字留空时不提交 name 字段", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "solo",
+    });
+    vi.mocked(createWorld).mockResolvedValue({
+      world_id: "world-solo",
+      module: "mansion_of_madness",
+    });
+    vi.mocked(getRoomInfo).mockResolvedValue({
+      world_id: "world-solo",
+      module: "mansion_of_madness",
+      members: [],
+    });
+
+    await createSoloWorld("mansion_of_madness", "   ");
+
+    expect(createWorld).toHaveBeenCalledWith("mansion_of_madness", {
+      max_players: 1,
+      play_mode: "solo",
+    });
+  });
+
+  it("deleteSoloWorld 成功后留在 solo 视图并刷新列表", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "solo",
+    });
+    localStorage.setItem("trpg-online-world-id", "world-solo");
+    vi.mocked(deleteWorld).mockResolvedValue(undefined);
+    vi.mocked(listWorlds).mockResolvedValue([]);
+    vi.mocked(listModules).mockResolvedValue([]);
+
+    const ok = await deleteSoloWorld("world-solo");
+
+    expect(ok).toBe(true);
+    expect(deleteWorld).toHaveBeenCalledWith("world-solo");
+    expect(listWorlds).toHaveBeenCalled();
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    expect(useOnlineStore.getState().view).toBe("solo");
+  });
+
+  it("deleteSoloWorld 409 时提示游戏进行中并留在列表", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "solo",
+    });
+    vi.mocked(deleteWorld).mockRejectedValue(
+      new ApiError("房间进行中", 409, "room_active"),
+    );
+
+    const ok = await deleteSoloWorld("world-solo");
+
+    expect(ok).toBe(false);
+    expect(useOnlineStore.getState().createError).toContain("游戏进行中");
+    expect(useOnlineStore.getState().view).toBe("solo");
   });
 });
 

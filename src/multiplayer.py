@@ -10,6 +10,7 @@ from datetime import UTC, timedelta
 from sqlalchemy.exc import IntegrityError
 
 from .database import (
+    AuditEvent,
     RoomAction,
     User,
     World,
@@ -23,6 +24,12 @@ from .database import (
 
 MEMBER_ROLES = frozenset({"owner", "player", "viewer"})
 INVITE_ROLES = frozenset({"player", "viewer"})
+PLAY_MODES = frozenset({"solo", "multiplayer"})
+
+
+def world_play_mode(metadata: dict | None) -> str:
+    """Read the explicit play mode; legacy worlds without it are multiplayer."""
+    return str((metadata or {}).get("play_mode") or "multiplayer")
 
 
 @dataclass
@@ -70,6 +77,15 @@ def _require_lobby_for_player_admission(world: World) -> None:
         )
 
 
+def _require_not_solo_world(world: World) -> None:
+    if world_play_mode(world.metadata_json) == "solo":
+        raise MultiplayerError(
+            "solo_world",
+            "私密单人世界不能邀请或加入",
+            403,
+        )
+
+
 def create_invite(
     db_url: str,
     world_id: str,
@@ -86,7 +102,8 @@ def create_invite(
     token = secrets.token_urlsafe(24)
     now = utcnow()
     with session_scope(db_url) as session:
-        _require_world(session, world_id)
+        world = _require_world(session, world_id)
+        _require_not_solo_world(world)
         _require_owner(session, world_id, user_id)
         invite = WorldInvite(
             id=new_id("invite"),
@@ -113,6 +130,7 @@ def create_invite(
 
 def revoke_invite(db_url: str, world_id: str, invite_id: str, user_id: str) -> None:
     with session_scope(db_url) as session:
+        _require_world(session, world_id)
         _require_owner(session, world_id, user_id)
         invite = session.get(WorldInvite, invite_id)
         if invite is None or invite.world_id != world_id:
@@ -125,6 +143,7 @@ def list_invites(db_url: str, world_id: str, user_id: str) -> dict:
     """List invitation metadata without ever returning stored token material."""
     now = utcnow()
     with session_scope(db_url) as session:
+        _require_world(session, world_id)
         _require_owner(session, world_id, user_id)
         rows = (
             session.query(WorldInvite)
@@ -195,6 +214,7 @@ def accept_invite(db_url: str, token: str, user_id: str) -> dict:
         )
         if world is None:
             raise MultiplayerError("world_not_found", "房间不存在", 404)
+        _require_not_solo_world(world)
         # The world row serializes capacity and membership admission. Recheck
         # after acquiring it because the same account may accept two invites
         # concurrently in separate tabs.
@@ -291,6 +311,7 @@ def update_member_role(
         )
         if world is None:
             raise MultiplayerError("world_not_found", "房间不存在", 404)
+        _require_not_solo_world(world)
         _require_owner(session, world_id, actor_user_id)
         target = _require_member(session, world_id, target_user_id)
         if target.role == "owner":
@@ -342,6 +363,7 @@ def transfer_owner(
         )
         if world is None:
             raise MultiplayerError("world_not_found", "房间不存在", 404)
+        _require_not_solo_world(world)
         current = (
             session.query(WorldMember)
             .filter_by(world_id=world_id, user_id=actor_user_id)
@@ -380,6 +402,79 @@ def transfer_owner(
             "previous_owner_user_id": actor_user_id,
             "owner_user_id": target_user_id,
         }
+
+
+def archive_world(
+    db_url: str,
+    world_id: str,
+    actor_user_id: str,
+    *,
+    runtime_room_status: str | None = None,
+) -> dict:
+    """Logically delete (archive) a world. Owner-only; refuses active rooms.
+
+    Keeps the world, turn, save, member and audit rows: flips ``worlds.status``
+    to ``"archived"`` (which removes it from the normal room list and makes
+    every world-scoped operation and WebSocket join fail with world_not_found),
+    revokes every unredeemed invite, and writes a ``world_archived`` audit
+    event in the same transaction. Calling it again on an already-archived
+    world is an idempotent success; a missing world row is world_not_found.
+
+    Owner authorization always runs before any activity check, so a non-owner
+    cannot probe whether the room is currently busy. Activity is judged by the
+    durable control plane (a running ``RoomAction`` row) plus the live room
+    status supplied by the caller (``runtime_room_status``), which covers a
+    loaded room whose persisted metadata may be stale.
+    """
+    with session_scope(db_url) as session:
+        world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
+        _require_owner(session, world_id, actor_user_id)
+        if world.status == "archived":
+            return {"world_id": world_id, "status": "archived", "already_archived": True}
+        # Durable authority: a running RoomAction row means a turn/control
+        # operation is in flight. Checked only after the owner gate so that a
+        # non-owner cannot distinguish busy from idle rooms.
+        running_action = (
+            session.query(RoomAction).filter_by(world_id=world_id, status="running").first()
+        )
+        room_status = runtime_room_status or str(
+            (world.metadata_json or {}).get("room_status") or "lobby"
+        )
+        if running_action is not None or room_status in {"starting", "playing"}:
+            raise MultiplayerError(
+                "room_active",
+                "游戏进行中，请先结束当前游戏再删除房间",
+                409,
+            )
+        now = utcnow()
+        world.status = "archived"
+        world.updated_at = now
+        pending = (
+            session.query(WorldInvite)
+            .filter(
+                WorldInvite.world_id == world_id,
+                WorldInvite.revoked_at.is_(None),
+            )
+            .all()
+        )
+        for invite in pending:
+            invite.revoked_at = now
+        session.add(
+            AuditEvent(
+                id=new_id("audit"),
+                user_id=actor_user_id,
+                event_type="world_archived",
+                world_id=world_id,
+                success=True,
+                details={
+                    "room_status": room_status,
+                    "invites_revoked": len(pending),
+                },
+            )
+        )
+    return {"world_id": world_id, "status": "archived"}
 
 
 def reserve_room_action(
@@ -531,7 +626,7 @@ def claim_investigator(
             member = _require_member(session, world_id, user_id)
             if member.role not in {"owner", "player"}:
                 raise MultiplayerError("player_required", "旁观者不能占用调查员", 403)
-            world = session.get(World, world_id)
+            world = _require_world(session, world_id)
             room_status = str((world.metadata_json or {}).get("room_status") or "lobby")
             if room_status != "lobby":
                 raise MultiplayerError(
@@ -586,7 +681,7 @@ def release_investigator(
 ) -> dict:
     with session_scope(db_url) as session:
         member = _require_member(session, world_id, user_id)
-        world = session.get(World, world_id)
+        world = _require_world(session, world_id)
         room_status = str((world.metadata_json or {}).get("room_status") or "lobby")
         if room_status != "lobby":
             raise MultiplayerError(

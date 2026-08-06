@@ -110,6 +110,33 @@ describe("LobbyScreen 房间列表", () => {
       screen.getByRole("button", { name: /疯狂宅邸/ }),
     ).toBeInTheDocument();
   });
+
+  it("solo 世界在多人大厅显示单人徽章", () => {
+    useOnlineStore.setState({
+      worldsStatus: "ready",
+      worlds: [
+        {
+          world_id: "world-solo",
+          module: "mansion_of_madness",
+          role: "owner",
+          metadata: { name: "雾中宅邸", play_mode: "solo" },
+        },
+        {
+          world_id: "world-multi",
+          module: "mansion_of_madness",
+          role: "owner",
+          metadata: { name: "周五调查夜" },
+        },
+      ],
+    });
+    render(<LobbyScreen />);
+    expect(screen.getByRole("button", { name: /雾中宅邸/ })).toHaveTextContent(
+      "单人",
+    );
+    expect(
+      screen.getByRole("button", { name: /周五调查夜/ }),
+    ).not.toHaveTextContent("单人");
+  });
 });
 
 describe("LobbyScreen 创建与加入", () => {

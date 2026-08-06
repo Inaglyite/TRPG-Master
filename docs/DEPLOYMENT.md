@@ -63,6 +63,18 @@ TRPG_SESSION_COOKIE=trpg_session
 TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/backup-passphrase
 ```
 
+云端单人/多人共用服务端全局模型配置（API Key 只在服务器，绝不下发客户端）。花费护栏随
+service 下发，小内存 VM 初期保持保守值，按实测成本再调：
+
+```bash
+TRPG_LLM_MAX_CONCURRENCY=2      # 全局模型调用并发上限，超出排队（60s 超时）
+TRPG_ACTION_RATE_PER_MINUTE=10  # 每账号每分钟行动上限
+TRPG_DAILY_TURN_QUOTA=200       # 每账号每日回合额度（进程内存计数，重启清零）
+```
+
+模型调用与拒绝事件会带 user_id/world_id 写入应用日志，用于核算成本与封禁滥用账号。
+`TRPG_ALLOW_REGISTRATION=0` 时注册接口关闭，用 `tools/manage_users.py` 人工开户（白名单）。
+
 每个 release 的 systemd `ExecStartPre` 执行 `alembic upgrade head`，失败时不得启动应用。人工核对迁移：
 
 ```bash

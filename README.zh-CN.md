@@ -95,6 +95,10 @@ python3 start.py --config
 | `TRPG_RUNTIME_ROOT` | 数据库、兼容数据、自定义角色和长期档案的可写根目录 | 源码模式同项目根目录；Electron 打包模式注入当前用户的 `userData/runtime` |
 | `TRPG_DATABASE_URL` | SQLAlchemy 数据库 URL；云端必须使用 PostgreSQL | 桌面模式默认使用 `TRPG_RUNTIME_ROOT/trpg-master.db` |
 | `TRPG_REQUIRE_AUTH` | 启用账号、HTTP 与 WebSocket 权限门禁 | `0`；生产 service 设置为 `1` |
+| `TRPG_ALLOW_REGISTRATION` | 开放注册接口；关闭后仅人工开户（`tools/manage_users.py`） | `1`；生产 service 设置为 `0` |
+| `TRPG_LLM_MAX_CONCURRENCY` | 全局模型调用并发上限（进程内信号量），超出排队，等待 60s 超时返回"服务器繁忙" | `2` |
+| `TRPG_ACTION_RATE_PER_MINUTE` | 每账号每分钟行动（start/continue/action）频率上限，超限拒绝 `rate_limited` | `10` |
+| `TRPG_DAILY_TURN_QUOTA` | 每账号每日生成回合额度，超限拒绝 `daily_quota_exceeded`；计数进程内存、重启清零 | `200` |
 | `TRPG_ALLOWED_ORIGINS` | 允许携带登录 Cookie 的 HTTP/WebSocket Origin | 生产环境必须显式配置 |
 | `TRPG_WORLD_ID` | 工具子进程打开的世界实例；通常由引擎自动注入 | 当前模组的默认本地世界 |
 

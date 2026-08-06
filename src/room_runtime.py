@@ -794,6 +794,7 @@ class GameRoom:
     owner_user_id: str
     current_actor_user_id: str | None = None
     status: str = "lobby"
+    play_mode: str = "multiplayer"
     ready_users: set[str] = field(default_factory=set)
     connected_users: dict[str, int] = field(default_factory=dict)
     _action_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)

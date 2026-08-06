@@ -95,6 +95,10 @@ Environment variables take precedence over the file. The full list — model-rol
 | `TRPG_RUNTIME_ROOT` | Writable root for the database, compatibility data, custom characters and profiles | project root in source mode; Electron injects its per-user `userData/runtime` directory when packaged |
 | `TRPG_DATABASE_URL` | SQLAlchemy database URL; PostgreSQL required for cloud deployments | desktop defaults to SQLite at `TRPG_RUNTIME_ROOT/trpg-master.db` |
 | `TRPG_REQUIRE_AUTH` | Enable account, HTTP and WebSocket permission gates | `0`; the production service sets `1` |
+| `TRPG_ALLOW_REGISTRATION` | Open the registration endpoint; when off, accounts are provisioned manually (`tools/manage_users.py`) | `1`; the production service sets `0` |
+| `TRPG_LLM_MAX_CONCURRENCY` | Process-wide cap on concurrent model calls; excess calls queue and time out after 60s with a "server busy" error | `2` |
+| `TRPG_ACTION_RATE_PER_MINUTE` | Per-account per-minute action rate limit (start/continue/action); excess is rejected with `rate_limited` | `10` |
+| `TRPG_DAILY_TURN_QUOTA` | Per-account daily generated-turn quota; excess is rejected with `daily_quota_exceeded`; in-memory counter, resets on restart | `200` |
 | `TRPG_ALLOWED_ORIGINS` | Origins allowed to carry the login cookie over HTTP/WebSocket | must be set explicitly in production |
 | `TRPG_WORLD_ID` | World instance opened by tool subprocesses; usually injected by the engine | the current module's default local world |
 

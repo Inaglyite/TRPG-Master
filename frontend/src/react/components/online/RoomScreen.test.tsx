@@ -5,6 +5,7 @@ import {
   assignActor,
   changeMemberRole,
   claimByKey,
+  deleteCurrentRoom,
   enterLobby,
   handOverOwnership,
   kickMember,
@@ -26,6 +27,7 @@ vi.mock("../../../online", () => ({
   assignActor: vi.fn(),
   changeMemberRole: vi.fn(),
   claimByKey: vi.fn(),
+  deleteCurrentRoom: vi.fn(),
   dismissInvite: vi.fn(),
   enterLobby: vi.fn(),
   handOverOwnership: vi.fn(),
@@ -456,6 +458,67 @@ describe("RoomScreen 邀请列表与房主移交", () => {
     expect(handOverOwnership).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "确认移交房主" }));
     expect(handOverOwnership).toHaveBeenCalledWith("u2");
+  });
+});
+
+describe("RoomScreen 房间处置（删除）", () => {
+  it("房主在 lobby 删除房间需要二次确认", () => {
+    setupRoom();
+    render(<RoomScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "删除房间" }));
+    expect(deleteCurrentRoom).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认删除房间" }));
+    expect(deleteCurrentRoom).toHaveBeenCalled();
+  });
+
+  it("取消删除不调用删除并收起确认组", () => {
+    setupRoom();
+    render(<RoomScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "删除房间" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(deleteCurrentRoom).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "确认删除房间" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "删除房间" }),
+    ).toBeInTheDocument();
+  });
+
+  it("非房主看不到房间处置区", () => {
+    setupRoom({
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "player",
+          investigator: null,
+        },
+        { user_id: "u2", username: "bob", role: "owner", investigator: null },
+      ],
+    });
+    render(<RoomScreen />);
+    expect(
+      screen.queryByRole("heading", { name: "房间处置" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "删除房间" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("游戏进行中删除按钮禁用并给出说明", () => {
+    setupRoom({ roomStatus: "playing" });
+    render(<RoomScreen />);
+    expect(screen.getByRole("button", { name: "删除房间" })).toBeDisabled();
+    expect(screen.getByText(/游戏进行中无法删除房间/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除房间" }));
+    expect(deleteCurrentRoom).not.toHaveBeenCalled();
+  });
+
+  it("lobby 的删除说明提示逻辑归档且不可恢复", () => {
+    setupRoom();
+    render(<RoomScreen />);
+    expect(screen.getByText(/逻辑归档/)).toBeInTheDocument();
   });
 });
 

@@ -598,8 +598,8 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   await expect(start).toBeEnabled();
   await start.click();
 
-  await expect(owner.getByTestId("game-room-bar")).toBeVisible();
-  await expect(player.getByTestId("game-room-bar")).toBeVisible();
+  await expect(owner.getByTestId("online-room-dock")).toBeVisible();
+  await expect(player.getByTestId("online-room-dock")).toBeVisible();
   await expect(
     player.getByText(new RegExp(`等待 ${ownerUsername} 行动`)),
   ).toBeVisible();
@@ -774,8 +774,8 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     await expect(start).toBeEnabled();
     await start.click();
 
-    await expect(page.getByTestId("game-room-bar")).toBeVisible();
-    await expect(peer.getByTestId("game-room-bar")).toBeVisible();
+    await expect(page.getByTestId("online-room-dock")).toBeVisible();
+    await expect(peer.getByTestId("online-room-dock")).toBeVisible();
     const turnTimeout = externalBaseUrl ? 120_000 : 60_000;
     const electronInput = page.locator("#user-input");
     const peerInput = peer.locator("#user-input");
@@ -802,7 +802,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
 
     // 刷新浏览器端必须恢复到同一房间、同一公开历史；双方 WS 都真实收过叙述。
     await peer.reload();
-    await expect(peer.getByTestId("game-room-bar")).toBeVisible({
+    await expect(peer.getByTestId("online-room-dock")).toBeVisible({
       timeout: turnTimeout,
     });
     await expect(peer.getByText(actionText, { exact: true })).toBeVisible();

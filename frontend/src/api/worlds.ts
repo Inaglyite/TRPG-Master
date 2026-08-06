@@ -16,6 +16,8 @@ export const worldMetadataSchema = z.looseObject({
   name: z.string().optional(),
   room_status: z.string().optional(),
   max_players: z.number().int().optional(),
+  // 云端私密单人世界为 "solo"；缺省按多人处理。
+  play_mode: z.string().optional(),
 });
 export type WorldMetadata = z.infer<typeof worldMetadataSchema>;
 
@@ -45,11 +47,21 @@ export type CreatedWorld = z.infer<typeof createdWorldSchema>;
 
 export function createWorld(
   module: string,
-  options: { name?: string; max_players?: number } = {},
+  options: { name?: string; max_players?: number; play_mode?: string } = {},
 ): Promise<CreatedWorld> {
   return apiFetch("/api/worlds", createdWorldSchema, {
     method: "POST",
     body: { module, ...options },
+  });
+}
+
+/**
+ * 房主删除房间（逻辑归档，契约见 docs/API.md）：
+ * 204 幂等成功；活动房间 409 room_active；非房主 403 owner_required。
+ */
+export function deleteWorld(worldId: string): Promise<void> {
+  return apiFetch(`/api/worlds/${encodeURIComponent(worldId)}`, z.undefined(), {
+    method: "DELETE",
   });
 }
 

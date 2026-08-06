@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("trpgDesktop", {
   getOnlineOrigin: () => ipcRenderer.invoke("trpg:get-online-origin"),
   selectLocalMode: () => ipcRenderer.invoke("trpg:select-local"),
-  selectOnlineMode: (origin) =>
-    ipcRenderer.invoke("trpg:select-online", origin),
+  selectOnlineMode: (origin, intent) =>
+    ipcRenderer.invoke("trpg:select-online", origin, intent),
   returnToLauncher: () => ipcRenderer.invoke("trpg:return-launcher"),
 });

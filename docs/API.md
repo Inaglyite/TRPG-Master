@@ -21,6 +21,8 @@ HttpOnly Session Cookie、登录限流、Origin/CSRF 校验和世界成员权限
 `4401`（未登录）、`4403`（成员资格已撤销或连接被拒绝）、`4404`（世界不存在）结束连接。
 成员仍在房间但角色被房主修改时，现有连接使用 `4409` 关闭；客户端应清除旧角色的私密状态和
 待发送动作，保留登录态、房间恢复游标，并按数据库中的新角色自动重连。
+房间被房主归档删除时，现有连接以 `4404`（"房间已删除"）关闭：客户端应清除房间视图并返回
+列表，不应尝试重连或恢复（见 2.4.1）。
 服务端内部异常使用 `1011`，房间运行时重启或恢复游标失效使用 `1012`；这两类关闭都不能让客户端
 清除活动房间或当作成员被踢，应保留恢复记录并自动重连。
 
@@ -79,6 +81,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `POST` | `/api/auth/logout` | 撤销当前 Session |
 | `GET` | `/api/auth/me` | 查询当前登录账号 |
 | `GET/POST` | `/api/worlds` | 列出有权访问的世界或创建世界 |
+| `DELETE` | `/api/worlds/{id}` | 房主归档删除房间（逻辑删除，见 2.4.1） |
 | `GET/POST` | `/api/worlds/{id}/invites` | 房主列出或创建邀请 |
 | `DELETE` | `/api/worlds/{id}/invites/{invite_id}` | 房主撤销邀请 |
 | `POST` | `/api/invites/accept` | 接受邀请；JSON 请求体为 `{"token":"…"}` |
@@ -188,6 +191,43 @@ HTTP 409 / `room_already_started`。
 认领与释放只允许在 `room_status=lobby` 时进行；开局后返回
 `room_already_started`，防止进行中切换权威角色。若房间运行时已加载，成功操作会广播
 `investigator_claimed` 或 `investigator_released`，并取消受影响玩家的 ready 状态。
+
+#### 删除房间（归档）
+
+`DELETE /api/worlds/{id}` 由当前房主执行，是**逻辑删除/归档**：`worlds.status` 置为
+`archived`，房间从 `GET /api/worlds` 列表移除，任何世界级操作（邀请、成员、开局）以及
+`/ws/room` 加入都会以 `world_not_found` / WS `4404` 失败。世界、回合、存档、成员和审计行
+全部保留；本次删除同时撤销全部未撤销邀请，并在同一事务写入 `world_archived` 审计事件。
+
+- 权限：仅 owner；其他成员返回 HTTP 403 / `owner_required`，未登录返回 401。
+- 状态限制：`room_status` 为 `starting`/`playing`，或持久层存在状态为 `running` 的
+  `RoomAction` 行（即进行中行动）时，返回 HTTP 409 / `room_active`；`lobby` 及其余非进行中
+  状态允许删除，即使房间已加载或仍有连接。已加载房间的活动状态以其运行时 `room.status`
+  为准（数据库 `metadata_json.room_status` 可能滞后）。
+- 幂等：已归档或已删除的世界再次调用返回 HTTP 204（幂等成功）；世界行不存在返回
+  HTTP 404 / `world_not_found`。
+- 已加载房间：删除成功后服务端广播 `room_deleted`（含 `world_id`），以关闭码 `4404`
+  （"房间已删除"）断开全部连接，并从 `RoomManager` 移除该房间；HTTP 调用方收到 204 后自行
+  退出即可。`room_deleted` 之后到达的 `/ws/room` 加入以 WS `4404`（"房间不存在"）关闭：
+  客户端应清除房间视图并返回列表，不应尝试重连或恢复。
+
+#### 云端单人世界（play_mode）
+
+`POST /api/worlds` 额外接受 `play_mode: "solo" | "multiplayer"`（缺省 `multiplayer`，非法值
+返回 HTTP 400 / `invalid_play_mode`）。`solo` 世界固定只属于创建者：`max_players` 恒为 1
+（显式传 >1 同样返回 `invalid_play_mode`），`metadata_json.play_mode` 随世界列表
+（`GET /api/worlds`）与房间信息下发，缺该字段的旧世界一律按 `multiplayer` 处理。
+
+- 禁区：对 solo 世界创建/接受邀请、修改成员角色、移交房主均返回 HTTP 403 / `solo_world`；
+  归档删除（`DELETE`）与多人世界规则一致。
+- 开局：`/ws/room` 的 `start` 对 solo 世界免除 ready/选角/全员在线门禁，只要求 owner 本人
+  已连接；未认领调查员时服务端自动认领第一个 `default`/`module` 来源候选，开局行动者恒为
+  owner。
+- 回合门禁复用多人通道；为控制模型成本，行动类消息可能被拒绝：
+  `action_in_progress`（该账号已有生成中回合）、`rate_limited`（每账号每分钟频率超限）、
+  `daily_quota_exceeded`（每账号每日额度超限）。额度参数见
+  [DEPLOYMENT.md](DEPLOYMENT.md) 的 `TRPG_LLM_MAX_CONCURRENCY` /
+  `TRPG_ACTION_RATE_PER_MINUTE` / `TRPG_DAILY_TURN_QUOTA`。
 
 ### 2.5 `GET /api/theme`
 
@@ -619,6 +659,8 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
   以及只为当前连接生成的 `private_state`；
 - `room_state`：房间状态、房主、当前行动者、ready/online 用户 ID；
 - `member_joined`、`member_left`、`member_removed`、`owner_changed`、`actor_changed`；
+- `room_deleted {world_id}`：房间已被房主归档删除，随后连接以 `4404` 关闭；客户端应清除房间
+  视图并返回列表，不重连（见 2.4.1）；
 - `investigator_claimed`、`investigator_released`：成员选角发生变化，所有客户端应刷新成员与
   调查员占用；
 - `room_action_rejected {code,message}`：稳定错误码包括 `owner_required`、`player_required`、

@@ -24,7 +24,7 @@ LINE_RATCHETS = {
     # measured post-extraction baseline: server.py is below master (1699),
     # while each dedicated adapter gets its own deliberately tight ceiling.
     "src/engine.py": 2126,
-    "src/model_streamer.py": 412,
+    "src/model_streamer.py": 427,
     "server.py": 1699,
     "src/tools.py": 1503,
     "tools/state_manager.py": 797,

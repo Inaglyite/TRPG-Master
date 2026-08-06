@@ -1,9 +1,9 @@
 import { useState } from "react";
 
 import {
-  createRoom,
+  createSoloWorld,
+  deleteSoloWorld,
   enterRoom,
-  joinWithToken,
   logout,
   refreshWorlds,
 } from "../../../online";
@@ -11,20 +11,17 @@ import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 
-const ROLE_LABELS: Record<string, string> = {
-  owner: "房主",
-  player: "玩家",
-  viewer: "旁观者",
-};
-
 function formatTime(value?: string): string {
   if (!value) return "";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
 
-/** 联机大厅：我的房间列表、创建房间、邀请码加入。 */
-export function LobbyScreen() {
+/**
+ * 云端单人“我的冒险”：列出 play_mode=solo 的私密世界，可新建/继续/删除。
+ * 与多人大厅共用 worlds/modules 数据；solo 世界不能邀请或加入，删除即归档。
+ */
+export function SoloLobbyScreen() {
   const user = useOnlineStore((state) => state.user);
   const worlds = useOnlineStore((state) => state.worlds);
   const worldsStatus = useOnlineStore((state) => state.worldsStatus);
@@ -33,15 +30,16 @@ export function LobbyScreen() {
   const modulesStatus = useOnlineStore((state) => state.modulesStatus);
   const createBusy = useOnlineStore((state) => state.createBusy);
   const createError = useOnlineStore((state) => state.createError);
-  const joinBusy = useOnlineStore((state) => state.joinBusy);
-  const joinError = useOnlineStore((state) => state.joinError);
   const setMode = useAppStore((state) => state.setMode);
 
   const [moduleId, setModuleId] = useState("");
-  const [roomName, setRoomName] = useState("");
-  const [maxPlayers, setMaxPlayers] = useState(4);
-  const [token, setToken] = useState("");
+  const [worldName, setWorldName] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
+  const soloWorlds = worlds.filter(
+    (world) => world.metadata?.play_mode === "solo",
+  );
   const moduleTitle = (id: string) =>
     modules.find((module) => module.id === id)?.title ?? id;
   const selectedModule = moduleId || modules[0]?.id || "";
@@ -61,12 +59,22 @@ export function LobbyScreen() {
     setMode("select");
   }
 
+  async function confirmDelete(worldId: string) {
+    setConfirmingDelete(null);
+    setDeleteBusy(true);
+    await deleteSoloWorld(worldId);
+    setDeleteBusy(false);
+  }
+
   return (
-    <div className="online-box online-card online-card--wide lobby-screen">
+    <div
+      className="online-box online-card online-card--wide solo-lobby-screen"
+      data-testid="solo-lobby"
+    >
       <header className="online-header">
         <div>
-          <h1 className="online-title online-title--small">联机大厅</h1>
-          <p className="online-subtitle">创建房间，或用邀请码加入朋友的调查</p>
+          <h1 className="online-title online-title--small">我的冒险</h1>
+          <p className="online-subtitle">云端私密单人世界，只有你能进入</p>
         </div>
         <div className="online-header-side">
           <span className="online-user" title={user?.id}>
@@ -84,12 +92,12 @@ export function LobbyScreen() {
 
       <section
         className="online-section lobby-section"
-        aria-labelledby="lobby-rooms-title"
+        aria-labelledby="solo-worlds-title"
       >
         <div className="online-section-head">
           <div>
-            <h2 id="lobby-rooms-title">我的房间</h2>
-            <p className="online-section-desc">你参与的全部调查档案</p>
+            <h2 id="solo-worlds-title">进行中的冒险</h2>
+            <p className="online-section-desc">你的全部云端单人存档</p>
           </div>
           <button
             type="button"
@@ -101,15 +109,15 @@ export function LobbyScreen() {
           </button>
         </div>
 
-        {worldsStatus === "loading" && worlds.length === 0 && (
+        {worldsStatus === "loading" && soloWorlds.length === 0 && (
           <p className="online-loading" role="status">
-            正在读取房间列表……
+            正在读取冒险列表……
           </p>
         )}
         {worldsStatus === "error" && (
           <div className="online-empty">
             <p className="online-notice online-notice--error" role="alert">
-              {worldsError ?? "无法读取房间列表"}
+              {worldsError ?? "无法读取冒险列表"}
             </p>
             <button
               type="button"
@@ -120,18 +128,18 @@ export function LobbyScreen() {
             </button>
           </div>
         )}
-        {worldsStatus === "ready" && worlds.length === 0 && (
+        {worldsStatus === "ready" && soloWorlds.length === 0 && (
           <div className="online-empty lobby-empty">
             <p className="lobby-empty-mark" aria-hidden="true">
               ❧
             </p>
-            <p>还没有房间。创建一个，或在下方输入邀请码加入。</p>
+            <p>还没有云端单人冒险。在下方选择模组，开始你的第一次调查。</p>
           </div>
         )}
-        {worlds.length > 0 && (
+        {soloWorlds.length > 0 && (
           <ul className="room-list">
-            {worlds.map((world) => (
-              <li key={world.world_id}>
+            {soloWorlds.map((world) => (
+              <li key={world.world_id} className="solo-world-row">
                 <button
                   type="button"
                   className="room-card"
@@ -151,29 +159,9 @@ export function LobbyScreen() {
                     {moduleTitle(world.module)}
                   </span>
                   <span className="room-card-meta">
-                    {world.metadata?.play_mode === "solo" && (
-                      <span className="online-badge online-badge--solo">
-                        单人
-                      </span>
-                    )}
-                    <span
-                      className={
-                        world.role === "owner"
-                          ? "online-badge online-badge--owner"
-                          : "online-badge online-badge--role"
-                      }
-                    >
-                      {ROLE_LABELS[world.role] ?? world.role}
+                    <span className="online-badge online-badge--solo">
+                      单人
                     </span>
-                    {typeof world.member_count === "number" && (
-                      <span className="room-card-count">
-                        {world.member_count}
-                        {world.metadata?.max_players
-                          ? `/${world.metadata.max_players}`
-                          : ""}{" "}
-                        人
-                      </span>
-                    )}
                     {formatTime(world.updated_at) && (
                       <span className="room-card-time">
                         {formatTime(world.updated_at)}
@@ -181,6 +169,35 @@ export function LobbyScreen() {
                     )}
                   </span>
                 </button>
+                {confirmingDelete === world.world_id ? (
+                  <span className="member-action-group solo-world-actions">
+                    <button
+                      type="button"
+                      className="btn-ghost online-danger"
+                      disabled={deleteBusy}
+                      onClick={() => void confirmDelete(world.world_id)}
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={deleteBusy}
+                      onClick={() => setConfirmingDelete(null)}
+                    >
+                      取消
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-ghost solo-world-actions"
+                    disabled={deleteBusy}
+                    onClick={() => setConfirmingDelete(world.world_id)}
+                  >
+                    删除存档
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -189,20 +206,18 @@ export function LobbyScreen() {
 
       <section
         className="online-section lobby-section"
-        aria-labelledby="lobby-create-title"
+        aria-labelledby="solo-create-title"
       >
         <div>
-          <h2 id="lobby-create-title">创建房间</h2>
-          <p className="online-section-desc">
-            选择模组与人数，开一份新的调查档案
-          </p>
+          <h2 id="solo-create-title">新建冒险</h2>
+          <p className="online-section-desc">选择模组，开一份只属于你的调查</p>
         </div>
         <div className="online-inline-form lobby-form">
           <input
-            value={roomName}
-            onChange={(event) => setRoomName(event.target.value)}
-            placeholder="房间名称（可选）"
-            aria-label="房间名称"
+            value={worldName}
+            onChange={(event) => setWorldName(event.target.value)}
+            placeholder="冒险名称（可选）"
+            aria-label="冒险名称"
             disabled={createBusy}
             maxLength={60}
           />
@@ -219,64 +234,18 @@ export function LobbyScreen() {
               </option>
             ))}
           </select>
-          <select
-            value={maxPlayers}
-            onChange={(event) => setMaxPlayers(Number(event.target.value))}
-            disabled={createBusy}
-            aria-label="人数上限"
-          >
-            {[2, 3, 4].map((count) => (
-              <option key={count} value={count}>
-                {count} 人
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             className="btn-primary"
             disabled={createBusy || !selectedModule}
-            onClick={() =>
-              void createRoom(selectedModule, roomName, maxPlayers)
-            }
+            onClick={() => void createSoloWorld(selectedModule, worldName)}
           >
-            {createBusy ? "创建中……" : "创建房间"}
+            {createBusy ? "创建中……" : "开始新的冒险"}
           </button>
         </div>
         {createError && (
           <p className="online-notice online-notice--error" role="alert">
             {createError}
-          </p>
-        )}
-      </section>
-
-      <section
-        className="online-section lobby-section"
-        aria-labelledby="lobby-join-title"
-      >
-        <div>
-          <h2 id="lobby-join-title">邀请码加入</h2>
-          <p className="online-section-desc">输入朋友分享的邀请码</p>
-        </div>
-        <div className="online-inline-form lobby-form">
-          <input
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            placeholder="输入邀请码"
-            aria-label="邀请码"
-            disabled={joinBusy}
-          />
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={joinBusy || !token.trim()}
-            onClick={() => void joinWithToken(token)}
-          >
-            {joinBusy ? "加入中……" : "加入房间"}
-          </button>
-        </div>
-        {joinError && (
-          <p className="online-notice online-notice--error" role="alert">
-            {joinError}
           </p>
         )}
       </section>

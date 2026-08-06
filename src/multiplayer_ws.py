@@ -20,7 +20,9 @@ from .model_settings import ModelSettings
 from .multiplayer import (
     finish_room_action,
     recover_room_actions,
+    world_play_mode,
 )
+from .multiplayer_guards import USER_TURN_GUARD
 from .multiplayer_messages import (
     owner_turn_required as owner_turn_required,
 )
@@ -303,10 +305,12 @@ class MultiplayerWsController:
                 world.metadata_json = metadata
                 world.updated_at = utcnow()
             room_status = str(metadata.get("room_status") or "lobby")
+            play_mode = world_play_mode(metadata)
 
         room.owner_user_id = owner_user_id
         room.current_actor_user_id = actor_user_id
         room.status = room_status
+        room.play_mode = play_mode
         room.ready_users.intersection_update(playable_members)
 
     def room_roster(self, world_id: str) -> tuple[list[dict], set[str]]:
@@ -422,6 +426,7 @@ class MultiplayerWsController:
                 owner_user_id = owner_member.user_id
                 room_metadata = dict(world.metadata_json or {})
                 room_status = str(room_metadata.get("room_status") or "lobby")
+                play_mode = world_play_mode(room_metadata)
                 # "starting" is a crash-recovery marker, never a durable game
                 # state. Recover a committed opening as playing; otherwise make
                 # the uncommitted attempt retryable.
@@ -506,15 +511,27 @@ class MultiplayerWsController:
                     owner_user_id,
                     current_actor_user_id=initial_actor_user_id,
                     status=room_status,
+                    play_mode=play_mode,
                 )
-                room.action_status_callback = lambda target_world_id, action_id, status: (
-                    finish_room_action(
-                        self.deps.database_url(),
-                        target_world_id,
-                        action_id,
-                        status,
-                    )
-                )
+                def record_action_status(
+                    target_world_id: str,
+                    action_id: str,
+                    status: str,
+                ) -> None:
+                    try:
+                        finish_room_action(
+                            self.deps.database_url(),
+                            target_world_id,
+                            action_id,
+                            status,
+                        )
+                    finally:
+                        # A terminal room action frees the account's single
+                        # in-flight generation slot, even if the durable
+                        # status write itself fails.
+                        USER_TURN_GUARD.release_action(target_world_id, action_id)
+
+                room.action_status_callback = record_action_status
                 room.recovery_history = public_history_snapshot(room)
                 room.history_snapshot_callback = lambda: public_history_snapshot(room)
                 room.status_change_callback = lambda status: self.set_room_status(

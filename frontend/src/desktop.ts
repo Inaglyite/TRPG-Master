@@ -15,7 +15,10 @@ export type DesktopOriginResult = DesktopResult & {
 export type DesktopBridge = {
   getOnlineOrigin(): Promise<DesktopOriginResult>;
   selectLocalMode(): Promise<DesktopResult>;
-  selectOnlineMode(origin: string): Promise<DesktopResult>;
+  selectOnlineMode(
+    origin: string,
+    intent?: "lobby" | "solo",
+  ): Promise<DesktopResult>;
   returnToLauncher(): Promise<DesktopResult>;
 };
 
