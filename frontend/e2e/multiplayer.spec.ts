@@ -728,7 +728,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     const peer = await peerContext.newPage();
     const peerFrames = collectWebSocketFrames(peer);
     await expect(page.getByTestId("mode-select")).toBeVisible();
-    await expect(page.getByText("单机游戏", { exact: true })).toBeVisible();
+    await expect(page.getByText("本地单人", { exact: true })).toBeVisible();
     await expect(page.getByText("多人游戏", { exact: true })).toBeVisible();
     await page.getByLabel("云端服务器地址").fill(baseUrl);
     await page.getByText("多人游戏", { exact: true }).click();
@@ -888,7 +888,7 @@ test("Electron 源码进程自主启动并回收真实本地后端", async () =>
     });
     const page = await electronApp.firstWindow();
     await expect(page.getByTestId("mode-select")).toBeVisible();
-    await page.getByText("单机游戏", { exact: true }).click();
+    await page.getByText("本地单人", { exact: true }).click();
     await expect(page.getByTestId("mode-select")).toBeHidden();
     await waitForUrl("http://127.0.0.1:8765/api/health");
     await expect
