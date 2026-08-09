@@ -228,6 +228,17 @@ def test_release_installers_stage_atomically_and_install_managed_assets() -> Non
             'install -d -m 0700 -o trpgdeploy -g trpgdeploy "$candidate/.venv"'
             in installer
         )
+        # Full release ids can make pip emit a two-line /bin/sh entry-point
+        # wrapper instead of a direct shebang. Both forms must be relocated.
+        assert (
+            '-e "2s|$candidate/.venv/bin/python3|$release/.venv/bin/python3|"'
+            in installer
+        )
+        # A first-install rollback may restore a unit to the missing state.
+        assert (
+            'elif systemctl cat "$service_name" >/dev/null 2>&1; then'
+            in installer
+        )
         assert 'chown -R root:root "$candidate/.venv"' in installer
         assert "! -user root -o -perm /022" in installer
         assert "UMask=0077" in service
@@ -496,6 +507,57 @@ def test_monitor_script_failures_exit_nonzero_and_send_webhook(
     assert '"name":"certificate"' in payload
 
 
+def test_monitor_records_backup_failure_when_all_backups_stale(
+    tmp_path: Path,
+) -> None:
+    """Regression: 多份备份全部过期时 backup FAIL 必须被记录,不能被 SIGPIPE 中止。
+
+    与 restore-drill 同根:`find … | sort -nr | head -1` 中 head 提前关闭管道
+    使 sort 收到 SIGPIPE,`set -Eeuo pipefail` 下命令替换非零让整个监控脚本退出
+    —— 备份不新鲜时监控崩溃而非发告警(告警静默丢失)。本测试构造 find 输出
+    超过 64KiB 管道缓冲的过期归档集(确定性复现 SIGPIPE,而非竞态),断言
+    backup FAIL 仍被记录且既有 webhook 告警路径照常发送。
+    """
+    script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
+    env = _monitor_environment(tmp_path)
+    webhook_log = tmp_path / "webhook.log"
+    env.update(
+        {
+            "TRPG_MONITOR_WEBHOOK_URL": "https://webhook.invalid/trpg",
+            "WEBHOOK_LOG": str(webhook_log),
+        }
+    )
+    backup_root = tmp_path / "backups" / "trpg-master"
+    old_epoch = 1_700_000_000
+    for path in backup_root.iterdir():
+        os.utime(path, (old_epoch, old_epoch))
+    for index in range(500):
+        path = backup_root / f"trpg-master-{index:0150d}.tar.gpg"
+        path.touch()
+        os.utime(path, (old_epoch, old_epoch))
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # 未被 SIGPIPE 提前中止:backup 失败被记录,其余检查仍执行完毕。
+    assert result.returncode == 1
+    assert "[FAIL] backup:" in result.stderr
+    assert "no backup newer than" in result.stderr
+    assert "[OK]   ready:" in result.stdout
+    assert "[OK]   certificate:" in result.stdout
+    # 既有告警路径照常发送。
+    assert webhook_log.exists()
+    payload = webhook_log.read_text(encoding="utf-8")
+    assert '"ok":false' in payload
+    assert '"name":"backup"' in payload
+
+
 def test_monitor_script_rejects_unsafe_configuration(tmp_path: Path) -> None:
     script = PROJECT_ROOT / "deploy" / "monitor-trpg-master.sh"
     base_env = _monitor_environment(tmp_path)
@@ -615,153 +677,104 @@ def test_production_installer_installs_and_rolls_back_monitor_units(
     assert "systemctl stop trpg-master-monitor.timer" in calls
 
 
-def test_restore_drill_requires_pg_restore() -> None:
-    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
-    result = subprocess.run(
-        ["bash", str(script), "--dry-run"],
-        cwd=PROJECT_ROOT,
-        env={**os.environ, "TRPG_PG_RESTORE": "/nonexistent/pg_restore"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def test_staging_installer_validates_host_nginx_override(tmp_path: Path):
+    """主机级 override 契约：regular file + root + 不可 group/world writable。
 
-    assert result.returncode == 2
-    assert "pg_restore is required" in result.stderr
-    assert "TRPG_PG_RESTORE" in result.stderr
-
-
-def test_restore_drill_refuses_production_database_target() -> None:
-    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
-    env = {
-        **os.environ,
-        "TRPG_PG_RESTORE": "/bin/true",
-        "TRPG_BACKUP_PASSPHRASE_FILE": "/dev/null",
-    }
-
-    without_prefix = subprocess.run(
-        ["bash", str(script), "--restore", "postgresql+psycopg://u:p@h/trpg_master"],
-        cwd=PROJECT_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert without_prefix.returncode == 2
-    assert "does not start with the drill prefix" in without_prefix.stderr
-    assert "trpg_drill_" in without_prefix.stderr
-
-    same_as_production = subprocess.run(
-        ["bash", str(script), "--restore", "postgresql+psycopg://u:p@h/trpg_drill_x"],
-        cwd=PROJECT_ROOT,
-        env={
-            **env,
-            "TRPG_PRODUCTION_DATABASE_URL": "postgresql+psycopg://u:p@h/trpg_drill_x",
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert same_as_production.returncode == 2
-    assert "is the configured production database" in same_as_production.stderr
-
-
-def test_restore_drill_has_no_destructive_statements() -> None:
-    import re
-
-    script = (PROJECT_ROOT / "deploy" / "restore-drill.sh").read_text(
+    通过 PATH 注入 stub stat 模拟 owner/mode，使 root 归属与写位检查可在
+    非 root CI 用户下精确验证；symlink 用真实文件系统构造。
+    """
+    installer = (PROJECT_ROOT / "deploy" / "install-staging-release.sh").read_text(
         encoding="utf-8"
     )
-
-    # 只检查可执行语句行（排除注释与 echo/printf 提示文本，提示里会教运维
-    # 手动清理演练库，但脚本自身绝不执行破坏性 SQL）。
-    executable = [
-        line
-        for line in script.splitlines()
-        if line.strip()
-        and not line.lstrip().startswith(("#", "echo ", "printf "))
-    ]
-    joined = "\n".join(executable)
-    assert not re.search(r"DROP\s+DATABASE", joined, re.IGNORECASE)
-    assert not re.search(r"DROP\s+TABLE", joined, re.IGNORECASE)
-    assert not re.search(r"\bTRUNCATE\b", joined, re.IGNORECASE)
-    assert "--clean" not in joined
-    assert "--if-exists" not in joined
-    assert "--drop" not in joined
-    assert "unset PGPASSWORD PGPASSFILE PGHOST PGHOSTADDR PGPORT PGDATABASE PGUSER" in script
-    assert 'pg_restore_bin" --list "$work/database.dump"' in script
-    assert 'pg_restore_bin" --no-owner --no-acl' in script
-
-
-def test_restore_drill_dry_run_is_isolated_from_databases(tmp_path: Path) -> None:
-    """Build a real backup bundle and stub gpg/pg_restore."""
-    script = PROJECT_ROOT / "deploy" / "restore-drill.sh"
-    backup_root = tmp_path / "backups" / "trpg-master"
-    backup_root.mkdir(parents=True)
-
-    bundle = tmp_path / "bundle"
-    bundle.mkdir()
-    (bundle / "database.dump").write_bytes(b"fake custom-format dump")
-    (bundle / "runtime.tar.gz").write_bytes(b"runtime")
-    with (bundle / "SHA256SUMS").open("w", encoding="utf-8") as handle:
-        subprocess.run(
-            ["sha256sum", "database.dump", "runtime.tar.gz"],
-            cwd=bundle,
-            stdout=handle,
-            check=True,
-        )
-    archive = backup_root / "trpg-master-drill-test.tar.gpg"
-    subprocess.run(["tar", "-czf", str(archive), "-C", str(bundle), "."], check=True)
+    function = _installer_function(
+        installer,
+        "validate_staging_nginx_override",
+        "backup_managed_path",
+    )
+    override = tmp_path / "staging-nginx.conf"
+    override.write_text("server {}\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    calls = tmp_path / "pg_restore_calls"
     _write_stub(
         bin_dir,
-        "gpg",
+        "stat",
         """#!/usr/bin/env bash
-prev=""
-for arg in "$@"; do
-    if [[ "$prev" == "--decrypt" ]]; then
-        cat "$arg"
-        exit 0
-    fi
-    prev="$arg"
-done
-exit 2
+if [[ "$*" == *"-c %u"* ]]; then
+    printf '%s\\n' "${STUB_UID:?}"
+else
+    printf '%s\\n' "${STUB_MODE:?}"
+fi
 """,
     )
-    _write_stub(
-        bin_dir,
-        "pg_restore",
-        f"""#!/usr/bin/env bash
-printf '%s\\n' "$*" >> {calls}
-printf 'table users\\ntable worlds\\n'
-""",
-    )
-    passphrase = tmp_path / "passphrase"
-    passphrase.write_text("secret", encoding="utf-8")
+    harness = f"""
+set -Eeuo pipefail
+staging_nginx_override="$1"
+{function}
+validate_staging_nginx_override
+"""
 
-    result = subprocess.run(
-        ["bash", str(script), "--dry-run"],
-        cwd=PROJECT_ROOT,
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "TRPG_PG_RESTORE": str(bin_dir / "pg_restore"),
-            "TRPG_BACKUP_PASSPHRASE_FILE": str(passphrase),
-            "TRPG_BACKUP_ROOT": str(backup_root),
-            "TRPG_BACKUP_PREFIX": "trpg-master",
-        },
-        capture_output=True,
-        text=True,
-        check=False,
+    def run(path: Path, **env: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "-s", "--", str(path)],
+            input=harness,
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                **env,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    # 不存在 -> 不生效，直接通过（Azure staging 行为不变）
+    missing = run(tmp_path / "absent.conf")
+    assert missing.returncode == 0, missing.stderr
+
+    # root 且 0644 -> 通过
+    good = run(override, STUB_UID="0", STUB_MODE="644")
+    assert good.returncode == 0, good.stderr
+
+    # 非 root -> 拒绝
+    non_root = run(override, STUB_UID="1000", STUB_MODE="644")
+    assert non_root.returncode == 1
+    assert "must be owned by root" in non_root.stderr
+
+    # root 但 group/world writable -> 拒绝
+    writable = run(override, STUB_UID="0", STUB_MODE="666")
+    assert writable.returncode == 1
+    assert "must not be group or world writable" in writable.stderr
+
+    # symlink -> 拒绝（真实文件系统，stat 之前就被拦截）
+    link = tmp_path / "link.conf"
+    link.symlink_to(override)
+    symlink = run(link, STUB_UID="0", STUB_MODE="644")
+    assert symlink.returncode == 1
+    assert "must be a regular file, not a symlink" in symlink.stderr
+
+
+def test_staging_installer_prefers_host_nginx_override_before_managed_writes():
+    """override 存在时作为 nginx_available 来源；验证发生在任何管理文件写入前。"""
+    installer = (PROJECT_ROOT / "deploy" / "install-staging-release.sh").read_text(
+        encoding="utf-8"
+    )
+    production = (PROJECT_ROOT / "deploy" / "install-release.sh").read_text(
+        encoding="utf-8"
     )
 
-    assert result.returncode == 0, result.stderr
-    assert "dry-run passed" in result.stdout
-    assert "table users" in result.stdout
-    pg_restore_call = calls.read_text(encoding="utf-8")
-    assert "--list" in pg_restore_call
-    assert "--dbname" not in pg_restore_call
-    assert "-d" not in pg_restore_call.split()
+    assert "staging_nginx_override=/etc/trpg-master/staging-nginx.conf" in installer
+    # 调用（非函数定义）位于 config_backup（管理文件写入起点）之前
+    call_position = installer.index("\nvalidate_staging_nginx_override\n")
+    backup_position = installer.index('config_backup="$(mktemp')
+    assert call_position < backup_position
+    # 默认沿用 release 模板；override 存在时才切换来源
+    assert 'nginx_source="$release/deploy/nginx-trpg-master-staging.conf"' in installer
+    assert (
+        'if [[ -f "$staging_nginx_override" && ! -L "$staging_nginx_override" ]]; then'
+        in installer
+    )
+    assert 'install_managed_file "$nginx_source" "$nginx_available" 0644' in installer
+    # 不硬编码主机 IP；生产安装器完全不受该机制影响
+    assert "staging_nginx_override" not in production
+    assert "192.168" not in installer

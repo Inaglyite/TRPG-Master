@@ -169,27 +169,27 @@ rollback_release() {
     systemctl daemon-reload || failed=1
     if [[ "$service_was_enabled" -eq 1 ]]; then
         systemctl enable "$service_name" || failed=1
-    else
+    elif systemctl cat "$service_name" >/dev/null 2>&1; then
         systemctl disable "$service_name" || failed=1
     fi
     if [[ "$timer_was_enabled" -eq 1 ]]; then
         systemctl enable "$backup_timer" || failed=1
-    else
+    elif systemctl cat "$backup_timer" >/dev/null 2>&1; then
         systemctl disable "$backup_timer" || failed=1
     fi
     if [[ "$timer_was_active" -eq 1 ]]; then
         systemctl start "$backup_timer" || failed=1
-    else
+    elif systemctl cat "$backup_timer" >/dev/null 2>&1; then
         systemctl stop "$backup_timer" || failed=1
     fi
     if [[ "$monitor_timer_was_enabled" -eq 1 ]]; then
         systemctl enable "$monitor_timer" || failed=1
-    else
+    elif systemctl cat "$monitor_timer" >/dev/null 2>&1; then
         systemctl disable "$monitor_timer" || failed=1
     fi
     if [[ "$monitor_timer_was_active" -eq 1 ]]; then
         systemctl start "$monitor_timer" || failed=1
-    else
+    elif systemctl cat "$monitor_timer" >/dev/null 2>&1; then
         systemctl stop "$monitor_timer" || failed=1
     fi
     if nginx -t; then
@@ -203,7 +203,7 @@ rollback_release() {
             echo "previous release did not recover readiness" >&2
             failed=1
         fi
-    else
+    elif systemctl cat "$service_name" >/dev/null 2>&1; then
         systemctl stop "$service_name" || failed=1
     fi
     if [[ "$failed" -ne 0 ]]; then
@@ -517,7 +517,9 @@ PY
     # so repair those entry points before activation; otherwise systemd's
     # ExecStartPre would keep pointing at the removed .install-* directory.
     find "$candidate/.venv/bin" -maxdepth 1 -type f -perm /111 -exec \
-        sed -i "1s|^#!$candidate/.venv/bin/python.*$|#!$release/.venv/bin/python3|" {} +
+        sed -i \
+            -e "1s|^#!$candidate/.venv/bin/python.*$|#!$release/.venv/bin/python3|" \
+            -e "2s|$candidate/.venv/bin/python3|$release/.venv/bin/python3|" {} +
     chown -R root:root "$candidate/.venv"
     chmod 0755 "$candidate/.venv"
     validate_required_release_files

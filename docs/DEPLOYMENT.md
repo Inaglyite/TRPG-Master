@@ -1,4 +1,4 @@
-# Azure 部署与恢复
+# 部署与恢复
 
 本文记录当前单进程权威房间服务的部署约束。多人版本必须先进入隔离 staging；生产只从通过质量
 门禁的 `master` 发布。
@@ -45,6 +45,53 @@ sudo certbot renew --dry-run --no-random-sleep-on-renew
 租约和事件总线前不得用增加 worker 的方式扩容。小内存 VM 的 staging 默认最多同时加载两个房间，
 生产可通过 `TRPG_MAX_ACTIVE_ROOMS` 按实测资源调整。
 
+### 局域网 Raspberry Pi 测试环境
+
+开发期另有一套与 Azure 生产完全无关的 ARM64 staging，当前通过
+`https://192.168.5.22:8443`（或局域网 mDNS 可用时的
+`https://raspberrypi.local:8443`）访问。它复用上表 staging 的目录、服务、端口和 Cookie 命名，
+但数据库、运行目录、账号、世界和备份都只存在于树莓派。生产域名不得指向或代理到这台设备。
+
+- 当前实例把 Nginx 明确绑定到 `192.168.5.22:8443`，不监听其他网卡或 IPv6；应用 8766 与
+  PostgreSQL 5432 只监听 `127.0.0.1`。把主机级 vhost 写到
+  `/etc/trpg-master/staging-nginx.conf`（root 所有、不可 group/world 写）后，staging 安装器
+  每次发布都会校验并保留该主机绑定，不再用 release 中的通用 vhost 覆盖。
+- TLS 使用覆盖当前 IP 与 `raspberrypi.local` 的自签名证书。浏览器可在明确确认后接受；Electron
+  测试前应把证书导入客户端系统信任库。若 DHCP 地址变化，先更新地址保留并重新签发证书与
+  `TRPG_ALLOWED_ORIGINS`，不要关闭 Origin 校验或 TLS 校验来绕过。
+- `/etc/trpg-master/staging.env` 为 `0600 root:root`，备份口令为
+  `0600 trpgdeploy:trpgdeploy`；模型配置只写入该 env，不进入 release、仓库或日志。
+- Pi 专用 systemd drop-in 把 `TRPG_LLM_MAX_CONCURRENCY` 限为 1；每日加密备份写入
+  `/var/backups/trpg-master-staging`。
+- 发布仍使用内容哈希 release 和 `deploy/install-staging-release.sh`，先在本机通过质量门禁并构建
+  `frontend/dist`，再上传到 Pi。不得把 Pi 验收替代本地自动化测试，也不得让该流程触碰 Azure
+  production。
+
+常用只读检查：
+
+```bash
+sudo systemctl status trpg-master-staging.service
+sudo systemctl status trpg-master-staging-backup.timer
+curl --fail http://127.0.0.1:8766/api/ready
+sudo journalctl -u trpg-master-staging.service --no-pager -n 100
+```
+
+#### 最近一次 Pi 候选验收（2026-08-10）
+
+候选 release `fd46bbf7be06…` 已在上述 Pi staging 完成以下验收；这不是 Azure production 发布记录：
+
+- 浏览器+浏览器、Electron+浏览器分别完成注册、建房、邀请、选角、准备、开局、行动和存档纵切；
+- 服务重启后，房间历史、当前行动者、输入权限和存档面板恢复正确；
+- 最新加密备份成功恢复到前缀受限的独立 PostgreSQL 演练库，关键表检查通过，
+  `users/worlds/turns/save_slots` 与源库计数一致；演练库和临时密文副本随后按精确名称删除；
+- E2E 账号、审计记录和世界按精确 ID 清理，保留 `local-mansion_of_madness`；清理后重新生成的
+  加密备份再次通过独立恢复，计数为 `0/1/0/0`；
+- readiness、服务、备份新鲜度、证书和磁盘的 staging 参数化监控检查全部通过；应用与 PostgreSQL
+  仍只监听回环地址，对局域网只暴露 Nginx 的 `192.168.5.22:8443`。
+
+仍未完成：真实玩家人工验收、连续 24 小时浸泡、Azure staging 验收和 production 发布。不得用本节
+替代这些门槛。
+
 ## 数据库与账号基线
 
 生产使用 PostgreSQL，数据库只监听 `127.0.0.1`，应用使用独立最小权限账号；不要让 5432 进入
@@ -74,6 +121,12 @@ TRPG_DAILY_TURN_QUOTA=200       # 每账号每日回合额度（进程内存计�
 
 模型调用与拒绝事件会带 user_id/world_id 写入应用日志，用于核算成本与封禁滥用账号。
 `TRPG_ALLOW_REGISTRATION=0` 时注册接口关闭，用 `tools/manage_users.py` 人工开户（白名单）。
+
+紧急停用账号时必须区分两层语义：把 `users.status` 改为 `inactive` 后，新登录会被拒绝，
+已发 Session token 也会在下一次查库解析时被拒绝；但已完成握手的 WebSocket 在连接存活期间
+不会每帧查库。在管理员踢人通道完成前，需要“立即断开”的现场封禁应同时撤销该用户的
+服务端 Session，并在确认当前进行中行动的恢复影响后重启应用进程，使存量 WebSocket 统一断开。
+不得把仅修改 `users.status` 记录为“已立即踢下线”。
 
 每个 release 的 systemd `ExecStartPre` 执行 `alembic upgrade head`，失败时不得启动应用。人工核对迁移：
 

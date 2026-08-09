@@ -21,6 +21,7 @@ health_url=http://127.0.0.1:8766/api/ready
 unit_dir=/etc/systemd/system
 nginx_available=/etc/nginx/sites-available/trpg-master-staging
 nginx_enabled=/etc/nginx/sites-enabled/trpg-master-staging
+staging_nginx_override=/etc/trpg-master/staging-nginx.conf
 installer_target=/usr/local/sbin/trpg-install-staging-release
 
 if [[ ! "$release_id" =~ ^[0-9a-f]{7,64}$ ]]; then
@@ -93,6 +94,29 @@ wait_for_service_ready() {
     return 1
 }
 
+# 主机级 Nginx override 必须在任何管理文件写入前验证（存在时才生效）。
+validate_staging_nginx_override() {
+    local owner mode
+    if [[ ! -e "$staging_nginx_override" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$staging_nginx_override" || -L "$staging_nginx_override" ]]; then
+        echo "staging nginx override must be a regular file, not a symlink: $staging_nginx_override" >&2
+        return 1
+    fi
+    owner="$(stat -c %u -- "$staging_nginx_override")"
+    if [[ "$owner" != "0" ]]; then
+        echo "staging nginx override must be owned by root: $staging_nginx_override" >&2
+        return 1
+    fi
+    mode="$(stat -c %a -- "$staging_nginx_override")"
+    if (( 8#$mode & 8#022 )); then
+        echo "staging nginx override must not be group or world writable: $staging_nginx_override" >&2
+        return 1
+    fi
+    return 0
+}
+
 backup_managed_path() {
     local target="$1"
     local key="$2"
@@ -162,17 +186,17 @@ rollback_release() {
     systemctl daemon-reload || failed=1
     if [[ "$service_was_enabled" -eq 1 ]]; then
         systemctl enable "$service_name" || failed=1
-    else
+    elif systemctl cat "$service_name" >/dev/null 2>&1; then
         systemctl disable "$service_name" || failed=1
     fi
     if [[ "$timer_was_enabled" -eq 1 ]]; then
         systemctl enable "$backup_timer" || failed=1
-    else
+    elif systemctl cat "$backup_timer" >/dev/null 2>&1; then
         systemctl disable "$backup_timer" || failed=1
     fi
     if [[ "$timer_was_active" -eq 1 ]]; then
         systemctl start "$backup_timer" || failed=1
-    else
+    elif systemctl cat "$backup_timer" >/dev/null 2>&1; then
         systemctl stop "$backup_timer" || failed=1
     fi
     if nginx -t; then
@@ -186,7 +210,7 @@ rollback_release() {
             echo "previous staging release did not recover readiness" >&2
             failed=1
         fi
-    else
+    elif systemctl cat "$service_name" >/dev/null 2>&1; then
         systemctl stop "$service_name" || failed=1
     fi
     if [[ "$failed" -ne 0 ]]; then
@@ -214,6 +238,9 @@ on_exit() {
     exit "$status"
 }
 trap on_exit EXIT
+
+# 任何管理文件写入（config_backup/install_managed_file）之前验证主机级 override。
+validate_staging_nginx_override
 
 if [[ -L "$release" ]]; then
     echo "release path must not be a symlink: $release" >&2
@@ -494,7 +521,9 @@ PY
     # so repair those entry points before activation; otherwise systemd's
     # ExecStartPre would keep pointing at the removed .install-* directory.
     find "$candidate/.venv/bin" -maxdepth 1 -type f -perm /111 -exec \
-        sed -i "1s|^#!$candidate/.venv/bin/python.*$|#!$release/.venv/bin/python3|" {} +
+        sed -i \
+            -e "1s|^#!$candidate/.venv/bin/python.*$|#!$release/.venv/bin/python3|" \
+            -e "2s|$candidate/.venv/bin/python3|$release/.venv/bin/python3|" {} +
     chown -R root:root "$candidate/.venv"
     chmod 0755 "$candidate/.venv"
     validate_required_release_files
@@ -528,8 +557,11 @@ install_managed_file "$release/deploy/trpg-master-staging-backup.service" \
     "$unit_dir/trpg-master-staging-backup.service" 0644
 install_managed_file "$release/deploy/trpg-master-staging-backup.timer" \
     "$unit_dir/trpg-master-staging-backup.timer" 0644
-install_managed_file "$release/deploy/nginx-trpg-master-staging.conf" \
-    "$nginx_available" 0644
+nginx_source="$release/deploy/nginx-trpg-master-staging.conf"
+if [[ -f "$staging_nginx_override" && ! -L "$staging_nginx_override" ]]; then
+    nginx_source="$staging_nginx_override"
+fi
+install_managed_file "$nginx_source" "$nginx_available" 0644
 ln -sfn "$nginx_available" "$nginx_enabled.next"
 mv -Tf "$nginx_enabled.next" "$nginx_enabled"
 

@@ -154,8 +154,13 @@ check_backup_freshness() {
             "backup fresh within ${backup_max_age_hours}h: $(basename -- "$fresh")"
         return
     fi
+    # 不用 head/早退读取器:head 提前关闭管道会让 sort 收到 SIGPIPE,
+    # pipefail 下命令替换非零使整个监控脚本退出(备份不新鲜时告警静默
+    # 丢失)。sed -n '1p' 完整消费排序输出,find/sort 正常结束,真正的
+    # 命令失败语义保留。
     latest="$(find "$backup_root" -maxdepth 1 -type f \
-        -name "$backup_prefix-*.tar.gpg" -printf '%T@ %f\n' 2>/dev/null | sort -nr | head -1)"
+        -name "$backup_prefix-*.tar.gpg" -printf '%T@ %f\n' 2>/dev/null \
+        | sort -nr | sed -n '1p')"
     if [[ -z "$latest" ]]; then
         record_check "backup" false "no backup found in $backup_root"
     else
