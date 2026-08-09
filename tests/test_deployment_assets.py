@@ -130,14 +130,12 @@ def test_production_deploy_provenance_and_manual_dispatch_quality_gate() -> None
         encoding="utf-8"
     )
 
-    assert "branches: [master]" in workflow
-    assert "github.event.workflow_run.conclusion == 'success'" in workflow
-    assert "github.event.workflow_run.event == 'push'" in workflow
-    assert "github.event.workflow_run.head_branch == 'master'" in workflow
-    assert (
-        "github.event.workflow_run.head_repository.full_name == github.repository"
-        in workflow
-    )
+    # Manual dispatch is the only trigger; workflow_run must not be used.
+    assert "workflow_dispatch:" in workflow
+    assert "workflow_run" not in workflow
+    assert "github.event.workflow_run" not in workflow
+
+    # Job is still strictly gated on master.
     assert "github.ref == 'refs/heads/master'" in workflow
     assert "postgres:17-alpine" in workflow
     assert 'python-version: "3.12"' in workflow

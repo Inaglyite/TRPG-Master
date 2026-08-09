@@ -1,7 +1,17 @@
 # 部署与恢复
 
 本文记录当前单进程权威房间服务的部署约束。多人版本必须先进入隔离 staging；生产只从通过质量
-门禁的 `master` 发布。
+门禁的 `master` 发布：`master` push 经 quality 全部通过（绿）后，由维护者人工在 GitHub Actions
+页面触发 `deploy-azure`（workflow_dispatch），不得由其他工作流自动级联；正式发布前仍需在
+staging 完成验收并获得明确确认。
+
+> **已知限制**：当前 CI SSH 用户尚无非交互 sudo 权限，workflow 末尾
+> `sudo bash /tmp/trpg-install-release-*.sh` 会在激活步骤失败。
+> 不得为 `/tmp` 下的临时脚本授予 NOPASSWD（部署用户可写），也不得使用
+> `sudo -S`、保存密码或 expect 脚本绕过。未来必须先设计并安装
+> root-owned、参数校验严格的固定部署入口（如
+> `/usr/local/sbin/trpg-activate-release`），再对该固定入口授予最小
+> NOPASSWD；在此之前由授权维护者登录主机交互式执行激活。
 
 ## 正式域名与 TLS
 

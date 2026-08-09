@@ -1,10 +1,6 @@
 name: deploy-azure
 
 on:
-  workflow_run:
-    workflows: [quality]
-    types: [completed]
-    branches: [master]
   workflow_dispatch:
 
 concurrency:
@@ -16,14 +12,7 @@ permissions:
 
 jobs:
   deploy:
-    if: >-
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'master' &&
-       github.event.workflow_run.head_repository.full_name == github.repository) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/master')
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: azure-production
     services:
@@ -45,16 +34,8 @@ jobs:
     steps:
       - name: Resolve release commit
         id: release
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
-          CURRENT_SHA: ${{ github.sha }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            echo "sha=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
-          fi
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
