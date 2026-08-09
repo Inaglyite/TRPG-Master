@@ -989,14 +989,22 @@ export function handleServerPayload(raw: unknown) {
         showConnectionNotice("进度已恢复，守秘人正在重建当前场景……");
       }
       break;
-    case "case_settled":
+    case "case_settled": {
+      // 账号化多人房间不写本机长期履历（profile 是本地概念），
+      // 联机结案只说结算结果；本地模式保留长期履历语义。
+      const online = useAppStore.getState().mode === "online";
       addMsg(
         "system",
         data.ok
-          ? "案件经历已写入调查员长期履历。"
-          : `履历写入失败：${data.error || "未知错误"}`,
+          ? online
+            ? "案件已结算，房间已返回大厅。"
+            : "案件经历已写入调查员长期履历。"
+          : online
+            ? `案件结算失败：${data.error || "未知错误"}`
+            : `履历写入失败：${data.error || "未知错误"}`,
       );
       break;
+    }
     case "character_state":
       // 新游戏/读档确认后立即采用服务端的权威角色，避免显示静态占位角色。
       updateCharPanel(data.data);

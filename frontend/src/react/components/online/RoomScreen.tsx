@@ -18,6 +18,7 @@ import {
   toggleReady,
 } from "../../../online";
 import { useOnlineStore } from "../../../state/online-store";
+import { inviteStatusLabel, roomStatusLabel } from "./room-status";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "房主",
@@ -143,7 +144,16 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
           <h1 className="online-title online-title--small">{roomTitle}</h1>
           <p className="online-subtitle">
             {moduleTitle && roomMetadata?.name ? `${moduleTitle} · ` : ""}
-            {activeWorldId ? `房间号 ${activeWorldId}` : ""}
+            {activeWorldId ? (
+              <span title={`房间号 ${activeWorldId}`}>
+                房间号{" "}
+                {activeWorldId.length > 8
+                  ? `…${activeWorldId.slice(-8)}`
+                  : activeWorldId}
+              </span>
+            ) : (
+              ""
+            )}
           </p>
         </div>
         <div className="online-header-side">
@@ -157,7 +167,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
           >
             {CONNECTION_LABELS[roomConnection] ?? roomConnection}
           </span>
-          {roomStatus && <span className="online-badge">{roomStatus}</span>}
+          {roomStatus && (
+            <span className="online-badge">{roomStatusLabel(roomStatus)}</span>
+          )}
           {me && (
             <span className="online-badge">
               {ROLE_LABELS[me.role] ?? me.role}
@@ -550,7 +562,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                   </span>
                   <span className="member-badges">
                     {item.status && (
-                      <span className="online-badge">{item.status}</span>
+                      <span className="online-badge">
+                        {inviteStatusLabel(item.status)}
+                      </span>
                     )}
                     {item.used_count != null && (
                       <span className="online-badge">

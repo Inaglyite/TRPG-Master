@@ -142,7 +142,11 @@ export function confirmEnding(data: any) {
 export function openSavePanel(mode: "load" | "manage" = "manage") {
   useAppStore.getState().setSavePanel(true, mode);
   safeSend(JSON.stringify({ type: "save_list" }));
-  safeSend(JSON.stringify({ type: "world_list" }));
+  // 联机房间协议没有 world_list 处理器（房间本就绑定单一世界），发送会收到
+  // protocol_error(unsupported_room_message) 红条；世界列表仅本地模式需要。
+  if (useAppStore.getState().mode !== "online") {
+    safeSend(JSON.stringify({ type: "world_list" }));
+  }
 }
 
 export function closeSavePanel() {

@@ -10,6 +10,7 @@ import {
 import {
   createWorld,
   deleteWorld,
+  getInvestigatorOptions,
   getRoomInfo,
   listWorlds,
   removeMember,
@@ -321,6 +322,74 @@ describe("异步 REST 归属隔离", () => {
       ],
     });
     expect(disconnectRoom).not.toHaveBeenCalled();
+  });
+
+  it("候选调查员按名字去重（默认库与模组库同名不重复列出）", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-a",
+      charactersStatus: "idle",
+    });
+    vi.mocked(getRoomInfo).mockResolvedValue({
+      world_id: "world-a",
+      module: "scarlet_docs",
+      metadata: { name: "房间 A", room_status: "lobby" },
+      members: [
+        {
+          user_id: alice.id,
+          username: alice.username,
+          role: "player",
+          investigator: null,
+        },
+      ],
+    });
+    vi.mocked(getInvestigatorOptions).mockResolvedValue({
+      groups: [
+        {
+          id: "default",
+          title: "默认调查员",
+          characters: [
+            {
+              id: "default:霍华德",
+              name: "霍华德",
+              occupation: "神秘学家",
+              source: "default",
+            },
+            {
+              id: "default:黄千陆",
+              name: "黄千陆",
+              occupation: "侦探",
+              source: "default",
+            },
+          ],
+        },
+        {
+          id: "module",
+          title: "模组调查员",
+          characters: [
+            {
+              id: "module:黄千陆",
+              name: "黄千陆",
+              occupation: "模组定制侦探",
+              source: "module",
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    await refreshRoom();
+
+    const options = useOnlineStore.getState().characterOptions;
+    // 同名不重复，且 default 与 module 同名时最终 ref 来自 module（模组定制版优先）
+    expect(options.map((option) => option.name)).toEqual(["霍华德", "黄千陆"]);
+    expect(options.map((option) => option.id)).toEqual([
+      "default:霍华德",
+      "module:黄千陆",
+    ]);
+    expect(options[1].occupation).toBe("模组定制侦探");
   });
 
   it("换号后丢弃上一账号迟到的世界列表", async () => {

@@ -10,6 +10,7 @@ import {
 import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
+import { roomStatusLabel } from "./room-status";
 
 function formatTime(value?: string): string {
   if (!value) return "";
@@ -130,9 +131,7 @@ export function SoloLobbyScreen() {
         )}
         {worldsStatus === "ready" && soloWorlds.length === 0 && (
           <div className="online-empty lobby-empty">
-            <p className="lobby-empty-mark" aria-hidden="true">
-              ❧
-            </p>
+            <p className="lobby-empty-mark" aria-hidden="true" />
             <p>还没有云端单人冒险。在下方选择模组，开始你的第一次调查。</p>
           </div>
         )}
@@ -151,7 +150,7 @@ export function SoloLobbyScreen() {
                     </span>
                     {world.metadata?.room_status && (
                       <span className="online-badge online-badge--status">
-                        {world.metadata.room_status}
+                        {roomStatusLabel(world.metadata.room_status)}
                       </span>
                     )}
                   </span>

@@ -483,9 +483,22 @@ async function loadCharacters(
     ) {
       return;
     }
-    const options = (data.groups ?? []).flatMap(
-      (group) => group.characters ?? [],
-    );
+    // 同一调查员可能同时存在于默认库与模组库（如 characters/default/黄千陆
+    // 与 mod/<模组>/characters/黄千陆），按角色名去重，避免列表出现重复人选。
+    // 同名时优先模组定制版（source === "module"），位置保持名字首次出现处，
+    // 保证列表顺序稳定。
+    const all = (data.groups ?? []).flatMap((group) => group.characters ?? []);
+    const byName = new Map<string, (typeof all)[number]>();
+    for (const option of all) {
+      const name = option.name || option.id;
+      const existing = byName.get(name);
+      if (!existing) {
+        byName.set(name, option);
+      } else if (existing.source !== "module" && option.source === "module") {
+        byName.set(name, option);
+      }
+    }
+    const options = [...byName.values()];
     useOnlineStore.setState({
       characterOptions: options,
       charactersStatus: "ready",

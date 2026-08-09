@@ -10,6 +10,7 @@ import {
 import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
+import { roomStatusLabel } from "./room-status";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "房主",
@@ -122,9 +123,7 @@ export function LobbyScreen() {
         )}
         {worldsStatus === "ready" && worlds.length === 0 && (
           <div className="online-empty lobby-empty">
-            <p className="lobby-empty-mark" aria-hidden="true">
-              ❧
-            </p>
+            <p className="lobby-empty-mark" aria-hidden="true" />
             <p>还没有房间。创建一个，或在下方输入邀请码加入。</p>
           </div>
         )}
@@ -143,7 +142,7 @@ export function LobbyScreen() {
                     </span>
                     {world.metadata?.room_status && (
                       <span className="online-badge online-badge--status">
-                        {world.metadata.room_status}
+                        {roomStatusLabel(world.metadata.room_status)}
                       </span>
                     )}
                   </span>
