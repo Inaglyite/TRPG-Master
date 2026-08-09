@@ -513,11 +513,12 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
     owner.locator(".member-row", { hasText: playerUsername }),
   ).toContainText(/在线/);
 
-  const worldIdText = await owner
-    .locator(".online-subtitle")
+  // 房间号在界面上截断显示，完整 world id 在 title 属性中。
+  const worldIdTitle = await owner
+    .locator(".online-subtitle span[title]")
     .first()
-    .textContent();
-  const worldId = worldIdText?.match(/world-[a-f0-9]+/)?.[0];
+    .getAttribute("title");
+  const worldId = worldIdTitle?.match(/world-[a-f0-9]+/)?.[0];
   expect(worldId).toBeTruthy();
   const privateNote = "E2E-PRIVATE-NOTE-7b369d";
   await player.evaluate(
@@ -592,21 +593,28 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   );
   expect(ownerFrames.some((frame) => frame.includes(privateNote))).toBe(false);
 
+  // 外部 staging 的真实模型 opening 可达 20 秒以上（树莓派实测约 21 秒），
+  // 超过 Playwright 默认 12 秒 expect 超时；turnTimeout 必须在点击“开始游戏”
+  // 前定义，并显式覆盖开局阶段的 dock、行动提示与输入框断言。
+  const turnTimeout = externalBaseUrl ? 120_000 : 30_000;
   await player.getByRole("button", { name: "准备" }).click();
   await owner.getByRole("button", { name: "准备" }).click();
   const start = owner.getByRole("button", { name: "开始游戏" });
   await expect(start).toBeEnabled();
   await start.click();
 
-  await expect(owner.getByTestId("online-room-dock")).toBeVisible();
-  await expect(player.getByTestId("online-room-dock")).toBeVisible();
+  await expect(owner.getByTestId("online-room-dock")).toBeVisible({
+    timeout: turnTimeout,
+  });
+  await expect(player.getByTestId("online-room-dock")).toBeVisible({
+    timeout: turnTimeout,
+  });
   await expect(
     player.getByText(new RegExp(`等待 ${ownerUsername} 行动`)),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: turnTimeout });
 
   // 本地 stub 用确定的 4s 窗口验证并发门禁；外部 staging 不假设模型响应
   // 时长，只验证双方都收到同一行动及权威 done 终态。
-  const turnTimeout = externalBaseUrl ? 120_000 : 30_000;
   const input = owner.locator("#user-input");
   await expect(input).toBeEnabled({ timeout: turnTimeout });
   const actionText = `验收行动-${runId}：我检查门锁和附近的脚印。`;
@@ -681,11 +689,11 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
     { timeout: 30_000 },
   );
   await owner.getByRole("button", { name: "打开存档管理" }).click();
-  await expect(owner.getByText("💾 存档管理", { exact: true })).toBeVisible();
+  await expect(owner.getByRole("heading", { name: "存档管理" })).toBeVisible();
   await expect(
-    owner.getByRole("button", { name: "读取存档" }).first(),
+    owner.getByRole("button", { name: "读取" }).first(),
   ).toBeVisible();
-  await owner.getByRole("button", { name: "读取存档" }).first().click();
+  await owner.getByRole("button", { name: "读取" }).first().click();
   await expect(input).toBeEnabled({ timeout: 60_000 });
 
   await ownerContext.close();
@@ -769,19 +777,25 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
       page.locator(".member-row", { hasText: `e2e_electron_peer${runId}` }),
     ).toContainText("在线");
 
+    // 同上：外部真实模型 opening 可超过默认 12 秒 expect 超时，turnTimeout
+    // 在点击“开始游戏”前定义，覆盖双方 dock 与紧邻的输入框状态断言。
+    const turnTimeout = externalBaseUrl ? 120_000 : 60_000;
     await peer.getByRole("button", { name: "准备" }).click();
     await page.getByRole("button", { name: "准备" }).click();
     const start = page.getByRole("button", { name: "开始游戏" });
     await expect(start).toBeEnabled();
     await start.click();
 
-    await expect(page.getByTestId("online-room-dock")).toBeVisible();
-    await expect(peer.getByTestId("online-room-dock")).toBeVisible();
-    const turnTimeout = externalBaseUrl ? 120_000 : 60_000;
+    await expect(page.getByTestId("online-room-dock")).toBeVisible({
+      timeout: turnTimeout,
+    });
+    await expect(peer.getByTestId("online-room-dock")).toBeVisible({
+      timeout: turnTimeout,
+    });
     const electronInput = page.locator("#user-input");
     const peerInput = peer.locator("#user-input");
     await expect(electronInput).toBeEnabled({ timeout: turnTimeout });
-    await expect(peerInput).toBeDisabled();
+    await expect(peerInput).toBeDisabled({ timeout: turnTimeout });
 
     // 两种客户端必须收到同一条公共开场，而不是各自启动独立引擎。
     const electronOpening = page
@@ -923,8 +937,8 @@ test("Electron 源码进程自主启动并回收真实本地后端", async () =>
       page.getByRole("button", { name: "快速存档" }),
     ).toHaveAttribute("title", "已保存", { timeout: 30_000 });
     await page.getByRole("button", { name: "打开存档管理" }).click();
-    await expect(page.getByText("💾 存档管理", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "读取存档" }).first().click();
+    await expect(page.getByRole("heading", { name: "存档管理" })).toBeVisible();
+    await page.getByRole("button", { name: "读取" }).first().click();
     await expect(input).toBeEnabled({ timeout: 60_000 });
 
     // 走真实 app.quit → before-quit/window-all-closed，验证 main.cjs 回收它

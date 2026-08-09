@@ -23,9 +23,10 @@ test("服务重启后恢复房间历史、行动权和存档", async ({ page }) 
     .first();
   await expect(room).toBeVisible();
   await room.click();
-  await expect(page.locator(".online-subtitle").first()).toContainText(
-    worldId!,
-  );
+  // 房间号在界面上截断显示，完整 world id 在 title 属性中。
+  await expect(
+    page.locator(".online-subtitle span[title]").first(),
+  ).toHaveAttribute("title", `房间号 ${worldId!}`);
   await expect(page.getByTestId("online-room-dock")).toBeVisible();
   await expect(
     page.getByText(/验收行动-.*我检查门锁和附近的脚印/),
@@ -34,6 +35,6 @@ test("服务重启后恢复房间历史、行动权和存档", async ({ page }) 
 
   await page.getByRole("button", { name: "打开存档管理" }).click();
   await expect(
-    page.getByRole("button", { name: "读取存档" }).first(),
+    page.getByRole("button", { name: "读取" }).first(),
   ).toBeVisible();
 });

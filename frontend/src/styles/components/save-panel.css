@@ -299,8 +299,8 @@
   position: relative;
   overflow: visible;
 }
-.save-slot-actions button::after,
-.save-rename-form button::after {
+.save-slot-actions button[data-tooltip]:not([data-tooltip=""])::after,
+.save-rename-form button[data-tooltip]:not([data-tooltip=""])::after {
   content: attr(data-tooltip);
   position: absolute;
   left: 50%;
@@ -327,16 +327,20 @@
     transform 0.14s ease,
     visibility 0.14s ease;
 }
-.save-slot-actions button:hover::after,
-.save-slot-actions button:focus-visible::after,
-.save-rename-form button:hover::after,
-.save-rename-form button:focus-visible::after {
+.save-slot-actions
+  button[data-tooltip]:not([data-tooltip=""]):hover::after,
+.save-slot-actions
+  button[data-tooltip]:not([data-tooltip=""]):focus-visible::after,
+.save-rename-form
+  button[data-tooltip]:not([data-tooltip=""]):hover::after,
+.save-rename-form
+  button[data-tooltip]:not([data-tooltip=""]):focus-visible::after {
   opacity: 1;
   visibility: visible;
   transform: translate(-50%, 0);
 }
-#save-panel-list:has(button[data-tooltip]:hover)
-  button[data-tooltip]:focus-visible:not(:hover)::after {
+#save-panel-list:has(button[data-tooltip]:not([data-tooltip=""]):hover)
+  button[data-tooltip]:not([data-tooltip=""]):focus-visible:not(:hover)::after {
   opacity: 0;
   visibility: hidden;
   transform: translate(-50%, 3px);

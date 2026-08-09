@@ -141,12 +141,16 @@ function SaveRow({ save, latest }: { save: SaveEntry; latest: boolean }) {
               />
               <button
                 className="save-rename-confirm"
+                aria-label="确认重命名"
+                data-tooltip="确认重命名"
                 onClick={() => void panelCommand("renameSave", save.id, name)}
               >
                 ✓
               </button>
               <button
                 className="save-rename-cancel"
+                aria-label="取消重命名"
+                data-tooltip="取消重命名"
                 onClick={() => useAppStore.setState({ renameSlotId: null })}
               >
                 ×
@@ -159,7 +163,6 @@ function SaveRow({ save, latest }: { save: SaveEntry; latest: boolean }) {
                   <span className="save-badge">最新</span>{" "}
                 </>
               )}
-              {isAuto ? "💾" : "📁"}{" "}
               {save.label || save.scene_name || "未知场景"}
             </span>
           )}
@@ -173,32 +176,29 @@ function SaveRow({ save, latest }: { save: SaveEntry; latest: boolean }) {
           <span>
             HP {String(save.hp ?? "?")} SAN {String(save.san ?? "?")}
           </span>
-          <span>📜 {save.clue_count ?? 0} 线索</span>
-          <span>💬 {save.message_count ?? 0} 消息</span>
+          <span>{save.clue_count ?? 0} 线索</span>
+          <span>{save.message_count ?? 0} 消息</span>
         </div>
       </div>
       <div className="save-slot-actions">
         <button
           className="save-action-load"
-          aria-label="读取存档"
           onClick={() => void panelCommand("loadSave", save.id)}
         >
-          📂
+          读取
         </button>
         <button
           className="save-action-rename"
-          aria-label="重命名存档"
           onClick={() => useAppStore.setState({ renameSlotId: save.id })}
         >
-          ✏️
+          重命名
         </button>
         {!isAuto && (
           <button
             className="save-action-del"
-            aria-label="删除存档"
             onClick={() => void panelCommand("deleteSave", save.id)}
           >
-            🗑
+            删除
           </button>
         )}
       </div>
@@ -225,7 +225,7 @@ export function SavePanel() {
       <div id="save-panel">
         <div id="save-panel-header">
           <h3 id="save-panel-title">
-            {mode === "load" ? "从存档开始" : "💾 存档管理"}
+            {mode === "load" ? "从存档开始" : "存档管理"}
           </h3>
           <button
             id="save-panel-close"
@@ -285,7 +285,7 @@ export function SavePanel() {
               className="save-new-btn"
               onClick={() => void panelCommand("createSave")}
             >
-              ➕ 新建存档
+              新建存档
             </button>
           )}
           <div id="save-panel-list">

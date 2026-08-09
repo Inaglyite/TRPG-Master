@@ -585,9 +585,13 @@ class RoomDriverTransport:
         if wire.get("type") == "private_event":
             target_user_id = str(wire.pop("target_user_id", ""))
             visibility = f"player:{target_user_id}" if target_user_id else "server_only"
-        elif wire.get("type") == "character_state" and wire.get("target_user_id"):
-            target_user_id = str(wire.pop("target_user_id"))
-            visibility = f"player:{target_user_id}"
+        elif wire.get("type") == "character_state":
+            # A character_state without a controller user must never fall back
+            # to public visibility: it carries the full investigator payload
+            # (hp/san/items/clues). Keep it server-only unless explicitly
+            # targeted at the investigator's controller.
+            target_user_id = str(wire.pop("target_user_id", ""))
+            visibility = f"player:{target_user_id}" if target_user_id else "server_only"
         elif wire.get("type") in {
             "suggest_check",
             "decision_request",
@@ -659,6 +663,35 @@ class RoomDriverTransport:
                     "ready_user_ids": sorted(room.ready_users),
                     "online_user_ids": sorted(room.connected_users),
                 }
+            elif payload.get("type") == "case_settled":
+                # Only a successful settlement (ok is True) ends the case and
+                # returns the room to the lobby. A failed settlement (ok False,
+                # e.g. "当前世界状态没有 pc") is not a terminal game over: the
+                # room must stay "playing" so the case can still proceed.
+                # Without the lobby return a finished room would deadlock (start
+                # requires lobby, archive rejects starting/playing); clearing
+                # ready_users forces every member to confirm ready again before
+                # the next start instead of silently reopening via stale ready.
+                # The next round opens with the current owner as first actor: a
+                # stale actor from the finished case would otherwise survive
+                # into the next start (start computes actor_id from
+                # room.current_actor_user_id) and, once that member released
+                # their investigator claim in the lobby, deadlock the opening
+                # on investigator_required. assign_actor must run before
+                # apply_status so the persistence callback snapshots the reset
+                # actor together with the "lobby" status.
+                if payload.get("ok") is True:
+                    room.assign_actor(room.owner_user_id)
+                    room.ready_users.clear()
+                    room.apply_status("lobby")
+                    recovered_start_state = {
+                        "type": "room_state",
+                        "status": room.status,
+                        "owner_user_id": room.owner_user_id,
+                        "current_actor_user_id": room.current_actor_user_id,
+                        "ready_user_ids": sorted(room.ready_users),
+                        "online_user_ids": sorted(room.connected_users),
+                    }
             room.clear_pending_reply()
             failed_terminal = (
                 payload.get("type")

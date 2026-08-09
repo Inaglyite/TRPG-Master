@@ -1,6 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import { confirmEnding, createSave, loadSave, quickSave } from "./panels";
+import {
+  confirmEnding,
+  createSave,
+  loadSave,
+  openSavePanel,
+  quickSave,
+} from "./panels";
 import { addMsg } from "./renderer";
 import { useAppStore } from "./state/app-store";
 import { initialOnlineState, useOnlineStore } from "./state/online-store";
@@ -82,6 +88,30 @@ describe("房主专属操作门禁（多人）", () => {
     quickSave();
     expect(safeSend).toHaveBeenCalledWith(
       JSON.stringify({ type: "save", manual: false }),
+    );
+  });
+});
+
+describe("openSavePanel 协议帧", () => {
+  it("联机模式不发送 world_list（房间协议无此处理器，会收 protocol_error）", () => {
+    setupRoom("owner", "online");
+    openSavePanel();
+    expect(safeSend).toHaveBeenCalledWith(
+      JSON.stringify({ type: "save_list" }),
+    );
+    expect(safeSend).not.toHaveBeenCalledWith(
+      JSON.stringify({ type: "world_list" }),
+    );
+  });
+
+  it("本地模式同时请求 save_list 与 world_list", () => {
+    setupRoom("owner", "local");
+    openSavePanel();
+    expect(safeSend).toHaveBeenCalledWith(
+      JSON.stringify({ type: "save_list" }),
+    );
+    expect(safeSend).toHaveBeenCalledWith(
+      JSON.stringify({ type: "world_list" }),
     );
   });
 });

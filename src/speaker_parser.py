@@ -270,13 +270,10 @@ def _infer_novel_dialogue_line(
     ]
     if not quotes:
         return None
-    outside_quotes: list[str] = []
-    cursor = 0
-    for quote in quotes:
-        outside_quotes.append(line[cursor : quote.start()])
-        cursor = quote.end()
-    outside_quotes.append(line[cursor:])
-    attribution = "".join(outside_quotes)
+    # Speaker attribution may only come from prose outside quotation marks.
+    # A character often names another NPC inside their line; treating that name
+    # as attribution swaps the bubble/avatar to the person being discussed.
+    attribution = _QUOTED_SPEECH.sub("", line)
     owner = _known_name_in_text(attribution, aliases)
     owner_id = owner[1] if owner else context_npc_id
     if owner_id is None:
@@ -338,7 +335,11 @@ def infer_named_speech(
                 )
                 active_npc_id = npc_id
                 continue
-            mentioned = _known_name_in_text(line, literal_aliases)
+            # Names spoken *inside* a quotation are dialogue subjects, not
+            # evidence that the named NPC is speaking.  Keep the established
+            # context unless the surrounding narration names a new speaker.
+            attribution = _QUOTED_SPEECH.sub("", line)
+            mentioned = _known_name_in_text(attribution, literal_aliases)
             novel_result = _infer_novel_dialogue_line(
                 line,
                 literal_aliases,

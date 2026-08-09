@@ -432,7 +432,7 @@ describe("RoomScreen 邀请列表与房主移交", () => {
     });
     render(<RoomScreen />);
     expect(screen.getByText(/inv1/)).toBeInTheDocument();
-    expect(screen.getByText("active")).toBeInTheDocument();
+    expect(screen.getByText("有效")).toBeInTheDocument();
     expect(screen.getByText(/已用 1\/5 次/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "撤销" }));
     expect(revokeInviteById).toHaveBeenCalledWith("inv1");
@@ -445,7 +445,7 @@ describe("RoomScreen 邀请列表与房主移交", () => {
       ],
     });
     render(<RoomScreen />);
-    expect(screen.getByText("expired")).toBeInTheDocument();
+    expect(screen.getByText("已过期")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "撤销" }),
     ).not.toBeInTheDocument();

@@ -40,7 +40,11 @@ export function OnlineRoomDock() {
   const [expanded, setExpanded] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const visible = view === "room" && roomStatus === "playing" && !roomOpen;
+  // 云端单人房间没有多人管理需求（邀请/移交/跳过行动者均被服务端拒绝），
+  // 整个 dock 都不显示，单人界面不出现任何“房间”概念。
+  const isSoloRoom = roomMetadata?.play_mode === "solo";
+  const visible =
+    view === "room" && roomStatus === "playing" && !roomOpen && !isSoloRoom;
 
   // 展开后把焦点移入卡片，键盘用户立即可达；收起不强制回焦（入口条仍在原位）。
   useEffect(() => {
@@ -51,8 +55,6 @@ export function OnlineRoomDock() {
 
   const me = members.find((member) => member.user_id === user?.id);
   const isOwner = me?.role === "owner";
-  // 云端单人房间没有多人管理页（邀请/移交/改角色均被服务端拒绝）。
-  const isSoloRoom = roomMetadata?.play_mode === "solo";
   const actor = members.find((member) => member.user_id === currentActorUserId);
   const myTurn = currentActorUserId != null && currentActorUserId === user?.id;
   const players = members.filter((member) => member.role !== "viewer");

@@ -263,9 +263,15 @@ if [[ ! -d "$backup_root" ]]; then
     exit 2
 fi
 if [[ -z "$archive" ]]; then
+    # 选择最新归档:不能用 head/早退读取器——head 读完首行即关闭管道,
+    # 让 sort 收到 SIGPIPE,命令替换在 `set -Eeuo pipefail` 下非零并触发
+    # 脚本退出(现场:多份备份时 --latest 无输出退出 1)。sed -n '1p' 完整
+    # 消费排序输出,find/sort 正常结束,真正的命令失败仍按 pipefail 传播。
+    # 语义保持:按 %T@ 降序取第一行 = 最新 mtime。
     archive="$(find "$backup_root" -maxdepth 1 -type f \
         -name "$backup_prefix-*.tar.gpg" -printf '%T@ %p\n' 2>/dev/null \
-        | sort -nr | head -1 | cut -d' ' -f2-)"
+        | sort -nr | sed -n '1p')"
+    archive="${archive#* }"
     if [[ -z "$archive" ]]; then
         echo "no backup found in $backup_root (prefix $backup_prefix)" >&2
         exit 2
@@ -305,10 +311,27 @@ if [[ -z "$work" ]]; then
     }
     trap cleanup EXIT
 fi
+# trpgdeploy 等系统账号的 HOME 常为 /nonexistent,真实 gpg 无法创建
+# $HOME/.gnupg;与 backup-trpg-master.sh 一致,在受控 work 内创建并导出
+# 0700 GNUPGHOME,生命周期随 work 的既有 trap 清理,绝不写调用者 HOME。
+export GNUPGHOME="$work/gnupg"
+install -d -m 0700 "$GNUPGHOME"
+# 生产 outer bundle 是未压缩 tar(backup 端:tar --create --file - | gpg);
+# GNU tar 对 stdin 流不自动检测压缩,而留存期内可能有旧版 gzip bundle。
+# 解密一次落盘后按 gzip magic 选择参数:不重复解密,也不宽松 extraction。
 if ! gpg --batch --quiet --pinentry-mode loopback \
         --passphrase-file "$passphrase_file" --decrypt "$archive" \
-    | tar --extract --gzip --file - --directory "$work"; then
-    echo "backup decryption or extraction failed: $archive" >&2
+    > "$work/outer.tar"; then
+    echo "backup decryption failed: $archive" >&2
+    exit 1
+fi
+if [[ "$(od -An -tx1 -N2 "$work/outer.tar" | tr -d ' \n')" == "1f8b" ]]; then
+    tar_flags=(--extract --gzip)
+else
+    tar_flags=(--extract)
+fi
+if ! tar "${tar_flags[@]}" --file "$work/outer.tar" --directory "$work"; then
+    echo "backup extraction failed: $archive" >&2
     exit 1
 fi
 if [[ ! -f "$work/database.dump" || ! -f "$work/SHA256SUMS" ]]; then
@@ -365,8 +388,11 @@ if [[ "$exists" == "1" ]]; then
     exit 1
 fi
 PGDATABASE=postgres createdb "$target_dbname"
-if ! PGDATABASE="$target_dbname" "$pg_restore_bin" --no-owner --no-acl \
-        --exit-on-error "$work/database.dump"; then
+# PGDATABASE 只提供连接默认值,不会替代 -d/--dbname 来选择直连恢复模式
+# （本次 PostgreSQL 17 现场暴露了旧写法:must specify -d/--dbname or -f/--file）,
+# 必须显式传入 --dbname;目标库名已通过前缀+字符校验,作为参数是安全的。
+if ! "$pg_restore_bin" --no-owner --no-acl --exit-on-error \
+        --dbname="$target_dbname" "$work/database.dump"; then
     echo "restore into drill database failed: $target_dbname" >&2
     echo "the partially restored drill database was left in place for inspection;" >&2
     echo "remove it manually (the script never drops databases) and re-run" >&2

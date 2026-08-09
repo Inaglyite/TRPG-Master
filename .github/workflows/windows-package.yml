@@ -119,8 +119,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            frontend/release/trpg-master-setup-*-x64.exe
-            frontend/release/trpg-master-portable-*-x64.exe
+            frontend/release/trpg-game-setup-*-x64.exe
+            frontend/release/trpg-game-portable-*-x64.exe
             frontend/release/SHA256SUMS.txt
 
       - name: Upload packaged backend

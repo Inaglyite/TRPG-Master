@@ -128,7 +128,7 @@ describe("OnlineRoomDock", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("solo 房间隐藏房间管理入口（单人也没有跳过行动者）", () => {
+  it("solo 房间整个 dock 都不渲染（单人界面不出现房间概念）", () => {
     setupOnline({
       roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
       currentActorUserId: "u1",
@@ -137,13 +137,10 @@ describe("OnlineRoomDock", () => {
         { user_id: "u1", username: "alice", role: "owner", investigator: null },
       ],
     });
-    render(<OnlineRoomDock />);
-    fireEvent.click(screen.getByRole("button", { name: /雾中宅邸/ }));
+    const { container } = render(<OnlineRoomDock />);
+    expect(container.firstChild).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "房间管理" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "跳过行动者" }),
+      screen.queryByRole("button", { name: /雾中宅邸/ }),
     ).not.toBeInTheDocument();
   });
 });

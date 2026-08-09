@@ -245,10 +245,10 @@ $PreviousNodeEnv = [Environment]::GetEnvironmentVariable("NODE_ENV", "Process")
 
 try {
   $Installer = @(
-    Get-ChildItem -LiteralPath $ReleaseDirectory -Filter "trpg-master-setup-*-x64.exe"
+    Get-ChildItem -LiteralPath $ReleaseDirectory -Filter "trpg-game-setup-*-x64.exe"
   )
   $Portable = @(
-    Get-ChildItem -LiteralPath $ReleaseDirectory -Filter "trpg-master-portable-*-x64.exe"
+    Get-ChildItem -LiteralPath $ReleaseDirectory -Filter "trpg-game-portable-*-x64.exe"
   )
   Assert-Condition ($Installer.Count -eq 1) "Expected exactly one NSIS installer, found $($Installer.Count)."
   Assert-Condition ($Portable.Count -eq 1) "Expected exactly one portable executable, found $($Portable.Count)."

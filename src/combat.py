@@ -326,7 +326,10 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
         confirm_option = "confirm_threat"
         prompt_suffix = (
             "[系统确认：玩家已确认实施武力威胁，但没有确认实际攻击。"
-            "必须按原意使用 threat，绝不能升级为开枪或造成伤害。]"
+            "必须按原意使用 threat，绝不能升级为开枪或造成伤害。"
+            "威胁结算与 NPC 反应叙述完毕后，必须明确把行动权交还玩家："
+            "提示玩家可以继续逼问、下令或收回武器，也可以直接开枪"
+            "（只有实际攻击才会进行射击判定）。]"
         )
     else:
         pending = _build_violence_decision(world, action, target)

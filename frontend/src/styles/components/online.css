@@ -289,6 +289,11 @@
   min-width: 0;
 }
 
+/* 按钮不得被 flex 压缩到内容宽度以下，否则文字会被 overflow 裁掉 */
+.online-inline-form > button {
+  flex-shrink: 0;
+}
+
 .online-submit {
   min-height: 44px;
   margin-top: var(--sp-1);
@@ -811,8 +816,13 @@
     align-items: stretch;
   }
 
+  /* 窄屏纵向堆叠时取消 240px 基准/108px 最小高度，否则卡片被拉成大片空白；
+     内容 + 内边距自然高度仍远超 44px 点击目标。 */
   .mode-card {
+    flex: 0 1 auto;
     max-width: none;
+    min-height: 0;
+    padding: var(--sp-3) var(--sp-4);
   }
 
   .online-inline-form {
@@ -927,10 +937,13 @@
 }
 
 .lobby-empty-mark {
-  color: var(--gold-dim);
-  font-size: 26px;
-  line-height: 1;
-  text-shadow: 0 0 12px color-mix(in srgb, var(--gold) 40%, transparent);
+  width: 10px;
+  height: 10px;
+  margin: 0 auto var(--sp-1);
+  transform: rotate(45deg);
+  border: 1px solid var(--gold-dim);
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 40%, transparent);
 }
 
 /* 窄窗口：表单单列、按钮全宽、卡片顶行可换行 */

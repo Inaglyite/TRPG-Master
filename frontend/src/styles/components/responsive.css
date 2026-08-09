@@ -433,3 +433,29 @@
     padding: 10px 12px;
   }
 }
+
+/* 弹层 pop-in 属于非必要动效：reduced-motion 下直接落定，不播放缩放入场。
+   本文件在 index.css 中最后导入，此处的 ID 规则才能压过各组件里的 pop-in。 */
+@media (prefers-reduced-motion: reduce) {
+  #model-settings-panel,
+  #utility-panel,
+  #save-panel,
+  #modal-box,
+  #module-import-panel {
+    animation: none;
+  }
+}
+
+/* 统一降级：reduced-motion 下其余所有 CSS 动画/过渡瞬时完成，覆盖
+   .online-overlay fade-in、.start-view 入场、msg-in、blink、dot-bounce、
+   quick-save-pulse、handout/clue-toast 等现存与未来的非必要动效。
+   无 animationend/transitionend JS 依赖，瞬时完成不影响功能。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

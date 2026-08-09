@@ -219,6 +219,7 @@ export const characterOptionSchema = z.looseObject({
   name: z.string(),
   occupation: z.string().optional(),
   era: z.string().optional(),
+  source: z.string().optional(),
   source_label: z.string().optional(),
 });
 export type CharacterOption = z.infer<typeof characterOptionSchema>;

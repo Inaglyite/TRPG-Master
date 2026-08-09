@@ -107,6 +107,26 @@ class SpeakerParserTests(unittest.TestCase):
         self.assertIn("黄先生，请坐", speeches[0].text)
         self.assertIn("不希望再有人", speeches[-1].text)
 
+    def test_npc_mentioned_inside_quote_does_not_replace_active_speaker(self):
+        text = (
+            "法伦听到你的追问，没有立刻回答。\n\n"
+            "“惠特克罗夫特医生……是校医，也是阿卡姆镇上多年的执业医生，口碑不坏。”\n\n"
+            "他斟酌着措辞。\n\n"
+            "“莱特的死亡证明，是他签的。”"
+        )
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={
+                "法伦": "bryce_fallon",
+                "约翰·惠特克罗夫特医生": "john_whitcroft",
+                "惠特克罗夫特医生": "john_whitcroft",
+            },
+        )
+
+        speeches = [segment for segment in segments if segment.kind == "speech"]
+        self.assertEqual(len(speeches), 2)
+        self.assertTrue(all(segment.npc_id == "bryce_fallon" for segment in speeches))
+
     def test_short_quoted_terms_stay_inside_narration(self):
         segments, _ = parse_segments(
             "布莱斯·法伦解释，档案里写作“柯布家族”，校方称其为“意外”。",
