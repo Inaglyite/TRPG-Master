@@ -475,6 +475,13 @@ async def run_room_message_loop(
             await _reject(ws, "owner_required", "只有房主可以执行房间管理操作")
             continue
         if message_type in OWNER_CONTROL_TYPES:
+            if message_type == "settle_case" and room.status != "playing":
+                await _reject(
+                    ws,
+                    "room_not_playing",
+                    "房间尚未进入游戏，不能结算案件",
+                )
+                continue
             action_id = str(data.get("action_id") or "")
             try:
                 await room.reserve_control(user.id, action_id)

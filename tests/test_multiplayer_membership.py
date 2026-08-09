@@ -3208,3 +3208,137 @@ def test_archived_world_http_claim_rejected_before_runtime_context_and_delete_id
                         assert denied.json()["code"] == "world_not_found"
                     fake_create.assert_not_called()
                     fake_options.assert_not_called()
+
+
+def test_settle_case_rejected_in_lobby_without_reserving_control():
+    """lobby 中 settle_case 在 run_room_message_loop 协议边界被拒，不进入控制锁/引擎。"""
+    class SettleSocket:
+        def __init__(self):
+            self.reads = 0
+            self.messages: list[dict] = []
+
+        async def receive_text(self):
+            self.reads += 1
+            if self.reads == 1:
+                return json.dumps(
+                    {
+                        "type": "settle_case",
+                        "action_id": "settle-lobby-1",
+                        "ending_type": "good",
+                        "title": "封印重归寂静",
+                        "summary": "调查员阻止了仪式。",
+                    }
+                )
+            raise RuntimeError("test complete")
+
+        async def send_json(self, payload):
+            self.messages.append(dict(payload))
+
+    room = GameRoom(
+        "world-settle-lobby",
+        SimpleNamespace(),
+        RoomEventHub("world-settle-lobby"),
+        "owner",
+        status="lobby",
+    )
+    socket = SettleSocket()
+    controller = SimpleNamespace(
+        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+    )
+
+    async def scenario():
+        with (
+            patch("src.multiplayer_messages.websocket_user", return_value=object()),
+            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer_messages.reserve_room_action") as durable_reserve,
+        ):
+            with pytest.raises(RuntimeError, match="test complete"):
+                await run_room_message_loop(
+                    controller,
+                    socket,
+                    room,
+                    SimpleNamespace(id="owner"),
+                    room.world_id,
+                    "owner-tab",
+                    "owner",
+                )
+            durable_reserve.assert_not_called()
+
+    asyncio.run(scenario())
+
+    rejection = socket.messages[0]
+    assert rejection["type"] == "room_action_rejected"
+    assert rejection["code"] == "room_not_playing"
+    assert "结算案件" in rejection["message"]
+    assert room.action_active is False
+    assert room.control_action_active is False
+
+
+def test_settle_case_passes_through_when_room_is_playing():
+    """playing 中 settle_case 沿用原有路径：预留控制行动并提交到房间驱动。"""
+    class SettleSocket:
+        def __init__(self):
+            self.reads = 0
+            self.messages: list[dict] = []
+
+        async def receive_text(self):
+            self.reads += 1
+            if self.reads == 1:
+                return json.dumps(
+                    {
+                        "type": "settle_case",
+                        "action_id": "settle-playing-1",
+                        "ending_type": "good",
+                        "title": "封印重归寂静",
+                        "summary": "调查员阻止了仪式。",
+                    }
+                )
+            raise RuntimeError("test complete")
+
+        async def send_json(self, payload):
+            self.messages.append(dict(payload))
+
+    class Driver:
+        def __init__(self):
+            self.submitted: list[dict] = []
+
+        async def submit(self, payload):
+            self.submitted.append(json.loads(payload))
+
+    room = GameRoom(
+        "world-settle-playing",
+        SimpleNamespace(),
+        RoomEventHub("world-settle-playing"),
+        "owner",
+        status="playing",
+    )
+    driver = Driver()
+    room.driver_transport = driver
+    socket = SettleSocket()
+    controller = SimpleNamespace(
+        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+    )
+
+    async def scenario():
+        with (
+            patch("src.multiplayer_messages.websocket_user", return_value=object()),
+            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer_messages.reserve_room_action"),
+        ):
+            with pytest.raises(RuntimeError, match="test complete"):
+                await run_room_message_loop(
+                    controller,
+                    socket,
+                    room,
+                    SimpleNamespace(id="owner"),
+                    room.world_id,
+                    "owner-tab",
+                    "owner",
+                )
+
+    asyncio.run(scenario())
+    assert [item["type"] for item in driver.submitted] == ["settle_case"]
+    assert driver.submitted[0]["action_id"] == "settle-playing-1"
+    assert driver.submitted[0]["ending_type"] == "good"
+    assert room.control_action_active is True
+    assert room.action_active is True

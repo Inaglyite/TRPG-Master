@@ -827,3 +827,172 @@ def test_driver_routes_combat_defense_only_to_target_investigator_controller():
 
 def test_driver_assigns_and_broadcasts_next_investigator_after_combat_turn():
     asyncio.run(_driver_assigns_and_broadcasts_next_investigator_after_combat_turn())
+
+
+async def _driver_returns_room_to_lobby_after_case_settled():
+    hub = RoomEventHub("world-case-settled")
+    owner_socket, player_socket = Socket(), Socket()
+    await hub.attach(RoomConnection("owner-tab", "owner", "owner", owner_socket))
+    await hub.attach(RoomConnection("player-tab", "player", "player", player_socket))
+    room = GameRoom(
+        "world-case-settled",
+        object(),
+        hub,
+        "owner",
+        current_actor_user_id="player",
+        status="playing",
+        ready_users={"owner", "player"},
+    )
+    statuses: list[str] = []
+
+    def apply_room_status(status: str) -> None:
+        # 生产绑定是 multiplayer_ws.set_room_status：回调内同时写 room.status
+        # 并持久化；apply_status 在 callback 非空时不再直接赋值。
+        room.status = status
+        statuses.append(status)
+
+    room.status_change_callback = apply_room_status
+    transport = RoomDriverTransport(room)
+    await room.reserve_control("owner", "settle-case-1")
+    assert room.control_action_active
+
+    await transport.send_json(
+        {
+            "type": "case_settled",
+            "ok": True,
+            "ending_type": "good",
+            "title": "封印重归寂静",
+            "summary": "调查员阻止了仪式。",
+        }
+    )
+
+    # 成功结算后房间回到大厅：可重新开局（start 要求 lobby），
+    # 也可由房主归档删除（archive 拒绝 starting/playing），不再死锁。
+    assert room.status == "lobby"
+    assert statuses == ["lobby"]
+    # ready 必须清空并在 room_state 里广播空集：否则保留的 ready 会让
+    # 立即重开跳过全员二次确认，而进程重启后 ready 丢失，行为不一致。
+    assert room.ready_users == set()
+    # 行动者重置为当前房主：下一局 start 的 actor_id（current_actor_user_id
+    # or user.id）取 owner，不会沿用上一局的旧 actor；旧 actor 在 lobby
+    # 释放 claim 后也不会再卡住开场（investigator_required）。
+    assert room.current_actor_user_id == "owner"
+    assert not room.action_active
+    assert not room.control_action_active
+    for socket in (owner_socket, player_socket):
+        assert any(
+            message["type"] == "room_state"
+            and message["status"] == "lobby"
+            and message["current_actor_user_id"] == "owner"
+            and message["ready_user_ids"] == []
+            for message in socket.messages
+        )
+        assert socket.messages[-1]["type"] == "case_settled"
+
+    # 控制锁已释放：房主可以立即登记下一项操作（例如重新开始）。
+    await room.reserve_control("owner", "settle-case-2")
+    room.release_action()
+
+
+def test_driver_returns_room_to_lobby_after_case_settled():
+    asyncio.run(_driver_returns_room_to_lobby_after_case_settled())
+
+
+async def _driver_keeps_room_playing_after_failed_case_settled():
+    hub = RoomEventHub("world-case-settled-failed")
+    owner_socket, player_socket = Socket(), Socket()
+    await hub.attach(RoomConnection("owner-tab", "owner", "owner", owner_socket))
+    await hub.attach(RoomConnection("player-tab", "player", "player", player_socket))
+    room = GameRoom(
+        "world-case-settled-failed",
+        object(),
+        hub,
+        "owner",
+        current_actor_user_id="player",
+        status="playing",
+        ready_users={"owner", "player"},
+    )
+    statuses: list[str] = []
+
+    def apply_room_status(status: str) -> None:
+        room.status = status
+        statuses.append(status)
+
+    room.status_change_callback = apply_room_status
+    transport = RoomDriverTransport(room)
+    await room.reserve_control("owner", "settle-case-failed-1")
+    assert room.control_action_active
+
+    await transport.send_json(
+        {
+            "type": "case_settled",
+            "ok": False,
+            "error": "当前世界状态没有 pc",
+        }
+    )
+
+    # 失败结算（ok=false）不是终局：案件仍在进行，房间必须保持 playing，
+    # 状态、行动者与 ready 都不得被改动，也不得广播回到大厅的 room_state。
+    assert room.status == "playing"
+    assert statuses == []
+    assert room.ready_users == {"owner", "player"}
+    assert room.current_actor_user_id == "player"
+    assert not room.action_active
+    assert not room.control_action_active
+    for socket in (owner_socket, player_socket):
+        assert not any(
+            message["type"] == "room_state" and message["status"] == "lobby"
+            for message in socket.messages
+        )
+        assert socket.messages[-1]["type"] == "case_settled"
+
+    # 控制锁已释放：房主仍可提交新的控制行动（例如重试结算）。
+    await room.reserve_control("owner", "settle-case-failed-2")
+    room.release_action()
+
+
+def test_driver_keeps_room_playing_after_failed_case_settled():
+    asyncio.run(_driver_keeps_room_playing_after_failed_case_settled())
+
+
+async def _character_state_without_controller_is_never_broadcast():
+    hub = RoomEventHub("world-charstate")
+    alice_socket, bob_socket = Socket(), Socket()
+    await hub.attach(RoomConnection("alice-tab", "alice", "player", alice_socket))
+    await hub.attach(RoomConnection("bob-tab", "bob", "player", bob_socket))
+    room = GameRoom(
+        "world-charstate",
+        object(),
+        hub,
+        "alice",
+        current_actor_user_id="alice",
+    )
+    transport = RoomDriverTransport(room)
+
+    # 没有控制器归属的 character_state 绝不能退回 public 广播：
+    # 完整调查员载荷（hp/san/物品/线索）只应到达目标玩家，否则一律不广播。
+    await transport.send_json(
+        {
+            "type": "character_state",
+            "data": '{"name":"Alice","hp":1,"san":0,"secret":"must-not-leak"}',
+        }
+    )
+    assert alice_socket.messages == []
+    assert bob_socket.messages == []
+
+    # 带控制器时仍只投递给目标玩家。
+    await transport.send_json(
+        {
+            "type": "character_state",
+            "target_user_id": "alice",
+            "data": '{"name":"Alice"}',
+        }
+    )
+    assert [message["type"] for message in alice_socket.messages] == [
+        "character_state"
+    ]
+    assert bob_socket.messages == []
+
+
+def test_character_state_without_controller_is_never_broadcast():
+    asyncio.run(_character_state_without_controller_is_never_broadcast())

@@ -192,6 +192,11 @@ HTTP 409 / `room_already_started`。
 `room_already_started`，防止进行中切换权威角色。若房间运行时已加载，成功操作会广播
 `investigator_claimed` 或 `investigator_released`，并取消受影响玩家的 ready 状态。
 
+房间运行状态机固定为 `lobby → starting → playing`：`starting` 只是开场生成期的恢复标记，
+开场成功后进入 `playing`，开场失败则回到 `lobby`。选角和 ready 是 `lobby` 中的成员状态，
+不是额外房间阶段。成功结算案件后回到 `lobby` 并清空全员 ready；结算失败仍保持
+`playing`。这一运行状态与持久层 `worlds.status=active|archived` 相互独立，不得混用。
+
 #### 删除房间（归档）
 
 `DELETE /api/worlds/{id}` 由当前房主执行，是**逻辑删除/归档**：`worlds.status` 置为
@@ -1037,6 +1042,14 @@ done
 6. 额外发送一个无 payload 的 `{"type":"state"}` 兼容刷新标记（已弃用，见 §7）；客户端应主动
    发送 `state` 请求并等待 `state_data`。
 
+在多人房间中，只有 `case_settled.ok=true` 会把房间从 `playing` 切回 `lobby`，清空
+`ready_user_ids`，并将行动者重置为当前房主（下一局由房主首位行动），随后广播新的
+`room_state`；下一局必须重新选择/确认必要的调查员并全员准备。`ok=false` 只表示本次
+结算未完成，房间仍为 `playing`，不得把它当作终局。
+
+`settle_case` 仅在房间处于 `playing` 时接受；`lobby`/`starting` 等非进行状态返回
+`room_action_rejected`（`room_not_playing`）且不预留控制行动。
+
 回合进行中返回 `error`。
 
 ### 4.16 退出当前会话
@@ -1871,6 +1884,9 @@ diagnostics 中。字段含义与采集边界见 [`ARCHITECTURE.md`](ARCHITECTUR
   "error": "当前世界状态没有 pc"
 }
 ```
+
+多人运行时仅在 `ok=true` 后额外广播 `room_state {status:"lobby", ready_user_ids:[]}`；
+`ok=false` 不改变房间状态或已有 ready 集合。
 
 #### `quit_ok`
 
