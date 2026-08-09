@@ -24,6 +24,33 @@ def test_windows_package_uses_distinct_deterministic_artifacts() -> None:
     )
 
 
+def _artifact_glob(template: str) -> str:
+    """artifactName 模板 → 消费侧（验证脚本/workflow）应使用的 x64 exe glob。"""
+    return (
+        template.replace("${version}", "*")
+        .replace("${arch}", "x64")
+        .replace("${ext}", "exe")
+    )
+
+
+def test_verifier_and_workflow_match_artifact_names() -> None:
+    package = json.loads(_read("frontend/package.json"))
+    expected_globs = {
+        _artifact_glob(package["build"][target]["artifactName"])
+        for target in ("nsis", "portable")
+    }
+
+    verifier = _read("packaging/verify_windows_desktop_artifacts.ps1")
+    workflow = _read(".github/workflows/windows-package.yml")
+    for glob in expected_globs:
+        assert glob in verifier
+        assert f"frontend/release/{glob}" in workflow
+    assert "trpg-master-setup" not in verifier
+    assert "trpg-master-portable" not in verifier
+    assert "trpg-master-setup" not in workflow
+    assert "trpg-master-portable" not in workflow
+
+
 def test_windows_build_script_is_locked_and_mirrors_are_opt_in() -> None:
     script = _read("packaging/build_windows.ps1")
 
