@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Privileged, fixed production release activation entrypoint.
+
+This file is installed once as root at /usr/local/sbin/trpg-activate-release.
+It intentionally accepts only a full release SHA and derives the upload path
+from that SHA.  The GitHub Actions SSH user may invoke this entrypoint via a
+single sudoers rule, but cannot choose an arbitrary executable or archive path.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+SPOOL_ROOT = Path("/var/lib/trpg-master-release")
+INCOMING_DIR = SPOOL_ROOT / "incoming"
+INSTALLER = Path("/usr/local/sbin/trpg-install-release")
+RELEASE_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
+SAFE_ENV = {
+    "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG": "C",
+    "LC_ALL": "C",
+}
+
+
+def reject(message: str) -> int:
+    print(f"trpg-activate-release: {message}", file=sys.stderr)
+    return 2
+
+
+def validate_directory(
+    path: Path,
+    *,
+    mode: int | None = None,
+    owner_uid: int | None = None,
+) -> int | None:
+    try:
+        resolved = path.resolve(strict=True)
+        info = path.stat()
+    except OSError as exc:
+        reject(f"cannot inspect {path}: {exc}")
+        return None
+    if resolved != path or not stat.S_ISDIR(info.st_mode):
+        reject(f"unsafe spool directory: {path}")
+        return None
+    if owner_uid is not None and info.st_uid != owner_uid:
+        reject(f"spool directory has unexpected owner: {path}")
+        return None
+    if mode is not None and stat.S_IMODE(info.st_mode) != mode:
+        reject(f"spool directory must have mode {mode:o}: {path}")
+        return None
+    return info.st_uid
+
+
+def validate_installer() -> bool:
+    try:
+        info = INSTALLER.lstat()
+    except OSError as exc:
+        reject(f"cannot inspect fixed installer: {exc}")
+        return False
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0:
+        reject("fixed installer must be a root-owned regular file")
+        return False
+    if stat.S_IMODE(info.st_mode) & 0o022:
+        reject("fixed installer must not be group/world writable")
+        return False
+    return True
+
+
+def copy_archive(release_id: str, archive: Path, upload_uid: int) -> Path | None:
+    try:
+        fd = os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        reject(f"cannot open release archive: {exc}")
+        return None
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            reject("release archive must be a regular file")
+            return None
+        if before.st_uid != upload_uid:
+            reject("release archive owner does not match the incoming directory")
+            return None
+        if stat.S_IMODE(before.st_mode) & 0o077:
+            reject("release archive must not be group/world accessible")
+            return None
+        if before.st_nlink != 1:
+            reject("release archive must not have hard links")
+            return None
+        if before.st_size <= 0 or before.st_size > MAX_ARCHIVE_BYTES:
+            reject("release archive size is outside the permitted range")
+            return None
+
+        with tempfile.NamedTemporaryFile(
+            dir=SPOOL_ROOT,
+            prefix=f".archive-{release_id}-",
+            suffix=".tar.gz",
+            delete=False,
+        ) as destination:
+            temporary = Path(destination.name)
+            os.fchmod(destination.fileno(), 0o600)
+            with os.fdopen(os.dup(fd), "rb", closefd=True) as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    destination.write(chunk)
+            destination.flush()
+            os.fsync(destination.fileno())
+
+        after = os.fstat(fd)
+        if (
+            before.st_ino != after.st_ino
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
+        ):
+            temporary.unlink(missing_ok=True)
+            reject("release archive changed during the privileged copy")
+            return None
+        return temporary
+    except OSError as exc:
+        reject(f"cannot stage release archive: {exc}")
+        return None
+    finally:
+        os.close(fd)
+
+
+def main(argv: list[str]) -> int:
+    if os.geteuid() != 0:
+        return reject("must be run through sudo")
+    if len(argv) != 2:
+        return reject("usage: trpg-activate-release <full-release-sha>")
+
+    release_id = argv[1]
+    if not RELEASE_PATTERN.fullmatch(release_id):
+        return reject("release id must be a 40-character lowercase SHA-1")
+    if validate_directory(SPOOL_ROOT, mode=0o755, owner_uid=0) is None:
+        return 2
+    upload_uid = validate_directory(INCOMING_DIR, mode=0o700)
+    if upload_uid is None or upload_uid == 0:
+        return reject("incoming directory must belong to a non-root upload user")
+    if not validate_installer():
+        return 2
+
+    archive = INCOMING_DIR / f"trpg-master-{release_id}.tar.gz"
+    staged_archive = copy_archive(release_id, archive, upload_uid)
+    if staged_archive is None:
+        return 2
+
+    try:
+        completed = subprocess.run(
+            [str(INSTALLER), release_id, str(staged_archive)],
+            check=False,
+            env=SAFE_ENV,
+        )
+        return completed.returncode
+    finally:
+        staged_archive.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

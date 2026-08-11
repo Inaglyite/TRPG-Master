@@ -93,9 +93,10 @@ def test_production_release_is_same_origin_complete_and_resource_bounded() -> No
 
     assert "schemas rules deploy frontend/dist" in workflow
     assert "VITE_TRPG_BACKEND_ORIGIN" not in workflow
-    assert "scp deploy/install-release.sh" in workflow
-    assert "sudo bash '/tmp/trpg-install-release-$RELEASE_SHA.sh'" in workflow
-    assert "/usr/local/sbin/trpg-install-release" not in workflow
+    assert "archive_path=\"/var/lib/trpg-master-release/incoming/" in workflow
+    assert "sudo -n /usr/local/sbin/trpg-activate-release '$RELEASE_SHA'" in workflow
+    assert "scp deploy/install-release.sh" not in workflow
+    assert "sudo bash '/tmp/trpg-install-release-$RELEASE_SHA.sh'" not in workflow
     assert "TRPG_TEST_POSTGRES_URL" in quality
     assert "alembic upgrade head" in quality
     assert "TRPG_MAX_ACTIVE_ROOMS=2" in service
@@ -110,6 +111,28 @@ def test_production_release_is_same_origin_complete_and_resource_bounded() -> No
     assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains" always' in nginx
     assert "X-Forwarded-For $remote_addr" in nginx
     assert "$proxy_add_x_forwarded_for" not in nginx
+
+
+def test_production_activation_uses_fixed_root_owned_entrypoint() -> None:
+    entrypoint = (
+        PROJECT_ROOT / "deploy" / "trpg-activate-release"
+    ).read_text(encoding="utf-8")
+    installer = (
+        PROJECT_ROOT / "deploy" / "install-release-activation-entrypoint.sh"
+    ).read_text(encoding="utf-8")
+
+    assert entrypoint.startswith("#!/usr/bin/env python3")
+    assert "RELEASE_PATTERN = re.compile(r\"^[0-9a-f]{40}$\")" in entrypoint
+    assert 'os.O_NOFOLLOW' in entrypoint
+    assert 'stat.S_IMODE(before.st_mode) & 0o077' in entrypoint
+    assert 'before.st_nlink != 1' in entrypoint
+    assert 'SPOOL_ROOT = Path("/var/lib/trpg-master-release")' in entrypoint
+    assert 'INCOMING_DIR = SPOOL_ROOT / "incoming"' in entrypoint
+    assert 'Path("/usr/local/sbin/trpg-install-release")' in entrypoint
+    assert 'os.geteuid() != 0' in entrypoint
+    assert "NOPASSWD: /usr/local/sbin/trpg-activate-release" in installer
+    assert "visudo -cf" in installer
+    assert "/tmp" not in installer
 
 
 def test_staging_nginx_global_rate_limit_and_hsts() -> None:

@@ -5,13 +5,27 @@
 页面触发 `deploy-azure`（workflow_dispatch），不得由其他工作流自动级联；正式发布前仍需在
 staging 完成验收并获得明确确认。
 
-> **已知限制**：当前 CI SSH 用户尚无非交互 sudo 权限，workflow 末尾
-> `sudo bash /tmp/trpg-install-release-*.sh` 会在激活步骤失败。
-> 不得为 `/tmp` 下的临时脚本授予 NOPASSWD（部署用户可写），也不得使用
-> `sudo -S`、保存密码或 expect 脚本绕过。未来必须先设计并安装
-> root-owned、参数校验严格的固定部署入口（如
-> `/usr/local/sbin/trpg-activate-release`），再对该固定入口授予最小
-> NOPASSWD；在此之前由授权维护者登录主机交互式执行激活。
+正式机的 GitHub Actions 只允许免密调用 root-owned、参数校验严格的固定入口
+`/usr/local/sbin/trpg-activate-release`。入口只接受完整 release SHA，并从 root
+控制的 incoming 目录派生归档路径；它会校验目录、文件所有者、权限、硬链接和归档
+复制过程，再调用当前的 release installer。不得为 `/tmp` 下的临时脚本授予 NOPASSWD，
+也不得使用 `sudo -S`、保存密码或 expect 脚本绕过。首次安装或重建入口必须由授权维护者
+交互式执行 `deploy/install-release-activation-entrypoint.sh`，并通过 `visudo -cf`
+校验生成的最小 sudoers 规则。入口安装前，正式 workflow 仍会在最后激活步骤失败。
+
+首次在正式机安装入口（只执行一次，或入口文件变更后由授权维护者执行）：
+
+```bash
+scp deploy/trpg-activate-release deploy/install-release-activation-entrypoint.sh <azure-host>:/tmp/
+ssh -tt <azure-host> \
+  "sudo bash /tmp/install-release-activation-entrypoint.sh /tmp <deploy-user>"
+```
+
+`<deploy-user>` 必须与 GitHub Environment 中的 `AZURE_VM_USER` 相同。安装器会创建
+root 控制的 `/var/lib/trpg-master-release/incoming`，仅允许该用户写入，并把入口安装为
+`root:root 0755`；sudoers 只放行 `/usr/local/sbin/trpg-activate-release`。确认安装输出和
+`sudo -l -U <deploy-user>` 后，删除 `/tmp` 中的两个安装文件。之后 workflow 只上传归档、
+执行 `chmod 600` 和 `sudo -n` 固定入口，不再上传或执行 `/tmp` 脚本。
 
 ## 正式域名与 TLS
 

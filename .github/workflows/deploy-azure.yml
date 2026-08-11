@@ -94,7 +94,11 @@ jobs:
           USER: ${{ secrets.AZURE_VM_USER }}
           RELEASE_SHA: ${{ steps.release.outputs.sha }}
         run: |
-          scp /tmp/trpg-master-release.tar.gz "$USER@$HOST:/tmp/trpg-master-$RELEASE_SHA.tar.gz"
-          scp deploy/install-release.sh "$USER@$HOST:/tmp/trpg-install-release-$RELEASE_SHA.sh"
+          archive_path="/var/lib/trpg-master-release/incoming/trpg-master-$RELEASE_SHA.tar.gz"
+          cleanup() {
+            ssh "$USER@$HOST" "rm -f -- '$archive_path'" || true
+          }
+          trap cleanup EXIT
+          scp /tmp/trpg-master-release.tar.gz "$USER@$HOST:$archive_path"
           ssh "$USER@$HOST" \
-            "sudo bash '/tmp/trpg-install-release-$RELEASE_SHA.sh' '$RELEASE_SHA' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'; status=\$?; rm -f -- '/tmp/trpg-install-release-$RELEASE_SHA.sh' '/tmp/trpg-master-$RELEASE_SHA.tar.gz'; exit \$status"
+            "chmod 600 -- '$archive_path' && sudo -n /usr/local/sbin/trpg-activate-release '$RELEASE_SHA'"
