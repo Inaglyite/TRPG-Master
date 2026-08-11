@@ -165,11 +165,13 @@ describe("connectRoom", () => {
     });
     useOnlineStore.setState({
       privateEvents: [{ kind: "clue", clue: { text: "私密事件" } }],
+      roomSnapshotReady: true,
     });
     disconnectRoom();
     expect(setActiveTransport).toHaveBeenLastCalledWith(null);
     expect(resetRoomGameSession).toHaveBeenCalled();
     expect(useOnlineStore.getState().roomConnection).toBe("idle");
+    expect(useOnlineStore.getState().roomSnapshotReady).toBe(false);
     expect(useAppStore.getState()).toMatchObject({
       character: null,
       clues: {},
@@ -471,6 +473,36 @@ describe("数字事件序号（room_event_id）", () => {
 });
 
 describe("room_full_state", () => {
+  it("开场快照落地后允许显示叙事，但不把房间误设为可行动", () => {
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    const history = [
+      {
+        turn_id: "opening-1",
+        kind: "opening",
+        messages: [{ role: "keeper", text: "雨落在阿卡姆的屋檐上。" }],
+      },
+    ];
+
+    ws.message(
+      JSON.stringify({
+        type: "room_full_state",
+        latest_event_id: 8,
+        status: "starting",
+        history,
+        private_state: null,
+      }),
+    );
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      roomStatus: "starting",
+      roomSnapshotReady: true,
+    });
+    expect(displayWorldHistory).toHaveBeenCalledWith(history);
+    expect(useStartStore.getState().gameStarted).toBe(false);
+  });
+
   it("latest_event_id 重置游标并落地 private_state（真实后端形状）", () => {
     vi.useFakeTimers();
     connectRoom("world-1");
@@ -585,6 +617,7 @@ describe("room_full_state", () => {
     );
     const state = useOnlineStore.getState();
     expect(state.roomStatus).toBe("playing");
+    expect(state.roomSnapshotReady).toBe(true);
     expect(useStartStore.getState().gameStarted).toBe(true);
     expect(state.ownerUserId).toBe("u1");
     expect(state.currentActorUserId).toBe("u2");

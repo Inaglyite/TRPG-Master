@@ -18,9 +18,10 @@ import { SoloLobbyScreen } from "./SoloLobbyScreen";
 
 /**
  * 联机模式外壳：认证 → 大厅/我的冒险 → 房间（等待页）→ 游戏进行中。
- * roomStatus 变为 playing 后不再用覆盖层遮挡：游戏区顶部的 OnlineRoomDock
- * （由 GameShell 挂载在聊天面板内）承载房间状态；这里只在 roomOpen 时
- * 显示完整房间管理页（成员/邀请/移交等管理）。
+ * 收到权威快照后，starting 与 playing 都不再用覆盖层遮挡：这样开场叙事会
+ * 直接流入游戏区，不会在“正在开局”页的背后被玩家错过。输入仍只会在
+ * playing 时启用。游戏区顶部的 OnlineRoomDock（由 GameShell 挂载在聊天
+ * 面板内）承载进行中房间状态；这里只在 roomOpen 时显示完整管理页。
  *
  * 云端单人（play_mode=solo）走同一 /ws/room 房间引擎，但不经过多人等待页：
  * 连接后自动开局（免 ready/claim），RoomScreen 永不用于 solo 房间。
@@ -30,6 +31,7 @@ export function OnlineShell() {
   const authStatus = useOnlineStore((state) => state.authStatus);
   const activeWorldId = useOnlineStore((state) => state.activeWorldId);
   const roomStatus = useOnlineStore((state) => state.roomStatus);
+  const roomSnapshotReady = useOnlineStore((state) => state.roomSnapshotReady);
   const roomOpen = useOnlineStore((state) => state.roomOpen);
   const roomConnection = useOnlineStore((state) => state.roomConnection);
   const roomMetadata = useOnlineStore((state) => state.roomMetadata);
@@ -112,10 +114,16 @@ export function OnlineShell() {
   }, [isSoloRoom, roomOpen]);
 
   const playing = view === "room" && roomStatus === "playing";
+  // 服务端对开局先标记 starting、再推流，并在 opening 回合完整提交后才切成
+  // playing。权威 room_full_state 已经把历史落地时即可展示游戏区；否则玩家会
+  // 错过开场的绝大部分叙述。首个快照前仍保持现有连接/房间页，避免空白首屏。
+  const openingReady =
+    view === "room" && roomStatus === "starting" && roomSnapshotReady;
+  const gameSurfaceVisible = playing || openingReady;
 
-  // playing 且未打开房间管理页时，联机外壳不渲染任何覆盖层；
-  // 房间状态由聊天面板内的 OnlineRoomDock 呈现，房间连接由上面的 effect 保持。
-  if (playing && (!roomOpen || isSoloRoom)) {
+  // 开场中/进行中且未打开房间管理页时，联机外壳不渲染任何覆盖层；
+  // 房间连接由上面的 effect 保持。开场阶段不会显示 Dock，但聊天区已可见。
+  if (gameSurfaceVisible && (!roomOpen || isSoloRoom)) {
     return null;
   }
 

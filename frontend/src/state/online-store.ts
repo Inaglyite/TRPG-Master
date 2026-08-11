@@ -79,6 +79,8 @@ export type OnlineState = {
   // 房间 WebSocket 状态（room_state 事件驱动）
   roomConnection: RoomConnection;
   roomStatus: string | null;
+  /** 已收到并应用当前房间的权威 room_full_state；用于安全揭开游戏界面。 */
+  roomSnapshotReady: boolean;
   ownerUserId: string | null;
   currentActorUserId: string | null;
   readyUserIds: string[];
@@ -124,6 +126,7 @@ export const initialOnlineState: OnlineState = {
   charactersStatus: "idle",
   roomConnection: "idle",
   roomStatus: null,
+  roomSnapshotReady: false,
   ownerUserId: null,
   currentActorUserId: null,
   readyUserIds: [],

@@ -92,6 +92,18 @@ describe("GameControls 多人行动门禁", () => {
     expect(screen.getByRole("button", { name: "1. 检查门锁" })).toBeEnabled();
   });
 
+  it("开场中即使收到输入状态也不能抢先行动", async () => {
+    const { useOnlineStore } = await import("../../state/online-store");
+    useOnlineStore.setState({
+      roomStatus: "starting",
+      currentActorUserId: "u1",
+    });
+    render(<GameControls />);
+    expect(screen.getByPlaceholderText("你决定做什么？")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "1. 检查门锁" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "⏎" })).toBeDisabled();
+  });
+
   it("单机模式不受房间状态影响", async () => {
     const { useAppStore } = await import("../../state/app-store");
     useAppStore.setState({ mode: "local" });

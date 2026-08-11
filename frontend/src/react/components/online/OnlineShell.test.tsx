@@ -93,6 +93,21 @@ describe("OnlineShell 界面切换", () => {
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
+  it("开场中拿到权威快照后立即露出游戏区，不遮挡守秘人叙事", () => {
+    setupOnline({ roomStatus: "starting", roomSnapshotReady: true });
+    const { container } = render(<OnlineShell />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("online-shell")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
+  });
+
+  it("开场中尚未收到权威快照时保留房间页，避免空白首屏", () => {
+    setupOnline({ roomStatus: "starting", roomSnapshotReady: false });
+    render(<OnlineShell />);
+    expect(screen.getByTestId("online-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("room-screen")).toBeInTheDocument();
+  });
+
   it("playing + roomOpen 时渲染房间管理页，返回游戏后关闭", () => {
     setupOnline({
       roomStatus: "playing",
@@ -197,6 +212,17 @@ describe("OnlineShell 云端单人", () => {
     expect(container.firstChild).toBeNull();
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
     expect(useOnlineStore.getState().roomOpen).toBe(false);
+  });
+
+  it("solo 房间开场中拿到权威快照后不再显示正在开局页", () => {
+    setupOnline({
+      roomStatus: "starting",
+      roomSnapshotReady: true,
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+    });
+    const { container } = render(<OnlineShell />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId("solo-start-screen")).not.toBeInTheDocument();
   });
 
   it("从 solo 大厅进房、元数据未加载时不闪现多人等待页", () => {

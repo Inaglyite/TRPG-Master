@@ -245,6 +245,7 @@ export function disconnectRoom(): void {
   useOnlineStore.setState({
     roomConnection: "idle",
     roomStatus: null,
+    roomSnapshotReady: false,
     ownerUserId: null,
     currentActorUserId: null,
     readyUserIds: [],
@@ -528,6 +529,10 @@ function handleRoomMessage(raw: unknown): void {
       // 状态抢先提交。ACK/sync 使用直连路径，不受该队列影响。
       roomSnapshotApplied = true;
       flushSendQueue();
+      // history、私有状态和控制字段均已落地后，才允许 OnlineShell 撤去覆盖层。
+      // 开场中（starting）也应立即看见游戏区与守秘人的流式叙事，不能等到
+      // opening 回合完成才显示；输入仍由 GameControls 的 playing 门禁保持禁用。
+      useOnlineStore.setState({ roomSnapshotReady: true });
       break;
     }
     case "member_joined":

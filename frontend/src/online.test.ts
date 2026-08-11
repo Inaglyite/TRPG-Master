@@ -437,6 +437,7 @@ describe("异步 REST 归属隔离", () => {
         playerNotesRevision: 1,
       },
       privateEvents: [{ kind: "clue", clue: { text: "旧秘密" } }],
+      roomSnapshotReady: true,
     });
     const roomA = deferred<Awaited<ReturnType<typeof getRoomInfo>>>();
     const roomB = deferred<Awaited<ReturnType<typeof getRoomInfo>>>();
@@ -447,6 +448,7 @@ describe("异步 REST 归属隔离", () => {
     const enteringA = enterRoom("world-a");
     expect(useOnlineStore.getState().privateState).toBeNull();
     expect(useOnlineStore.getState().privateEvents).toEqual([]);
+    expect(useOnlineStore.getState().roomSnapshotReady).toBe(false);
     const enteringB = enterRoom("world-b");
     roomB.resolve({
       world_id: "world-b",
