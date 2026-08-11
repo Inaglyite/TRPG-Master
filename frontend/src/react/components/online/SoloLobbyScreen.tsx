@@ -69,7 +69,7 @@ export function SoloLobbyScreen() {
 
   return (
     <div
-      className="online-box online-card online-card--wide solo-lobby-screen"
+      className="online-box online-card online-card--wide lobby-screen solo-lobby-screen"
       data-testid="solo-lobby"
     >
       <header className="online-header">

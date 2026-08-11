@@ -34,6 +34,12 @@ vi.mock("./SoloLobbyScreen", () => ({
   SoloLobbyScreen: () => <div data-testid="solo-lobby-screen" />,
 }));
 
+vi.mock("./SoloCharacterSelectScreen", () => ({
+  SoloCharacterSelectScreen: () => (
+    <div data-testid="solo-character-select-screen" />
+  ),
+}));
+
 vi.mock("./RoomScreen", () => ({
   RoomScreen: ({ onClose }: { onClose?: () => void }) => (
     <div data-testid="room-screen">
@@ -131,7 +137,7 @@ describe("OnlineShell 云端单人", () => {
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
-  it("solo 房间 lobby 状态渲染自动开局页而非 RoomScreen", () => {
+  it("solo 房间 lobby 状态先渲染角色卡选择页而非 RoomScreen", () => {
     setupOnline({
       roomStatus: "lobby",
       roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
@@ -140,7 +146,9 @@ describe("OnlineShell 云端单人", () => {
       ],
     });
     render(<OnlineShell />);
-    expect(screen.getByTestId("solo-start-screen")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("solo-character-select-screen"),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
@@ -150,7 +158,15 @@ describe("OnlineShell 云端单人", () => {
       roomStatus: "lobby",
       roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
       members: [
-        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "owner",
+          investigator: {
+            id: "investigator-1",
+            character_key: "default:alice",
+          },
+        },
       ],
     });
     render(<OnlineShell />);

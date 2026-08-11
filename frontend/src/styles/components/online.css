@@ -449,6 +449,111 @@
   text-align: center;
 }
 
+/* 云端单人开局：角色卡先于自动开场展示，避免新存档被默认角色直接带入游戏。 */
+.solo-character-screen {
+  gap: var(--sp-5);
+  padding: clamp(var(--sp-5), 4vw, var(--sp-6));
+}
+
+.solo-character-screen > .online-header {
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--gold-dim) 35%, transparent);
+}
+
+.solo-character-screen > .online-section {
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg3) 34%, transparent);
+}
+
+.solo-character-screen .online-section h2 {
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--gold-dim) 28%, transparent);
+  font-size: 14px;
+  letter-spacing: 0.2em;
+}
+
+.solo-character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--sp-3);
+}
+
+.solo-character-card {
+  min-height: 146px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--gold-dim) 48%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--gold-dim) 65%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg2) 72%, transparent);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+
+.solo-character-card:hover:not(:disabled),
+.solo-character-card:focus-visible {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, var(--bg2));
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.solo-character-card--selected {
+  border-color: var(--gold-bright);
+  border-left-color: var(--gold-bright);
+  background: color-mix(in srgb, var(--gold) 16%, var(--bg2));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+.solo-character-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.solo-character-card-name {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.solo-character-card-meta {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.solo-character-card-action {
+  margin-top: auto;
+  color: var(--blue-bright);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+
+.solo-character-actions {
+  gap: var(--sp-3);
+  padding-top: var(--sp-1);
+}
+
+.solo-character-actions > .btn-primary,
+.solo-character-actions > .btn-ghost {
+  min-height: 48px;
+  padding: 0 20px;
+  font-size: 15px;
+}
+
 /* 房间卡片与成员行 */
 .room-list,
 .member-list {
@@ -911,9 +1016,12 @@
 .lobby-screen .lobby-refresh,
 .lobby-screen .lobby-form .btn-primary,
 .lobby-screen .lobby-form .btn-ghost,
-.lobby-screen .online-header-side .btn-ghost {
+.lobby-screen .online-header-side .btn-ghost,
+.lobby-screen .solo-world-actions.btn-ghost,
+.lobby-screen .solo-world-actions .btn-ghost {
   min-height: 44px;
   padding: 0 18px;
+  white-space: nowrap;
 }
 
 .lobby-screen .lobby-form {

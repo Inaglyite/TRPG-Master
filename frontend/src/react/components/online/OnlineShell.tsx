@@ -13,6 +13,7 @@ import { useOnlineStore } from "../../../state/online-store";
 import { AuthScreen } from "./AuthScreen";
 import { LobbyScreen } from "./LobbyScreen";
 import { RoomScreen } from "./RoomScreen";
+import { SoloCharacterSelectScreen } from "./SoloCharacterSelectScreen";
 import { SoloLobbyScreen } from "./SoloLobbyScreen";
 
 /**
@@ -32,6 +33,8 @@ export function OnlineShell() {
   const roomOpen = useOnlineStore((state) => state.roomOpen);
   const roomConnection = useOnlineStore((state) => state.roomConnection);
   const roomMetadata = useOnlineStore((state) => state.roomMetadata);
+  const user = useOnlineStore((state) => state.user);
+  const members = useOnlineStore((state) => state.members);
   const pendingIntent = useOnlineStore((state) => state.pendingIntent);
   const roomError = useOnlineStore((state) => state.roomError);
 
@@ -81,15 +84,25 @@ export function OnlineShell() {
   const soloRoomFlow =
     view === "room" &&
     (isSoloRoom || (pendingIntent === "solo" && roomMetadata === null));
+  const currentMember = members.find((member) => member.user_id === user?.id);
+  const soloHasInvestigator = Boolean(currentMember?.investigator);
 
-  // solo 房间免 ready/claim：连接且确认 lobby 状态后直接由房主（即本人）开局。
+  // 已经有角色卡的单人存档可以自动恢复；新存档必须先经过角色卡选择页。
   useEffect(() => {
     if (!isSoloRoom || view !== "room" || !activeWorldId) return;
     if (roomConnection !== "connected" || roomStatus !== "lobby") return;
+    if (!soloHasInvestigator) return;
     if (soloAutoStartRef.current === activeWorldId) return;
     soloAutoStartRef.current = activeWorldId;
     void startGame();
-  }, [activeWorldId, isSoloRoom, roomConnection, roomStatus, view]);
+  }, [
+    activeWorldId,
+    isSoloRoom,
+    roomConnection,
+    roomStatus,
+    soloHasInvestigator,
+    view,
+  ]);
 
   // solo 房间没有多人管理页（邀请/移交均不可用）；兜底关掉，永不渲染 RoomScreen。
   useEffect(() => {
@@ -111,31 +124,37 @@ export function OnlineShell() {
       {view === "auth" && <AuthScreen />}
       {view === "lobby" && <LobbyScreen />}
       {view === "solo" && <SoloLobbyScreen />}
-      {view === "room" && soloRoomFlow && (
-        <div
-          className="online-box online-card solo-start-screen"
-          data-testid="solo-start-screen"
-        >
-          <h1 className="online-title online-title--small">
-            正在准备你的冒险…
-          </h1>
-          <p className="online-loading" role="status">
-            {roomConnection === "connected" ? "正在开局……" : "正在连接房间……"}
-          </p>
-          {roomError && (
-            <p className="online-notice online-notice--error" role="alert">
-              {roomError}
-            </p>
-          )}
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => void enterSoloLobby()}
+      {view === "room" &&
+        soloRoomFlow &&
+        isSoloRoom &&
+        roomStatus === "lobby" && <SoloCharacterSelectScreen />}
+      {view === "room" &&
+        soloRoomFlow &&
+        (!isSoloRoom || roomStatus !== "lobby") && (
+          <div
+            className="online-box online-card solo-start-screen"
+            data-testid="solo-start-screen"
           >
-            ← 返回我的冒险
-          </button>
-        </div>
-      )}
+            <h1 className="online-title online-title--small">
+              正在准备你的冒险…
+            </h1>
+            <p className="online-loading" role="status">
+              {roomConnection === "connected" ? "正在开局……" : "正在连接房间……"}
+            </p>
+            {roomError && (
+              <p className="online-notice online-notice--error" role="alert">
+                {roomError}
+              </p>
+            )}
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => void enterSoloLobby()}
+            >
+              ← 返回我的冒险
+            </button>
+          </div>
+        )}
       {view === "room" && !soloRoomFlow && (
         <RoomScreen
           onClose={

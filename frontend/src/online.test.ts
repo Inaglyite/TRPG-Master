@@ -182,6 +182,7 @@ describe("logout 与会话过期", () => {
       authStatus: "authenticated",
       user: alice,
       view: "lobby",
+      pendingIntent: "solo",
     });
     vi.mocked(apiLogout).mockResolvedValue();
     await expect(logout()).resolves.toBe(true);
@@ -189,6 +190,7 @@ describe("logout 与会话过期", () => {
     expect(state.authStatus).toBe("anonymous");
     expect(state.user).toBeNull();
     expect(state.view).toBe("auth");
+    expect(state.pendingIntent).toBe("solo");
     expect(disconnectRoom).toHaveBeenCalled();
   });
 
@@ -225,6 +227,7 @@ describe("logout 与会话过期", () => {
       authStatus: "authenticated",
       user: alice,
       view: "room",
+      pendingIntent: "solo",
     });
     const unsubscribe = initOnlineSession();
     expect(triggerUnauthorized).not.toBeNull();
@@ -233,6 +236,7 @@ describe("logout 与会话过期", () => {
     expect(state.authStatus).toBe("anonymous");
     expect(state.sessionExpired).toBe(true);
     expect(state.view).toBe("auth");
+    expect(state.pendingIntent).toBe("solo");
     unsubscribe();
   });
 

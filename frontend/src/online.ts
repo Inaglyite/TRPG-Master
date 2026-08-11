@@ -167,6 +167,9 @@ export async function register(
 }
 
 export async function logout(): Promise<boolean> {
+  // 退出后仍保留当前入口意图（云端单人/多人），这样重新登录会回到
+  // 用户刚才所在的页面，而不是因为 resetOnlineState 的默认值误进多人大厅。
+  const pendingIntent = useOnlineStore.getState().pendingIntent;
   const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({ authBusy: true, authError: null });
   try {
@@ -185,7 +188,7 @@ export async function logout(): Promise<boolean> {
   }
   if (epoch !== currentOnlineRequestEpoch()) return false;
   disconnectRoom();
-  resetOnlineState();
+  resetOnlineState({ pendingIntent });
   return true;
 }
 
@@ -194,8 +197,9 @@ export function initOnlineSession(): () => void {
   return onUnauthorized(() => {
     const state = useOnlineStore.getState();
     if (state.authStatus === "authenticated") {
+      const pendingIntent = state.pendingIntent;
       disconnectRoom();
-      resetOnlineState({ sessionExpired: true });
+      resetOnlineState({ sessionExpired: true, pendingIntent });
     }
   });
 }

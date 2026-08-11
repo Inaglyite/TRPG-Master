@@ -65,6 +65,11 @@ beforeEach(() => {
 });
 
 describe("SoloLobbyScreen 冒险列表", () => {
+  it("复用大厅的舒展布局样式", () => {
+    render(<SoloLobbyScreen />);
+    expect(screen.getByTestId("solo-lobby")).toHaveClass("lobby-screen");
+  });
+
   it("只列出 play_mode=solo 的世界（名称、模组标题、单人徽章）", () => {
     render(<SoloLobbyScreen />);
     expect(screen.getByText("雾中宅邸")).toBeInTheDocument();
