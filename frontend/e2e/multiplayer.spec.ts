@@ -760,6 +760,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     await expect(page.getByRole("heading", { name: roomName })).toBeVisible();
     await expect(page.getByText("已连接", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "选择" }).first().click();
+    await expect(page.getByRole("button", { name: "释放" })).toBeVisible();
     await page.getByRole("button", { name: "生成邀请码" }).click();
     const inviteToken = (
       await page.locator(".invite-token").textContent()
@@ -773,6 +774,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     await peer.getByRole("button", { name: "加入房间" }).click();
     await expect(peer.getByRole("heading", { name: roomName })).toBeVisible();
     await peer.getByRole("button", { name: "选择" }).first().click();
+    await expect(peer.getByRole("button", { name: "释放" })).toBeVisible();
     await expect(
       page.locator(".member-row", { hasText: `e2e_electron_peer${runId}` }),
     ).toContainText("在线");
