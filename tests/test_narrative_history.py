@@ -17,6 +17,12 @@ class _Engine:
         return {}
 
 
+class _EngineWithFallonAlias(_Engine):
+    @staticmethod
+    def npc_speaker_aliases() -> dict[str, str]:
+        return {"法伦": "bryce_fallon"}
+
+
 def test_public_history_sanitizes_protocol_and_recovers_speaker_segments() -> None:
     source = {
         "turn_id": "turn-1",
@@ -49,3 +55,21 @@ def test_public_history_sanitizes_protocol_and_recovers_speaker_segments() -> No
     assert source["narrative_segments"] == [
         {"kind": "narration", "text": "旧版未归因正文"}
     ]
+
+
+def test_public_history_does_not_promote_player_dialogue_to_npc_speech() -> None:
+    narrative = "黄千陆向法伦说：“我是正义的警察。”"
+    source = {
+        "turn_id": "turn-player-dialogue",
+        "narrative": narrative,
+        "narrative_segments": [{"kind": "narration", "text": narrative}],
+    }
+
+    result = enrich_public_history_record(source, _EngineWithFallonAlias())
+
+    assert len(result["narrative_segments"]) == 1
+    segment = result["narrative_segments"][0]
+    assert segment["kind"] == "narration"
+    assert segment["text"] == narrative
+    assert segment["speaker"]["type"] == "keeper"
+    assert "npc_id" not in segment

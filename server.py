@@ -115,7 +115,6 @@ from src.database import (
     World,
     WorldMember,
     database_url,
-    new_id,
     session_scope,
 )
 from src.editor_api import create_editor_router
@@ -151,9 +150,13 @@ from src.narrative_history import enrich_public_history_record
 from src.persistence import delete_save, load_game
 from src.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.room_runtime import ActionReservationError, GameRoom, RoomManager
-from src.runtime import RuntimeContext
+from src.runtime import RuntimeContext, default_world_id
 from src.world_branches import WorldBranchService
 from src.world_store import StaleRevisionError
+from src.world_timeline_ws import (
+    WorldTimelineWsDependencies,
+    register_world_timeline_handlers,
+)
 from src.ws_router import WsMessageRouter
 from src.ws_session import SessionTurnGate, WsSessionContext
 
@@ -367,6 +370,36 @@ def _world_turn_lock(context: RuntimeContext) -> threading.Lock:
 def _set_active_context(context: RuntimeContext) -> None:
     global _active_context
     _active_context = context
+
+
+def _local_world_fallback(module_name: object) -> RuntimeContext:
+    """Open a safe local default when an old browser preference is unusable."""
+    preferred_module = str(module_name or "").strip() or _active_context.module_name
+    try:
+        MODULE_REGISTRY.resolve(preferred_module)
+    except (FileNotFoundError, ValueError):
+        preferred_module = _active_context.module_name
+    fallback_world_id = default_world_id(preferred_module)
+    with session_scope(database_url(RUNTIME_ROOT)) as db_session:
+        existing = db_session.get(World, fallback_world_id)
+        # The normal default name could itself be an old archived world.  Do
+        # not let fallback turn that logical deletion into a fresh open.
+        if existing is not None and existing.status != "active":
+            fallback_world_id = (
+                f"{fallback_world_id}-recovery-{secrets.token_hex(3)}"
+            )
+    if fallback_world_id != default_world_id(preferred_module):
+        return RuntimeContext.create(
+            fallback_world_id,
+            preferred_module,
+            project_root=PROJECT_ROOT,
+            runtime_root=RUNTIME_ROOT,
+        )
+    return RuntimeContext.local(
+        preferred_module,
+        project_root=PROJECT_ROOT,
+        runtime_root=RUNTIME_ROOT,
+    )
 
 
 app.include_router(
@@ -611,25 +644,70 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             "module_name": engine.context.module_name,
         }
 
+    def allowed_world_ids() -> set[str] | None:
+        """账号模式下当前用户可访问的世界集合；本地模式返回 None（不过滤）。"""
+        if not (auth_required() and user_id):
+            return None
+        with session_scope(DATABASE_URL) as db_session:
+            return {
+                row[0]
+                for row in db_session.query(WorldMember.world_id)
+                .filter_by(user_id=user_id)
+                .all()
+            }
+
     def world_list_payload() -> dict:
         worlds = WORLD_BRANCHES.list_worlds(
             engine.context.module_name,
             active_world_id=engine.context.world_id,
         )
-        if auth_required() and user_id:
-            with session_scope(DATABASE_URL) as db_session:
-                allowed_ids = {
-                    row[0]
-                    for row in db_session.query(WorldMember.world_id)
-                    .filter_by(user_id=user_id)
-                    .all()
-                }
-            worlds = [world for world in worlds if world["world_id"] in allowed_ids]
+        allowed = allowed_world_ids()
+        if allowed is not None:
+            worlds = [world for world in worlds if world["world_id"] in allowed]
         return {
             "type": "world_list",
             "active_world_id": engine.context.world_id,
             "worlds": worlds,
         }
+
+    def save_list_payload() -> dict:
+        # 存档面板按“选一个存档 → 显示其时间线”浏览，因此本地会话的存档
+        # 列表聚合当前分支树的全部时间线，并标注每条存档所属的时间线。
+        saves = WORLD_BRANCHES.list_tree_saves(
+            engine.context.module_name,
+            active_world_id=engine.context.world_id,
+        )
+        allowed = allowed_world_ids()
+        if allowed is not None:
+            saves = [save for save in saves if save["world_id"] in allowed]
+        return {"type": "save_list", "saves": saves}
+
+    def adventure_list_payload() -> dict:
+        """当前模组的存档位（存档→时间线）列表。
+
+        只列当前连接模组的世界树：Load 页跟随开局页模组选择器，避免其他
+        模组的存档混入（编号也在模组内顺延）。
+        """
+        adventures = WORLD_BRANCHES.list_adventures(
+            active_world_id=engine.context.world_id,
+            module_name=engine.context.module_name,
+            allowed_world_ids=allowed_world_ids(),
+        )
+        module_titles = {mod["id"]: mod.get("title") for mod in _list_mods()}
+        for adventure in adventures:
+            adventure["module_title"] = module_titles.get(
+                adventure["module_name"], adventure["module_name"]
+            )
+        return {
+            "type": "adventure_list",
+            "active_world_id": engine.context.world_id,
+            "adventures": adventures,
+        }
+
+    async def send_save_panels() -> None:
+        """存档槽位列表与冒险（存档→时间线）列表始终成对刷新。"""
+        await outbound.send(save_list_payload())
+        await outbound.send(adventure_list_payload())
 
     async def send_character_state(target_user_id: str | None = None):
         """在进入叙述前同步角色栏，不提前发送线索。"""
@@ -831,7 +909,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     @router.handler("save_list")
     async def handle_save_list(_data: dict) -> None:
-        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+        await send_save_panels()
 
     @router.handler("character_list")
     async def handle_character_list(_data: dict) -> None:
@@ -1053,151 +1131,32 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         await outbound.send({"type": "quit_ok"})
         session.close_requested = True
 
-    @router.handler("turn_branch_create")
-    async def handle_turn_branch_create(data: dict) -> None:
-        if not await reserve_turn():
-            return
-        turn_id = str(data.get("turn_id") or "")
-        if not turn_id:
-            release_turn()
-            await outbound.send(
-                {
-                    "type": "turn_branch_failed",
-                    "message": "缺少分支回合 ID",
-                }
-            )
-            return
-        try:
-            branch = await asyncio.to_thread(
-                WORLD_BRANCHES.create,
-                engine.context,
-                engine.turn_journal,
-                turn_id,
-                label=data.get("label", ""),
-                user_id=user_id,
-            )
-            if auth_required() and user_id:
-                with session_scope(DATABASE_URL) as db_session:
-                    world = db_session.get(World, branch.context.world_id)
-                    world.created_by = user_id
-                    db_session.add(
-                        WorldMember(
-                            id=new_id("member"),
-                            world_id=branch.context.world_id,
-                            user_id=user_id,
-                            role="owner",
-                        )
-                    )
-                audit(
-                    DATABASE_URL,
-                    "world_branched",
-                    user_id=user_id,
-                    world_id=branch.context.world_id,
-                    details={"source_turn_id": turn_id},
-                )
-            engine.switch_context(branch.context)
-            resolve_speaker.clear()
-            engine.adopt_message_history(branch.messages)
-            turn_gate.rebind_world(_world_turn_lock(branch.context))
-            _set_active_context(branch.context)
-            history = engine.turn_journal.public_history()
-            for turn in history:
-                enriched = public_chat_events(turn)
-                turn["narrative_segments"] = enriched
-                turn["chat_events"] = enriched
-        except Exception as exc:
-            release_turn()
-            await outbound.send(
-                {
-                    "type": "turn_branch_failed",
-                    "source_turn_id": turn_id,
-                    "message": str(exc) or "创建时间线分支失败",
-                }
-            )
-            return
-        release_turn()
-        await outbound.send(
-            {
-                "type": "turn_branched",
-                "source_turn_id": turn_id,
-                "world_id": branch.context.world_id,
-                "module_name": branch.context.module_name,
-                "label": branch.label,
-                "history": history,
-            }
-        )
-        await outbound.send(world_context_payload())
-        await outbound.send(world_list_payload())
-        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
-        await send_character_state()
-
-    @router.handler("world_switch")
-    async def handle_world_switch(data: dict) -> None:
-        if not turn_gate.try_acquire_session():
-            await outbound.send(
-                {
-                    "type": "world_switch_failed",
-                    "message": "当前回合尚未结束，暂时不能切换时间线。",
-                }
-            )
-            return
-        target_lock: threading.Lock | None = None
-        target_lock_acquired = False
-        try:
-            target_world_id = str(data.get("world_id") or "")
-            if auth_required():
-                if not user_id:
-                    raise PermissionError("未登录")
-                authorize_world(DATABASE_URL, user_id, target_world_id, "play")
-            context = WORLD_BRANCHES.open(target_world_id)
-            target_lock = _world_turn_lock(context)
-            if not target_lock.acquire(blocking=False):
-                raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
-            target_lock_acquired = True
-            messages, _snapshot = load_game(AUTO_SAVE_SLOT, context=context)
-            engine.switch_context(context)
-            resolve_speaker.clear()
-            if messages is not None:
-                engine.adopt_message_history(messages)
-            turn_gate.rebind_world(target_lock)
-            _set_active_context(context)
-            history = engine.turn_journal.public_history()
-            for turn in history:
-                enriched = public_chat_events(turn)
-                turn["narrative_segments"] = enriched
-                turn["chat_events"] = enriched
-            if user_id:
-                audit(
-                    DATABASE_URL,
-                    "world_switched",
-                    user_id=user_id,
-                    world_id=context.world_id,
-                )
-        except Exception as exc:
-            await outbound.send(
-                {
-                    "type": "world_switch_failed",
-                    "message": str(exc) or "切换时间线失败",
-                }
-            )
-            return
-        finally:
-            if target_lock is not None and target_lock_acquired:
-                target_lock.release()
-            turn_gate.release_session()
-        await outbound.send(
-            {
-                "type": "world_switched",
-                "world_id": engine.context.world_id,
-                "module_name": engine.context.module_name,
-                "history": history,
-            }
-        )
-        await outbound.send(world_context_payload())
-        await outbound.send(world_list_payload())
-        await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
-        await outbound.send({"type": "save_list", "saves": engine.list_saves()})
-        await send_character_state()
+    register_world_timeline_handlers(
+        router,
+        engine=engine,
+        outbound=outbound,
+        turn_gate=turn_gate,
+        reserve_turn=reserve_turn,
+        release_turn=release_turn,
+        resolve_speaker=resolve_speaker,
+        public_chat_events=public_chat_events,
+        send_save_panels=send_save_panels,
+        send_character_state=send_character_state,
+        world_context_payload=world_context_payload,
+        world_list_payload=world_list_payload,
+        user_id=user_id,
+        auto_save_slot=AUTO_SAVE_SLOT,
+        dependencies=WorldTimelineWsDependencies(
+            world_branches=WORLD_BRANCHES,
+            database_url=DATABASE_URL,
+            auth_required=auth_required,
+            authorize_world=authorize_world,
+            audit=audit,
+            world_turn_lock=_world_turn_lock,
+            set_active_context=_set_active_context,
+            load_theme=_load_theme,
+        ),
+    )
 
     @router.handler("turn_rewrite")
     async def handle_turn_rewrite(data: dict) -> None:
@@ -1268,7 +1227,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     ),
                 }
             )
-            await outbound.send({"type": "save_list", "saves": engine.list_saves()})
+            await send_save_panels()
         finally:
             turn_gate.release_session()
 
@@ -1278,10 +1237,29 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             return
         mark_room_start_pending()
         try:
-            intent = game_app.start_game.execute(data.get("character_ref"))
             roster = data.get("_room_roster")
+            is_room_start = isinstance(roster, list) and bool(roster)
+            if not is_room_start and not auth_required():
+                # 本地单人“开始新游戏” = 创建一个新的存档位（独立根世界），
+                # 不再 reset 模组默认世界覆盖旧进度。连接初始化或切换模组时
+                # 打开过但从未开始的世界（无回合无存档）直接复用，避免取消
+                # 开局留下垃圾存档位。
+                if not WORLD_BRANCHES.is_tree_untouched(engine.context.world_id):
+                    fresh_context = WORLD_BRANCHES.create_root(
+                        engine.context.module_name
+                    )
+                    engine.switch_context(fresh_context)
+                    resolve_speaker.clear()
+                    turn_gate.rebind_world(_world_turn_lock(fresh_context))
+                    _set_active_context(fresh_context)
+                    await outbound.send(world_context_payload())
+                    await outbound.send(world_list_payload())
+                    await outbound.send(
+                        {"type": "theme", "theme": _load_theme(fresh_context)}
+                    )
+            intent = game_app.start_game.execute(data.get("character_ref"))
             active_investigator_id = str(data.get("_room_investigator_id") or "")
-            if isinstance(roster, list) and roster:
+            if is_room_start:
                 initialize_investigator_roster(
                     engine.context,
                     roster,
@@ -1494,8 +1472,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         )
     )
 
-    saves = engine.list_saves()
-    await outbound.send({"type": "save_list", "saves": saves})
+    await outbound.send(save_list_payload())
+    await outbound.send(adventure_list_payload())
 
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
@@ -1637,18 +1615,27 @@ async def game_ws(ws: WebSocket):
             return
         await ws.accept()
         if requested_world:
-            context = RuntimeContext.create(
-                requested_world,
-                requested_module,
-                project_root=PROJECT_ROOT,
-                runtime_root=RUNTIME_ROOT,
-            )
+            try:
+                requested_context = WORLD_BRANCHES.open(requested_world)
+                # ``load_game`` is also the one-shot legacy file importer.
+                # Do this before starting a session so an obsolete browser
+                # preference never lands the renderer in an empty timeline.
+                messages, _snapshot = load_game(
+                    AUTO_SAVE_SLOT,
+                    context=requested_context,
+                )
+                context = (
+                    requested_context
+                    if messages is not None
+                    else _local_world_fallback(requested_context.module_name)
+                )
+            except (FileNotFoundError, ValueError):
+                # A deleted, malformed, or no-longer-installed saved world is
+                # not a connection error.  Start a clean local world and let
+                # the initial module_list/world id replace localStorage.
+                context = _local_world_fallback(requested_module)
         else:
-            context = RuntimeContext.local(
-                requested_module,
-                project_root=PROJECT_ROOT,
-                runtime_root=RUNTIME_ROOT,
-            )
+            context = _local_world_fallback(requested_module)
         engine = GameEngine(context)
         engine.configure_models(
             _active_model_settings.narrative_model,

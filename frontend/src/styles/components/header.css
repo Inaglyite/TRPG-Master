@@ -142,7 +142,7 @@
   background-image: var(--ui-restart);
 }
 #btn-panel {
-  background-image: var(--ui-character);
+  background-image: var(--ui-icon-character);
 }
 #toolbar #btn-notes {
   background-image: var(--ui-notebook);
@@ -153,6 +153,41 @@
   background-image: var(--ui-model-settings);
   background-position: center 2px;
   background-size: 58px 58px;
+}
+
+/* 云端单人中唯一的房间级出口。它故意是紧凑文字铭牌，而不是再塞一个
+   贴图大图标：玩家需要一眼找到“离开冒险”，但不能压过角色/笔记等常用工具。 */
+#toolbar #btn-solo-adventure-exit {
+  width: auto;
+  min-width: 82px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--gold-dim) 76%, transparent);
+  border-radius: var(--r-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg3) 94%, black),
+    color-mix(in srgb, var(--bg) 90%, black)
+  );
+  color: var(--gold-bright);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-indent: 0;
+  overflow: visible;
+  filter: none;
+}
+#toolbar #btn-solo-adventure-exit::after {
+  display: none;
+}
+#toolbar #btn-solo-adventure-exit:hover,
+#toolbar #btn-solo-adventure-exit:focus-visible {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--bg4) 92%, black);
+  color: var(--gold-bright);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--gold) 36%, transparent));
+  outline: none;
 }
 
 @keyframes quick-save-pulse {

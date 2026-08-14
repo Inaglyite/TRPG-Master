@@ -108,17 +108,47 @@ describe("OnlineShell 界面切换", () => {
     expect(screen.getByTestId("room-screen")).toBeInTheDocument();
   });
 
-  it("playing + roomOpen 时渲染房间管理页，返回游戏后关闭", () => {
-    setupOnline({
-      roomStatus: "playing",
-      currentActorUserId: "u2",
-      roomOpen: true,
-    });
-    render(<OnlineShell />);
-    expect(screen.getByTestId("room-screen")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "返回游戏" }));
-    expect(useOnlineStore.getState().roomOpen).toBe(false);
-    expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
+  it("playing + roomOpen 时渲染房间管理页，返回游戏后淡出关闭", () => {
+    vi.useFakeTimers();
+    try {
+      setupOnline({
+        roomStatus: "playing",
+        currentActorUserId: "u2",
+        roomOpen: true,
+      });
+      render(<OnlineShell />);
+      expect(screen.getByTestId("room-screen")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "返回游戏" }));
+      expect(useOnlineStore.getState().roomOpen).toBe(false);
+      // 整幕淡出期间外壳仍在场，播完 360ms 后才卸载
+      expect(screen.getByTestId("online-shell")).toHaveClass("online-closing");
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("online-shell")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("已挂载外壳在进入游戏画面时先播整幕淡出再卸载", () => {
+    vi.useFakeTimers();
+    try {
+      setupOnline({ roomStatus: "lobby", currentActorUserId: "u1" });
+      render(<OnlineShell />);
+      expect(screen.getByTestId("online-shell")).toBeInTheDocument();
+
+      act(() => useOnlineStore.setState({ roomStatus: "playing" }));
+      expect(screen.getByTestId("online-shell")).toHaveClass("online-closing");
+      expect(screen.getByTestId("online-shell")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.queryByTestId("online-shell")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("等待页、playing、房间管理与返回游戏共用一个房间连接", async () => {
@@ -167,10 +197,11 @@ describe("OnlineShell 云端单人", () => {
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
-  it("solo 房间连接且 lobby 时自动开局（每个世界一次）", async () => {
+  it("solo 房间连接且 lobby 时自动开局（进房已有角色卡，每个世界一次）", async () => {
     const { startGame } = await import("../../../online");
     setupOnline({
       roomStatus: "lobby",
+      membersStatus: "ready",
       roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
       members: [
         {
@@ -190,6 +221,38 @@ describe("OnlineShell 云端单人", () => {
     // room_state 重放 lobby 不重复发送 start。
     act(() => useOnlineStore.setState({ readyUserIds: ["u1"] }));
     expect(startGame).toHaveBeenCalledTimes(1);
+  });
+
+  it("进房后才认领角色卡不自动开局（确认按钮由玩家显式点击）", async () => {
+    const { startGame } = await import("../../../online");
+    setupOnline({
+      roomStatus: "lobby",
+      membersStatus: "ready",
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+      ],
+    });
+    render(<OnlineShell />);
+    expect(startGame).not.toHaveBeenCalled();
+
+    // 玩家在角色选择页点卡认领：成员更新带上了 investigator，仍不得自动开局
+    act(() =>
+      useOnlineStore.setState({
+        members: [
+          {
+            user_id: "u1",
+            username: "alice",
+            role: "owner",
+            investigator: {
+              id: "investigator-1",
+              character_key: "default:alice",
+            },
+          },
+        ],
+      }),
+    );
+    expect(startGame).not.toHaveBeenCalled();
   });
 
   it("多人房间不自动开局", async () => {

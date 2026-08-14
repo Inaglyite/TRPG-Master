@@ -1,8 +1,13 @@
 /** Start-flow state machine and WebSocket command adapter. */
 
 import { enableInput } from "./options";
-import { openSavePanel, renderSavePanel } from "./panels";
-import { showGmThinking } from "./renderer";
+import {
+  clearTransientHandouts,
+  openSavePanel,
+  renderSavePanel,
+} from "./panels";
+import { resetGamePresentation, showGmThinking } from "./renderer";
+import { useAppStore } from "./state/app-store";
 import {
   useStartStore,
   type CharacterGroup,
@@ -38,10 +43,69 @@ export function getGameStarting() {
   return useStartStore.getState().gameStarting;
 }
 
+/**
+ * 从顶部“新游戏”回到应用内开局选择。
+ *
+ * 不重载 document，也不立刻改动服务端世界：用户仍需选定调查员并确认开始，
+ * 才会沿用既有 start 命令重置世界。这既保留了原来的确认流程，也避免 Electron
+ * reload 关闭正在使用的 WebSocket。
+ */
+export function returnToStartMenu() {
+  if (getGameStarting()) return;
+  clearRetry();
+  retryAttempt = 0;
+  enableInput(false);
+  useAppStore.getState().setChoices([]);
+  useAppStore.getState().setDialog(null);
+  useAppStore.getState().setEnding(null);
+  useStartStore.setState({
+    gameStarted: false,
+    gameStarting: false,
+    view: "menu",
+    moduleSwitchPending: false,
+    hint: "",
+  });
+  // 回到开局页时刷新存档位/存档列表：开始新游戏后服务端不会主动推送，
+  // 不刷新的话“从存档开始”会一直停留在连接初始化时的可用状态。
+  safeSend(JSON.stringify({ type: "save_list" }));
+}
+
+function resetLocalGamePresentation() {
+  resetGamePresentation();
+  clearTransientHandouts();
+  useAppStore.setState({
+    character: null,
+    clues: {},
+    choices: [],
+    dialog: null,
+    ending: null,
+    utilityOpen: false,
+    characterPanelOpen: false,
+    savePanelOpen: false,
+    saves: [],
+    worlds: [],
+    renameSlotId: null,
+    quickSaveState: "idle",
+    notesText: "",
+    notesRevision: 0,
+    notesDirty: false,
+    notesSaving: false,
+    notesLoading: false,
+    notesStatus: "",
+    notesStatusKind: "",
+  });
+}
+
 export function onGmTurnStart() {
   if (!getGameStarted()) {
+    const startWasRequested = getGameStarting();
     clearRetry();
     retryAttempt = 0;
+    // 此时 start 已被服务端接受；现在才清掉旧局 UI，避免用户只是打开
+    // 开局选择就丢失当前画面或本地草稿。
+    if (startWasRequested) {
+      resetLocalGamePresentation();
+    }
     useStartStore.setState({ gameStarting: false, gameStarted: true });
   }
   enableInput(false);

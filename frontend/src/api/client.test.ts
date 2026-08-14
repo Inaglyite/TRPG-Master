@@ -11,7 +11,7 @@ import {
   onUnauthorized,
   setCloudOrigin,
 } from "./client";
-import { acceptInvite, deleteWorld } from "./worlds";
+import { abandonWorld, acceptInvite, deleteWorld } from "./worlds";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -124,6 +124,18 @@ describe("apiFetch", () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://localhost:8765/api/worlds/world%2F1%3Fx");
     expect(init.method).toBe("DELETE");
+    expect(init.credentials).toBe("include");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("abandonWorld 以 POST 请求调用单人放弃端点", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(abandonWorld("world/1?x")).resolves.toBeUndefined();
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:8765/api/worlds/world%2F1%3Fx/abandon");
+    expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
     expect(init.body).toBeUndefined();
   });

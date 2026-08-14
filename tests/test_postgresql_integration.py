@@ -12,12 +12,15 @@ from pathlib import Path
 import pytest
 from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 
 from src.auth import create_user
 from src.config import PROJECT_ROOT
 from src.database import (
+    ACTIVE_TURN_WORLD_INDEX,
     SaveSlot,
     Snapshot,
+    Turn,
     World,
     WorldMember,
     WorldState,
@@ -42,6 +45,42 @@ pytestmark = pytest.mark.skipif(
     not POSTGRES_URL,
     reason="set TRPG_TEST_POSTGRES_URL to run PostgreSQL integration tests",
 )
+
+
+def test_postgresql_active_turn_partial_index_enforces_one_per_world() -> None:
+    """CI exercises the PostgreSQL half of the cross-process turn guard."""
+    suffix = secrets.token_hex(5)
+    world_id = f"pg-active-turn-{suffix}"
+
+    def row(turn_id: str, status: str) -> Turn:
+        return Turn(
+            pk=new_id("turnrow"),
+            id=turn_id,
+            world_id=world_id,
+            kind="action",
+            status=status,
+            owner_token="pg-writer",
+            record={"turn_id": turn_id, "status": status},
+            messages=[],
+        )
+
+    with session_scope(POSTGRES_URL) as session:
+        session.add(World(id=world_id, module_name="mansion_of_madness"))
+        session.flush()
+        session.add(row(f"active-a-{suffix}", "active"))
+
+    with pytest.raises(IntegrityError):
+        with session_scope(POSTGRES_URL) as session:
+            session.add(row(f"active-b-{suffix}", "active"))
+
+    with session_scope(POSTGRES_URL) as session:
+        session.add(row(f"completed-{suffix}", "completed"))
+        active_rows = session.query(Turn).filter_by(world_id=world_id, status="active").all()
+    assert len(active_rows) == 1
+    indexes = {
+        index["name"]: index for index in inspect(get_engine(POSTGRES_URL)).get_indexes("turns")
+    }
+    assert indexes[ACTIVE_TURN_WORLD_INDEX]["unique"]
 
 
 def test_postgresql_jsonb_membership_and_room_idempotency(

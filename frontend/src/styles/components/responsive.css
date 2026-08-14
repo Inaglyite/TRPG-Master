@@ -334,6 +334,17 @@
   #save-panel-body {
     padding: 14px 30px 30px;
   }
+  .world-entry {
+    grid-template-columns: 1fr;
+  }
+  .world-entry-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .world-archive-confirmation {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
   .save-slot-entry {
     align-items: stretch;
     grid-template-columns: 1fr;

@@ -12,6 +12,7 @@ import {
   onNarrativeSegment,
   onNarrativeSegments,
   renderTurnHistory,
+  resetGamePresentation,
   setDisplayTurnId,
   setNarrationBoost,
   whenNarrativePresented,
@@ -43,6 +44,16 @@ describe("React message renderer adapter", () => {
       text: "检查门锁",
       turnId: "turn-1",
     });
+  });
+
+  it("clears old messages and stream state when a confirmed new game begins", () => {
+    setDisplayTurnId("turn-old");
+    addMsg("player", "翻阅旧档案");
+    onNarrativeChunk("旧叙述仍在显示");
+
+    resetGamePresentation();
+
+    expect(useMessageStore.getState().messages).toEqual([]);
   });
 
   it("发送者把乐观玩家气泡升级为权威署名，且同 turn 重放不重复", () => {

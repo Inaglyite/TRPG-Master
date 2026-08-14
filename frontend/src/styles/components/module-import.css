@@ -14,6 +14,13 @@
 #module-import-overlay.hidden {
   display: none;
 }
+/* 退出：与 fade-in/pop-in 成对 */
+#module-import-overlay.overlay-closing {
+  animation: fade-out 0.16s ease both;
+}
+#module-import-overlay.overlay-closing #module-import-panel {
+  animation: pop-out 0.16s cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
 #module-import-panel {
   width: min(580px, 100%);
   max-height: min(720px, calc(100vh - 48px));

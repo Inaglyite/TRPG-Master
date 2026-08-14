@@ -20,7 +20,9 @@ function formatTime(value?: string): string {
 
 /**
  * 云端单人“我的冒险”：列出 play_mode=solo 的私密世界，可新建/继续/删除。
- * 与多人大厅共用 worlds/modules 数据；solo 世界不能邀请或加入，删除即归档。
+ * 视觉与本地开始页同一体系（主题背景裸排版 + start-brand 品牌区 +
+ * adventure-card 存档卡 + start-art-button 黄铜 CTA），写通路保持
+ * HTTP worlds/createSoloWorld 不变。删除即归档，保留二次确认。
  */
 export function SoloLobbyScreen() {
   const user = useOnlineStore((state) => state.user);
@@ -35,6 +37,7 @@ export function SoloLobbyScreen() {
 
   const [moduleId, setModuleId] = useState("");
   const [worldName, setWorldName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -69,15 +72,15 @@ export function SoloLobbyScreen() {
 
   return (
     <div
-      className="online-box online-card online-card--wide lobby-screen solo-lobby-screen"
+      className="online-start-view solo-lobby lobby-screen"
       data-testid="solo-lobby"
     >
-      <header className="online-header">
-        <div>
-          <h1 className="online-title online-title--small">我的冒险</h1>
+      <header className="solo-lobby-header">
+        <div className="start-brand">
+          <h1 className="online-title fx-glow">我的冒险</h1>
           <p className="online-subtitle">云端私密单人世界，只有你能进入</p>
         </div>
-        <div className="online-header-side">
+        <div className="solo-lobby-user">
           <span className="online-user" title={user?.id}>
             {user?.username}
           </span>
@@ -92,14 +95,11 @@ export function SoloLobbyScreen() {
       </header>
 
       <section
-        className="online-section lobby-section"
+        className="solo-lobby-section"
         aria-labelledby="solo-worlds-title"
       >
-        <div className="online-section-head">
-          <div>
-            <h2 id="solo-worlds-title">进行中的冒险</h2>
-            <p className="online-section-desc">你的全部云端单人存档</p>
-          </div>
+        <div className="solo-lobby-section-head">
+          <h2 id="solo-worlds-title">进行中的冒险</h2>
           <button
             type="button"
             className="btn-ghost lobby-refresh"
@@ -136,122 +136,152 @@ export function SoloLobbyScreen() {
           </div>
         )}
         {soloWorlds.length > 0 && (
-          <ul className="room-list">
+          <div className="solo-world-list">
             {soloWorlds.map((world) => (
-              <li key={world.world_id} className="solo-world-row">
-                <button
-                  type="button"
-                  className="room-card"
-                  onClick={() => void enterRoom(world.world_id)}
-                >
-                  <span className="room-card-top">
-                    <span className="room-card-title">
-                      {world.metadata?.name || moduleTitle(world.module)}
-                    </span>
-                    {world.metadata?.room_status && (
-                      <span className="online-badge online-badge--status">
-                        {roomStatusLabel(world.metadata.room_status)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="room-card-module">
-                    {moduleTitle(world.module)}
-                  </span>
-                  <span className="room-card-meta">
-                    <span className="online-badge online-badge--solo">
-                      单人
-                    </span>
-                    {formatTime(world.updated_at) && (
-                      <span className="room-card-time">
-                        {formatTime(world.updated_at)}
-                      </span>
-                    )}
-                  </span>
-                </button>
-                {confirmingDelete === world.world_id ? (
-                  <span className="member-action-group solo-world-actions">
-                    <button
-                      type="button"
-                      className="btn-ghost online-danger"
-                      disabled={deleteBusy}
-                      onClick={() => void confirmDelete(world.world_id)}
-                    >
-                      确认删除
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      disabled={deleteBusy}
-                      onClick={() => setConfirmingDelete(null)}
-                    >
-                      取消
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-ghost solo-world-actions"
-                    disabled={deleteBusy}
-                    onClick={() => setConfirmingDelete(world.world_id)}
+              <div
+                className="adventure-card"
+                key={world.world_id}
+                data-world={world.world_id}
+              >
+                <div className="adventure-card-main">
+                  <div
+                    className="adventure-card-info"
+                    onClick={() => void enterRoom(world.world_id)}
                   >
-                    删除存档
-                  </button>
-                )}
-              </li>
+                    <div className="adventure-slot-line">
+                      <span className="adventure-slot-no">云端存档</span>
+                      {world.metadata?.room_status && (
+                        <span className="adventure-badge">
+                          {roomStatusLabel(world.metadata.room_status)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="adventure-card-title">
+                      {world.metadata?.name || moduleTitle(world.module)}
+                    </div>
+                    <div className="adventure-card-meta">
+                      {moduleTitle(world.module)}
+                    </div>
+                    <div className="adventure-card-meta dim">
+                      最后游玩 {formatTime(world.updated_at) || "未知"}
+                    </div>
+                  </div>
+                  <div className="adventure-card-actions">
+                    <button
+                      type="button"
+                      className="adventure-resume"
+                      onClick={() => void enterRoom(world.world_id)}
+                    >
+                      继续冒险
+                    </button>
+                    <div className="adventure-card-sub-actions">
+                      {confirmingDelete === world.world_id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="adventure-delete"
+                            disabled={deleteBusy}
+                            onClick={() => void confirmDelete(world.world_id)}
+                          >
+                            确认删除
+                          </button>
+                          <button
+                            type="button"
+                            className="adventure-manage"
+                            disabled={deleteBusy}
+                            onClick={() => setConfirmingDelete(null)}
+                          >
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="adventure-delete"
+                          disabled={deleteBusy}
+                          onClick={() => setConfirmingDelete(world.world_id)}
+                        >
+                          删除存档
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </section>
 
       <section
-        className="online-section lobby-section"
+        className="solo-lobby-section"
         aria-labelledby="solo-create-title"
       >
-        <div>
-          <h2 id="solo-create-title">新建冒险</h2>
-          <p className="online-section-desc">选择模组，开一份只属于你的调查</p>
-        </div>
-        <div className="online-inline-form lobby-form">
-          <input
-            value={worldName}
-            onChange={(event) => setWorldName(event.target.value)}
-            placeholder="冒险名称（可选）"
-            aria-label="冒险名称"
-            disabled={createBusy}
-            maxLength={60}
-          />
-          <select
-            value={selectedModule}
-            onChange={(event) => setModuleId(event.target.value)}
-            disabled={createBusy || modulesStatus !== "ready"}
-            aria-label="选择模组"
-          >
-            {modulesStatus !== "ready" && <option>正在读取模组……</option>}
-            {modules.map((module) => (
-              <option key={module.id} value={module.id}>
-                {module.title}
-              </option>
-            ))}
-          </select>
+        {!createOpen ? (
           <button
             type="button"
-            className="btn-primary"
-            disabled={createBusy || !selectedModule}
-            onClick={() => void createSoloWorld(selectedModule, worldName)}
+            className="start-art-button solo-lobby-create-cta"
+            onClick={() => setCreateOpen(true)}
           >
-            {createBusy ? "创建中……" : "开始新的冒险"}
+            <span className="start-art-label">开始新冒险</span>
           </button>
-        </div>
-        {createError && (
-          <p className="online-notice online-notice--error" role="alert">
-            {createError}
-          </p>
+        ) : (
+          <div className="solo-lobby-create">
+            <h2 id="solo-create-title">开始新冒险</h2>
+            <p className="online-section-desc">
+              选择模组，开一份只属于你的调查
+            </p>
+            <div className="online-inline-form lobby-form">
+              <input
+                value={worldName}
+                onChange={(event) => setWorldName(event.target.value)}
+                placeholder="冒险名称（可选）"
+                aria-label="冒险名称"
+                disabled={createBusy}
+                maxLength={60}
+              />
+              <select
+                value={selectedModule}
+                onChange={(event) => setModuleId(event.target.value)}
+                disabled={createBusy || modulesStatus !== "ready"}
+                aria-label="选择模组"
+              >
+                {modulesStatus !== "ready" && <option>正在读取模组……</option>}
+                {modules.map((module) => (
+                  <option key={module.id} value={module.id}>
+                    {module.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={createBusy || !selectedModule}
+                onClick={() => void createSoloWorld(selectedModule, worldName)}
+              >
+                {createBusy ? "创建中……" : "创建冒险"}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={createBusy}
+                onClick={() => setCreateOpen(false)}
+              >
+                收起
+              </button>
+            </div>
+            {createError && (
+              <p className="online-notice online-notice--error" role="alert">
+                {createError}
+              </p>
+            )}
+          </div>
         )}
       </section>
 
       <button
         type="button"
-        className="start-menu-button"
+        className="start-menu-button solo-lobby-back"
         onClick={() => void backToModeSelect()}
       >
         ← 返回模式选择

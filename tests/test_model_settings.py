@@ -72,7 +72,7 @@ class ModelSettingsTests(unittest.TestCase):
             ):
                 with TestClient(server.app) as client:
                     with client.websocket_connect("/ws") as ws:
-                        messages = [ws.receive_json() for _ in range(5)]
+                        messages = [ws.receive_json() for _ in range(6)]
                         current = next(
                             message
                             for message in messages

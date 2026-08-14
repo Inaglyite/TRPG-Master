@@ -4,6 +4,7 @@ import { sendAction } from "../../options";
 import { closeUtility, requestNotes, saveNotes } from "../../utility";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
+import { useDelayedClose } from "./transitions";
 
 const quickActions = [
   "观察当前环境",
@@ -26,6 +27,7 @@ function submitQuickAction(action: string) {
 
 export function UtilityPanel() {
   const open = useAppStore((state) => state.utilityOpen);
+  const { rendered, closing } = useDelayedClose(open);
   const text = useAppStore((state) => state.notesText);
   const dirty = useAppStore((state) => state.notesDirty);
   const saving = useAppStore((state) => state.notesSaving);
@@ -67,10 +69,11 @@ export function UtilityPanel() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  if (!open) return <div id="utility-overlay" className="hidden" />;
+  if (!rendered) return <div id="utility-overlay" className="hidden" />;
   return (
     <div
       id="utility-overlay"
+      className={closing ? "overlay-closing" : undefined}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget)
           void notesCommand("closeUtility");

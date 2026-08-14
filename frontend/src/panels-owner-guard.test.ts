@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  archiveWorld,
   confirmEnding,
   createSave,
   loadSave,
@@ -113,5 +114,21 @@ describe("openSavePanel 协议帧", () => {
     expect(safeSend).toHaveBeenCalledWith(
       JSON.stringify({ type: "world_list" }),
     );
+  });
+});
+
+describe("本地时间线归档协议帧", () => {
+  it("只在本地模式发送 world_archive", () => {
+    setupRoom("owner", "local");
+    archiveWorld("branch-a");
+    expect(safeSend).toHaveBeenCalledWith(
+      JSON.stringify({ type: "world_archive", world_id: "branch-a" }),
+    );
+  });
+
+  it("联机模式不发送本地时间线归档命令", () => {
+    setupRoom("owner", "online");
+    archiveWorld("branch-a");
+    expect(safeSend).not.toHaveBeenCalled();
   });
 });

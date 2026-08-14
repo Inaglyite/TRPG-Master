@@ -160,6 +160,7 @@
   transition:
     border-color 0.16s ease,
     background 0.16s ease,
+    box-shadow 0.16s ease,
     transform 0.16s ease;
 }
 .character-card::before {
@@ -169,6 +170,9 @@
   width: 3px;
   background: var(--gold-dim);
   opacity: 0.55;
+  transition:
+    opacity 0.16s ease,
+    background-color 0.16s ease;
 }
 .character-card:hover {
   transform: translateX(2px);
@@ -253,7 +257,78 @@
   padding: 30px;
 }
 .character-dossier {
-  padding: 24px 26px 28px;
+  padding: 28px 34px 32px;
+  /* 手绘羊皮纸档案卡（有机纸纹，整体贴合卡片盒） */
+  background: var(--ui-dossier-parchment) center / 100% 100% no-repeat, #d8c096;
+}
+/* 切换调查员时档案卡淡入上浮；换页入场期间不播（避免容器+子元素双重动效） */
+.character-dossier.dossier-anim {
+  animation: dossier-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes dossier-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+/* 羊皮纸上的深墨文字体系（仅作用于档案卡内部，不影响深色侧栏） */
+.character-dossier .character-detail-header {
+  border-bottom-color: rgba(74, 52, 24, 0.42);
+}
+.character-dossier .character-detail-identity h3 {
+  color: #2a1608;
+  text-shadow: none;
+}
+.character-dossier .character-detail-identity p {
+  color: #5a4226;
+}
+.character-dossier .character-source-badge {
+  border-color: #7a5a30;
+  background: rgba(60, 40, 16, 0.12);
+  color: #4a3010;
+}
+.character-dossier .character-vital {
+  background: rgba(70, 48, 20, 0.1);
+  border-left-color: #8a6a36;
+}
+.character-dossier .character-vital span {
+  color: #6a522e;
+}
+.character-dossier .character-vital strong {
+  color: #2a1608;
+}
+.character-dossier .character-detail-section {
+  border-top-color: rgba(74, 52, 24, 0.35);
+}
+.character-dossier .character-detail-section h4 {
+  color: #6a4a18;
+}
+.character-dossier .character-attribute,
+.character-dossier .character-skill {
+  border-bottom-color: rgba(96, 70, 34, 0.45);
+}
+.character-dossier .character-attribute span,
+.character-dossier .character-skill span {
+  color: #5a4226;
+}
+.character-dossier .character-attribute strong,
+.character-dossier .character-skill strong {
+  color: #2a1608;
+}
+.character-dossier .character-story p {
+  color: #33240f;
+}
+.character-dossier .character-story strong {
+  color: #6a4a18;
+}
+.character-dossier .character-inventory {
+  color: #33240f;
+}
+.character-dossier .character-inventory li::marker {
+  color: #8a6a36;
+}
+.character-dossier .character-career-note {
+  color: #3d5a2a;
 }
 .character-detail-header {
   display: flex;

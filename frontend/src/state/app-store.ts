@@ -84,14 +84,55 @@ export type SaveEntry = {
   clue_count?: number;
   message_count?: number;
   created_at?: string;
+  // 本地会话的存档列表聚合整个分支树：每条存档标注所属时间线。
+  // 旧服务端不下发这些字段，此时全部按当前时间线处理。
+  world_id?: string;
+  timeline_label?: string;
+  world_active?: boolean;
 };
 export type WorldEntry = {
   world_id?: string;
   active?: boolean;
   is_branch?: boolean;
+  resumable?: boolean;
   label?: string;
   scene_name?: string;
   character_name?: string;
+  parent_world_id?: string;
+};
+/** 存档容器内的一条时间线（服务端已按展示顺序排好：主时间线在前）。 */
+export type TimelineEntry = {
+  world_id?: string;
+  label?: string;
+  is_branch?: boolean;
+  parent_world_id?: string;
+  depth?: number;
+  active?: boolean;
+  resumable?: boolean;
+  scene_name?: string;
+  character_name?: string;
+  updated_at?: string;
+  save_count?: number;
+};
+/** 一次游戏/模组进度 = 一个存档位（Save Slot）；时间线从属于它。 */
+export type AdventureEntry = {
+  root_world_id?: string;
+  module_name?: string;
+  module_title?: string;
+  /** 存档位编号（按创建顺序从 1 开始），UI 显示为 SAVE 01/02/03。 */
+  slot_index?: number;
+  /** 存档位的自定义显示名；为空时 UI 回退为模组名。 */
+  slot_name?: string;
+  /** resume 时间线的已完成回合数（“第 N 回合”进度）。 */
+  turn_count?: number;
+  created_at?: string;
+  active?: boolean;
+  character_name?: string;
+  scene_name?: string;
+  updated_at?: string;
+  timeline_count?: number;
+  resume_world_id?: string;
+  timelines?: TimelineEntry[];
 };
 export type QuickSaveState = "idle" | "saving" | "success" | "failed";
 
@@ -145,6 +186,12 @@ type AppState = {
   savePanelMode: "load" | "manage";
   saves: SaveEntry[];
   worlds: WorldEntry[];
+  adventures: AdventureEntry[];
+  /** 服务端是否已下发过 adventure_list：区分“新服务端但暂无存档位”与
+   *  “旧服务端/联机房间不支持存档位视图（回退平铺列表）”。 */
+  adventuresReady: boolean;
+  /** 最近一个可创建分支的已完成回合（面板"从当前进度创建分支"用）。 */
+  latestBranchTurnId: string | null;
   renameSlotId: string | null;
   quickSaveState: QuickSaveState;
   setMode: (mode: AppMode) => void;
@@ -189,6 +236,10 @@ type AppState = {
   setSavePanel: (open: boolean, mode?: "load" | "manage") => void;
   setSaveData: (saves: SaveEntry[]) => void;
   setWorldData: (worlds: WorldEntry[], activeWorldId: string) => void;
+  setAdventureData: (
+    adventures: AdventureEntry[],
+    activeWorldId: string,
+  ) => void;
 };
 
 export const useAppStore = create<AppState>((set) => ({
@@ -224,6 +275,9 @@ export const useAppStore = create<AppState>((set) => ({
   savePanelMode: "manage",
   saves: [],
   worlds: [],
+  adventures: [],
+  adventuresReady: false,
+  latestBranchTurnId: null,
   renameSlotId: null,
   quickSaveState: "idle",
   setMode: (mode) => set({ mode }),
@@ -291,4 +345,6 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setSaveData: (saves) => set({ saves }),
   setWorldData: (worlds, activeWorldId) => set({ worlds, activeWorldId }),
+  setAdventureData: (adventures, activeWorldId) =>
+    set({ adventures, activeWorldId, adventuresReady: true }),
 }));

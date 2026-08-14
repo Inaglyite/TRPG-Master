@@ -4,12 +4,14 @@ import { enableInput } from "./options";
 import { addMsg, removeLoading } from "./renderer";
 import {
   useAppStore,
+  type AdventureEntry,
   type ClueItem,
   type Handout,
   type SaveEntry,
   type WorldEntry,
 } from "./state/app-store";
 import { isRoomOwner } from "./state/online-store";
+import { useStartStore } from "./state/start-store";
 import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
 import { safeSend } from "./ws";
@@ -163,6 +165,70 @@ export function renderWorldPanel(worlds: WorldEntry[], activeWorldId: string) {
     .setWorldData(Array.isArray(worlds) ? worlds : [], activeWorldId || "");
 }
 
+export function renderAdventurePanel(
+  adventures: AdventureEntry[],
+  activeWorldId: string,
+) {
+  const list = Array.isArray(adventures) ? adventures : [];
+  useAppStore.getState().setAdventureData(list, activeWorldId || "");
+  // 存档位列表是“从存档开始”可用性的权威来源：只要任意存档位存在，
+  // 开局页 Load 入口就可用（不再只看当前时间线树的槽位）。
+  useStartStore.setState({ hasSaves: list.length > 0 });
+}
+
+/** 从存档卡片"继续游戏"：跨存档时先切到其最近可玩时间线。 */
+let resumeAfterSwitch = false;
+
+/** 继续某条时间线：当前时间线直接回到游戏；其他时间线先切换。 */
+export function resumeTimeline(worldId: string, active: boolean) {
+  const target = String(worldId || "");
+  if (!target) return;
+  if (active) {
+    // 当前时间线：游戏中直接回到叙述；开局页则读取自动存档进入。
+    closeSavePanel();
+    if (!getGameStarted()) loadSave("slot_000");
+    return;
+  }
+  resumeAfterSwitch = true;
+  switchWorld(target);
+}
+
+export function resumeAdventure(adventure: AdventureEntry) {
+  resumeTimeline(
+    String(adventure.resume_world_id || ""),
+    Boolean(adventure.active),
+  );
+}
+
+/** world_switched 后若仍在开局页，立即读取自动存档完成"继续游戏"。 */
+export function consumeResumeAfterSwitch(): boolean {
+  const pending = resumeAfterSwitch;
+  resumeAfterSwitch = false;
+  return pending;
+}
+
+/** 从当前进度的最近完成回合创建时间线分支。 */
+export function createBranchFromCurrentTurn(label: string) {
+  const turnId = useAppStore.getState().latestBranchTurnId;
+  if (!turnId) return;
+  safeSend(
+    JSON.stringify({
+      type: "turn_branch_create",
+      turn_id: turnId,
+      label: label.trim(),
+    }),
+  );
+}
+
+/** 重命名一条时间线的显示名。门禁与归档一致：仅本地模式。 */
+export function renameWorld(worldId: string, label: string) {
+  const id = String(worldId || "").trim();
+  if (!id || useAppStore.getState().mode !== "local") return;
+  safeSend(
+    JSON.stringify({ type: "world_rename", world_id: id, label: label.trim() }),
+  );
+}
+
 export function loadSave(slotId: string) {
   if (!roomOwnerOpsAllowed()) {
     denyRoomOwnerOp();
@@ -206,6 +272,41 @@ export function createSave() {
 
 export function switchWorld(worldId: string) {
   safeSend(JSON.stringify({ type: "world_switch", world_id: worldId }));
+}
+
+/**
+ * 删除一条已离开的本地时间线分支。
+ *
+ * UI 只会为非当前的分支展示入口；服务端仍会重新校验分支关系、活动状态
+ * 与当前世界，不能把这个客户端检查当作权限边界。
+ */
+export function archiveWorld(worldId: string) {
+  const id = String(worldId || "").trim();
+  if (!id || useAppStore.getState().mode !== "local") return;
+  safeSend(JSON.stringify({ type: "world_archive", world_id: id }));
+}
+
+/**
+ * 删除整个存档位（主时间线 + 全部分支）。逻辑归档可恢复；
+ * 当前正在游玩的存档位不可删除（服务端会再次校验）。仅本地模式。
+ */
+export function archiveAdventure(rootWorldId: string) {
+  const id = String(rootWorldId || "").trim();
+  if (!id || useAppStore.getState().mode !== "local") return;
+  safeSend(JSON.stringify({ type: "adventure_archive", root_world_id: id }));
+}
+
+/** 重命名存档位的自定义显示名（仅元数据）。仅本地模式。 */
+export function renameAdventure(rootWorldId: string, label: string) {
+  const id = String(rootWorldId || "").trim();
+  if (!id || useAppStore.getState().mode !== "local") return;
+  safeSend(
+    JSON.stringify({
+      type: "adventure_rename",
+      root_world_id: id,
+      label: label.trim(),
+    }),
+  );
 }
 
 export function quickSave() {

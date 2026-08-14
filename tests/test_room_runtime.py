@@ -82,6 +82,35 @@ async def _room_manager_enforces_active_room_capacity():
         )
 
 
+async def _world_lifecycle_waits_for_loading_room():
+    """归档租约不能从正在建房的 ``_loading`` 窗口中穿过去。"""
+    manager = RoomManager()
+    build_started = asyncio.Event()
+    allow_build = asyncio.Event()
+    archive_entered = asyncio.Event()
+    room = GameRoom("world-a", object(), RoomEventHub("world-a"), "owner")
+
+    async def factory():
+        build_started.set()
+        await allow_build.wait()
+        return room
+
+    loading = asyncio.create_task(manager.get_or_create("world-a", factory))
+    await asyncio.wait_for(build_started.wait(), timeout=1)
+
+    async def archive_boundary():
+        async with manager.world_lifecycle("world-a"):
+            assert await manager.get("world-a") is room
+            archive_entered.set()
+
+    archive = asyncio.create_task(archive_boundary())
+    await asyncio.sleep(0)
+    assert not archive_entered.is_set()
+    allow_build.set()
+    await loading
+    await asyncio.wait_for(archive, timeout=1)
+
+
 async def _event_visibility_ack_and_replay_are_connection_scoped():
     hub = RoomEventHub("world-a", replay_limit=16)
     owner_socket, alice_socket, alice_viewer_socket, bob_socket = (
@@ -753,6 +782,10 @@ def test_room_manager_single_flights_concurrent_creation():
 
 def test_room_manager_enforces_active_room_capacity():
     asyncio.run(_room_manager_enforces_active_room_capacity())
+
+
+def test_world_lifecycle_waits_for_loading_room():
+    asyncio.run(_world_lifecycle_waits_for_loading_room())
 
 
 def test_event_visibility_ack_and_replay_are_connection_scoped():

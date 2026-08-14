@@ -7,6 +7,7 @@ import {
 } from "./api/auth";
 import { listModules } from "./api/modules";
 import {
+  abandonWorld,
   acceptInvite,
   claimInvestigator,
   createInvite,
@@ -368,6 +369,52 @@ export async function deleteSoloWorld(worldId: string): Promise<boolean> {
     /* localStorage 不可用不影响服务端已经完成的归档 */
   }
   await refreshWorlds();
+  return true;
+}
+
+/**
+ * 放弃当前云端单人冒险并归档世界。它与 settle_case 无关：不会结算模组、
+ * 增加声望或把放弃误记为通关。服务端会再次校验单人房主与回合空闲状态。
+ */
+export async function abandonSoloWorld(): Promise<boolean> {
+  const { activeWorldId, roomMetadata, user, members } =
+    useOnlineStore.getState();
+  const isOwner = members.some(
+    (member) => member.user_id === user?.id && member.role === "owner",
+  );
+  if (
+    !activeWorldId ||
+    !user ||
+    !isOwner ||
+    roomMetadata?.play_mode !== "solo"
+  ) {
+    return false;
+  }
+
+  const scope = captureRequestScope(activeWorldId);
+  useOnlineStore.setState({ roomBusy: true, roomError: null });
+  try {
+    await abandonWorld(activeWorldId);
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return false;
+    useOnlineStore.setState({
+      roomBusy: false,
+      roomError: errorMessage(error, "放弃冒险失败，请稍后重试"),
+    });
+    return false;
+  }
+
+  // 请求返回前用户可能已切房/退出；旧世界的成功响应不能干扰新世界。
+  if (!requestScopeIsCurrent(scope)) return true;
+  try {
+    if (localStorage.getItem(LAST_ROOM_KEY) === activeWorldId) {
+      localStorage.removeItem(LAST_ROOM_KEY);
+    }
+  } catch {
+    /* localStorage 不可用不影响服务端已经完成的归档 */
+  }
+  useOnlineStore.setState({ roomBusy: false });
+  await enterSoloLobby();
   return true;
 }
 

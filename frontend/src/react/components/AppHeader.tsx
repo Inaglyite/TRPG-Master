@@ -1,6 +1,9 @@
 import { useAppStore } from "../../state/app-store";
 import { useModelStore } from "../../state/model-store";
 import { useOnlineStore } from "../../state/online-store";
+import { returnToStartMenu } from "../../start";
+import { useStartStore } from "../../state/start-store";
+import { SoloAdventureExitControl } from "./online/SoloAdventureExitControl";
 
 const connectionTitles = {
   connected: "已连接到守秘人",
@@ -18,6 +21,7 @@ export function AppHeader() {
   );
   const quickSaveState = useAppStore((state) => state.quickSaveState);
   const mode = useAppStore((state) => state.mode);
+  const gameStarting = useStartStore((state) => state.gameStarting);
   // 多人房间中存档/读档为房主专属操作（服务端按 Session 再校验）；
   // selector 订阅成员/用户变化，房主移交后 UI 即时更新。
   const isOwner = useOnlineStore((state) => {
@@ -97,14 +101,18 @@ export function AppHeader() {
             </button>
           </>
         )}
-        <button
-          id="btn-new"
-          title="新游戏"
-          aria-label="开始新游戏"
-          onClick={() => location.reload()}
-        >
-          🆕
-        </button>
+        {mode === "local" && (
+          <button
+            id="btn-new"
+            title={gameStarting ? "正在开始新游戏…" : "返回开局选择"}
+            aria-label="开始新游戏"
+            disabled={gameStarting}
+            onClick={returnToStartMenu}
+          >
+            🆕
+          </button>
+        )}
+        {mode === "online" && <SoloAdventureExitControl />}
         <button
           id="btn-panel"
           title="角色/线索"

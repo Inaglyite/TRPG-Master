@@ -14,6 +14,13 @@
 #model-settings-overlay.hidden {
   display: none;
 }
+/* 退出：与 fade-in/pop-in 成对 */
+#model-settings-overlay.overlay-closing {
+  animation: fade-out 0.16s ease both;
+}
+#model-settings-overlay.overlay-closing #model-settings-panel {
+  animation: pop-out 0.16s cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
 #model-settings-panel {
   width: min(660px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
@@ -351,6 +358,13 @@
 #utility-overlay.hidden {
   display: none;
 }
+/* 退出：与 fade-in/pop-in 成对 */
+#utility-overlay.overlay-closing {
+  animation: fade-out 0.16s ease both;
+}
+#utility-overlay.overlay-closing #utility-panel {
+  animation: pop-out 0.16s cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
 #utility-panel {
   width: min(700px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
@@ -443,13 +457,21 @@
   padding: 13px 14px;
   border: 1px solid var(--gold-dim);
   border-radius: var(--r-md);
-  background: var(--bg);
-  color: var(--text);
+  /* 手绘羊皮纸（调查笔记右页裁切）+ 深墨字迹 */
+  background:
+    var(--ui-notes-parchment) center / cover no-repeat,
+    #d8c096;
+  color: #2a1a0c;
   font-family: var(--font);
   font-size: 14px;
+  font-weight: 600;
   line-height: 1.65;
   letter-spacing: 0;
   outline: none;
+  caret-color: #2a1a0c;
+}
+#player-notes-input::placeholder {
+  color: rgba(42, 26, 12, 0.52);
 }
 #player-notes-input:focus {
   border-color: var(--gold);

@@ -1,47 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { continueGame, startGame, switchModule } from "../../start";
 import { useAppStore } from "../../state/app-store";
-import { useStartStore, type CharacterOption } from "../../state/start-store";
+import { useStartStore } from "../../state/start-store";
+import { CharacterDossier } from "./CharacterDossier";
 import { ModelSettingsTrigger } from "./ModelSettingsPanel";
 import { ModuleImporter } from "./ModuleImporter";
 import { useModuleTransition } from "./module-transition";
-
-const attributes: Record<string, string> = {
-  STR: "力量",
-  CON: "体质",
-  SIZ: "体型",
-  DEX: "敏捷",
-  APP: "外貌",
-  INT: "智力",
-  POW: "意志",
-  EDU: "教育",
-};
-const skills: Record<string, string> = {
-  spot_hidden: "侦查",
-  listen: "聆听",
-  library_use: "图书馆使用",
-  psychology: "心理学",
-  fast_talk: "话术",
-  persuade: "说服",
-  charm: "魅惑",
-  intimidate: "恐吓",
-  fighting_brawl: "格斗",
-  firearms_handgun: "手枪",
-  firearms_rifle: "步枪/霰弹枪",
-  dodge: "闪避",
-  stealth: "潜行",
-  first_aid: "急救",
-  medicine: "医学",
-  occult: "神秘学",
-  history: "历史",
-  law: "法律",
-  navigate: "导航",
-  track: "追踪",
-  language_own: "母语",
-  credit_rating: "信用评级",
-  cthulhu_mythos: "克苏鲁神话",
-};
+import { useDelayedClose } from "./transitions";
 
 async function startCommand(
   command: "startGame" | "continueGame" | "switchModule",
@@ -51,125 +17,6 @@ async function startCommand(
   else if (command === "startGame") startGame();
   else continueGame();
 }
-function inventoryLabel(item: unknown) {
-  if (typeof item === "string") return item;
-  if (item && typeof item === "object") {
-    const value = item as Record<string, unknown>;
-    const label = value.label || value.name || value.id;
-    if (typeof label === "string")
-      return `${label}${typeof value.quantity === "number" ? ` × ${value.quantity}` : ""}`;
-  }
-  return String(item);
-}
-function CharacterDetail({ character }: { character: CharacterOption }) {
-  const derived = character.derived || {};
-  const backstory = character.backstory || {};
-  const story = [
-    ["外貌", character.description || backstory.description],
-    ["经历", backstory.background],
-    ["信念", backstory.beliefs],
-    ["特质", backstory.traits],
-  ].filter(([, value]) => typeof value === "string" && value);
-  return (
-    <article className="character-dossier">
-      <header className="character-detail-header">
-        <div className="character-detail-identity">
-          <h3>{character.name}</h3>
-          <p>
-            {[
-              character.occupation || "调查员",
-              character.age ? `${character.age} 岁` : "",
-              character.era || "",
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-        <span className="character-source-badge">{character.source_label}</span>
-      </header>
-      <div className="character-vitals-grid">
-        {[
-          ["HP", `${character.hp}/${character.max_hp}`],
-          ["SAN", `${character.san}/${character.max_san}`],
-          ["MP", derived.MP],
-          ["幸运", derived.LUCK],
-          ["移动", derived.MOV],
-          ["伤害加值", derived.DB],
-          ["体格", derived.BUILD],
-          ["信用", character.credit_rating],
-        ]
-          .filter(([, value]) => value !== undefined && value !== "")
-          .map(([label, value]) => (
-            <div className="character-vital" key={String(label)}>
-              <span>{String(label)}</span>
-              <strong>{String(value)}</strong>
-            </div>
-          ))}
-      </div>
-      {character.attributes && (
-        <section className="character-detail-section">
-          <h4>基础属性</h4>
-          <div className="character-attribute-grid">
-            {Object.entries(attributes)
-              .filter(([id]) => typeof character.attributes?.[id] === "number")
-              .map(([id, label]) => (
-                <div className="character-attribute" key={id}>
-                  <span>
-                    {label} {id}
-                  </span>
-                  <strong>{character.attributes?.[id]}</strong>
-                </div>
-              ))}
-          </div>
-        </section>
-      )}
-      {Boolean(character.top_skills?.length) && (
-        <section className="character-detail-section">
-          <h4>擅长技能</h4>
-          <div className="character-skill-list">
-            {character.top_skills?.map((skill) => (
-              <div className="character-skill" key={skill.id}>
-                <span>{skills[skill.id] || skill.id.replaceAll("_", " ")}</span>
-                <strong>{skill.value}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      {story.length > 0 && (
-        <section className="character-detail-section">
-          <h4>人物档案</h4>
-          <div className="character-story">
-            {story.map(([label, value]) => (
-              <p key={String(label)}>
-                <strong>{String(label)}：</strong>
-                {String(value)}
-              </p>
-            ))}
-          </div>
-        </section>
-      )}
-      {Boolean(character.inventory?.length) && (
-        <section className="character-detail-section">
-          <h4>随身物品</h4>
-          <ul className="character-inventory">
-            {character.inventory?.map((item, index) => (
-              <li key={index}>{inventoryLabel(item)}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {Boolean(character.completed_modules || character.reputation) && (
-        <section className="character-detail-section">
-          <h4>调查履历</h4>
-          <div className="character-career-note">
-            完成案件 {character.completed_modules} · 声望 {character.reputation}
-          </div>
-        </section>
-      )}
-    </article>
-  );
-}
 
 export function StartScreen() {
   const state = useStartStore();
@@ -178,6 +25,10 @@ export function StartScreen() {
   const description = useAppStore((value) => value.description);
   const startButtonText = useAppStore((value) => value.startButtonText);
   const transition = useModuleTransition();
+  // 开局/读档被服务端接受（gameStarted）后，整幕保持挂载 360ms 播退出动画，
+  // 淡出揭示下方游戏画面，而不是瞬间 display:none（ui-animation 规范：成对进出）。
+  const startedClose = useDelayedClose(!state.gameStarted, 360);
+  const detailRef = useRef<HTMLElement>(null);
   const characters = state.characterGroups.flatMap(
     (group) => group.characters || [],
   );
@@ -192,6 +43,10 @@ export function StartScreen() {
         selectedCharacterRef: selected.ref,
       });
   }, [selected?.id]);
+  // 切换调查员时档案面板回到顶部，避免沿用上一人的滚动位置。
+  useEffect(() => {
+    if (detailRef.current) detailRef.current.scrollTop = 0;
+  }, [selected?.id]);
   useEffect(() => {
     if (state.view !== "characters") return;
     const listener = (event: KeyboardEvent) => {
@@ -201,8 +56,10 @@ export function StartScreen() {
     document.addEventListener("keydown", listener);
     return () => document.removeEventListener("keydown", listener);
   }, [state.view, state.gameStarting]);
-  if (state.gameStarted) return <div id="start-overlay" className="hidden" />;
+  if (!startedClose.rendered)
+    return <div id="start-overlay" className="hidden" />;
   const overlayClass = [
+    startedClose.closing ? "start-closing" : "",
     transition.phase !== "idle" ? "module-transition" : "",
     transition.phase === "leaving" ? "module-leaving" : "",
     transition.phase === "entering" ? "module-entering" : "",
@@ -211,10 +68,19 @@ export function StartScreen() {
     .join(" ");
   const boxClass =
     transition.phase === "idle" ? undefined : `module-${transition.phase}`;
+  // 主菜单与角色选择双挂载交叉过渡：非激活页用 view-off 退场到固定侧
+  // （菜单在左、角色选择在右），由 CSS transition 完成重叠交叉，
+  // 不出现“旧页消失 → 空背景 → 新页跳入”的闪烁（docs/ARCHITECTURE.md §9.2）。
+  const menuOff = state.view !== "menu";
+  const charactersOff = state.view !== "characters";
   const layerImage = (value: string | null) =>
     ({ "--layer-image": value || "var(--ui-start-bg)" }) as React.CSSProperties;
   return (
-    <div id="start-overlay" className={overlayClass || undefined}>
+    <div
+      id="start-overlay"
+      className={overlayClass || undefined}
+      aria-hidden={startedClose.closing || undefined}
+    >
       {transition.phase !== "idle" && (
         <>
           <div
@@ -230,11 +96,12 @@ export function StartScreen() {
         </>
       )}
       <div id="start-box" className={boxClass}>
-        {state.view === "menu" ? (
+        <div id="start-view-stack">
           <section
             id="start-menu-view"
-            className="start-view"
+            className={`start-view${menuOff ? " view-off" : ""}`}
             aria-label="主菜单"
+            aria-hidden={menuOff}
           >
             <div className="start-brand">
               <div id="start-title" className="fx-glow">
@@ -301,8 +168,11 @@ export function StartScreen() {
             </nav>
             <div id="start-hint">{state.hint}</div>
           </section>
-        ) : (
-          <section id="character-select-view" className="start-view">
+          <section
+            id="character-select-view"
+            className={`start-view${charactersOff ? " view-off" : ""}`}
+            aria-hidden={charactersOff}
+          >
             <header className="character-select-header">
               <button
                 id="btn-character-back"
@@ -361,9 +231,9 @@ export function StartScreen() {
                   ))}
                 </div>
               </section>
-              <aside id="character-detail">
+              <aside id="character-detail" ref={detailRef}>
                 {selected ? (
-                  <CharacterDetail character={selected} />
+                  <CharacterDossier key={selected.id} character={selected} />
                 ) : (
                   <div className="character-detail-empty">
                     {state.charactersReady
@@ -388,7 +258,7 @@ export function StartScreen() {
               </button>
             </footer>
           </section>
-        )}
+        </div>
       </div>
       {transition.phase === "entering" && (
         <div className="module-page-edge" aria-hidden="true" />

@@ -404,35 +404,41 @@ def transfer_owner(
         }
 
 
-def archive_world(
+def _archive_world(
     db_url: str,
     world_id: str,
     actor_user_id: str,
     *,
-    runtime_room_status: str | None = None,
+    runtime_room_status: str | None,
+    allow_active_solo: bool,
+    reservation_action_id: str | None = None,
 ) -> dict:
-    """Logically delete (archive) a world. Owner-only; refuses active rooms.
+    """Archive a world through one of the explicit product-level flows.
 
-    Keeps the world, turn, save, member and audit rows: flips ``worlds.status``
-    to ``"archived"`` (which removes it from the normal room list and makes
-    every world-scoped operation and WebSocket join fail with world_not_found),
-    revokes every unredeemed invite, and writes a ``world_archived`` audit
-    event in the same transaction. Calling it again on an already-archived
-    world is an idempotent success; a missing world row is world_not_found.
-
-    Owner authorization always runs before any activity check, so a non-owner
-    cannot probe whether the room is currently busy. Activity is judged by the
-    durable control plane (a running ``RoomAction`` row) plus the live room
-    status supplied by the caller (``runtime_room_status``), which covers a
-    loaded room whose persisted metadata may be stale.
+    ``allow_active_solo`` is intentionally private to this module: normal
+    room deletion must still refuse an active game, while the dedicated
+    "abandon this private solo adventure" flow may archive an *idle* solo
+    game without pretending that it reached a narrative ending.  In both
+    cases a durable running RoomAction is always a hard stop.
     """
     with session_scope(db_url) as session:
         world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
         if world is None:
             raise MultiplayerError("world_not_found", "房间不存在", 404)
         _require_owner(session, world_id, actor_user_id)
+        if allow_active_solo and world_play_mode(world.metadata_json) != "solo":
+            raise MultiplayerError(
+                "solo_world_required",
+                "只有云端单人冒险可以在进行中放弃",
+                403,
+            )
         if world.status == "archived":
-            return {"world_id": world_id, "status": "archived", "already_archived": True}
+            return {
+                "world_id": world_id,
+                "status": "archived",
+                "already_archived": True,
+                **({"abandoned": True} if allow_active_solo else {}),
+            }
         # Durable authority: a running RoomAction row means a turn/control
         # operation is in flight. Checked only after the owner gate so that a
         # non-owner cannot distinguish busy from idle rooms.
@@ -442,15 +448,54 @@ def archive_world(
         room_status = runtime_room_status or str(
             (world.metadata_json or {}).get("room_status") or "lobby"
         )
-        if running_action is not None or room_status in {"starting", "playing"}:
+        reservation = None
+        if allow_active_solo:
+            reservation = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_id=str(reservation_action_id or ""))
+                .with_for_update()
+                .one_or_none()
+            )
+            if (
+                reservation is None
+                or reservation.status != "running"
+                or reservation.submitted_by != actor_user_id
+                or reservation.action_type != "solo_abandon"
+            ):
+                raise MultiplayerError(
+                    "abandon_reservation_invalid",
+                    "放弃请求已失效，请返回后重试",
+                    409,
+                )
+            running_action = (
+                session.query(RoomAction)
+                .filter(
+                    RoomAction.world_id == world_id,
+                    RoomAction.status == "running",
+                    RoomAction.action_id != reservation.action_id,
+                )
+                .first()
+            )
+        if running_action is not None or (
+            not allow_active_solo and room_status in {"starting", "playing"}
+        ):
             raise MultiplayerError(
                 "room_active",
-                "游戏进行中，请先结束当前游戏再删除房间",
+                (
+                    "当前回合仍在处理，请稍后再放弃冒险"
+                    if allow_active_solo
+                    else "游戏进行中，请先结束当前游戏再删除房间"
+                ),
                 409,
             )
         now = utcnow()
         world.status = "archived"
         world.updated_at = now
+        if reservation is not None:
+            # The archive and its control lease commit together.  This is not
+            # a game settlement: it merely closes the action used to serialize
+            # a deliberate abandonment against turn writes.
+            reservation.status = "completed"
         pending = (
             session.query(WorldInvite)
             .filter(
@@ -471,10 +516,107 @@ def archive_world(
                 details={
                     "room_status": room_status,
                     "invites_revoked": len(pending),
+                    "archive_reason": (
+                        "solo_abandoned" if allow_active_solo else "manual_delete"
+                    ),
+                    **(
+                        {"action_id": reservation.action_id}
+                        if reservation is not None
+                        else {}
+                    ),
                 },
             )
         )
-    return {"world_id": world_id, "status": "archived"}
+    return {
+        "world_id": world_id,
+        "status": "archived",
+        **({"abandoned": True} if allow_active_solo else {}),
+    }
+
+
+def archive_world(
+    db_url: str,
+    world_id: str,
+    actor_user_id: str,
+    *,
+    runtime_room_status: str | None = None,
+) -> dict:
+    """Logically delete an inactive world. Owner-only and idempotent.
+
+    Keeps the world, turn, save, member and audit rows: flips ``worlds.status``
+    to ``"archived"`` (which removes it from the normal room list and makes
+    every world-scoped operation and WebSocket join fail with world_not_found),
+    revokes every unredeemed invite, and writes a ``world_archived`` audit
+    event in the same transaction. Calling it again on an already-archived
+    world is an idempotent success; a missing world row is world_not_found.
+
+    Owner authorization always runs before any activity check, so a non-owner
+    cannot probe whether the room is currently busy. Activity is judged by the
+    durable control plane (a running ``RoomAction`` row) plus the live room
+    status supplied by the caller (``runtime_room_status``), which covers a
+    loaded room whose persisted metadata may be stale.
+    """
+    return _archive_world(
+        db_url,
+        world_id,
+        actor_user_id,
+        runtime_room_status=runtime_room_status,
+        allow_active_solo=False,
+    )
+
+
+def abandon_solo_world(
+    db_url: str,
+    world_id: str,
+    actor_user_id: str,
+    *,
+    reservation_action_id: str,
+    runtime_room_status: str | None = None,
+) -> dict:
+    """Archive an idle, private solo world without settling the case.
+
+    This is deliberately not a wrapper around ``engine.settle_case``: giving
+    up an investigation must not award module completion/reputation or claim
+    that the narrative reached one of its authored endings.  A concurrent
+    turn/control operation remains forbidden so a partial engine write cannot
+    race this archival transaction.
+    """
+    return _archive_world(
+        db_url,
+        world_id,
+        actor_user_id,
+        runtime_room_status=runtime_room_status,
+        allow_active_solo=True,
+        reservation_action_id=reservation_action_id,
+    )
+
+
+def check_solo_abandon_access(
+    db_url: str,
+    world_id: str,
+    actor_user_id: str,
+) -> dict:
+    """Authorize a possible solo abandonment before touching a live room lock.
+
+    The HTTP handler must not let a viewer temporarily reserve a loaded
+    room's in-memory action lock just by guessing its world id.  This narrow
+    preflight deliberately performs the same owner and play-mode checks that
+    the transactional abandon operation repeats later.
+    """
+    with session_scope(db_url) as session:
+        world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
+        if world is None:
+            raise MultiplayerError("world_not_found", "房间不存在", 404)
+        _require_owner(session, world_id, actor_user_id)
+        if world_play_mode(world.metadata_json) != "solo":
+            raise MultiplayerError(
+                "solo_world_required",
+                "只有云端单人冒险可以在进行中放弃",
+                403,
+            )
+        if world.status == "archived":
+            return {"world_id": world_id, "already_archived": True}
+        return {"world_id": world_id, "already_archived": False}
 
 
 def reserve_room_action(
@@ -511,6 +653,25 @@ def reserve_room_action(
                 raise MultiplayerError("owner_required", "只有房主可以执行此操作", 403)
             if required_permission == "play" and member.role not in {"owner", "player"}:
                 raise MultiplayerError("player_required", "旁观者不能提交行动", 403)
+            # The world row lock above makes this a cross-process guard too.
+            # GameRoom's in-memory lock handles the ordinary path, but a room
+            # can be loading/recovering in another worker; never let two
+            # distinct durable actions race past that boundary.
+            other_running = (
+                session.query(RoomAction)
+                .filter(
+                    RoomAction.world_id == world_id,
+                    RoomAction.status == "running",
+                    RoomAction.action_id != action_id,
+                )
+                .first()
+            )
+            if other_running is not None:
+                raise MultiplayerError(
+                    "room_turn_in_progress",
+                    "房间正在处理上一项行动",
+                    409,
+                )
             existing = (
                 session.query(RoomAction)
                 .filter_by(world_id=world_id, action_id=action_id)

@@ -17,6 +17,7 @@ import {
 } from "./api/worlds";
 import { listModules } from "./api/modules";
 import {
+  abandonSoloWorld,
   assignActor,
   checkSession,
   createRoom,
@@ -71,6 +72,7 @@ vi.mock("./api/modules", () => ({
 }));
 
 vi.mock("./api/worlds", () => ({
+  abandonWorld: vi.fn(),
   acceptInvite: vi.fn(),
   claimInvestigator: vi.fn(),
   createInvite: vi.fn(),
@@ -754,6 +756,60 @@ describe("云端单人", () => {
     expect(ok).toBe(false);
     expect(useOnlineStore.getState().createError).toContain("游戏进行中");
     expect(useOnlineStore.getState().view).toBe("solo");
+  });
+
+  it("abandonSoloWorld 调用专用归档接口，清理恢复记录并返回我的冒险", async () => {
+    const { abandonWorld } = await import("./api/worlds");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-solo",
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+      ],
+    });
+    localStorage.setItem("trpg-online-world-id", "world-solo");
+    vi.mocked(abandonWorld).mockResolvedValue(undefined);
+    vi.mocked(listWorlds).mockResolvedValue([]);
+    vi.mocked(listModules).mockResolvedValue([]);
+
+    await expect(abandonSoloWorld()).resolves.toBe(true);
+
+    expect(abandonWorld).toHaveBeenCalledWith("world-solo");
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "solo",
+      activeWorldId: null,
+      roomBusy: false,
+    });
+  });
+
+  it("abandonSoloWorld 被服务端拒绝时留在当前单人世界", async () => {
+    const { abandonWorld } = await import("./api/worlds");
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "world-solo",
+      roomMetadata: { name: "雾中宅邸", play_mode: "solo" },
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+      ],
+    });
+    vi.mocked(abandonWorld).mockRejectedValue(
+      new ApiError("守秘人仍在处理本回合", 409, "turn_in_progress"),
+    );
+
+    await expect(abandonSoloWorld()).resolves.toBe(false);
+
+    expect(useOnlineStore.getState()).toMatchObject({
+      view: "room",
+      activeWorldId: "world-solo",
+      roomBusy: false,
+      roomError: "守秘人仍在处理本回合",
+    });
   });
 });
 

@@ -110,7 +110,18 @@
   flex-direction: column;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--sp-2) var(--sp-3);
+  /* 手绘深木雕花框：四角/顶饰落在 border-image 角区，中段横向拉伸 */
+  border-style: solid;
+  border-width: 26px 32px;
+  border-image: var(--ui-frame-card) 120 130 / 26px 32px / 0 stretch;
+  background: color-mix(in srgb, var(--bg) 90%, black);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.62);
+}
+/* 雕花框自带装饰，去掉 .start-art-button 的 ◆ 点缀与描金边 */
+.mode-card::before,
+.mode-card::after {
+  display: none;
 }
 
 .mode-card-title {
@@ -420,138 +431,124 @@
   color: var(--blue-bright);
 }
 
-/* 云端单人“我的冒险”列表行：卡片 + 行内删除（二次确认） */
-.solo-world-row {
+/* ---- 云端单人：复用本地开始页视觉体系（docs/ARCHITECTURE.md §9.2） ----
+   裸排版在主题背景上（不套 online-card 盒子），档案卡/存档卡/黄铜 CTA
+   全部直接引用 character-select.css / save-panel.css / start-screen.css
+   的既有 class，这里只补云端特有的布局与状态。 */
+.online-start-view {
+  width: min(1080px, calc(100vw - 48px));
+  max-height: calc(100vh - 40px);
+  margin: auto;
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  gap: var(--sp-4);
+  overflow-y: auto;
+  filter: drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
+  animation: module-content-enter 200ms ease-out;
+}
+
+/* 进入游戏画面时整幕淡出（与本地 start-overlay 退场一致） */
+.online-overlay.online-closing {
+  pointer-events: none;
+  animation: start-overlay-out 360ms ease-in forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .online-start-view,
+  .online-overlay.online-closing {
+    animation: none;
+  }
+}
+
+/* 云端单人“我的冒险”大厅 */
+.solo-lobby-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.solo-lobby-header .start-brand {
+  margin-bottom: 0;
+  text-align: left;
+}
+.solo-lobby-header .online-title {
+  text-align: left;
+}
+.solo-lobby-user {
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
+  padding-top: var(--sp-2);
 }
-
-.solo-world-row .room-card {
-  flex: 1 1 auto;
+.solo-lobby-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
-
-.solo-world-actions {
-  flex: 0 0 auto;
+.solo-lobby-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--gold-dim) 35%, transparent);
+}
+.solo-lobby-section-head h2,
+.solo-lobby-create h2 {
+  margin: 0;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+}
+.solo-world-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.solo-lobby-create-cta {
   align-self: center;
-  display: inline-flex;
-  gap: var(--sp-2);
+  min-width: min(360px, 100%);
+}
+.solo-lobby-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--gold-dim) 40%, transparent);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg2) 82%, transparent);
+}
+.solo-lobby-back {
+  align-self: center;
+}
+
+/* 云端单人角色选择页 */
+.solo-character-select .online-conn-hint {
+  align-self: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+.solo-character-select .online-conn-hint--ok {
+  color: color-mix(in srgb, var(--gold) 80%, transparent);
+}
+.character-card-claimed {
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
 }
 
 /* 云端单人自动开局等待页 */
 .solo-start-screen {
-  width: min(100% - 24px, 480px);
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-5);
   text-align: center;
 }
-
-/* 云端单人开局：角色卡先于自动开场展示，避免新存档被默认角色直接带入游戏。 */
-.solo-character-screen {
-  gap: var(--sp-5);
-  padding: clamp(var(--sp-5), 4vw, var(--sp-6));
+.solo-start-screen .start-brand {
+  margin-bottom: 0;
 }
-
-.solo-character-screen > .online-header {
-  gap: var(--sp-4);
-  padding-bottom: var(--sp-4);
-  border-bottom: 1px solid color-mix(in srgb, var(--gold-dim) 35%, transparent);
-}
-
-.solo-character-screen > .online-section {
-  gap: var(--sp-3);
-  padding: var(--sp-4);
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--bg3) 34%, transparent);
-}
-
-.solo-character-screen .online-section h2 {
-  padding-bottom: var(--sp-2);
-  border-bottom: 1px solid color-mix(in srgb, var(--gold-dim) 28%, transparent);
-  font-size: 14px;
-  letter-spacing: 0.2em;
-}
-
-.solo-character-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: var(--sp-3);
-}
-
-.solo-character-card {
-  min-height: 146px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  padding: var(--sp-4);
-  border: 1px solid color-mix(in srgb, var(--gold-dim) 48%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--gold-dim) 65%, transparent);
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--bg2) 72%, transparent);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease,
-    transform 0.16s ease;
-}
-
-.solo-character-card:hover:not(:disabled),
-.solo-character-card:focus-visible {
-  border-color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 10%, var(--bg2));
-  outline: none;
-  transform: translateY(-1px);
-}
-
-.solo-character-card--selected {
-  border-color: var(--gold-bright);
-  border-left-color: var(--gold-bright);
-  background: color-mix(in srgb, var(--gold) 16%, var(--bg2));
-  box-shadow: 0 0 18px color-mix(in srgb, var(--gold) 16%, transparent);
-}
-
-.solo-character-card:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.solo-character-card-name {
-  color: var(--gold-bright);
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.solo-character-card-meta {
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.solo-character-card-action {
-  margin-top: auto;
-  color: var(--blue-bright);
-  font-size: 12px;
-  letter-spacing: 0.12em;
-}
-
-.solo-character-actions {
-  gap: var(--sp-3);
-  padding-top: var(--sp-1);
-}
-
-.solo-character-actions > .btn-primary,
-.solo-character-actions > .btn-ghost {
-  min-height: 48px;
-  padding: 0 20px;
-  font-size: 15px;
+.solo-start-back {
+  align-self: center;
 }
 
 /* 房间卡片与成员行 */
@@ -757,6 +754,128 @@
 .online-badge--error {
   border-color: color-mix(in srgb, var(--red) 60%, transparent);
   color: var(--red-bright);
+}
+
+/* 云端单人退出：常态只留顶栏小入口；真正的选择收进一张小型档案卡，
+   不常驻遮挡叙事和行动区。 */
+.solo-adventure-exit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1850;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ink) 68%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.18s ease;
+}
+
+.solo-adventure-exit-dialog {
+  width: min(440px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 24px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--bg3) 94%, black),
+    color-mix(in srgb, var(--bg) 96%, black)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gold) 10%, transparent),
+    0 22px 64px rgba(0, 0, 0, 0.7);
+  outline: none;
+  animation: pop-in 0.2s ease;
+}
+
+.solo-adventure-exit-eyebrow {
+  color: var(--gold-dim);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.solo-adventure-exit-dialog h2 {
+  margin: 0;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 24px;
+  letter-spacing: 0.06em;
+}
+
+.solo-adventure-exit-description,
+.solo-adventure-exit-warning {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.solo-adventure-exit-warning {
+  padding-left: var(--sp-3);
+  border-left: 2px solid color-mix(in srgb, var(--gold-dim) 72%, transparent);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.solo-adventure-exit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.solo-adventure-exit-actions > button {
+  min-height: 44px;
+  padding: 0 18px;
+}
+
+.solo-adventure-exit-actions .btn-primary,
+.solo-adventure-exit-actions .online-danger {
+  flex: 1 1 210px;
+}
+
+.solo-adventure-exit-actions .btn-ghost {
+  flex: 1 1 120px;
+}
+
+.solo-adventure-exit-actions .online-danger {
+  border: 1px solid color-mix(in srgb, var(--red) 70%, black);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.solo-adventure-exit-actions .online-danger:disabled {
+  cursor: wait;
+  filter: grayscale(0.45);
+  opacity: 0.52;
+}
+
+.solo-adventure-exit-abandon-link {
+  align-self: flex-start;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--red-bright);
+  font-family: var(--font);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.solo-adventure-exit-abandon-link:hover,
+.solo-adventure-exit-abandon-link:focus-visible {
+  color: color-mix(in srgb, var(--red-bright) 74%, white);
+  outline: none;
+}
+
+.solo-adventure-exit-abandon-link:disabled {
+  cursor: wait;
+  opacity: 0.5;
 }
 
 /* 多人游戏进行中的房间坞：聊天面板顶部的正常布局区域（不是浮层）。
@@ -1016,9 +1135,7 @@
 .lobby-screen .lobby-refresh,
 .lobby-screen .lobby-form .btn-primary,
 .lobby-screen .lobby-form .btn-ghost,
-.lobby-screen .online-header-side .btn-ghost,
-.lobby-screen .solo-world-actions.btn-ghost,
-.lobby-screen .solo-world-actions .btn-ghost {
+.lobby-screen .online-header-side .btn-ghost {
   min-height: 44px;
   padding: 0 18px;
   white-space: nowrap;
@@ -1058,6 +1175,23 @@
 @media (max-width: 640px) {
   .lobby-screen .lobby-form {
     flex-direction: column;
+  }
+
+  /* 云端单人大厅窄屏：品牌区与用户行纵向堆叠，避免用户名挤压退出按钮；
+     存档卡改为单列（作用域限于 solo 大厅，不影响本地存档面板） */
+  .solo-lobby-header {
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .solo-lobby-user {
+    padding-top: 0;
+  }
+  .solo-lobby .adventure-card-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .solo-lobby .adventure-card-actions {
+    flex-direction: row;
+    align-items: center;
   }
 
   .lobby-screen .lobby-form .btn-primary {

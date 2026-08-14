@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 
-from src.database import Base
+from src.database import ACTIVE_TURN_WORLD_INDEX, Base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,6 +57,16 @@ def test_packaged_migrations_create_fresh_database_at_head(
     )
 
     assert _revision(database_url) == MIGRATION_HOOK.migration_head(PROJECT_ROOT)
+    engine = sa.create_engine(database_url)
+    try:
+        indexes = {
+            index["name"]: index for index in sa.inspect(engine).get_indexes("turns")
+        }
+        active_turn_index = indexes[ACTIVE_TURN_WORLD_INDEX]
+        assert active_turn_index["unique"] == 1
+        assert str(active_turn_index["dialect_options"]["sqlite_where"]) == "status = 'active'"
+    finally:
+        engine.dispose()
     assert "TRPG_DATABASE_URL" not in __import__("os").environ
     engine = sa.create_engine(database_url)
     try:
@@ -97,6 +107,16 @@ def test_packaged_migrations_safely_adopt_create_all_database(
     )
 
     assert _revision(database_url) == MIGRATION_HOOK.migration_head(PROJECT_ROOT)
+    engine = sa.create_engine(database_url)
+    try:
+        indexes = {
+            index["name"]: index for index in sa.inspect(engine).get_indexes("turns")
+        }
+        active_turn_index = indexes[ACTIVE_TURN_WORLD_INDEX]
+        assert active_turn_index["unique"] == 1
+        assert str(active_turn_index["dialect_options"]["sqlite_where"]) == "status = 'active'"
+    finally:
+        engine.dispose()
 
 
 def test_packaged_migrations_upgrade_unversioned_revision_0002(

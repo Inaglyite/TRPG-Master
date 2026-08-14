@@ -23,6 +23,7 @@ from src.auth import (
     revoke_session,
 )
 from src.database import (
+    ACTIVE_TURN_WORLD_INDEX,
     Base,
     RoomAction,
     SaveSlot,
@@ -40,7 +41,7 @@ from src.database_store import DatabaseWorldStore
 from src.database_turn_journal import DatabaseTurnJournal
 from src.engine import GameEngine
 from src.multiplayer import MultiplayerError, reserve_room_action
-from src.turn_journal import TurnJournal
+from src.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
 from src.world_store import StaleRevisionError
 from tools.import_worlds_to_database import _record_time, import_world
 
@@ -68,6 +69,226 @@ def test_database_world_store_revision_and_json_state(tmp_path: Path):
         store.update(lambda state: state, expected_revision=0)
     with session_scope(url) as session:
         assert session.get(WorldState, "world-a").state["pc"]["hp"] == 8
+
+
+def test_database_partial_index_allows_history_but_one_active_turn_per_world(
+    tmp_path: Path,
+):
+    """The invariant must hold even when callers bypass journal read checks."""
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+
+    def row(turn_id: str, status: str, world_id: str = "world-a") -> Turn:
+        return Turn(
+            pk=new_id("turnrow"),
+            id=turn_id,
+            world_id=world_id,
+            kind="action",
+            status=status,
+            owner_token="writer",
+            record={"turn_id": turn_id, "status": status},
+            messages=[],
+        )
+
+    with session_scope(url) as session:
+        session.add(row("active-a", "active"))
+
+    # A second active row is rejected by the database, not merely by the
+    # journal's preflight query.  This is the SQLite half of the cross-process
+    # race guard; PostgreSQL receives the same partial index definition.
+    with pytest.raises(IntegrityError):
+        with session_scope(url) as session:
+            session.add(row("active-b", "active"))
+
+    with session_scope(url) as session:
+        session.add(row("finished-a", "completed"))
+        session.add(row("interrupted-a", "interrupted"))
+
+    seed_world(url, "world-b")
+    with session_scope(url) as session:
+        session.add(row("active-b-world-b", "active", "world-b"))
+
+
+def test_database_journal_maps_active_turn_insert_race_to_busy_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A stale read followed by the unique-index collision is user-safe."""
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    world_dir = tmp_path / "worlds" / "world-a"
+    with patch.dict(
+        os.environ,
+        {
+            "TRPG_DATABASE_URL": url,
+            "TRPG_WRITE_COMPAT_EXPORTS": "0",
+        },
+    ):
+        first = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-a",
+        )
+        active_turn_id = first.begin(kind="action", player_input="查看书桌")
+        second = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-b",
+        )
+
+        # Reproduce the only dangerous interleaving: another writer commits
+        # after this process has read "no active turn" but before it flushes.
+        # The database must still reject it and ``begin`` must not leak an ORM
+        # IntegrityError to the WebSocket layer.
+        monkeypatch.setattr(second, "_active_turn", lambda _session: None)
+        with pytest.raises(ActiveTurnError, match="已有正在进行的回合"):
+            second.begin(kind="action", player_input="第二个并发行动")
+
+        assert second._active_events == {}
+        assert second._started_at == {}
+        with session_scope(url) as session:
+            active = session.query(Turn).filter_by(world_id="world-a", status="active").all()
+        assert [row.id for row in active] == [active_turn_id]
+        first.finish_incomplete(active_turn_id, status="cancelled")
+
+
+def test_database_journal_fences_live_foreign_owner_and_allows_original_commit(
+    tmp_path: Path,
+):
+    url = sqlite_url(tmp_path)
+    store = seed_world(url)
+    world_dir = tmp_path / "worlds" / "world-a"
+    with patch.dict(os.environ, {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+    }):
+        first = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-a",
+        )
+        turn_id = first.begin(kind="action", player_input="检查书桌")
+
+        second = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-b",
+        )
+        status = second.recovery_status(turn_id)
+        assert status["requested"]["status"] == "active"
+        assert status["active"]["turn_id"] == turn_id
+        with pytest.raises(TurnJournalError, match="另一服务进程"):
+            second.complete(
+                turn_id,
+                messages=[],
+                world_state=store.load(),
+                narrative="错误的服务不应提交。",
+                choices=[],
+            )
+        with pytest.raises(TurnJournalError, match="另一服务进程"):
+            second.finish_incomplete(turn_id, status="failed")
+
+        completed = first.complete(
+            turn_id,
+            messages=[],
+            world_state=store.load(),
+            narrative="原服务仍可提交这一回合。",
+            choices=[],
+        )
+    assert completed["status"] == "completed"
+
+
+def test_database_journal_recovery_status_never_mutates_foreign_turn(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    world_dir = tmp_path / "worlds" / "world-a"
+    with patch.dict(os.environ, {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+    }):
+        observer = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-b",
+        )
+        first = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-a",
+        )
+        turn_id = first.begin(kind="action", player_input="观察")
+
+        # A status poll is a read.  Even if the original PID were dead by the
+        # time the poll runs, only an explicit journal construction/recovery
+        # may decide whether to interrupt it.
+        with patch("src.turn_journal._owner_liveness", return_value=False):
+            status = observer.recovery_status(turn_id)
+    assert status["requested"]["status"] == "active"
+    assert status["active"]["turn_id"] == turn_id
+
+
+def test_database_journal_recovers_provably_dead_local_owner(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    world_dir = tmp_path / "worlds" / "world-a"
+    with patch.dict(os.environ, {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+    }):
+        first = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-a",
+        )
+        turn_id = first.begin(kind="action", player_input="观察")
+        with patch("src.turn_journal._owner_liveness", return_value=False):
+            second = DatabaseTurnJournal(
+                world_dir,
+                world_id="world-a",
+                module_name="module-a",
+                owner_token="process-b",
+            )
+        status = second.recovery_status(turn_id)
+    assert status["requested"]["status"] == "interrupted"
+    assert status["active"] is None
+
+
+def test_database_journal_begin_recovers_owner_that_died_after_connect(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    world_dir = tmp_path / "worlds" / "world-a"
+    with patch.dict(os.environ, {
+        "TRPG_DATABASE_URL": url,
+        "TRPG_WRITE_COMPAT_EXPORTS": "0",
+    }):
+        first = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-a",
+        )
+        interrupted_turn_id = first.begin(kind="action", player_input="观察")
+        second = DatabaseTurnJournal(
+            world_dir,
+            world_id="world-a",
+            module_name="module-a",
+            owner_token="process-b",
+        )
+
+        # The observer connected while A was healthy. If A then dies, its next
+        # turn attempt must safely recover the orphan instead of remaining busy.
+        with patch("src.turn_journal._owner_liveness", return_value=False):
+            next_turn_id = second.begin(kind="action", player_input="继续")
+        status = second.recovery_status(interrupted_turn_id)
+        assert status["requested"]["status"] == "interrupted"
+        assert next_turn_id != interrupted_turn_id
+        second.finish_incomplete(next_turn_id, status="cancelled")
 
 
 def test_multiplayer_pc_projection_commits_atomically_to_world_turn_and_save(
@@ -300,6 +521,78 @@ def test_initial_alembic_revision_is_frozen_before_multiplayer_tables(tmp_path: 
         "world_investigators",
         "room_actions",
     } <= tables_at_head
+
+
+def test_active_turn_guard_migration_fails_closed_for_legacy_duplicates(tmp_path: Path):
+    """A migration must not guess which legacy in-flight turn to destroy."""
+    url = sqlite_url(tmp_path)
+    env = {**os.environ, "TRPG_DATABASE_URL": url}
+    root = Path(__file__).resolve().parent.parent
+    alembic = [sys.executable, "-m", "alembic"]
+    subprocess.run(
+        [*alembic, "upgrade", "20260728_0006"],
+        cwd=root,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    with session_scope(url) as session:
+        session.add(World(id="legacy-duplicate-world", module_name="legacy-module"))
+        session.flush()
+        session.add_all(
+            [
+                Turn(
+                    pk="legacy-turn-a",
+                    id="legacy-turn-a",
+                    world_id="legacy-duplicate-world",
+                    kind="action",
+                    status="active",
+                    owner_token="legacy-a",
+                    record={"turn_id": "legacy-turn-a", "status": "active"},
+                    messages=[],
+                ),
+                Turn(
+                    pk="legacy-turn-b",
+                    id="legacy-turn-b",
+                    world_id="legacy-duplicate-world",
+                    kind="action",
+                    status="active",
+                    owner_token="legacy-b",
+                    record={"turn_id": "legacy-turn-b", "status": "active"},
+                    messages=[],
+                ),
+            ]
+        )
+
+    result = subprocess.run(
+        [*alembic, "upgrade", "head"],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "发现多个 active 回合" in (result.stdout + result.stderr)
+    with session_scope(url) as session:
+        rows = (
+            session.query(Turn)
+            .filter_by(world_id="legacy-duplicate-world")
+            .order_by(Turn.id)
+            .all()
+        )
+        assert [(row.id, row.status) for row in rows] == [
+            ("legacy-turn-a", "active"),
+            ("legacy-turn-b", "active"),
+        ]
+    assert ACTIVE_TURN_WORLD_INDEX not in {
+        index["name"] for index in inspect(get_engine(url)).get_indexes("turns")
+    }
+    with get_engine(url).connect() as connection:
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
+            "20260728_0006"
+        )
 
 
 def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: Path):

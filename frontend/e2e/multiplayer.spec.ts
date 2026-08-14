@@ -938,7 +938,9 @@ test("Electron 源码进程自主启动并回收真实本地后端", async () =>
     ).toHaveAttribute("title", "已保存", { timeout: 30_000 });
     await page.getByRole("button", { name: "打开存档管理" }).click();
     await expect(page.getByRole("heading", { name: "存档管理" })).toBeVisible();
-    await page.getByRole("button", { name: "读取" }).first().click();
+    // 存档位视图的主按钮是“继续游戏”（恢复当前时间线最近状态），读取单槽
+    // 在时间线子视图内；这里验证存档后的恢复回路即可。
+    await page.getByRole("button", { name: "继续游戏" }).first().click();
     await expect(input).toBeEnabled({ timeout: 60_000 });
 
     // 走真实 app.quit → before-quit/window-all-closed，验证 main.cjs 回收它

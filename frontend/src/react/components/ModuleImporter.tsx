@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { backendHttpOrigin } from "../../backend-url";
 import { safeSend } from "../../ws";
+import { useDelayedClose } from "./transitions";
 
 const maxBytes = 64 * 1024 * 1024;
 const backendOrigin = backendHttpOrigin();
@@ -57,14 +58,19 @@ export function ModuleImporter() {
   const [status, setStatus] = useState("");
   const [statusKind, setStatusKind] = useState("");
   const [error, setError] = useState("");
-  const close = () => {
-    if (busy) return;
-    sequence.current++;
-    setOpen(false);
+  // 延迟关闭：退出动画期间保留面板内容，隐藏后再清空表单状态。
+  const { rendered, closing } = useDelayedClose(open);
+  useEffect(() => {
+    if (rendered) return;
     setFile(null);
     setSummary(null);
     setError("");
     if (input.current) input.current.value = "";
+  }, [rendered]);
+  const close = () => {
+    if (busy) return;
+    sequence.current++;
+    setOpen(false);
   };
   useEffect(() => {
     if (!open) return;
@@ -177,9 +183,10 @@ export function ModuleImporter() {
       >
         {status}
       </div>
-      {open && (
+      {rendered && (
         <div
           id="module-import-overlay"
+          className={closing ? "overlay-closing" : undefined}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close();
           }}

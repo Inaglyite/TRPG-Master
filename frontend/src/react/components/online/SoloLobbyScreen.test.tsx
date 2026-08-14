@@ -70,11 +70,11 @@ describe("SoloLobbyScreen 冒险列表", () => {
     expect(screen.getByTestId("solo-lobby")).toHaveClass("lobby-screen");
   });
 
-  it("只列出 play_mode=solo 的世界（名称、模组标题、单人徽章）", () => {
+  it("只列出 play_mode=solo 的世界（名称、模组标题、云端存档标识）", () => {
     render(<SoloLobbyScreen />);
     expect(screen.getByText("雾中宅邸")).toBeInTheDocument();
     expect(screen.getAllByText("猩红文档").length).toBeGreaterThan(0);
-    expect(screen.getByText("单人")).toBeInTheDocument();
+    expect(screen.getByText("云端存档")).toBeInTheDocument();
     expect(screen.queryByText("周五调查夜")).not.toBeInTheDocument();
   });
 
@@ -100,15 +100,18 @@ describe("SoloLobbyScreen 操作", () => {
     expect(enterRoom).toHaveBeenCalledWith("w-solo");
   });
 
-  it("新建冒险使用选中的模组与名字", () => {
+  it("新建冒险：展开表单后使用选中的模组与名字", () => {
     render(<SoloLobbyScreen />);
+    // 新建表单默认收起，由黄铜主 CTA 展开
+    expect(screen.queryByLabelText("冒险名称")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
     fireEvent.change(screen.getByLabelText("冒险名称"), {
       target: { value: "新的调查" },
     });
     fireEvent.change(screen.getByLabelText("选择模组"), {
       target: { value: "mod-2" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "开始新的冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查");
   });
 

@@ -182,10 +182,12 @@ export function AuthScreen() {
         )}
         <button
           type="submit"
-          className="btn-primary online-submit"
+          className="start-art-button online-submit"
           disabled={authBusy}
         >
-          {authBusy ? "请稍候……" : tab === "login" ? "登录" : "注册并登录"}
+          <span className="start-art-label">
+            {authBusy ? "请稍候……" : tab === "login" ? "登录" : "注册并登录"}
+          </span>
         </button>
       </form>
 

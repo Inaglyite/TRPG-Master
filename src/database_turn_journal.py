@@ -9,9 +9,12 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from .config import AUTO_SAVE_SLOT
 from .database import (
+    ACTIVE_TURN_WORLD_INDEX,
+    AuditEvent,
     ModelCall,
     SaveSlot,
     Snapshot,
@@ -30,9 +33,12 @@ from .turn_journal import (
     ActiveTurnError,
     TurnJournalError,
     TurnNotFoundError,
+    _assert_active_turn_owner,
+    _foreign_owner_is_recoverable,
     _json_safe,
     _new_turn_id,
     _now,
+    _owner_metadata,
     serialize_messages,
 )
 from .world_store import StaleRevisionError, atomic_write_json
@@ -66,6 +72,7 @@ class DatabaseTurnJournal:
         world_id: str,
         module_name: str,
         owner_token: str = PROCESS_INSTANCE_ID,
+        recover_on_init: bool = True,
     ) -> None:
         self.world_dir = Path(world_dir).resolve()
         runtime_root = self.world_dir.parent.parent
@@ -75,7 +82,8 @@ class DatabaseTurnJournal:
         self.owner_token = owner_token
         self._active_events: dict[str, list[dict]] = {}
         self._started_at: dict[str, float] = {}
-        self.recover_stale_turn()
+        if recover_on_init:
+            self.recover_stale_turn()
 
     def _export_completed(self, record: dict, messages: list[dict], snapshot: dict) -> None:
         """Optional derived JSON export for desktop/backward compatibility."""
@@ -103,36 +111,203 @@ class DatabaseTurnJournal:
     def _record(row: Turn) -> dict:
         return copy.deepcopy(row.record or {})
 
-    def _row(self, session, turn_id: str) -> Turn:
-        row = session.scalar(select(Turn).where(Turn.world_id == self.world_id, Turn.id == turn_id))
+    def _row(self, session, turn_id: str, *, for_update: bool = False) -> Turn:
+        statement = select(Turn).where(Turn.world_id == self.world_id, Turn.id == turn_id)
+        if for_update:
+            statement = statement.with_for_update()
+        row = session.scalar(statement)
         if row is None:
             raise TurnNotFoundError(f"回合记录不存在: {turn_id}")
         return row
 
-    def recover_stale_turn(self) -> dict | None:
+    def _active_turn(self, session) -> Turn | None:
+        """Return the active row seen by this transaction, if any."""
+        return session.scalar(
+            select(Turn).where(Turn.world_id == self.world_id, Turn.status == "active")
+        )
+
+    @staticmethod
+    def _is_active_turn_unique_violation(exc: IntegrityError) -> bool:
+        """Identify the partial-index collision across SQLite and PostgreSQL."""
+        original = getattr(exc, "orig", None)
+        constraint = getattr(getattr(original, "diag", None), "constraint_name", None)
+        if constraint == ACTIVE_TURN_WORLD_INDEX:
+            return True
+        message = str(original or exc).lower()
+        # psycopg includes the index name in its duplicate-key diagnostic.
+        # SQLite exposes only the constrained column for a partial index.
+        return (
+            ACTIVE_TURN_WORLD_INDEX.lower() in message
+            or "unique constraint failed: turns.world_id" in message
+        )
+
+    @staticmethod
+    def _force_recovery_preview(row: Turn) -> dict:
+        """Return the local-operator CAS data for one active turn.
+
+        This is intentionally not part of the WebSocket recovery payload.  A
+        local maintenance command must copy both values back into the force
+        operation, so a stale operator terminal cannot interrupt a newer
+        owner by accident.
+        """
+        record = DatabaseTurnJournal._record(row)
+        return {
+            "turn_id": row.id,
+            "status": row.status,
+            "kind": row.kind,
+            "created_at": record.get("created_at") or row.created_at.isoformat(),
+            "owner_token": row.owner_token or str(record.get("owner_token") or ""),
+        }
+
+    def active_turn_recovery_candidates(self) -> list[dict]:
+        """List active turns with their operator-only compare-and-swap data.
+
+        Automatic recovery deliberately leaves legacy, remote, and otherwise
+        unknown owners alone.  This read-only method is only consumed by the
+        local maintenance CLI that can present a human-confirmed force action.
+        It must never be exposed through HTTP/WebSocket payloads.
+        """
         with session_scope(self.database_url) as session:
             rows = session.scalars(
                 select(Turn)
                 .where(Turn.world_id == self.world_id, Turn.status == "active")
-                .with_for_update()
+                .order_by(Turn.created_at.asc(), Turn.pk.asc())
             ).all()
-            recovered = None
-            for row in rows:
-                record = self._record(row)
-                if row.owner_token == self.owner_token:
-                    recovered = record
-                    continue
-                record.update(
-                    {
-                        "status": "interrupted",
-                        "interrupted_at": _now(),
-                        "error": "服务进程在回合提交前结束",
-                    }
+            return [self._force_recovery_preview(row) for row in rows]
+
+    def force_interrupt_active_turn(
+        self,
+        *,
+        expected_turn_id: str,
+        expected_owner_token: str | None,
+        reason: str,
+        operator: str,
+    ) -> dict:
+        """Explicitly interrupt one fenced active turn and write an audit row.
+
+        This is intentionally separate from ``recover_stale_turn``: it exists
+        only for a local operator who has already confirmed that an unknown
+        owner cannot safely finish.  The World and Turn locks plus the expected
+        id/token form a small compare-and-swap guard against an old terminal
+        command interrupting a different turn.
+        """
+        turn_id = str(expected_turn_id or "").strip()
+        owner_token = "" if expected_owner_token is None else str(expected_owner_token)
+        normalized_reason = str(reason or "").strip()
+        normalized_operator = str(operator or "").strip()
+        if not turn_id:
+            raise ValueError("expected_turn_id 不能为空")
+        if expected_owner_token is None:
+            raise ValueError("expected_owner_token 不能为空")
+        if not normalized_reason or len(normalized_reason) > 500:
+            raise ValueError("reason 必须为 1-500 个字符")
+        if not normalized_operator or len(normalized_operator) > 120:
+            raise ValueError("operator 必须为 1-120 个字符")
+
+        with session_scope(self.database_url) as session:
+            world = session.scalar(
+                select(World).where(World.id == self.world_id).with_for_update()
+            )
+            if world is None:
+                raise TurnJournalError(f"世界不存在: {self.world_id}")
+            row = session.scalar(
+                select(Turn)
+                .where(Turn.world_id == self.world_id, Turn.id == turn_id)
+                .with_for_update()
+            )
+            if row is None:
+                raise TurnNotFoundError(f"回合记录不存在: {turn_id}")
+            if row.status != "active":
+                raise TurnJournalError(f"回合 {turn_id} 状态为 {row.status}，不能强制回收")
+
+            record = self._record(row)
+            current_owner_token = row.owner_token or str(record.get("owner_token") or "")
+            if current_owner_token != owner_token:
+                raise TurnJournalError(
+                    f"回合 {turn_id} 的 owner token 已变化；请重新检查后再执行"
                 )
-                row.status = "interrupted"
-                row.record = record
+
+            now = _now()
+            record["owner_token"] = current_owner_token
+            record.update(
+                {
+                    "status": "interrupted",
+                    "interrupted_at": now,
+                    "error": f"操作员强制回收未完成回合：{normalized_reason}",
+                    "force_recovery": {
+                        "at": now,
+                        "operator": normalized_operator,
+                        "reason": normalized_reason,
+                        "mode": "local_cli",
+                    },
+                }
+            )
+            row.status = "interrupted"
+            row.record = record
+            session.add(
+                AuditEvent(
+                    id=new_id("audit"),
+                    event_type="turn_force_recovered",
+                    world_id=self.world_id,
+                    success=True,
+                    ip_address="local-cli",
+                    details={
+                        "turn_id": turn_id,
+                        "reason": normalized_reason,
+                        "operator": normalized_operator,
+                        "mode": "local_cli",
+                        "owner_metadata_present": bool(
+                            record.get("owner_host") and record.get("owner_pid")
+                        ),
+                    },
+                )
+            )
+            return copy.deepcopy(record)
+
+    def _recover_stale_turn_in_session(self, session) -> dict | None:
+        """Recover a provably dead foreign owner while the caller holds World."""
+        rows = session.scalars(
+            select(Turn)
+            .where(Turn.world_id == self.world_id, Turn.status == "active")
+            .with_for_update()
+        ).all()
+        recovered = None
+        for row in rows:
+            record = self._record(row)
+            # A journal is constructed for every WebSocket connection.  Do not
+            # confuse a different interpreter (tests, a second launcher, or a
+            # rolling restart) with a dead one: only interrupt an owner that
+            # local PID fencing proves has exited.
+            record["owner_token"] = row.owner_token or record.get("owner_token", "")
+            if not _foreign_owner_is_recoverable(record, self.owner_token):
                 recovered = record
-            return copy.deepcopy(recovered)
+                continue
+            record.update(
+                {
+                    "status": "interrupted",
+                    "interrupted_at": _now(),
+                    "error": "服务进程在回合提交前结束",
+                }
+            )
+            row.status = "interrupted"
+            row.record = record
+            recovered = record
+        return copy.deepcopy(recovered)
+
+    def recover_stale_turn(self) -> dict | None:
+        """Recover only a foreign turn whose local owner is provably dead.
+
+        Reconnect/status paths instantiate journals frequently.  Unknown or
+        remote owners therefore remain active rather than being destroyed by
+        an owner-token mismatch; a competing backend will report the world as
+        busy until an operator performs a fenced recovery.  Taking the World
+        row lock serializes this operation with ``begin`` on PostgreSQL.
+        """
+        with session_scope(self.database_url) as session:
+            world = session.scalar(select(World).where(World.id == self.world_id).with_for_update())
+            if world is None:
+                return None
+            return self._recover_stale_turn_in_session(session)
 
     def begin(
         self,
@@ -141,52 +316,84 @@ class DatabaseTurnJournal:
         player_input: str | None,
         actor: dict | None = None,
     ) -> str:
-        with session_scope(self.database_url) as session:
-            world = session.scalar(select(World).where(World.id == self.world_id).with_for_update())
-            if world is None:
-                raise TurnJournalError(f"世界不存在: {self.world_id}")
-            active = session.scalar(
-                select(Turn).where(Turn.world_id == self.world_id, Turn.status == "active")
-            )
-            if active:
-                raise ActiveTurnError(f"回合 {active.id} 尚未结束")
-            latest = session.scalar(
-                select(Turn)
-                .where(Turn.world_id == self.world_id, Turn.status == "completed")
-                .order_by(Turn.completed_at.desc())
-                .limit(1)
-            )
-            turn_id = _new_turn_id()
-            record = {
-                "schema_version": TURN_RECORD_SCHEMA_VERSION,
-                "turn_id": turn_id,
-                "world_id": self.world_id,
-                "module_name": self.module_name,
-                "parent_turn_id": latest.id if latest else None,
-                "kind": str(kind or "action"),
-                "status": "active",
-                "created_at": _now(),
-                "owner_token": self.owner_token,
-                "player_input": player_input,
-                "actor": _json_safe(actor) if isinstance(actor, dict) else None,
-                "events": [],
-            }
-            session.add(
-                Turn(
-                    pk=new_id("turnrow"),
-                    id=turn_id,
-                    world_id=self.world_id,
-                    parent_turn_id=record["parent_turn_id"],
-                    kind=record["kind"],
-                    status="active",
-                    owner_token=self.owner_token,
-                    player_input=player_input,
-                    record=record,
+        turn_id: str | None = None
+        try:
+            with session_scope(self.database_url) as session:
+                world = session.scalar(
+                    select(World).where(World.id == self.world_id).with_for_update()
                 )
-            )
-            self._active_events[turn_id] = []
-            self._started_at[turn_id] = time.monotonic()
-            return turn_id
+                if world is None:
+                    raise TurnJournalError(f"世界不存在: {self.world_id}")
+                # A connection can outlive a different local backend process.
+                # Recheck after taking the same World row lock that protects the
+                # active-turn check and insert below, so recovery and begin cannot
+                # interleave on PostgreSQL.
+                self._recover_stale_turn_in_session(session)
+                active = self._active_turn(session)
+                if active:
+                    raise ActiveTurnError(f"回合 {active.id} 尚未结束")
+                latest = session.scalar(
+                    select(Turn)
+                    .where(Turn.world_id == self.world_id, Turn.status == "completed")
+                    .order_by(Turn.completed_at.desc())
+                    .limit(1)
+                )
+                turn_id = _new_turn_id()
+                record = {
+                    "schema_version": TURN_RECORD_SCHEMA_VERSION,
+                    "turn_id": turn_id,
+                    "world_id": self.world_id,
+                    "module_name": self.module_name,
+                    "parent_turn_id": latest.id if latest else None,
+                    "kind": str(kind or "action"),
+                    "status": "active",
+                    "created_at": _now(),
+                    "owner_token": self.owner_token,
+                    **_owner_metadata(),
+                    "player_input": player_input,
+                    "actor": _json_safe(actor) if isinstance(actor, dict) else None,
+                    "events": [],
+                }
+                session.add(
+                    Turn(
+                        pk=new_id("turnrow"),
+                        id=turn_id,
+                        world_id=self.world_id,
+                        parent_turn_id=record["parent_turn_id"],
+                        kind=record["kind"],
+                        status="active",
+                        owner_token=self.owner_token,
+                        player_input=player_input,
+                        record=record,
+                    )
+                )
+                try:
+                    # SQLite ignores the World ``FOR UPDATE`` lock.  Flush
+                    # now so its partial unique index turns an inter-process
+                    # read/insert race into a friendly busy result instead of
+                    # leaking a raw IntegrityError at transaction commit.
+                    session.flush()
+                except IntegrityError as exc:
+                    if self._is_active_turn_unique_violation(exc):
+                        raise ActiveTurnError("这个世界已有正在进行的回合") from exc
+                    raise
+                self._active_events[turn_id] = []
+                self._started_at[turn_id] = time.monotonic()
+                return turn_id
+        except IntegrityError as exc:
+            if turn_id:
+                self._active_events.pop(turn_id, None)
+                self._started_at.pop(turn_id, None)
+            if self._is_active_turn_unique_violation(exc):
+                raise ActiveTurnError("这个世界已有正在进行的回合") from exc
+            raise
+        except BaseException:
+            if turn_id:
+                # If commit fails after flush, don't retain ephemeral events
+                # for a row that never reached the database.
+                self._active_events.pop(turn_id, None)
+                self._started_at.pop(turn_id, None)
+            raise
 
     def append_event(self, turn_id: str | None, payload: dict) -> None:
         if not turn_id or payload.get("type") not in _REPLAY_EVENT_TYPES:
@@ -229,11 +436,14 @@ class DatabaseTurnJournal:
     ) -> dict:
         journal_started = time.monotonic()
         with session_scope(self.database_url) as session:
-            row = self._row(session, turn_id)
+            row = self._row(session, turn_id, for_update=True)
             if row.status == "completed":
                 return self._record(row)
             if row.status != "active":
                 raise TurnJournalError(f"回合 {turn_id} 状态为 {row.status}，不能提交")
+            record = self._record(row)
+            record["owner_token"] = row.owner_token or record.get("owner_token", "")
+            _assert_active_turn_owner(record, self.owner_token, "提交")
             serializable = serialize_messages(messages)
             if expected_world_revision is not None:
                 world_row = session.scalar(
@@ -253,7 +463,6 @@ class DatabaseTurnJournal:
                 world_row.updated_at = utcnow()
             events = self._active_events.pop(turn_id, [])
             started_at = self._started_at.pop(turn_id, None)
-            record = self._record(row)
             record.update(
                 {
                     "status": "completed",
@@ -386,12 +595,14 @@ class DatabaseTurnJournal:
         if status not in {"cancelled", "failed", "interrupted"}:
             raise ValueError(f"非法回合结束状态: {status}")
         with session_scope(self.database_url) as session:
-            row = self._row(session, turn_id)
+            row = self._row(session, turn_id, for_update=True)
             if row.status != "active":
                 return self._record(row)
+            record = self._record(row)
+            record["owner_token"] = row.owner_token or record.get("owner_token", "")
+            _assert_active_turn_owner(record, self.owner_token, "结束")
             started = self._started_at.pop(turn_id, None)
             self._active_events.pop(turn_id, None)
-            record = self._record(row)
             record.update(
                 {
                     "status": status,
@@ -628,7 +839,6 @@ class DatabaseTurnJournal:
         return {k: copy.deepcopy(record.get(k)) for k in keys if k in record}
 
     def recovery_status(self, requested_turn_id: str | None = None) -> dict:
-        self.recover_stale_turn()
         with session_scope(self.database_url) as session:
 
             def optional(value):

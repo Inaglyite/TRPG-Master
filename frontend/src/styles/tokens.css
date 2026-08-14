@@ -31,6 +31,14 @@
   --ui-button-strip: url("../assets/ui/extracted/18_button_strip_plain.png");
   --ui-candle: url("../assets/ui/extracted/21_fx_candle_middle.png");
   --ui-eye: url("../assets/ui/extracted/26_fx_eye_left.png");
+  /* ---- 手绘素材组（1920s 调查员：深木/黄铜/羊皮纸） ---- */
+  --ui-frame-card: url("../assets/ui/card_frame_darkwood.png");
+  --ui-cta-brass: url("../assets/ui/cta_button_brass.png");
+  --ui-frame-dice: url("../assets/ui/dice_result_card.png");
+  --ui-frame-status-bar: url("../assets/ui/status_bar_brass.png");
+  --ui-dossier-parchment: url("../assets/ui/dossier_parchment.png");
+  --ui-notes-parchment: url("../assets/ui/notes_parchment.png");
+  --ui-icon-character: url("../assets/ui/icon_character.png");
   --bg: #14100c;
   --bg2: #1e1812;
   --bg3: #2a221a;

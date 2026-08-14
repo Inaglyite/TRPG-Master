@@ -106,15 +106,17 @@
   white-space: nowrap;
 }
 
-/* 状态条：档案量表（加粗 + 10% 刻度纹） */
+/* 状态条：手绘黄铜空心管框（border-image，端帽 medallion 不变形，
+   中央镂空透出底色与填充条） */
 .stat-bar {
   position: relative;
-  height: 10px;
-  border-radius: var(--r-md);
+  height: 26px;
   margin: 5px 0 10px;
+  border-style: solid;
+  border-width: 9px 16px;
+  border-image: var(--ui-frame-status-bar) 80 150 / 9px 16px / 0 stretch;
   background: var(--bg3);
   overflow: hidden;
-  border: 1px solid var(--border);
 }
 .stat-bar::after {
   content: "";
@@ -129,7 +131,7 @@
 }
 .stat-bar-fill {
   height: 100%;
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
   transition: width 0.6s ease;
 }
 .stat-bar-fill.hp {

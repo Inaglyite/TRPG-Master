@@ -87,7 +87,11 @@ textarea {
 }
 
 body:has(#start-overlay:not(.hidden)) #header,
-body:has(#start-overlay:not(.hidden)) #bottom {
+body:has(#start-overlay:not(.hidden)) #bottom,
+/* 联机全屏外壳（认证/大厅/角色选择/房间管理）同样遮住游戏顶栏与输入区，
+   避免透过半透明 overlay 看到身后游戏 UI；淡出退场（online-closing）时恢复。 */
+body:has(.online-overlay:not(.online-closing)) #header,
+body:has(.online-overlay:not(.online-closing)) #bottom {
   opacity: 0;
   pointer-events: none;
 }

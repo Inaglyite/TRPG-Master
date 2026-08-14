@@ -100,6 +100,40 @@ curl --fail http://127.0.0.1:8766/api/ready
 sudo journalctl -u trpg-master-staging.service --no-pager -n 100
 ```
 
+#### 断电后的恢复
+
+树莓派上的 PostgreSQL、Nginx、`trpg-master-staging.service` 与备份 timer 都设为开机启动；正常情况下
+恢复供电后无需手动操作。若需要从开发机显式启动并同时做 readiness 验证，运行：
+
+```bash
+bash tools/start-pi-staging.sh
+```
+
+它通过 SSH 调用树莓派上 root 所有、无参数的
+`/usr/local/sbin/trpg-start-staging`，依次启动所需 unit，并检查
+`http://127.0.0.1:8766/api/ready`。树莓派的 LAN 地址变化时，可临时覆盖目标：
+
+```bash
+TRPG_PI_SSH_TARGET=inaglyite@新地址 bash tools/start-pi-staging.sh
+```
+
+若已经在任意终端中，只需直接执行等价的单条命令：
+
+```bash
+ssh inaglyite@192.168.5.22 'sudo -n /usr/local/sbin/trpg-start-staging'
+```
+
+一次性安装该固定入口（树莓派上执行；不应放入 release 目录）：
+
+```bash
+scp deploy/trpg-start-staging inaglyite@192.168.5.22:/tmp/
+ssh inaglyite@192.168.5.22 \
+  'sudo install -o root -g root -m 0755 /tmp/trpg-start-staging /usr/local/sbin/trpg-start-staging && rm -f /tmp/trpg-start-staging'
+```
+
+入口不接受任何参数，避免把 SSH 启动快捷方式变成可注入的特权命令；本机 helper 也使用
+`BatchMode=yes` 和 `sudo -n`，凭据或 sudo 授权失效时会直接失败而不会在后台卡住。
+
 #### 最近一次 Pi 候选验收（2026-08-10）
 
 候选 release `fd46bbf7be06…` 已在上述 Pi staging 完成以下验收；这不是 Azure production 发布记录：
@@ -170,6 +204,26 @@ cd /opt/trpg-master/current
 ```
 
 确认数据库、回合、存档和加密备份均可恢复前保留旧目录；它只是离线导入来源，不再是运行时事实。
+
+### 受控回合恢复
+
+自动恢复只会中断本机且 owner PID 已确认退出的活动回合；旧格式、跨主机或未知 owner 会保留为
+`active`，避免第二个服务错误覆盖仍在生成的回合。它们若确认已经遗留，可由**能读取同一受管
+运行环境和数据库的本机维护者**执行 `tools/recover_active_turn.py`，没有 HTTP 或前端入口。
+
+先停止并核实原服务/worker 不会再提交该世界，且不要把 `TRPG_DATABASE_URL` 贴进命令行或工单。
+在已注入该受限环境变量的维护 shell 中先只读检查：
+
+```bash
+cd /opt/trpg-master/current
+TRPG_RUNTIME_ROOT=/var/lib/trpg-master \
+  .venv/bin/python tools/recover_active_turn.py --world-id '<world-id>'
+```
+
+命令会打印活动回合的 `turn_id` 与当前 `owner_token`。复制其对应的一行，并在再次核实后追加
+`--force --yes`；这两个值是 compare-and-swap 栅栏，检查后若回合已结束、被替换或 owner token
+变化，工具会拒绝写入。强制恢复只把该回合标记为 `interrupted`，不会把未提交叙述或状态当作完成
+回合，并在同一数据库事务写入 `audit_events.turn_force_recovered`。绝不可对仍在运行的游戏执行。
 
 ## 首次安装 staging
 

@@ -27,6 +27,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Engine
@@ -34,6 +35,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 from sqlalchemy.types import JSON
 
 JSON_VALUE = JSON().with_variant(JSONB(), "postgresql")
+ACTIVE_TURN_WORLD_INDEX = "uq_turns_one_active_per_world"
 
 
 def utcnow() -> datetime:
@@ -189,6 +191,18 @@ class Turn(Base):
     __tablename__ = "turns"
     __table_args__ = (
         Index("ix_turns_world_completed", "world_id", "completed_at"),
+        # A World row lock serializes normal PostgreSQL writes, but SQLite
+        # ignores ``FOR UPDATE`` and a second backend can still race between
+        # the application-level read and insert.  The partial unique index is
+        # the final authority on both backends: a world may have many finished
+        # turns, but never more than one active one.
+        Index(
+            ACTIVE_TURN_WORLD_INDEX,
+            "world_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
         UniqueConstraint("world_id", "id", name="uq_world_turn"),
     )
 

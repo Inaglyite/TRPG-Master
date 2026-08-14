@@ -65,6 +65,20 @@ export function deleteWorld(worldId: string): Promise<void> {
   });
 }
 
+/**
+ * 放弃一份云端私密单人冒险并将其逻辑归档。
+ *
+ * 与 DELETE 不同：该专用路径只允许单人世界的房主在没有进行中回合时
+ * 主动结束一次未结案的调查；不会触发案件结算、角色成长或奖励。
+ */
+export function abandonWorld(worldId: string): Promise<void> {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/abandon`,
+    z.undefined(),
+    { method: "POST" },
+  );
+}
+
 // —— 成员 ——
 
 export const memberInvestigatorSchema = z.looseObject({

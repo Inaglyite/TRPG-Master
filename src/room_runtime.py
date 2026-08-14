@@ -7,7 +7,8 @@ import copy
 import os
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -1029,10 +1030,44 @@ class RoomManager:
     def __init__(self, *, max_rooms: int = 8):
         self._rooms: dict[str, GameRoom] = {}
         self._loading: dict[str, asyncio.Future[GameRoom]] = {}
+        # Serializes room construction with destructive lifecycle operations
+        # (archive/abandon) for one world.  The global map lock remains tiny;
+        # expensive engine creation never holds it or blocks other worlds.
+        self._lifecycle_locks: dict[str, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
         self.max_rooms = max(1, int(max_rooms))
 
+    async def _lifecycle_lock(self, world_id: str) -> asyncio.Lock:
+        async with self._lock:
+            lock = self._lifecycle_locks.get(world_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._lifecycle_locks[world_id] = lock
+            return lock
+
+    @asynccontextmanager
+    async def world_lifecycle(self, world_id: str) -> AsyncIterator[None]:
+        """Serialize one world's load and archive/abandon boundary.
+
+        A world can be expensive to build, so this lock is deliberately scoped
+        to a single ID instead of ``RoomManager._lock``.  It closes the gap in
+        which an archive request used to miss ``_loading`` while a WebSocket
+        room factory recovered durable action leases in parallel.
+        """
+        lock = await self._lifecycle_lock(world_id)
+        async with lock:
+            yield
+
     async def get_or_create(self, world_id: str, factory: RoomFactory) -> tuple[GameRoom, bool]:
+        async with self.world_lifecycle(world_id):
+            return await self._get_or_create(world_id, factory)
+
+    async def _get_or_create(
+        self,
+        world_id: str,
+        factory: RoomFactory,
+    ) -> tuple[GameRoom, bool]:
+        """Implement get/create while the caller owns ``world_lifecycle``."""
         creator = False
         async with self._lock:
             existing = self._rooms.get(world_id)

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from src.engine import GameEngine
 from src.runtime import RuntimeContext
-from src.turn_journal import ActiveTurnError, TurnJournal
+from src.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
 
 
 class TurnJournalTests(unittest.TestCase):
@@ -154,7 +154,7 @@ class TurnJournalTests(unittest.TestCase):
             self.assertEqual(actor, history[-1]["actor"])
             self.assertEqual(actor, journal.recovery_status(turn_id)["requested"]["actor"])
 
-    def test_new_process_marks_uncommitted_turn_interrupted(self):
+    def test_live_foreign_owner_is_never_interrupted_or_finished(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             first = self.make_journal(root, "process-a")
@@ -162,8 +162,69 @@ class TurnJournalTests(unittest.TestCase):
 
             second = self.make_journal(root, "process-b")
             status = second.recovery_status(turn_id)
+            self.assertEqual("active", status["requested"]["status"])
+            self.assertEqual(turn_id, status["active"]["turn_id"])
+            with self.assertRaisesRegex(TurnJournalError, "另一服务进程"):
+                second.complete(
+                    turn_id,
+                    messages=[],
+                    world_state={"revision": 1},
+                    narrative="错误的服务不应提交。",
+                    choices=[],
+                )
+            with self.assertRaisesRegex(TurnJournalError, "另一服务进程"):
+                second.finish_incomplete(turn_id, status="failed")
+
+            completed = first.complete(
+                turn_id,
+                messages=[],
+                world_state={"revision": 1},
+                narrative="开场仍由原服务完成。",
+                choices=[],
+            )
+            self.assertEqual("completed", completed["status"])
+
+    def test_recovery_status_is_read_only_for_a_foreign_dead_owner(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            observer = self.make_journal(root, "process-b")
+            first = self.make_journal(root, "process-a")
+            turn_id = first.begin(kind="opening", player_input=None)
+
+            # If status polling still called recovery, this simulated dead PID
+            # would turn the row into interrupted.  It must remain a read.
+            with patch("src.turn_journal._owner_liveness", return_value=False):
+                status = observer.recovery_status(turn_id)
+            self.assertEqual("active", status["requested"]["status"])
+            self.assertEqual(turn_id, status["active"]["turn_id"])
+
+    def test_provably_dead_foreign_owner_is_recovered(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = self.make_journal(root, "process-a")
+            turn_id = first.begin(kind="opening", player_input=None)
+
+            with patch("src.turn_journal._owner_liveness", return_value=False):
+                second = self.make_journal(root, "process-b")
+            status = second.recovery_status(turn_id)
             self.assertEqual("interrupted", status["requested"]["status"])
             self.assertIsNone(status["active"])
+
+    def test_legacy_foreign_owner_fails_closed_until_fenced_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = self.make_journal(root, "process-a")
+            turn_id = first.begin(kind="opening", player_input=None)
+            record = first.read(turn_id)
+            record.pop("owner_pid", None)
+            record.pop("owner_host", None)
+            first._write_record_unlocked(record)
+
+            second = self.make_journal(root, "process-b")
+            status = second.recovery_status(turn_id)
+            self.assertEqual("active", status["requested"]["status"])
+            with self.assertRaises(ActiveTurnError):
+                second.begin(kind="action", player_input="新行动")
 
     def test_new_multiplayer_engine_restores_latest_committed_model_history(self):
         with tempfile.TemporaryDirectory() as temp:

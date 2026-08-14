@@ -397,16 +397,13 @@
   max-width: min(92%, 560px);
   color: var(--gold-bright);
   font-weight: 700;
-  padding: 14px 22px 13px;
-  background:
-    radial-gradient(
-      circle at 50% 0%,
-      color-mix(in srgb, var(--gold-bright) 14%, transparent),
-      transparent 58%
-    ),
-    color-mix(in srgb, var(--gold) 8%, transparent);
-  border: 1px solid var(--gold);
-  border-radius: var(--r-lg);
+  padding: 4px 14px;
+  /* 手绘黄铜检定框：左侧骰子勋章在角区不拉伸，上下轨道横向往复 */
+  border-style: solid;
+  border-width: 30px 53px 29px 89px;
+  border-image: var(--ui-frame-dice) 110 195 107 330 / 30px 53px 29px 89px / 0
+    stretch;
+  background: color-mix(in srgb, var(--ink) 84%, transparent);
   font-family: var(--font-mono);
   text-shadow: 0 0 12px var(--gold-glow);
   box-shadow: var(--shadow-glow);
@@ -541,8 +538,15 @@
   animation: ink-cursor 0.9s ease-in-out infinite;
 }
 @keyframes ink-cursor {
-  0%, 100% { opacity: 0.22; transform: scaleY(0.72); }
-  48% { opacity: 0.9; transform: scaleY(1); }
+  0%,
+  100% {
+    opacity: 0.22;
+    transform: scaleY(0.72);
+  }
+  48% {
+    opacity: 0.9;
+    transform: scaleY(1);
+  }
 }
 
 /* 长按加速期间唯一视觉反馈：流式光标略微提亮 */

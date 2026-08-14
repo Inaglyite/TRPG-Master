@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from src.auth import create_user
 from src.database import (
+    AuditEvent,
     Base,
     RoomAction,
     User,
@@ -30,9 +31,13 @@ from src.database import (
 )
 from src.multiplayer import (
     MultiplayerError,
+    abandon_solo_world,
     accept_invite,
     archive_world,
+    check_solo_abandon_access,
     create_invite,
+    finish_room_action,
+    reserve_room_action,
     transfer_owner,
     update_member_role,
 )
@@ -41,7 +46,7 @@ from src.multiplayer_guards import (
     reset_action_guards,
 )
 from src.multiplayer_messages import UNSUPPORTED_ROOM_TYPES, run_room_message_loop
-from src.room_runtime import GameRoom, RoomEventHub
+from src.room_runtime import GameRoom, RoomEventHub, RoomManager
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -277,6 +282,298 @@ def test_solo_world_http_invite_blocked_and_archive_allowed(tmp_path: Path):
 
         deleted = client.delete(f"/api/worlds/{world_id}", headers=ORIGIN)
         assert deleted.status_code == 204
+
+
+def test_abandon_solo_world_archives_active_story_without_settling(tmp_path: Path):
+    """放弃是单人归档，不是 end_game/settle_case 的替身。"""
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    with session_scope(url) as session:
+        world = session.get(World, "world-solo")
+        world.metadata_json = {
+            **dict(world.metadata_json or {}),
+            "room_status": "playing",
+        }
+
+    action_id = "solo-abandon-test"
+    reserve_room_action(
+        url,
+        "world-solo",
+        action_id,
+        owner.id,
+        "solo_abandon",
+        required_permission="manage",
+    )
+    result = abandon_solo_world(
+        url,
+        "world-solo",
+        owner.id,
+        reservation_action_id=action_id,
+        runtime_room_status="playing",
+    )
+
+    assert result == {
+        "world_id": "world-solo",
+        "status": "archived",
+        "abandoned": True,
+    }
+    with session_scope(url) as session:
+        assert session.get(World, "world-solo").status == "archived"
+        action = (
+            session.query(RoomAction)
+            .filter_by(world_id="world-solo", action_id=action_id)
+            .one()
+        )
+        assert action.status == "completed"
+        audit_row = (
+            session.query(AuditEvent)
+            .filter_by(world_id="world-solo", event_type="world_archived")
+            .one()
+        )
+        assert audit_row.details["archive_reason"] == "solo_abandoned"
+        assert audit_row.details["action_id"] == action_id
+
+
+def test_abandon_solo_world_refuses_competing_turn_and_multiplayer_world(tmp_path: Path):
+    """专用放弃路径不越过回合租约，也永远不作用于多人房间。"""
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    reserve_room_action(
+        url,
+        "world-solo",
+        "turn-running",
+        owner.id,
+        "action",
+    )
+    with pytest.raises(MultiplayerError) as active:
+        reserve_room_action(
+            url,
+            "world-solo",
+            "solo-abandon-competing",
+            owner.id,
+            "solo_abandon",
+            required_permission="manage",
+        )
+    assert active.value.code == "room_turn_in_progress"
+    finish_room_action(url, "world-solo", "turn-running", "completed")
+
+    with session_scope(url) as session:
+        world = session.get(World, "world-solo")
+        assert world.status == "active"
+        world.metadata_json = {
+            **dict(world.metadata_json or {}),
+            "play_mode": "multiplayer",
+            "max_players": 4,
+        }
+    with pytest.raises(MultiplayerError) as wrong_mode:
+        check_solo_abandon_access(url, "world-solo", owner.id)
+    assert wrong_mode.value.code == "solo_world_required"
+    with session_scope(url) as session:
+        assert session.get(World, "world-solo").status == "active"
+
+
+def test_active_solo_abandon_http_is_idempotent_and_keeps_normal_delete_strict(
+    tmp_path: Path,
+):
+    """进行中的单人世界只能经专用 POST 放弃，普通 DELETE 仍必须 409。"""
+    url = sqlite_url(tmp_path)
+    server, env_patch, db_patch = cloud_client(url)
+    Base.metadata.create_all(get_engine(url))
+    with env_patch, db_patch, TestClient(server.app, base_url="https://testserver") as client:
+        assert (
+            client.post(
+                "/api/auth/register",
+                json={"username": "abandon_owner", "password": "owner password 123"},
+            ).status_code
+            == 201
+        )
+        world_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "play_mode": "solo"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        with session_scope(url) as session:
+            world = session.get(World, world_id)
+            world.metadata_json = {
+                **dict(world.metadata_json or {}),
+                "room_status": "playing",
+            }
+
+        strict_delete = client.delete(f"/api/worlds/{world_id}", headers=ORIGIN)
+        assert strict_delete.status_code == 409
+        assert strict_delete.json()["code"] == "room_active"
+
+        abandoned = client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN)
+        assert abandoned.status_code == 204
+        # 网络重试 / 双击不会把已归档的本人世界变成失败。
+        assert client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN).status_code == 204
+
+        with session_scope(url) as session:
+            world = session.get(World, world_id)
+            assert world.status == "archived"
+            action = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_type="solo_abandon")
+                .one()
+            )
+            assert action.status == "completed"
+
+
+def test_active_solo_abandon_http_rejects_other_turn_and_non_solo_owner(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    server, env_patch, db_patch = cloud_client(url)
+    Base.metadata.create_all(get_engine(url))
+    with env_patch, db_patch, TestClient(server.app, base_url="https://testserver") as client:
+        assert (
+            client.post(
+                "/api/auth/register",
+                json={"username": "abandon_guard", "password": "owner password 123"},
+            ).status_code
+            == 201
+        )
+        solo_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "play_mode": "solo"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        with session_scope(url) as session:
+            owner_id = session.query(User).filter_by(username="abandon_guard").one().id
+        reserve_room_action(url, solo_id, "still-running", owner_id, "action")
+        blocked = client.post(f"/api/worlds/{solo_id}/abandon", headers=ORIGIN)
+        assert blocked.status_code == 409
+        assert blocked.json()["code"] == "room_turn_in_progress"
+        with session_scope(url) as session:
+            assert session.get(World, solo_id).status == "active"
+        finish_room_action(url, solo_id, "still-running", "completed")
+
+        multiplayer_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        wrong_mode = client.post(
+            f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN
+        )
+        assert wrong_mode.status_code == 403
+        assert wrong_mode.json()["code"] == "solo_world_required"
+        with session_scope(url) as session:
+            world = session.get(World, multiplayer_id)
+            assert world.status == "active"
+            # 已归档的多人世界也不能借“幂等”语义伪装成单人放弃成功。
+            world.status = "archived"
+        archived_wrong_mode = client.post(
+            f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN
+        )
+        assert archived_wrong_mode.status_code == 403
+        assert archived_wrong_mode.json()["code"] == "solo_world_required"
+
+
+def test_active_solo_abandon_http_serializes_loaded_room_then_retires_it(
+    tmp_path: Path,
+):
+    """已加载的 playing 单人房也必须先取本地锁，再归档并摘除运行时。"""
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    manager = RoomManager()
+    with (
+        patch.dict(os.environ, {**CLOUD_ENV, "TRPG_DATABASE_URL": url}),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        owner_id = client.post(
+            "/api/auth/register",
+            json={"username": "loaded_abandon", "password": "owner password 123"},
+        ).json()["id"]
+        world_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "play_mode": "solo"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        room = GameRoom(
+            world_id,
+            SimpleNamespace(),
+            RoomEventHub(world_id),
+            owner_id,
+            current_actor_user_id=owner_id,
+            status="playing",
+            play_mode="solo",
+        )
+
+        async def install_room():
+            installed, created = await manager.get_or_create(world_id, lambda: room)
+            assert created is True
+            assert installed is room
+
+        asyncio.run(install_room())
+        response = client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN)
+        assert response.status_code == 204
+        assert room.action_active is False
+        assert asyncio.run(manager.get(world_id)) is None
+        with session_scope(url) as session:
+            assert session.get(World, world_id).status == "archived"
+            action = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_type="solo_abandon")
+                .one()
+            )
+            assert action.status == "completed"
+
+
+def test_active_solo_abandon_releases_leases_after_unexpected_failure(tmp_path: Path):
+    """数据库/运行时意外错误不能把已加载房间永久锁在“处理中”。"""
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    manager = RoomManager()
+    with (
+        patch.dict(os.environ, {**CLOUD_ENV, "TRPG_DATABASE_URL": url}),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        owner_id = client.post(
+            "/api/auth/register",
+            json={"username": "abandon_cleanup", "password": "owner password 123"},
+        ).json()["id"]
+        world_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "play_mode": "solo"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        room = GameRoom(
+            world_id,
+            SimpleNamespace(),
+            RoomEventHub(world_id),
+            owner_id,
+            current_actor_user_id=owner_id,
+            status="playing",
+            play_mode="solo",
+        )
+
+        async def install_room():
+            await manager.get_or_create(world_id, lambda: room)
+
+        asyncio.run(install_room())
+        with patch(
+            "src.multiplayer_archive_http.abandon_solo_world",
+            side_effect=RuntimeError("database temporarily unavailable"),
+        ):
+            failed = client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN)
+        assert failed.status_code == 503
+        assert failed.json()["code"] == "abandon_unavailable"
+        assert room.action_active is False
+        with session_scope(url) as session:
+            assert session.get(World, world_id).status == "active"
+            action = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_type="solo_abandon")
+                .one()
+            )
+            assert action.status == "failed"
 
 
 class _QueueSocket:

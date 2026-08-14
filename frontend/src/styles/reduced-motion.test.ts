@@ -79,7 +79,7 @@ describe("prefers-reduced-motion 弹层动效", () => {
       "animation: fade-in 0.4s",
     );
     expect(readStyle("components/start-screen.css")).toContain(
-      "animation: start-view-enter",
+      "animation: module-content-enter",
     );
     expect(readStyle("components/messages.css")).toContain(
       "animation: dot-bounce",

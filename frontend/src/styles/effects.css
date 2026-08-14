@@ -25,6 +25,20 @@
   }
 }
 
+/* 浮层退出：与 fade-in/pop-in 成对的快速收场（无回弹，略下沉收拢） */
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-out {
+  to {
+    transform: scale(0.97) translateY(6px);
+    opacity: 0;
+  }
+}
+
 /* ---- 烛光呼吸：金色光晕的明暗摇曳 ---- */
 @keyframes candle-flicker {
   0%,

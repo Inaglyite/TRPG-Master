@@ -367,6 +367,23 @@ export function resetTurnActionButtons() {
   useMessageStore.getState().resetActionButtons();
 }
 
+/**
+ * 清除上一局仅存在于渲染端的聊天呈现。
+ *
+ * 这里不能通过整页刷新来开始新游戏：Electron 的 document reload 会直接
+ * 断开 WebSocket，使服务端把仍在收尾的回合标成 interrupted。真正的世界
+ * 重置仍由用户在开局页确认调查员后发送的 start 命令完成；本函数只在服务端
+ * 已接受新的开局回合时，丢弃旧局的可视内容和流式计时器。
+ */
+export function resetGamePresentation() {
+  clearStream();
+  replacement = null;
+  displayTurnId = null;
+  rewriteCallbacks.clear();
+  branchCallbacks.clear();
+  useMessageStore.getState().replaceMessages([]);
+}
+
 export function renderTurnHistory(
   history: TurnHistoryItem[],
 ): TurnHistoryItem | null {

@@ -1,12 +1,24 @@
-import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "../../state/app-store";
+import { returnToStartMenu } from "../../start";
+import { useStartStore } from "../../state/start-store";
 import { AppHeader } from "./AppHeader";
+
+vi.mock("../../start", () => ({
+  returnToStartMenu: vi.fn(),
+}));
 
 describe("AppHeader", () => {
   beforeEach(() => {
-    useAppStore.setState({ connection: "connecting", title: "TRPG Game" });
+    vi.mocked(returnToStartMenu).mockReset();
+    useAppStore.setState({
+      connection: "connecting",
+      title: "TRPG Game",
+      mode: "local",
+    });
+    useStartStore.setState({ gameStarting: false });
   });
 
   it("reacts to connection and module theme state", () => {
@@ -21,6 +33,14 @@ describe("AppHeader", () => {
 
     expect(screen.getByRole("heading")).toHaveTextContent("猩红文档");
     expect(container.querySelector("#conn-status")).toHaveClass("connected");
+  });
+
+  it("通过应用内开局选择开始新游戏，不重载 Electron 页面", () => {
+    render(<AppHeader />);
+
+    fireEvent.click(screen.getByLabelText("开始新游戏"));
+
+    expect(returnToStartMenu).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -42,6 +62,7 @@ describe("AppHeader 多人房主专属操作", () => {
     expect(screen.queryByLabelText("快速存档")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("打开存档管理")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("打开模型设置")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("开始新游戏")).not.toBeInTheDocument();
   });
 
   it("房主可见存档操作", async () => {

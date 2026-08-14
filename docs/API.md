@@ -82,6 +82,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `GET` | `/api/auth/me` | 查询当前登录账号 |
 | `GET/POST` | `/api/worlds` | 列出有权访问的世界或创建世界 |
 | `DELETE` | `/api/worlds/{id}` | 房主归档删除房间（逻辑删除，见 2.4.1） |
+| `POST` | `/api/worlds/{id}/abandon` | 房主放弃进行中的云端单人冒险（见 2.4.2） |
 | `GET/POST` | `/api/worlds/{id}/invites` | 房主列出或创建邀请 |
 | `DELETE` | `/api/worlds/{id}/invites/{invite_id}` | 房主撤销邀请 |
 | `POST` | `/api/invites/accept` | 接受邀请；JSON 请求体为 `{"token":"…"}` |
@@ -233,6 +234,23 @@ HTTP 409 / `room_already_started`。
   `daily_quota_exceeded`（每账号每日额度超限）。额度参数见
   [DEPLOYMENT.md](DEPLOYMENT.md) 的 `TRPG_LLM_MAX_CONCURRENCY` /
   `TRPG_ACTION_RATE_PER_MINUTE` / `TRPG_DAILY_TURN_QUOTA`。
+
+#### 放弃云端单人冒险
+
+`POST /api/worlds/{id}/abandon` 是 `DELETE /api/worlds/{id}` 的**受限例外**：它只允许
+当前 owner 放弃 `play_mode=solo` 的私密世界，即使该世界处于 `starting` 或 `playing`。成功后仍是
+逻辑归档：世界从正常列表消失，存档/回合/成员记录保留在数据库中，当前客户端收到
+`room_deleted` 与 WS `4404` 后回到“我的冒险”。
+
+- 它不会调用 `settle_case`、不会写入模组完成记录，也不会给予结案奖励或声望；审计事件仍是
+  `world_archived`，并带 `archive_reason: "solo_abandoned"`。
+- 服务端先取得已加载房间的内存行动锁，再创建 `RoomAction(action_type="solo_abandon")` 的持久租约。
+  任一真实回合、控制操作或待确认决定仍在进行时，返回 HTTP 409
+  (`room_turn_in_progress` 或 `room_active`)；客户端应等待本回合结束后重试。
+- 多人世界、非房主或不存在的世界不能使用该路径，分别返回 403 / `solo_world_required`、403
+  (`owner_required` / `not_a_member`) 或 404。已被同一房主归档的单人世界重复请求返回 204。
+- 普通 `DELETE /api/worlds/{id}` 的活动房间限制不变：进行中的单人或多人世界仍返回
+  HTTP 409 / `room_active`。不要把本端点当作多人房间的强制删除接口。
 
 ### 2.5 `GET /api/theme`
 
@@ -647,6 +665,7 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 3. `theme`
 4. `model_settings`
 5. `save_list`
+6. `adventure_list`
 
 引擎初始化失败时，服务端发送 `error` 并关闭连接。
 
@@ -754,6 +773,10 @@ HTTP 404、`error_code:"project_not_found"`；请求体非法返回 HTTP 400、
 | `turn_branch_create` | `turn_id`, `label?` | 从指定完成回合创建并切换独立世界分支 |
 | `world_list` | 无 | 列出当前模组的主时间线与分支 |
 | `world_switch` | `world_id` | 切换世界并恢复其消息历史 |
+| `world_archive` | `world_id` | 归档删除一条已离开的本地时间线分支（逻辑删除） |
+| `world_rename` | `world_id`, `label` | 重命名时间线显示名（仅元数据） |
+| `adventure_archive` | `root_world_id` | 归档删除整个存档位（主时间线 + 全部分支，逻辑删除） |
+| `adventure_rename` | `root_world_id`, `label` | 重命名存档位的自定义显示名（仅元数据） |
 | `player_notes_get` | 无 | 读取当前世界的玩家笔记 |
 | `player_notes_update` | `text`, `revision?` | 以乐观 revision 原子保存玩家笔记 |
 | `switch_module` | `module` | 切换活动模组并刷新开局数据 |
@@ -877,11 +900,18 @@ HTTP 创建对应模组的世界后使用 `world_switch`。
 
 开始新游戏会：
 
-1. 以当前模组的初始模板重建世界状态，并递增世界 revision。
+0. （仅单机 `/ws`）**创建一个新的存档位**：当前世界树已经玩过（有回合或存档）时，
+   服务端先创建一棵全新的根世界并把连接切换过去，再执行开局；旧存档位不受任何影响。
+   从未开始过的世界（连接初始化或 `switch_module` 打开、无回合也无存档）直接复用，
+   玩家取消开局不会留下空存档位。多人 `/ws/room` 与账号模式不变：开局始终作用于
+   房间/账号已绑定的世界。
+1. 以当前模组的初始模板重建（新世界的）世界状态，并递增世界 revision。
 2. 把选中的调查员复制到当前 world 的 `pc`。
 3. 重建 system prompt 与会话消息。
 4. 返回 `character_state`，让客户端在揭开开始界面前同步权威调查员资料。
 5. 返回 `gm_turn_start` 并异步运行开场 GM 回合。
+
+切换到新存档位时，开场回合前先发送 `world_context`、`world_list` 与 `theme`。
 
 ### 4.6 玩家动作
 
@@ -1140,7 +1170,8 @@ turn_rewritten 或 turn_rewrite_failed    # 终止事件，不再发送 done
 2. `world_context`
 3. `world_list`
 4. `save_list`
-5. `character_state`
+5. `adventure_list`
+6. `character_state`
 
 失败时发送 `turn_branch_failed`（缺少 `turn_id`、回合不存在、回合未完成或快照不完整等）；回合
 冲突时先收到 `turn_rejected`。
@@ -1151,8 +1182,9 @@ turn_rewritten 或 turn_rewrite_failed    # 终止事件，不再发送 done
 {"type":"world_list"}
 ```
 
-响应为 `world_list` 事件（§5.7），列出当前模组的主时间线与全部分支。账号模式只返回当前账号
-有权访问的世界。
+响应为 `world_list` 事件（§5.7），列出**当前世界所属主时间线及其分支树**，而不是同一模组
+下全部无关世界。账号模式只返回当前账号有权访问的世界。每项的 `resumable:false` 表示缺少
+`slot_000` 自动存档；客户端必须展示为不可切换，避免切入后“从存档开始”被锁住。
 
 ### 4.22 切换时间线（`world_switch`）
 
@@ -1171,12 +1203,108 @@ turn_rewritten 或 turn_rewrite_failed    # 终止事件，不再发送 done
 3. `world_list`
 4. `theme`
 5. `save_list`
-6. `character_state`
+6. `adventure_list`
+7. `character_state`
 
 失败时发送 `world_switch_failed`：`world_id` 非法或不存在、账号模式无权限、目标世界有回合正在
-进行，或当前连接的回合尚未结束。
+进行、缺少可恢复的 `slot_000` 自动存档，或当前连接的回合尚未结束。
 
-### 4.23 读取玩家笔记（`player_notes_get`）
+### 4.23 归档时间线分支（`world_archive`）
+
+```json
+{
+  "type": "world_archive",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12"
+}
+```
+
+把一条**已离开的本地时间线分支**逻辑删除（归档）：世界从正常列表消失，回合、存档与
+兼容导出文件全部保留，误删后仍可恢复。只允许归档 `is_branch:true` 且不是当前世界、
+没有进行中回合的分支；主时间线与当前时间线不可归档。账号模式要求对目标世界有
+`manage` 权限。
+
+成功时依次发送：
+
+1. `world_archived`（含 `fallback_world_id` 与最新 `worlds` 列表）
+2. `save_list`
+3. `adventure_list`
+
+失败时发送 `world_archive_failed`：目标不是分支、目标是当前世界、目标有回合正在进行，
+或当前连接的回合尚未结束。
+
+### 4.24 重命名时间线（`world_rename`）
+
+```json
+{
+  "type": "world_rename",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "label": "没有打开书架"
+}
+```
+
+修改一条时间线的显示名。只更新世界元数据（含兼容导出 `worlds/<id>/world.json`），
+不动任何回合或存档；`label` 折叠连续空白并截断到 60 字符，为空时回退为
+`主时间线`（根）或 `时间线分支`（分支）。已归档或不存在的世界不可重命名。
+
+成功时依次发送：
+
+1. `world_renamed`（含 `world_id` 与归一化后的 `label`）
+2. `world_list`
+3. `save_list`
+4. `adventure_list`
+
+失败时发送 `world_rename_failed`：`world_id` 非法、世界不存在或已归档、账号模式无权限等。
+
+### 4.25 删除存档位（`adventure_archive`）
+
+```json
+{
+  "type": "adventure_archive",
+  "root_world_id": "local-scarlet"
+}
+```
+
+**逻辑删除整个存档位**：根时间线（主时间线）与其全部分支时间线一并归档，从存档位
+列表消失；回合、存档与兼容导出文件全部保留，误删后仍可恢复。`root_world_id` 必须是
+树的根世界（带 `branch` 元数据的分支请改用 `world_archive`）。当前正在游玩的存档位
+不可删除（当前世界属于该树时拒绝）；树内任何世界有进行中回合时拒绝。账号模式要求
+对根世界有 `manage` 权限。
+
+成功时依次发送：
+
+1. `adventure_archived`（含 `archived_count`）
+2. `world_list`
+3. `save_list`
+4. `adventure_list`
+
+失败时发送 `adventure_archive_failed`：`root_world_id` 非法或不是根世界、存档不存在
+或已删除、存档为当前正在游玩、有回合正在进行，或当前连接的回合尚未结束。
+
+### 4.26 重命名存档位（`adventure_rename`）
+
+```json
+{
+  "type": "adventure_rename",
+  "root_world_id": "local-scarlet",
+  "label": "图书馆线"
+}
+```
+
+设置存档位的自定义显示名（根世界 metadata 的 `slot_name`），与时间线显示名相互独立；
+`label` 折叠连续空白并截断到 60 字符，为空时清除自定义名（UI 回退为模组名）。仅更新
+元数据（含兼容导出 `worlds/<id>/world.json`），不动任何回合或存档。`root_world_id`
+必须是树根；已归档或不存在的世界不可重命名。
+
+成功时依次发送：
+
+1. `adventure_renamed`（含归一化后的 `slot_name`）
+2. `save_list`
+3. `adventure_list`
+
+失败时发送 `adventure_rename_failed`：`root_world_id` 非法或不是根世界、存档不存在
+或已归档、账号模式无权限等。
+
+### 4.27 读取玩家笔记（`player_notes_get`）
 
 ```json
 {"type":"player_notes_get"}
@@ -1185,7 +1313,7 @@ turn_rewritten 或 turn_rewrite_failed    # 终止事件，不再发送 done
 响应为 `player_notes` 事件（§5.7）。笔记按世界隔离（账号模式下还按账号隔离），不进入
 system prompt、Lorebook 扫描或 `world_state`。
 
-### 4.24 保存玩家笔记（`player_notes_update`）
+### 4.28 保存玩家笔记（`player_notes_update`）
 
 ```json
 {
@@ -1320,6 +1448,12 @@ system prompt、Lorebook 扫描或 `world_state`。
 `label` 仅在重命名后存在。列表按 `created_at` 倒序。元素还可能携带 `world_id`、`module_name`、
 `world_revision`、`schema_version` 等内部字段，客户端只需使用上面列出的字段。
 
+本地 `/ws` 会话的 `save_list` 聚合**当前分支树的全部时间线**（与 `world_list` 同一棵树），
+每条存档额外携带 `world_id`、`timeline_label`（所属时间线显示名）和 `world_active`（是否属于
+当前时间线）：存档面板按“选一个存档 → 显示其时间线”浏览，时间线区只展示所选存档所属的
+时间线及其直接子分支。读取/重命名/删除仍只作用于当前时间线的存档；属于其他时间线的存档
+应先 `world_switch` 再操作。多人房间的 `save_list` 不变，仍只含房间绑定世界的槽位摘要。
+
 ### 5.2 回合事件
 
 从 `gm_turn_start` 到回合终止事件的每个事件都额外包含：
@@ -1436,8 +1570,10 @@ system prompt、Lorebook 扫描或 `world_state`。
 | `speaker` | NPC 时与 `narrative_segment` 中的 `speaker` 同构；旁白为 `{"type":"keeper","name":"守秘人"}` |
 
 服务端在生成该事件以及历史类载荷（`turn_recovery`、`turn_rewritten`、`turn_branched`、
-`world_switched`）时，会对缺少发言段的记录按当前世界的公开人物名单重新解析归因；无法确认
-归属的文本一律归为守秘人旁白，未知姓名不会创建人物身份。历史载荷同时携带与 `chat_events`
+`world_switched`）时，会对缺少发言段的记录按当前世界的公开人物名单重新解析归因；只有
+`姓名：台词` 或同一行中明确以 NPC 为说话主语的引语可以补回人物身份，回退不会猜测裸姓名
+受词。无法确认归属、跨行代词延续，以及“调查员对 NPC 说”的文本一律归为守秘人旁白；未知
+姓名不会创建人物身份。历史载荷同时携带与 `chat_events`
 同内容的兼容字段 `narrative_segments`（见 §7）。
 
 #### `tension`
@@ -1922,7 +2058,7 @@ diagnostics 中。字段含义与采集边界见 [`ARCHITECTURE.md`](ARCHITECTUR
 
 ### 5.7 回合恢复与时间线事件
 
-本节事件支撑 §4.17-§4.24 的恢复、诊断、改写、分支、时间线切换与玩家笔记。
+本节事件支撑 §4.17-§4.28 的恢复、诊断、改写、分支、时间线切换与玩家笔记。
 
 **时间线与回合记录。** 每个完成的回合都会持久化为一条回合记录，包含 `turn_id`、
 `parent_turn_id`、`kind`、`player_input`、`narrative`、`choices`、世界快照与消息历史（快照和
@@ -2154,6 +2290,7 @@ T1 守秘人给出 A / B / C
       "module_name": "猩红文档",
       "active": true,
       "is_branch": true,
+      "resumable": true,
       "parent_world_id": "local-scarlet",
       "source_turn_id": "turn_20260715T115500000000Z_9f8e7d6c",
       "created_at": "2026-07-15T12:00:00+00:00",
@@ -2166,7 +2303,8 @@ T1 守秘人给出 A / B / C
 ```
 
 主时间线的 `label` 为 `主时间线`、`is_branch:false`、`parent_world_id`/`source_turn_id` 为
-`null`。排序：当前世界固定第一，其余按 `updated_at` 倒序。
+`null`。排序：当前世界固定第一，其余按 `updated_at` 倒序。`resumable` 是 `slot_000` 自动存档
+是否存在的权威提示；缺失时不得发送 `world_switch`。
 
 #### `world_switched`
 
@@ -2192,6 +2330,163 @@ T1 守秘人给出 A / B / C
 ```
 
 当前连接的世界绑定不变。
+
+#### `adventure_list`
+
+```json
+{
+  "type": "adventure_list",
+  "active_world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "adventures": [
+    {
+      "root_world_id": "local-scarlet",
+      "module_name": "猩红文档",
+      "module_title": "猩红文档",
+      "slot_index": 1,
+      "slot_name": "",
+      "created_at": "2026-07-15T11:00:00+00:00",
+      "turn_count": 14,
+      "active": true,
+      "character_name": "黄千陆",
+      "scene_name": "书房",
+      "updated_at": "2026-07-15T12:00:00.000000",
+      "timeline_count": 2,
+      "resume_world_id": "local-scarlet-branch-20260715-120000-ab12",
+      "timelines": [
+        {
+          "world_id": "local-scarlet",
+          "label": "主时间线",
+          "is_branch": false,
+          "parent_world_id": null,
+          "depth": 0,
+          "active": false,
+          "resumable": true,
+          "scene_name": "门厅",
+          "character_name": "黄千陆",
+          "updated_at": "2026-07-15T11:00:00.000000",
+          "save_count": 2
+        }
+      ]
+    }
+  ]
+}
+```
+
+存档面板的"存档位 → 时间线"两级视图数据：**一次游玩（一棵世界树）= 一个存档位
+（Save Slot）**，`timelines` 是该存档位内的时间线（根在前，分支按 `depth` 排序）。
+每个存档位还带：
+
+| 字段 | 说明 |
+|---|---|
+| `slot_index` | 存档位编号，按根世界 `created_at` 从 1 开始顺延；UI 显示为 `SAVE 01/02/03`。删除中间存档位后编号顺延 |
+| `slot_name` | 存档位自定义显示名（`adventure_rename` 设置）；为空时 UI 回退为模组名 |
+| `created_at` | 根世界创建时间（编号排序依据） |
+| `turn_count` | `resume_world_id` 时间线的已完成回合数（"第 N 回合"进度） |
+
+`resume_world_id` 指向该存档位最近可玩的时间线（Load 默认读取它，不要求玩家先选
+时间线）；`active:true` 的存档位包含当前连接绑定的世界。**只返回当前连接模组的
+存档位**（Load 页跟随开局页模组选择器，其他模组的存档不混入；编号也在模组内顺延）。
+从未开始过的树（无回合也无存档，例如连接初始化或 `switch_module` 打开的模组默认
+世界）**不作为存档位返回**，避免空垃圾存档位。账号模式只返回当前账号有权访问的
+世界树。与 `save_list` 始终成对
+推送：连接初始化、`save_list` 请求、`turn_branch_create`、`world_switch`、
+`world_archive`、`world_rename`、`adventure_archive`、`adventure_rename` 之后。
+
+多人 `/ws/room` 会话不发送本事件（房间绑定单一世界），客户端应回退到仅基于
+`save_list`/`world_list` 的平铺列表。
+
+#### `world_renamed`
+
+```json
+{
+  "type": "world_renamed",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "label": "没有打开书架"
+}
+```
+
+随后还有 `world_list`、`save_list`、`adventure_list`（§4.24）。
+
+#### `world_rename_failed`
+
+```json
+{
+  "type": "world_rename_failed",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "message": "时间线不存在或已归档"
+}
+```
+
+#### `world_archived`
+
+```json
+{
+  "type": "world_archived",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "fallback_world_id": "local-scarlet",
+  "worlds": []
+}
+```
+
+`fallback_world_id` 是被归档分支的可回退祖先（通常为根世界）；`worlds` 是最新
+`world_list` 内容。随后还有 `save_list`、`adventure_list`（§4.23）。归档是逻辑删除：
+回合与存档保留，仅列表不可见。
+
+#### `world_archive_failed`
+
+```json
+{
+  "type": "world_archive_failed",
+  "world_id": "local-scarlet-branch-20260715-120000-ab12",
+  "message": "当前回合尚未结束，暂时不能删除时间线。"
+}
+```
+
+#### `adventure_archived`
+
+```json
+{
+  "type": "adventure_archived",
+  "root_world_id": "local-scarlet",
+  "archived_count": 3
+}
+```
+
+`archived_count` 是本次一并归档的时间线数（主时间线 + 分支）。随后还有
+`world_list`、`save_list`、`adventure_list`（§4.25）。
+
+#### `adventure_archive_failed`
+
+```json
+{
+  "type": "adventure_archive_failed",
+  "root_world_id": "local-scarlet",
+  "message": "不能删除当前正在游玩的存档"
+}
+```
+
+#### `adventure_renamed`
+
+```json
+{
+  "type": "adventure_renamed",
+  "root_world_id": "local-scarlet",
+  "slot_name": "图书馆线"
+}
+```
+
+`slot_name` 为空字符串表示自定义名已清除（UI 回退为模组名）。随后还有
+`save_list`、`adventure_list`（§4.26）。
+
+#### `adventure_rename_failed`
+
+```json
+{
+  "type": "adventure_rename_failed",
+  "root_world_id": "local-scarlet",
+  "message": "存档不存在或已删除"
+}
+```
 
 #### `player_notes`
 

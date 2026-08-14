@@ -60,6 +60,9 @@ import {
   showEnding,
   renderSavePanel,
   renderWorldPanel,
+  renderAdventurePanel,
+  consumeResumeAfterSwitch,
+  loadSave,
   updateCharPanel,
   updateCluePanel,
   showHandout,
@@ -321,7 +324,13 @@ function attachTurnActions(history: TurnHistoryItem[]) {
       attachTurnBranchAction(turnId, () => requestTurnBranch(sourceTurnId));
     }
   });
-  const latestTurnId = String(history[history.length - 1]?.turn_id || "");
+  const latestTurn = history[history.length - 1];
+  const latestTurnId = String(latestTurn?.turn_id || "");
+  if (latestTurn) {
+    useAppStore.setState({
+      latestBranchTurnId: branchSourceTurnId(latestTurn) || null,
+    });
+  }
   if (latestTurnId) {
     attachTurnRewriteAction(latestTurnId, () =>
       requestTurnRewrite(latestTurnId),
@@ -503,6 +512,7 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
   const branchSourceId = String(record.parent_turn_id || turnId);
   attachTurnBranchAction(turnId, () => requestTurnBranch(branchSourceId));
   attachTurnRewriteAction(turnId, () => requestTurnRewrite(turnId));
+  useAppStore.setState({ latestBranchTurnId: branchSourceId });
   gmTurnActive = false;
   setDisplayTurnId(null);
   activeTurnId = null;
@@ -729,12 +739,14 @@ export function handleServerPayload(raw: unknown) {
       const completedBranchSourceTurnId = activeBranchSourceTurnId;
       onDone(pendingChoices);
       if (completedTurnId) {
+        const latestSource = completedBranchSourceTurnId || completedTurnId;
         attachTurnBranchAction(completedTurnId, () =>
-          requestTurnBranch(completedBranchSourceTurnId || completedTurnId),
+          requestTurnBranch(latestSource),
         );
         attachTurnRewriteAction(completedTurnId, () =>
           requestTurnRewrite(completedTurnId),
         );
+        useAppStore.setState({ latestBranchTurnId: latestSource });
       }
       gmTurnActive = false;
       if (!narrativeVisibilityScheduled) {
@@ -787,6 +799,7 @@ export function handleServerPayload(raw: unknown) {
         attachTurnRewriteAction(sourceTurnId, () =>
           requestTurnRewrite(sourceTurnId),
         );
+        useAppStore.setState({ latestBranchTurnId: branchSourceId });
       }
       gmTurnActive = false;
       deferredHandouts = [];
@@ -841,6 +854,36 @@ export function handleServerPayload(raw: unknown) {
     case "world_list":
       renderWorldPanel(data.worlds || [], String(data.active_world_id || ""));
       break;
+    case "adventure_list":
+      renderAdventurePanel(
+        data.adventures || [],
+        String(data.active_world_id || ""),
+      );
+      break;
+    case "world_renamed":
+      addMsg("system", `时间线已重命名为「${data.label || "未命名"}」。`, true);
+      break;
+    case "world_rename_failed":
+      addMsg("error", data.message || "重命名时间线失败。", true);
+      break;
+    case "adventure_archived":
+      addMsg("system", "存档已删除。", true);
+      break;
+    case "adventure_archive_failed":
+      addMsg("error", data.message || "删除存档失败。", true);
+      break;
+    case "adventure_renamed":
+      addMsg(
+        "system",
+        data.slot_name
+          ? `存档已重命名为「${data.slot_name}」。`
+          : "已恢复为默认存档名。",
+        true,
+      );
+      break;
+    case "adventure_rename_failed":
+      addMsg("error", data.message || "重命名存档失败。", true);
+      break;
     case "turn_branched":
       rememberWorld(data.world_id, data.module_name);
       if (getGameStarted()) displayWorldHistory(data.history);
@@ -856,18 +899,45 @@ export function handleServerPayload(raw: unknown) {
       resetTurnActionButtons();
       addMsg("error", data.message || "创建时间线分支失败。", true);
       break;
-    case "world_switched":
+    case "world_switched": {
       rememberWorld(data.world_id, data.module_name);
       if (getGameStarted()) {
         displayWorldHistory(data.history);
         addMsg("system", "已切换时间线。", true);
       }
       closeSavePanel();
+      // 开局页"继续游戏"：切换完成后立即读取自动存档进入。
+      // 标志位必须每次切换都消费，避免游戏中切换残留的待读档状态。
+      const resumeAfterSwitch = consumeResumeAfterSwitch();
+      if (!getGameStarted() && resumeAfterSwitch) {
+        loadSave("slot_000");
+      }
       safeSend(JSON.stringify({ type: "state" }));
       break;
+    }
     case "world_switch_failed":
       addMsg("error", data.message || "切换时间线失败。", true);
       safeSend(JSON.stringify({ type: "world_list" }));
+      break;
+    case "world_archived": {
+      const archivedWorldId = String(data.world_id || "");
+      if (archivedWorldId) {
+        useAppStore.setState((state) => ({
+          worlds: state.worlds.filter(
+            (world) => String(world.world_id || "") !== archivedWorldId,
+          ),
+        }));
+      }
+      addMsg("system", "时间线已删除。", true);
+      // world_archived 仅由本地 /ws 发送；重新请求权威列表，覆盖乐观移除。
+      if (useAppStore.getState().mode === "local") {
+        safeSend(JSON.stringify({ type: "world_list" }));
+      }
+      break;
+    }
+    case "world_archive_failed":
+      // 不关闭存档面板：玩家可以查看原因、取消确认或在条件满足后重试。
+      addMsg("error", data.message || "删除时间线失败。", true);
       break;
     case "player_notes":
       onPlayerNotes(data);

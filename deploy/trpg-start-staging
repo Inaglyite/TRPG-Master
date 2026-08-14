@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Fixed, root-owned Raspberry Pi staging startup entrypoint.
+#
+# It deliberately accepts no arguments: an SSH helper may invoke it through
+# sudo without gaining a parameterised service-management surface.
+set -Eeuo pipefail
+
+if [[ "${EUID:-}" -ne 0 ]]; then
+    echo "trpg-start-staging must be run as root" >&2
+    exit 2
+fi
+if (( $# != 0 )); then
+    echo "usage: trpg-start-staging" >&2
+    exit 2
+fi
+
+readonly systemctl_bin=/usr/bin/systemctl
+readonly curl_bin=/usr/bin/curl
+readonly ready_url=http://127.0.0.1:8766/api/ready
+readonly -a required_units=(
+    postgresql.service
+    nginx.service
+    trpg-master-staging-backup.timer
+    trpg-master-staging.service
+)
+
+for unit in "${required_units[@]}"; do
+    "$systemctl_bin" start "$unit"
+done
+
+for unit in "${required_units[@]}"; do
+    if ! "$systemctl_bin" is-active --quiet "$unit"; then
+        echo "required unit did not become active: $unit" >&2
+        exit 1
+    fi
+done
+
+for (( attempt = 1; attempt <= 30; attempt++ )); do
+    if "$curl_bin" --fail --silent --show-error --max-time 3 "$ready_url"; then
+        printf '\nTRPG Pi staging is ready.\n'
+        exit 0
+    fi
+    sleep 1
+done
+
+echo "TRPG staging service is active but readiness did not pass within 30 seconds" >&2
+exit 1

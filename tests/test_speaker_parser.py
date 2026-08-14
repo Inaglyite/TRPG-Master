@@ -46,7 +46,7 @@ class SpeakerParserTests(unittest.TestCase):
     def test_novel_dialogue_with_trailing_known_speaker_is_recovered(self):
         text = (
             "你推门进去时，他正站在窗边。\n"
-            "“黄先生，感谢你冒雨前来。”法伦示意你坐下，自己绕过办公桌。\n"
+            "“黄先生，感谢你冒雨前来。”法伦答道，示意你坐下，自己绕过办公桌。\n"
             "他沉默了几秒。"
         )
         segments, _ = parse_segments(
@@ -63,7 +63,7 @@ class SpeakerParserTests(unittest.TestCase):
             ],
         )
         self.assertEqual(segments[1].text, "“黄先生，感谢你冒雨前来。”")
-        self.assertIn("法伦示意你坐下", segments[2].text)
+        self.assertIn("法伦答道，示意你坐下", segments[2].text)
 
     def test_novel_dialogue_with_leading_known_speaker_is_recovered(self):
         segments, _ = parse_segments(
@@ -77,6 +77,20 @@ class SpeakerParserTests(unittest.TestCase):
         )
         self.assertEqual(segments[1].text, "“莱特并没有告诉我全部真相。”")
 
+    def test_npc_subject_addressing_explicit_player_forms_is_recovered(self):
+        aliases = {"法伦": "bryce_fallon"}
+        for text in (
+            "法伦对黄先生说：“请坐。”",
+            "法伦向调查员问：“你带来文件了吗？”",
+            "法伦对你说：“请坐。”",
+            "“请坐。”法伦对黄先生说。",
+        ):
+            with self.subTest(text=text):
+                segments, _ = parse_segments(text, speaker_aliases=aliases)
+                speeches = [segment for segment in segments if segment.kind == "speech"]
+                self.assertEqual(len(speeches), 1)
+                self.assertEqual(speeches[0].npc_id, "bryce_fallon")
+
     def test_unattributed_quotation_remains_keeper_narration(self):
         segments, _ = parse_segments(
             "档案首页写着：“此件不得外借。”",
@@ -85,7 +99,7 @@ class SpeakerParserTests(unittest.TestCase):
 
         self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
 
-    def test_short_alias_and_active_speaker_recover_opening_dialogue(self):
+    def test_unattributed_quotes_do_not_inherit_active_speaker(self):
         text = (
             "布莱斯·法伦站在窗边，直到门关上才转过身。\n\n"
             "“黄先生，请坐。”他示意你坐进扶手椅。\n\n"
@@ -101,13 +115,12 @@ class SpeakerParserTests(unittest.TestCase):
             },
         )
 
-        speeches = [segment for segment in segments if segment.kind == "speech"]
-        self.assertEqual(len(speeches), 4)
-        self.assertTrue(all(segment.npc_id == "bryce_fallon" for segment in speeches))
-        self.assertIn("黄先生，请坐", speeches[0].text)
-        self.assertIn("不希望再有人", speeches[-1].text)
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None)],
+        )
 
-    def test_npc_mentioned_inside_quote_does_not_replace_active_speaker(self):
+    def test_unattributed_quotes_do_not_inherit_previous_npc(self):
         text = (
             "法伦听到你的追问，没有立刻回答。\n\n"
             "“惠特克罗夫特医生……是校医，也是阿卡姆镇上多年的执业医生，口碑不坏。”\n\n"
@@ -123,9 +136,129 @@ class SpeakerParserTests(unittest.TestCase):
             },
         )
 
-        speeches = [segment for segment in segments if segment.kind == "speech"]
-        self.assertEqual(len(speeches), 2)
-        self.assertTrue(all(segment.npc_id == "bryce_fallon" for segment in speeches))
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None)],
+        )
+
+    def test_player_addressing_known_npc_never_becomes_npc_speech(self):
+        aliases = {"法伦": "bryce_fallon"}
+        for text in (
+            "黄千陆对法伦说：“我是正义的警察。”",
+            "黄千陆向法伦说：“我是正义的警察。”",
+            "黄千陆问法伦：“我是正义的警察。”",
+            "黄千陆告诉法伦：“我是正义的警察。”",
+            "黄千陆指向法伦说：“我是正义的警察。”",
+            "“我是正义的警察。”黄千陆对法伦说。",
+        ):
+            with self.subTest(text=text):
+                segments, _ = parse_segments(text, speaker_aliases=aliases)
+                self.assertEqual(
+                    [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+                    [("narration", None, text)],
+                )
+
+    def test_cross_line_quote_never_inherits_prior_npc_speaker(self):
+        text = "法伦说：“请坐。”\n“我是正义的警察。”"
+        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+            ],
+        )
+        self.assertIn("我是正义的警察", segments[-1].text)
+
+    def test_targeted_speech_inference_rejects_continuing_clauses(self):
+        aliases = {"法伦": "bryce_fallon"}
+        for text in (
+            "法伦告诉黄千陆的故事里写着：“别去。”",
+            "“玩家原话。”法伦问黄千陆为什么离开。",
+            "“玩家原话。”法伦问黄千陆，为什么离开。",
+            "“玩家原话。”法伦说起黄千陆的故事。",
+            "“玩家原话。”法伦表示同意。",
+            "“玩家原话。”法伦答应了请求。",
+            "“玩家原话。”法伦问候大家。",
+            "“玩家原话。”法伦回应声响。",
+        ):
+            with self.subTest(text=text):
+                segments, _ = parse_segments(text, speaker_aliases=aliases)
+                self.assertEqual(
+                    [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+                    [("narration", None, text)],
+                )
+
+    def test_quote_attribution_before_a_later_quote_does_not_relabel_previous_quote(self):
+        text = "“玩家原话。”法伦说道：“NPC 台词。”"
+        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+            [
+                ("narration", None, "“玩家原话。”法伦说道："),
+                ("speech", "bryce_fallon", "“NPC 台词。”"),
+            ],
+        )
+
+    def test_paired_quotes_keep_embedded_ascii_quotes_in_one_npc_speech(self):
+        text = '“你认识他说的"深渊"吗？”法伦答道。'
+        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+            [
+                ("speech", "bryce_fallon", '“你认识他说的"深渊"吗？”'),
+                ("narration", None, "法伦答道。"),
+            ],
+        )
+
+    def test_ascii_quotes_require_escaping_for_nested_ascii_quotes(self):
+        text = r'法伦说："他说\"别动\"，然后离开。"'
+        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None), ("speech", "bryce_fallon")],
+        )
+
+    def test_unescaped_nested_ascii_quotes_fail_closed_to_narration(self):
+        text = '法伦说："请说出答案："深渊"的来历。"'
+        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+            [("narration", None, text)],
+        )
+
+    def test_paired_outer_quote_uses_its_own_trailing_speaker(self):
+        text = "“法伦说：‘请坐。’”管家答道。"
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={"法伦": "bryce_fallon", "管家": "butler_gregory"},
+        )
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+            [
+                ("speech", "butler_gregory", "“法伦说：‘请坐。’”"),
+                ("narration", None, "管家答道。"),
+            ],
+        )
+
+    def test_paired_quotes_split_two_explicit_speakers(self):
+        text = "法伦说：“第一句。”\n管家答道：「第二句。」"
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={"法伦": "bryce_fallon", "管家": "butler_gregory"},
+        )
+
+        self.assertEqual(
+            [segment.npc_id for segment in segments if segment.kind == "speech"],
+            ["bryce_fallon", "butler_gregory"],
+        )
 
     def test_short_quoted_terms_stay_inside_narration(self):
         segments, _ = parse_segments(

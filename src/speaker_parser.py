@@ -6,6 +6,8 @@
 - 兼容模型遗漏闭标签，以及旧提示词曾产生的 ``⟧`` 右括号；
 - 未知 id 按守秘人旁白处理并剥离标签；
 - 标签在所有情况下都会从输出文本中剥离，绝不泄漏给玩家或消息历史。
+- 定稿兼容缺失标签时，只恢复同一行、已知 NPC 作为明确说话主语的引语；
+  不从上一行继承发言者，也不把调查员对 NPC 的话猜成 NPC 台词。
 
 输出为有序的 Piece 序列（流式与定稿同一条状态机，天然幂等）：
     ("speech_start", npc_id)  — 发言段开始
@@ -241,55 +243,202 @@ def parse_segments(
 _NAMED_LINE = re.compile(
     r"^(?P<indent>\s*)(?:\*\*|__)?(?P<name>[^：:\n]{1,40})(?:\*\*|__)?\s*[：:]\s*(?P<text>.+)$"
 )
+_CJK_QUOTED_SPEECH_PATTERN = (
+    r"“(?P<fullwidth>.*?)”"
+    r"|「(?P<corner>.*?)」"
+    r"|『(?P<double_corner>.*?)』"
+)
+_ASCII_QUOTED_SPEECH_PATTERN = r'"(?P<ascii>(?:\\.|[^"\\])*)"'
+_CJK_QUOTED_SPEECH = re.compile(_CJK_QUOTED_SPEECH_PATTERN)
 _QUOTED_SPEECH = re.compile(
-    r"(?P<quote>[“「『\"])(?P<body>.+?)(?P<close>[”」』\"])",
+    rf"{_CJK_QUOTED_SPEECH_PATTERN}|{_ASCII_QUOTED_SPEECH_PATTERN}"
 )
 
 
-def _known_name_in_text(text: str, aliases: dict[str, str]) -> tuple[str, str] | None:
+@dataclass(frozen=True)
+class _QuotedSpeech:
+    start: int
+    end: int
+    text: str
+    body: str
+
+
+def _paired_quoted_speech(line: str) -> list[_QuotedSpeech]:
+    """Return only matching quote pairs; ASCII inner quotes require escaping."""
+    if _has_ambiguous_ascii_quote_structure(line):
+        return []
+    quotes: list[_QuotedSpeech] = []
+    for match in _QUOTED_SPEECH.finditer(line):
+        body = next(
+            value
+            for value in (
+                match.group("fullwidth"),
+                match.group("corner"),
+                match.group("double_corner"),
+                match.group("ascii"),
+            )
+            if value is not None
+        )
+        quotes.append(
+            _QuotedSpeech(
+                start=match.start(),
+                end=match.end(),
+                text=match.group(0),
+                body=body,
+            )
+        )
+    return quotes
+
+
+def _has_ambiguous_ascii_quote_structure(line: str) -> bool:
+    """Fail closed for malformed/nested ASCII quotes outside CJK quote pairs.
+
+    A single ASCII pair is unambiguous, and escaped inner quotes are ignored.
+    More than one unescaped pair could be either several utterances or malformed
+    nesting; the fallback must not create a partial NPC bubble in that case.
+    """
+    cjk_spans = [match.span() for match in _CJK_QUOTED_SPEECH.finditer(line)]
+
+    def in_cjk_span(index: int) -> bool:
+        return any(start <= index < end for start, end in cjk_spans)
+
+    unescaped: list[int] = []
+    for index, char in enumerate(line):
+        if char != '"' or in_cjk_span(index):
+            continue
+        backslashes = 0
+        cursor = index - 1
+        while cursor >= 0 and line[cursor] == "\\":
+            backslashes += 1
+            cursor -= 1
+        if backslashes % 2 == 0:
+            unescaped.append(index)
+    return bool(unescaped) and len(unescaped) != 2
+
+# 未加标签的小说体台词只能在归属足够明确时恢复为 NPC 气泡。这里故意
+# 保守：错把玩家对 NPC 说的话渲染成 NPC 发言，比少恢复一条 NPC 气泡更糟。
+_SPEECH_CUE = r"(?:说(?:道)?|答(?:道)?|回答(?:道)?|问(?:道)?|道|表示|解释(?:道)?|告诉|回应(?:道)?|应声|喊(?:道)?|叫(?:道)?|喃喃(?:道|说)?|补充(?:道)?|承认(?:道)?|提醒(?:道)?|吩咐(?:道)?)"
+_SPEECH_MANNER = r"(?:低声|轻声|缓缓|冷冷|平静地|郑重地|迟疑地|不紧不慢地|压低声音|开口|终于|随即|接着|又)"
+_STAGE_DIRECTION = r"(?:望向[^，。！？!?\n]{0,12}|看向[^，。！？!?\n]{0,12}|看着[^，。！？!?\n]{0,12}|抬头|低下头|皱眉|叹了口气|沉默片刻|停顿片刻|顿了顿|微笑着|笑了笑|轻叹一声)"
+_ADDRESS_MARKER = r"(?:对|向|朝|跟|同)"
+# Do not accept an arbitrary short Chinese phrase as the addressee.  Chinese
+# verbs such as ``答应`` / ``问候`` / ``回应`` otherwise get split into a
+# speaking verb plus a fictional target, which is exactly the kind of false
+# NPC attribution this fallback must avoid.  Actual character names are
+# deliberately not guessed here: the tagged / ``姓名：`` paths remain the
+# reliable route for them.
+_TRUSTED_ADDRESS_TARGET = r"(?:你(?:们)?|您(?:们)?|调查员(?:们)?|各位|大家|[一-龥]{1,3}(?:先生|女士|医生|警官))"
+_DIRECT_SPEECH_BOUNDARY = r"(?=\s*(?:$|[，,。！？!?；;:：]))"
+_TARGET_COMPLETION = r"(?=\s*(?:$|[。！？!?；;:：]))"
+# A direct cue can be followed by a short stage direction (``法伦答道，示意…``)
+# because the known NPC is still unambiguously the grammatical speaker.
+_TERMINAL_SPEECH_CUE = rf"{_SPEECH_CUE}{_DIRECT_SPEECH_BOUNDARY}"
+_ADDRESS_SPEECH = (
+    rf"{_ADDRESS_MARKER}{_TRUSTED_ADDRESS_TARGET}"
+    rf"{_SPEECH_CUE}{_TARGET_COMPLETION}"
+)
+
+
+def _is_explicit_npc_speaker_phrase(text: str, name: str, *, at_start: bool) -> bool:
+    """Return whether ``text`` explicitly attributes nearby speech to ``name``.
+
+    ``at_start`` is used for the prose after a closing quote.  Before a quote we
+    require the NPC name to begin a clause, so ``黄千陆对/向/问法伦说`` cannot
+    accidentally match the addressed NPC as the speaker.
+    """
+    escaped_name = re.escape(name)
+    # A preceding closing CJK quote is also a clause boundary.  This lets
+    # ``“玩家原话。”法伦说道：“NPC 台词。”`` attach the attribution to the
+    # following quote, while the caller separately prevents it from relabelling
+    # the preceding one.
+    prefix = r"^\s*" if at_start else r"(?:^|[。！？!?；;，,」』”\n])\s*"
+    ending = r"\s*[:：]?" if at_start else r"\s*[:：]?$"
+    speaker_phrase = (
+        rf"(?:{_SPEECH_MANNER}\s*)?"
+        rf"(?:{_TERMINAL_SPEECH_CUE}|{_ADDRESS_SPEECH})"
+    )
+    direct = rf"{prefix}{escaped_name}\s*{speaker_phrase}{ending}"
+    matcher = re.match if at_start else re.search
+    if matcher(direct, text):
+        return True
+
+    # Keep a narrow, still explicit novel form such as
+    # ``法伦望向窗外，低声说：‘……’``.  Arbitrary prose is not permitted here:
+    # it is too easy for another character to become the actual grammatical
+    # subject before the speaking verb.
+    staged = (
+        rf"{prefix}{escaped_name}\s*{_STAGE_DIRECTION}\s*[，,]\s*"
+        rf"(?:{_SPEECH_MANNER}\s*)?{_TERMINAL_SPEECH_CUE}{ending}"
+    )
+    return bool(matcher(staged, text))
+
+
+def _explicit_npc_owner_before_quote(
+    before: str, aliases: dict[str, str]
+) -> str | None:
+    """Find a same-line, clause-subject attribution ending at a quote."""
     for name in sorted(aliases, key=len, reverse=True):
-        if name in text:
-            return name, aliases[name]
+        if _is_explicit_npc_speaker_phrase(before.rstrip(), name, at_start=False):
+            return aliases[name]
+    return None
+
+
+def _explicit_npc_owner_after_quote(
+    after: str, aliases: dict[str, str]
+) -> str | None:
+    """Find a same-line attribution immediately following a quote."""
+    for name in sorted(aliases, key=len, reverse=True):
+        if _is_explicit_npc_speaker_phrase(after.lstrip(), name, at_start=True):
+            return aliases[name]
     return None
 
 
 def _infer_novel_dialogue_line(
-    line: str, aliases: dict[str, str], context_npc_id: str | None = None
-) -> tuple[list[Segment], str] | None:
+    line: str, aliases: dict[str, str]
+) -> list[Segment] | None:
     """Recognize common Chinese novel dialogue with an explicit known speaker.
 
-    Supported forms include ``“台词。”法伦示意……`` and
-    ``法伦望向窗外，低声说：“台词。”``. The nearby public name is mandatory;
+    Supported forms include ``“台词。”法伦答道……`` and
+    ``法伦望向窗外，低声说：“台词。”``.  The known NPC must be the
+    same-line grammatical speaker, not merely a name mentioned nearby;
     unattributed quotations remain keeper narration.
     """
     quotes = [
         quote
-        for quote in _QUOTED_SPEECH.finditer(line)
-        if len(quote.group("body")) >= 18
-        or re.search(r"[，。！？!?；…—]", quote.group("body"))
+        for quote in _paired_quoted_speech(line)
+        if len(quote.body) >= 18 or re.search(r"[，。！？!?；…—]", quote.body)
     ]
     if not quotes:
         return None
-    # Speaker attribution may only come from prose outside quotation marks.
-    # A character often names another NPC inside their line; treating that name
-    # as attribution swaps the bubble/avatar to the person being discussed.
-    attribution = _QUOTED_SPEECH.sub("", line)
-    owner = _known_name_in_text(attribution, aliases)
-    owner_id = owner[1] if owner else context_npc_id
-    if owner_id is None:
-        return None
     result: list[Segment] = []
     cursor = 0
-    for quote in quotes:
-        before = line[cursor : quote.start()].strip()
+    for index, quote in enumerate(quotes):
+        # Only immediately adjacent, same-line prose counts as attribution.
+        # Never carry a prior line's active NPC into an untagged quote.
+        before = line[cursor : quote.start]
+        next_start = quotes[index + 1].start if index + 1 < len(quotes) else len(line)
+        after = line[quote.end : next_start]
+        owner_id = _explicit_npc_owner_before_quote(before, aliases)
+        # ``“前一句。”法伦说道：“后一句。”`` attributes the *next* quote.
+        # Do not let its leading speaker phrase relabel the preceding quote.
+        after_introduces_next_quote = (
+            index + 1 < len(quotes) and after.rstrip().endswith((":", "："))
+        )
+        if owner_id is None and not after_introduces_next_quote:
+            owner_id = _explicit_npc_owner_after_quote(after, aliases)
+        if owner_id is None:
+            continue
+        before = line[cursor : quote.start].strip()
         if before:
             result.append(Segment(kind="narration", text=before))
-        result.append(Segment(kind="speech", text=quote.group(0), npc_id=owner_id))
-        cursor = quote.end()
+        result.append(Segment(kind="speech", text=quote.text, npc_id=owner_id))
+        cursor = quote.end
+    if not result:
+        return None
     tail = line[cursor:].strip()
     if tail:
         result.append(Segment(kind="narration", text=tail))
-    return result, owner_id
+    return result
 
 
 def infer_named_speech(
@@ -311,7 +460,6 @@ def infer_named_speech(
         if name.strip() and npc_id
     }
     recovered: list[Segment] = []
-    active_npc_id: str | None = None
     for segment in segments:
         if segment.kind != "narration":
             recovered.append(segment)
@@ -333,26 +481,13 @@ def infer_named_speech(
                 recovered.append(
                     Segment(kind="speech", text=match.group("text").strip(), npc_id=npc_id)
                 )
-                active_npc_id = npc_id
                 continue
-            # Names spoken *inside* a quotation are dialogue subjects, not
-            # evidence that the named NPC is speaking.  Keep the established
-            # context unless the surrounding narration names a new speaker.
-            attribution = _QUOTED_SPEECH.sub("", line)
-            mentioned = _known_name_in_text(attribution, literal_aliases)
-            novel_result = _infer_novel_dialogue_line(
-                line,
-                literal_aliases,
-                mentioned[1] if mentioned else active_npc_id,
-            )
+            novel_result = _infer_novel_dialogue_line(line, literal_aliases)
             if novel_result:
                 flush_narration()
-                novel_segments, active_npc_id = novel_result
-                recovered.extend(novel_segments)
+                recovered.extend(novel_result)
                 continue
             narration_lines.append(line)
-            if mentioned:
-                active_npc_id = mentioned[1]
         flush_narration()
 
     merged: list[Segment] = []

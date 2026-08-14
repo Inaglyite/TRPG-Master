@@ -12,6 +12,7 @@
 import json
 import os
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -453,11 +454,21 @@ def restore_snapshot(
 def list_saves(*, context: RuntimeContext | None = None) -> list[dict]:
     """列出所有存档的元数据，按时间倒序"""
     context = _runtime_context(context)
-    result = []
+    with session_scope(context.database_url) as session:
+        known_slots = {
+            row.slot_key
+            for row in session.query(SaveSlot)
+            .filter_by(world_id=context.world_id)
+            .all()
+        }
+    # 旧文件式存档只做一次性迁移：仅导入数据库中还没有记录的槽位。
+    # 每次列出都重复导入会堆积无引用的 legacy_import 快照（数据库膨胀），
+    # 而已删除存档的兼容文件残留也会被重新导入导致存档"复活"。
     if context.saves_dir.is_dir():
-        for slot_dir in context.saves_dir.glob("slot_*"):
-            if slot_dir.is_dir():
+        for slot_dir in sorted(context.saves_dir.glob("slot_*")):
+            if slot_dir.is_dir() and slot_dir.name not in known_slots:
                 _import_legacy_slot(context, slot_dir.name)
+    result = []
     with session_scope(context.database_url) as session:
         rows = session.query(SaveSlot).filter_by(world_id=context.world_id).all()
         for row in rows:
@@ -475,9 +486,19 @@ def has_save(*, context: RuntimeContext | None = None) -> bool:
 
 
 def delete_save(slot_id: str, *, context: RuntimeContext | None = None):
-    """删除指定存档"""
+    """删除指定存档（数据库记录与兼容导出目录一并清理）"""
     context = _runtime_context(context)
-    _slot_dir(slot_id, context)
+    slot_dir = _slot_dir(slot_id, context)
+    # 数据库是当前存档的读取权威，兼容目录只是面向旧版的导出副本；但只要
+    # 它还留着，list_saves() 就会把它当作旧存档重新导入。先移除兼容目录，
+    # 失败则保留数据库记录并把错误交给协议层——绝不能“假装删除成功”。
+    #
+    # 不使用 ignore_errors：静默吞掉权限/IO 错误会让已删除的 SaveSlot 在下一次
+    # save_list 时复活，正是这里要避免的故障模式。
+    if slot_dir.exists():
+        if not slot_dir.is_dir():
+            raise OSError(f"存档路径不是目录，拒绝删除: {slot_dir}")
+        shutil.rmtree(slot_dir)
     with session_scope(context.database_url) as session:
         row = (
             session.query(SaveSlot)

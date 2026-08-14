@@ -13,6 +13,7 @@ import {
   saveSettings,
 } from "../../settings";
 import { useModelStore, type TurnDiagnostics } from "../../state/model-store";
+import { useDelayedClose } from "./transitions";
 
 const reasons: Record<string, string> = {
   selected: "已选",
@@ -215,8 +216,8 @@ export function ModelSettingsPanel() {
     document.addEventListener("keydown", listener);
     return () => document.removeEventListener("keydown", listener);
   }, [state.open, state.saving]);
-  if (!state.open)
-    return <div id="model-settings-overlay" className="hidden" />;
+  const { rendered, closing } = useDelayedClose(state.open);
+  if (!rendered) return <div id="model-settings-overlay" className="hidden" />;
   const preset =
     state.narrativeDraft === pro && state.judgementDraft === pro
       ? "pro"
@@ -238,6 +239,7 @@ export function ModelSettingsPanel() {
   return (
     <div
       id="model-settings-overlay"
+      className={closing ? "overlay-closing" : undefined}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !state.saving)
           void settingsCommand("closeSettings");

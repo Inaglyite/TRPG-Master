@@ -108,19 +108,29 @@
 #modal-overlay.hidden {
   display: none;
 }
+/* 退出：与 fade-in/pop-in 成对 */
+#modal-overlay.overlay-closing {
+  animation: fade-out 0.16s ease both;
+}
+#modal-overlay.overlay-closing #modal-box {
+  animation: pop-out 0.16s cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
 #modal-box {
-  background: var(--ui-panel-modal) center / 100% 100% no-repeat;
-  border: 0;
-  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 245, 210, 0.05), rgba(38, 25, 11, 0.07)),
+    linear-gradient(180deg, var(--bg2), var(--bg));
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, transparent);
+  border-radius: var(--r-lg);
   box-sizing: border-box;
-  padding: 64px 56px 44px;
+  padding: 26px 28px 24px;
   max-width: 560px;
   max-height: calc(100vh - 24px);
   overflow-y: auto;
   text-align: center;
-  color: var(--paper-ink-soft);
-  box-shadow: none;
-  filter: drop-shadow(0 18px 34px rgba(0, 0, 0, 0.68));
+  color: var(--text);
+  box-shadow:
+    var(--shadow-3),
+    0 0 24px var(--gold-glow);
   animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -129,11 +139,10 @@
   line-height: 1.85;
   margin-bottom: 20px;
   font-weight: 720;
-  text-shadow: 0 1px 0 rgba(255, 245, 214, 0.64);
 }
 .suggest-desc {
   display: block;
-  color: #3f2a15;
+  color: var(--text-dim);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -143,7 +152,7 @@
   overflow-wrap: anywhere;
 }
 .decision-title {
-  color: #2d1b0e;
+  color: var(--gold-bright);
   font-size: 18px;
   font-weight: 800;
   margin-bottom: 8px;

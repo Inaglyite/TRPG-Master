@@ -10,6 +10,7 @@ import {
 } from "../../../online";
 import { connectRoom, disconnectRoom } from "../../../room-ws";
 import { useOnlineStore } from "../../../state/online-store";
+import { useDelayedClose } from "../transitions";
 import { AuthScreen } from "./AuthScreen";
 import { LobbyScreen } from "./LobbyScreen";
 import { RoomScreen } from "./RoomScreen";
@@ -39,6 +40,7 @@ export function OnlineShell() {
   const members = useOnlineStore((state) => state.members);
   const pendingIntent = useOnlineStore((state) => state.pendingIntent);
   const roomError = useOnlineStore((state) => state.roomError);
+  const membersStatus = useOnlineStore((state) => state.membersStatus);
 
   // solo 房间每个世界只自动开局一次，避免 room_state 重放导致重复 start。
   const soloAutoStartRef = useRef<string | null>(null);
@@ -89,17 +91,32 @@ export function OnlineShell() {
   const currentMember = members.find((member) => member.user_id === user?.id);
   const soloHasInvestigator = Boolean(currentMember?.investigator);
 
-  // 已经有角色卡的单人存档可以自动恢复；新存档必须先经过角色卡选择页。
+  // 自动开局只服务“进房时存档已有角色卡”的续玩场景：进房后玩家在角色选择页
+  // 里新认领不算——否则点卡预览会立即开局，“以此调查员开始”确认形同虚设。
+  // 以成员列表就绪（membersStatus==="ready"）后的首次评估为进房快照。
+  const soloEntryRef = useRef<{
+    worldId: string;
+    hadInvestigator: boolean;
+  } | null>(null);
+  const membersReady = membersStatus === "ready";
   useEffect(() => {
     if (!isSoloRoom || view !== "room" || !activeWorldId) return;
     if (roomConnection !== "connected" || roomStatus !== "lobby") return;
-    if (!soloHasInvestigator) return;
+    if (!membersReady) return;
+    if (soloEntryRef.current?.worldId !== activeWorldId) {
+      soloEntryRef.current = {
+        worldId: activeWorldId,
+        hadInvestigator: soloHasInvestigator,
+      };
+    }
+    if (!soloEntryRef.current.hadInvestigator || !soloHasInvestigator) return;
     if (soloAutoStartRef.current === activeWorldId) return;
     soloAutoStartRef.current = activeWorldId;
     void startGame();
   }, [
     activeWorldId,
     isSoloRoom,
+    membersReady,
     roomConnection,
     roomStatus,
     soloHasInvestigator,
@@ -121,14 +138,18 @@ export function OnlineShell() {
     view === "room" && roomStatus === "starting" && roomSnapshotReady;
   const gameSurfaceVisible = playing || openingReady;
 
-  // 开场中/进行中且未打开房间管理页时，联机外壳不渲染任何覆盖层；
-  // 房间连接由上面的 effect 保持。开场阶段不会显示 Dock，但聊天区已可见。
-  if (gameSurfaceVisible && (!roomOpen || isSoloRoom)) {
-    return null;
-  }
+  // 进入游戏画面时外壳不立刻卸载：整幕淡出 360ms 揭示游戏区（与本地开始页
+  // 的 start-overlay 退场一致）；期间状态回退（如开局被拒）会取消退出。
+  const shellOpen = !(gameSurfaceVisible && (!roomOpen || isSoloRoom));
+  const shell = useDelayedClose(shellOpen, 360);
+  if (!shell.rendered) return null;
 
   return (
-    <div className="online-overlay" data-testid="online-shell">
+    <div
+      className={`online-overlay${shell.closing ? " online-closing" : ""}`}
+      data-testid="online-shell"
+      aria-hidden={shell.closing || undefined}
+    >
       {view === "auth" && <AuthScreen />}
       {view === "lobby" && <LobbyScreen />}
       {view === "solo" && <SoloLobbyScreen />}
@@ -140,15 +161,19 @@ export function OnlineShell() {
         soloRoomFlow &&
         (!isSoloRoom || roomStatus !== "lobby") && (
           <div
-            className="online-box online-card solo-start-screen"
+            className="online-start-view solo-start-screen"
             data-testid="solo-start-screen"
           >
-            <h1 className="online-title online-title--small">
-              正在准备你的冒险…
-            </h1>
-            <p className="online-loading" role="status">
-              {roomConnection === "connected" ? "正在开局……" : "正在连接房间……"}
-            </p>
+            <div className="start-brand">
+              <h1 className="online-title online-title--small">
+                正在准备你的冒险…
+              </h1>
+              <p className="online-subtitle" role="status">
+                {roomConnection === "connected"
+                  ? "守秘人正在布景……"
+                  : "正在连接房间……"}
+              </p>
+            </div>
             {roomError && (
               <p className="online-notice online-notice--error" role="alert">
                 {roomError}
@@ -156,7 +181,7 @@ export function OnlineShell() {
             )}
             <button
               type="button"
-              className="btn-ghost"
+              className="character-back-button solo-start-back"
               onClick={() => void enterSoloLobby()}
             >
               ← 返回我的冒险

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import secrets
+import socket
 import threading
 import time
 from datetime import UTC, datetime
@@ -21,6 +23,13 @@ from .world_store import atomic_write_json, file_lock
 
 TURN_RECORD_SCHEMA_VERSION = 1
 PROCESS_INSTANCE_ID = secrets.token_hex(12)
+# ``owner_token`` identifies one Python interpreter, while these fields let a
+# later interpreter distinguish a genuinely dead local process from a still
+# running second launcher/test process.  They deliberately live in the turn
+# record JSON so both the database and compatibility file journals share the
+# same fencing contract without a schema migration.
+PROCESS_OWNER_PID = os.getpid()
+PROCESS_OWNER_HOST = socket.gethostname()
 _TURN_ID = re.compile(r"^turn_[0-9]{8}T[0-9]{12}Z_[0-9a-f]{8}$")
 _REPLAY_EVENT_TYPES = {
     "narrative_chunk",
@@ -67,6 +76,74 @@ def _new_turn_id() -> str:
 
 def _json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _owner_metadata() -> dict[str, int | str]:
+    """Return local-process metadata persisted with every new active turn."""
+    return {
+        "owner_pid": PROCESS_OWNER_PID,
+        "owner_host": PROCESS_OWNER_HOST,
+    }
+
+
+def _owner_liveness(record: dict) -> bool | None:
+    """Return whether a foreign turn owner is provably live on this host.
+
+    ``None`` means that this process cannot safely decide (for example a
+    remote host, malformed metadata, or an older record).  Callers must fail
+    closed in that case: a second process may report a live turn, but must not
+    turn it into ``interrupted`` merely because its random owner token differs.
+    """
+    host = str(record.get("owner_host") or "")
+    raw_pid = record.get("owner_pid")
+    if host != PROCESS_OWNER_HOST:
+        return None
+    try:
+        pid = int(raw_pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    if pid == PROCESS_OWNER_PID:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # A process that exists but belongs to another OS user is still live.
+        return True
+    except OSError:
+        return None
+    return True
+
+
+def _foreign_owner_is_recoverable(record: dict, owner_token: str) -> bool:
+    """Whether it is safe to interrupt a foreign active turn.
+
+    Turns are interrupted only after their same-host owner PID is known dead.
+    Remote, legacy, or otherwise unknown owners remain active so a second
+    backend cannot corrupt a live turn during an upgrade or rolling restart.
+    """
+    if str(record.get("owner_token") or "") == str(owner_token):
+        return False
+    liveness = _owner_liveness(record)
+    if liveness is False:
+        return True
+    if liveness is True:
+        return False
+    # Legacy, partially populated, and remote metadata is intentionally fail
+    # closed because it may describe a live process we cannot inspect.
+    return False
+
+
+def _assert_active_turn_owner(record: dict, owner_token: str, action: str) -> None:
+    """Fence a live turn so another backend cannot finish or cancel it."""
+    if str(record.get("owner_token") or "") == str(owner_token):
+        return
+    raise TurnJournalError(
+        f"回合 {record.get('turn_id')} 正由另一服务进程处理，不能{action}"
+    )
 
 
 def serialize_messages(messages: list[dict]) -> list[dict]:
@@ -167,7 +244,7 @@ class TurnJournal:
         if record.get("status") != "active":
             index["active_turn_id"] = None
             return True
-        if record.get("owner_token") == self.owner_token:
+        if not _foreign_owner_is_recoverable(record, self.owner_token):
             return False
         record.update({
             "status": "interrupted",
@@ -179,7 +256,12 @@ class TurnJournal:
         return True
 
     def recover_stale_turn(self) -> dict | None:
-        """Mark a record owned by a previous server process as interrupted."""
+        """Recover only a foreign turn whose local owner is provably dead.
+
+        A journal constructor runs for every reconnect, so owner-token mismatch
+        alone is not evidence of a crash.  Unknown/remote owners stay active
+        and make a competing process fail busy rather than lose game state.
+        """
         with self._thread_lock, file_lock(self.lock_path):
             index = self._load_index_unlocked()
             active_id = index.get("active_turn_id")
@@ -219,6 +301,7 @@ class TurnJournal:
                 "status": "active",
                 "created_at": _now(),
                 "owner_token": self.owner_token,
+                **_owner_metadata(),
                 "player_input": player_input,
                 "actor": _json_safe(actor) if isinstance(actor, dict) else None,
                 "events": [],
@@ -280,6 +363,7 @@ class TurnJournal:
                 raise TurnJournalError(
                     f"回合 {turn_id} 状态为 {record.get('status')}，不能提交"
                 )
+            _assert_active_turn_owner(record, self.owner_token, "提交")
 
             serializable_messages = serialize_messages(messages)
             turn_dir = self._turn_dir(turn_id)
@@ -326,6 +410,7 @@ class TurnJournal:
             record = self._read_record_unlocked(turn_id)
             if record.get("status") != "active":
                 return record
+            _assert_active_turn_owner(record, self.owner_token, "结束")
             self._active_events.pop(turn_id, None)
             started_at = self._started_at.pop(turn_id, None)
             record.update({
@@ -580,8 +665,6 @@ class TurnJournal:
     def recovery_status(self, requested_turn_id: str | None = None) -> dict:
         with self._thread_lock, file_lock(self.lock_path):
             index = self._load_index_unlocked()
-            if self._recover_stale_unlocked(index):
-                atomic_write_json(self.index_path, index)
 
             def optional(turn_id: str | None) -> dict | None:
                 if not turn_id:

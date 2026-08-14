@@ -4,6 +4,7 @@ import { sendAction, sendDecisionReply, sendSuggestReply } from "../../options";
 import { confirmEnding } from "../../panels";
 import { useAppStore, type EndingProposal } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
+import { useDelayedClose } from "./transitions";
 
 export function GameControls() {
   const appEnabled = useAppStore((state) => state.inputEnabled);
@@ -134,31 +135,36 @@ const dangerousDecisionIds = new Set([
 
 export function DecisionModal() {
   const dialog = useAppStore((state) => state.dialog);
-  if (!dialog) return <div id="modal-overlay" className="hidden" />;
+  // 退出动画期间 dialog 已清空：沿用它最后一个非空值，避免弹窗内容先于动画消失。
+  const { rendered, closing } = useDelayedClose(Boolean(dialog));
+  const lastDialogRef = useRef(dialog);
+  if (dialog) lastDialogRef.current = dialog;
+  const shown = dialog ?? lastDialogRef.current;
+  if (!rendered || !shown) return <div id="modal-overlay" className="hidden" />;
 
   return (
-    <div id="modal-overlay">
+    <div id="modal-overlay" className={closing ? "overlay-closing" : undefined}>
       <div id="modal-box" role="dialog" aria-modal="true">
         <div id="modal-text">
-          {dialog.kind === "suggest" ? (
+          {shown.kind === "suggest" ? (
             <>
-              <div className="suggest-desc">{dialog.description}</div>
+              <div className="suggest-desc">{shown.description}</div>
               <div className="suggest-roll">
-                <b>{dialog.skill}</b>（{dialog.attribute}） — 难度：
-                {dialog.dc_label}（DC {String(dialog.dc ?? "")}）
+                <b>{shown.skill}</b>（{shown.attribute}） — 难度：
+                {shown.dc_label}（DC {String(shown.dc ?? "")}）
               </div>
             </>
           ) : (
             <>
               <div className="decision-title">
-                {dialog.title || "需要你做出决定"}
+                {shown.title || "需要你做出决定"}
               </div>
-              <div className="suggest-desc">{dialog.description || ""}</div>
+              <div className="suggest-desc">{shown.description || ""}</div>
             </>
           )}
         </div>
         <div id="modal-actions">
-          {dialog.kind === "suggest" ? (
+          {shown.kind === "suggest" ? (
             <>
               <button
                 id="modal-yes"
@@ -176,13 +182,13 @@ export function DecisionModal() {
               </button>
             </>
           ) : (
-            dialog.options.map((option) => (
+            shown.options.map((option) => (
               <button
                 key={option.id}
                 className={`${dangerousDecisionIds.has(option.id) ? "btn-danger" : "btn-safe"} decision-option`}
                 onClick={() =>
                   void sendDecisionReply(
-                    dialog.id,
+                    shown.id,
                     option.id,
                     option.label || option.id,
                   )
