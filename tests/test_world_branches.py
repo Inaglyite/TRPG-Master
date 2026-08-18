@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.database import SaveSlot, Turn, World, new_id, session_scope
+from src.database_turn_journal import DatabaseTurnJournal
 from src.engine import GameEngine
 from src.persistence import save_game
 from src.player_notes import PlayerNotesStore
@@ -89,6 +90,15 @@ class WorldBranchTests(unittest.TestCase):
             )
 
             self.assertNotEqual(engine.context.world_id, branch.context.world_id)
+            self.assertIn("context", engine.turn_journal.read(first_turn))
+            self.assertNotIn(
+                "context",
+                DatabaseTurnJournal(
+                    branch.context.world_dir,
+                    world_id=branch.context.world_id,
+                    module_name=branch.context.module_name,
+                ).read(first_turn),
+            )
             self.assertEqual(first_snapshot, branch.context.world_store.load())
             self.assertTrue(engine.context.world_store.load()["flags"]["bookcase_open"])
             history = branch.context.world_dir / "turns" / "index.json"

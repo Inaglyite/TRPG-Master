@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from . import context_shadow as _context_shadow
 from .llm_concurrency import LlmBusyError, acquire_llm_slot
 from .model_request import StreamPolicy, prepare_model_request
 from .model_stream_helpers import (
@@ -61,6 +62,7 @@ class ModelStreamer:
             temperature=temperature,
             messages_override=messages_override,
         )
+        _context_shadow.record_prepared_request(host, prepared)
         messages = prepared.messages
         request_role = prepared.request_role
         request_snapshot = prepared.request_snapshot

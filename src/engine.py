@@ -8,6 +8,7 @@ import time
 
 from openai import OpenAI
 
+from . import context_shadow as _context_shadow
 from . import investigators as investigator_roster
 from .action_checks import infer_action_check, infer_scene_transition
 from .action_resolution import ActionResolution, plan_player_action
@@ -67,11 +68,10 @@ from .optional_skills import (
 from .persistence import (
     has_save,
     list_saves,
-    load_game,
+    load_game_artifacts,
     load_system_prompt,
     normalize_tool_message_history,
     restore_snapshot,
-    save_game,
 )
 from .runtime import RuntimeContext
 from .speaker_parser import parse_segments as parse_speaker_segments
@@ -109,10 +109,6 @@ _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 节奏、感官细节和对白表达，但普通气氛描写不能升级成证据。只输出改写后的叙事正文；
 不要解释任务，不要输出行动选项、标题、分析、JSON 或 Markdown 代码块。原文中 NPC 真正说
 出口的台词必须用 【npc:<id>⟧…【/npc】 原样保留或补标；旁白与转述不加标签。"""
-
-
-def _sanitize_visible_narrative(text: str) -> str:
-    return sanitize_visible_narrative(text)
 
 
 def _thinking_type_for_request(model: str, request_role: str) -> str | None:
@@ -308,9 +304,14 @@ class GameEngine:
             module_name=context.module_name,
         )
         self._active_turn_id = None
+        _context_shadow.forget_engine(self)
         self.prepare_session()
 
-    def adopt_message_history(self, messages: list[dict]) -> int:
+    def adopt_message_history(
+        self,
+        messages: list[dict],
+        checkpoint: dict | None = None,
+    ) -> int:
         """Adopt committed public/session history without restoring world state again."""
         normalized = normalize_tool_message_history(copy.deepcopy(messages))
         system_msg = (
@@ -331,6 +332,7 @@ class GameEngine:
         self._tier_last_injected = -99
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
+        _context_shadow.adopt_engine(self, checkpoint)
         return len(self.messages)
 
     def restore_latest_committed_history(self) -> int:
@@ -344,8 +346,9 @@ class GameEngine:
         latest_turn_id = self.turn_journal.latest_completed_id()
         if not latest_turn_id:
             return 0
+        checkpoint = self.turn_journal.read(latest_turn_id).get("context")
         messages, _snapshot = self.turn_journal.load_artifacts(latest_turn_id)
-        return self.adopt_message_history(messages)
+        return self.adopt_message_history(messages, checkpoint)
 
     @property
     def active_turn_id(self) -> str | None:
@@ -369,6 +372,7 @@ class GameEngine:
             player_input=player_input,
             actor=actor,
         )
+        _context_shadow.capture_turn_surface(self)
         self._active_turn_id = turn_id
         self._turn_diagnostics = []
         self._turn_lore_diagnostics = {}
@@ -455,6 +459,7 @@ class GameEngine:
         # Turn, Snapshot and auto-save, so a crash after commit cannot expose an
         # older investigator copy during recovery.
         investigator_roster.project_active_investigator(world_state)
+        checkpoint = _context_shadow.finalize_engine_turn(self, turn_id)
         with self.performance_span("journal_commit"):
             record = journal.complete(
                 turn_id,
@@ -477,6 +482,7 @@ class GameEngine:
                 },
                 narrative_segments=narrative_segments,
                 expected_world_revision=expected_world_revision,
+                checkpoint=checkpoint,
             )
         accept_commit = getattr(self.context.world_store, "accept_turn_commit", None)
         if accept_commit:
@@ -489,6 +495,7 @@ class GameEngine:
                 performance.setdefault("phases_ms", {})["journal_commit"] = journal_ms
             record.setdefault("diagnostics", {})["performance"] = performance
             self.cb.on_performance(performance)
+        _context_shadow.commit_turn_surface(self)
         self._active_turn_id = None
         self._turn_performance = None
         return record
@@ -508,6 +515,7 @@ class GameEngine:
             status=status,
             error=error,
         )
+        _context_shadow.rollback_turn_surface(self)
         self._active_turn_id = None
         return record
 
@@ -591,7 +599,7 @@ class GameEngine:
             temperature=0.85,
             messages_override=rewrite_messages,
         )
-        rewritten = narrative_body(_sanitize_visible_narrative(rewritten)).strip()
+        rewritten = narrative_body(sanitize_visible_narrative(rewritten)).strip()
         rewrite_segments, rewritten = parse_speaker_segments(
             rewritten,
             is_valid_npc=self.is_valid_npc_id,
@@ -618,6 +626,7 @@ class GameEngine:
             raise ValueError("当前会话历史与回合记录不一致，请先恢复最新存档")
 
         self.messages = updated_messages
+        _context_shadow.rebase_engine(self)
         try:
             self.save("slot_000")
             variant = self.turn_journal.add_narrative_variant(
@@ -630,6 +639,7 @@ class GameEngine:
             )
         except Exception:
             self.messages = previous_messages
+            _context_shadow.rebase_engine(self)
             try:
                 self.save("slot_000")
             except Exception:
@@ -723,6 +733,7 @@ class GameEngine:
             "一次全部拉入画面；即兴增加的气氛、动作和对白只能作为叙事点缀，不能记录为"
             "线索、证据、NPC 揭示、检定目标或 flag。"
         )
+        _context_shadow.begin_fresh_engine_session(self)
         return selected_character
 
     def _apply_starting_character(self, character_ref: dict | None) -> dict | None:
@@ -758,7 +769,7 @@ class GameEngine:
 
     def save(self, slot_id: str | None = None) -> str:
         """保存游戏。返回槽位 ID。"""
-        return save_game(self.messages, slot_id, context=self.context)
+        return _context_shadow.save_engine(self, slot_id)
 
     def list_saves(self) -> list[dict]:
         return list_saves(context=self.context)
@@ -766,7 +777,7 @@ class GameEngine:
     def load(self, slot_id: str | None = None) -> int | None:
         """读取存档并恢复世界状态快照。返回消息数量或 None。"""
         expected_revision = self.context.world_store.revision
-        messages, snapshot = load_game(slot_id, context=self.context)
+        messages, snapshot, metadata = load_game_artifacts(slot_id, context=self.context)
         if messages is None:
             return None
         # 恢复世界状态快照（防止线索污染）
@@ -789,6 +800,7 @@ class GameEngine:
         self._summary_token_estimate = 0
         self._loaded_optional_skills = set()
         self._preconfirmed_escalation = None
+        _context_shadow.rebind_loaded_engine(self, metadata)
         return len(messages) - 1
 
     def settle_case(
@@ -894,13 +906,6 @@ class GameEngine:
             selected = decision.get("default_option")
         authorization = preview["authorization"]
         if selected != authorization["confirm_option"]:
-            self.messages.append(
-                {
-                    "role": "user",
-                    "content": f"[玩家在行动发生前取消，场景状态不变] 原提议：{content}",
-                }
-            )
-            self.save("slot_000")
             return None
 
         self._preconfirmed_escalation = authorization
@@ -2046,15 +2051,9 @@ class GameEngine:
             pass
 
     def _inject_tier_reminder(self):
-        """在最新 user 消息前注入 TIER 规则提醒（防止上下文稀释导致泄密）"""
-        # 找到最后一条 user 消息
-        for i in range(len(self.messages) - 1, -1, -1):
-            if self.messages[i]["role"] == "user":
-                content = self.messages[i]["content"]
-                # 避免重复注入
-                if "[核心约束" not in content:
-                    self.messages[i]["content"] = self.TIER_REMINDER + "\n\n" + content
-                break
+        """追加 TIER 控制消息，不原地篡改已经入账的玩家行动。"""
+        reminder = f"{self.CONTROL_MESSAGE_PREFIX}\n{self.TIER_REMINDER}"
+        self.messages.append({"role": "user", "content": reminder})
         log_tier(self._round_count)
         self._tier_last_injected = self._round_count
 
@@ -2104,12 +2103,17 @@ class GameEngine:
         self._resume_pending_combat_decision()
         try:
             if user_content:
+                proposed_content = user_content
                 user_content = self._preflight_player_escalation(user_content)
                 if user_content is None:
-                    self.finish_turn_record(
-                        status="cancelled",
-                        error="玩家在行动发生前取消",
+                    self.finish_turn_record(status="cancelled", error="玩家在行动发生前取消")
+                    cancel_note = (
+                        f"[玩家在行动发生前取消，场景状态不变] 原提议：{proposed_content}"
                     )
+                    self.messages.append(
+                        {"role": "user", "content": cancel_note}
+                    )
+                    self.save("slot_000")
                     self.cb.on_done()
                     return
             self._turn_graph.invoke(

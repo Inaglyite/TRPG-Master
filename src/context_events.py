@@ -111,14 +111,16 @@ def _world_write_lock(url: str, world_id: str) -> threading.RLock:
 EVENT_ENTERED_PLAYER_ACTION = "entered_player_action"
 EVENT_CONTEXT_INJECTION = "context_injection"
 EVENT_REQUEST_ENVELOPE = "request_envelope"
+EVENT_REQUEST_PATCH = "model_request_patch"
 EVENT_ASSISTANT_MESSAGE = "assistant_message"
 EVENT_TOOL_CALL = "tool_call"
 EVENT_TOOL_RESULT = "tool_result"
 EVENT_CHECKPOINT = "compaction_checkpoint"
 
 # Events that produce a model-visible message in the projection.  The rest
-# (request envelopes, checkpoints) are metadata-only: they never show up as a
-# projected message, only influence the projection (masking) or diagnostics.
+# (request envelopes, request patches, checkpoints) are metadata-only: they
+# never show up as a projected message, only influence the projection
+# (masking) or diagnostics.
 SURFACE_EVENT_TYPES = frozenset(
     {
         EVENT_ENTERED_PLAYER_ACTION,
@@ -884,21 +886,35 @@ class ContextEventStore:
         session_id: str,
         *,
         include_turn_id: str | None = None,
+        to_sequence: int | None = None,
+        _replay_turn_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Project the full visible surface for one session (server-internal).
 
         Message events from failed/cancelled/interrupted turns are excluded;
         the current active turn is included only when ``include_turn_id`` is
-        given.  Non-surface events (request envelopes, checkpoints) never
-        produce a message in the result.
+        given.  ``to_sequence`` pins the current session to a historical
+        request boundary; ancestor cutoffs still come from the lineage.
+        Non-surface events (request envelopes, request patches, checkpoints)
+        never produce a message in the result.
         """
         sessions = self._session_chain(session_id)
+        if to_sequence is not None:
+            current_head = int(sessions[-1]["head_sequence"])
+            if (
+                isinstance(to_sequence, bool)
+                or not isinstance(to_sequence, int)
+                or not 0 <= to_sequence <= current_head
+            ):
+                raise ValueError(
+                    f"context projection cutoff {to_sequence} 超出 [0, {current_head}]"
+                )
         events_by_session: dict[str, list[dict[str, Any]]] = {}
         event_turns: set[tuple[str, str]] = set()
         for index, session_row in enumerate(sessions):
             if session_row["id"] == session_id:
-                # Current session: full range.
-                to_seq = None
+                # Current session: full range, or a request/checkpoint cutoff.
+                to_seq = int(to_sequence) if to_sequence is not None else None
             else:
                 # Ancestor cutoff is the *next* generation's source_sequence
                 # (where this session forks into the child), never this
@@ -912,9 +928,92 @@ class ContextEventStore:
                 if turn_id:
                     event_turns.add((str(event.get("world_id") or ""), str(turn_id)))
         visible_turns = self._visible_turn_ids(event_turns, include_turn_id)
+        if _replay_turn_id:
+            # Exact private request replay may inspect a request from a turn
+            # that later failed.  This opt-in never affects the ordinary
+            # projection used as a future model surface.
+            visible_turns.update(
+                key for key in event_turns if key[1] == _replay_turn_id
+            )
         return ContextProjector.project_timeline(
             sessions, events_by_session, visible_turn_ids=visible_turns
         )
+
+    def replay_request_messages(
+        self,
+        session_id: str,
+        request_id: str,
+    ) -> list[dict[str, Any]]:
+        """Rebuild one provider request surface from its private patch.
+
+        This is deliberately a server-internal recovery/evaluation API.  It
+        reads the private payload directly and must never be exposed through
+        HTTP, WebSocket, ordinary diagnostics, or ``event_metadata``.
+        """
+        request_id = str(request_id or "").strip()
+        if not request_id:
+            raise ValueError("request_id 不能为空")
+        with session_scope(self.url) as session:
+            row = (
+                session.query(ModelContextEvent)
+                .filter_by(
+                    session_id=session_id,
+                    event_type=EVENT_REQUEST_PATCH,
+                    source_id=request_id,
+                )
+                .order_by(ModelContextEvent.sequence.desc())
+                .first()
+            )
+            if row is None:
+                raise ValueError(f"request patch 不存在: {request_id}")
+            patch = dict(row.payload or {})
+
+        mode = str(patch.get("mode") or "")
+        if mode == "replace_all":
+            raw_messages = patch.get("messages")
+            if not isinstance(raw_messages, list) or not all(
+                isinstance(message, dict) for message in raw_messages
+            ):
+                raise ValueError("request replace_all payload 非法")
+            rebuilt = [dict(message) for message in raw_messages]
+        else:
+            base_sequence = patch.get("base_sequence")
+            if isinstance(base_sequence, bool) or not isinstance(base_sequence, int):
+                raise ValueError("request patch 缺少合法 base_sequence")
+            rebuilt = self.project(
+                session_id,
+                include_turn_id=str(patch.get("turn_id") or "") or None,
+                to_sequence=base_sequence,
+                _replay_turn_id=str(patch.get("turn_id") or "") or None,
+            )
+            if messages_digest(rebuilt) != str(patch.get("base_surface_digest") or ""):
+                raise ValueError("request patch 的 base surface 已不一致")
+            if mode == "replace_indices":
+                replacements = patch.get("replacements")
+                if not isinstance(replacements, list):
+                    raise ValueError("request replacements payload 非法")
+                for replacement in replacements:
+                    if not isinstance(replacement, dict):
+                        raise ValueError("request replacement 必须是对象")
+                    index = replacement.get("index")
+                    message = replacement.get("message")
+                    if (
+                        isinstance(index, bool)
+                        or not isinstance(index, int)
+                        or not 0 <= index < len(rebuilt)
+                        or not isinstance(message, dict)
+                    ):
+                        raise ValueError("request replacement 索引或消息非法")
+                    rebuilt[index] = dict(message)
+            elif mode != "identity":
+                raise ValueError(f"未知 request patch mode: {mode}")
+
+        from .persistence import normalize_tool_message_history
+
+        rebuilt = normalize_tool_message_history(rebuilt)
+        if messages_digest(rebuilt) != str(patch.get("effective_surface_digest") or ""):
+            raise ValueError("request patch 重放 digest 不一致")
+        return rebuilt
 
     # -- sync from existing messages (shadow mode) ------------------------
 

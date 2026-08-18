@@ -227,9 +227,9 @@ class SaveRestoreIntegrationTests(unittest.TestCase):
                 context.world_store.update(
                     lambda world: world["pc"].update({"hp": 1})
                 )
-                return ([{"role": "system", "content": "old"}], old_snapshot)
+                return ([{"role": "system", "content": "old"}], old_snapshot, {})
 
-            with patch("src.engine.load_game", side_effect=racing_load):
+            with patch("src.engine.load_game_artifacts", side_effect=racing_load):
                 with self.assertRaises(StaleRevisionError):
                     engine.load("slot_001")
 

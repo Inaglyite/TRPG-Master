@@ -137,6 +137,9 @@ class HistoryCompactor:
             ),
         }
         engine.messages = [system_message, note, *recent_messages]
+        from .context_shadow import rebase_engine
+
+        rebase_engine(engine)
         self.estimate_tokens()
         if not silent:
             engine.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
@@ -159,6 +162,9 @@ class HistoryCompactor:
             ),
         }
         self.engine.messages = [system_message, summary_message, *recent_messages]
+        from .context_shadow import rebase_engine
+
+        rebase_engine(self.engine)
         self.estimate_tokens()
         log_summary(model_name, "成功")
         if not silent:

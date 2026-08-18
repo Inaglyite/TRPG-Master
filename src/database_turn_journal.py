@@ -752,6 +752,11 @@ class DatabaseTurnJournal:
                         "module_name": target.module_name,
                     }
                 )
+                # A cloned Turn must never retain a checkpoint into the source
+                # world's private context session.  H2 branch integration will
+                # replace this with a target-world fork checkpoint; until then
+                # the target auto-save intentionally follows legacy seeding.
+                record.pop("context", None)
                 snapshot_row = Snapshot(
                     id=new_id("snapshot"),
                     world_id=target.world_id,
