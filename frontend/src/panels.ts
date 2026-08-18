@@ -10,7 +10,11 @@ import {
   type SaveEntry,
   type WorldEntry,
 } from "./state/app-store";
-import { isRoomOwner } from "./state/online-store";
+import {
+  isRoomOwner,
+  timelineCapabilities,
+  useOnlineStore,
+} from "./state/online-store";
 import { useStartStore } from "./state/start-store";
 import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
@@ -144,11 +148,15 @@ export function confirmEnding(data: any) {
 export function openSavePanel(mode: "load" | "manage" = "manage") {
   useAppStore.getState().setSavePanel(true, mode);
   safeSend(JSON.stringify({ type: "save_list" }));
-  // 联机房间协议没有 world_list 处理器（房间本就绑定单一世界），发送会收到
-  // protocol_error(unsupported_room_message) 红条；世界列表仅本地模式需要。
-  if (useAppStore.getState().mode !== "online") {
-    safeSend(JSON.stringify({ type: "world_list" }));
+  if (useAppStore.getState().mode === "online") {
+    // 云端单人房间支持时间线树查询（回复与本地同形的 world_list/adventure_list）；
+    // 多人房间的旧协议没有该处理器，发送会收到 protocol_error 红条。
+    if (timelineCapabilities().canList) {
+      safeSend(JSON.stringify({ type: "solo_world_list" }));
+    }
+    return;
   }
+  safeSend(JSON.stringify({ type: "world_list" }));
 }
 
 export function closeSavePanel() {
@@ -174,6 +182,20 @@ export function renderAdventurePanel(
   // 存档位列表是“从存档开始”可用性的权威来源：只要任意存档位存在，
   // 开局页 Load 入口就可用（不再只看当前时间线树的槽位）。
   useStartStore.setState({ hasSaves: list.length > 0 });
+  // 云端单人“管理时间线”入口意图：adventure_list 只含当前存档位一个条目，
+  // 落地后直接定位到该存档位的时间线视图。
+  if (
+    useAppStore.getState().mode === "online" &&
+    useOnlineStore.getState().pendingTimelinePanel
+  ) {
+    useOnlineStore.setState({ pendingTimelinePanel: false });
+    const rootId = String(list[0]?.root_world_id || "");
+    if (list.length === 1 && rootId) {
+      useAppStore.setState({
+        savePanelView: { name: "timelines", rootId },
+      });
+    }
+  }
 }
 
 /** 从存档卡片"继续游戏"：跨存档时先切到其最近可玩时间线。 */
@@ -183,13 +205,17 @@ let resumeAfterSwitch = false;
 export function resumeTimeline(worldId: string, active: boolean) {
   const target = String(worldId || "");
   if (!target) return;
+  const online = useAppStore.getState().mode === "online";
   if (active) {
-    // 当前时间线：游戏中直接回到叙述；开局页则读取自动存档进入。
+    // 当前时间线：直接回到游戏。云端重连后服务端已恢复到最新状态，
+    // 本地才需要在开局页补读 slot_000 自动存档。
     closeSavePanel();
-    if (!getGameStarted()) loadSave("slot_000");
+    if (!online && !getGameStarted()) loadSave("slot_000");
     return;
   }
-  resumeAfterSwitch = true;
+  // 云端切换 = 提交指针 + 断开重连，重连后服务端自动恢复最新状态；
+  // 本地那套 resumeAfterSwitch/slot_000 逻辑不适用于房间协议。
+  if (!online) resumeAfterSwitch = true;
   switchWorld(target);
 }
 
@@ -211,6 +237,17 @@ export function consumeResumeAfterSwitch(): boolean {
 export function createBranchFromCurrentTurn(label: string) {
   const turnId = useAppStore.getState().latestBranchTurnId;
   if (!turnId) return;
+  if (useAppStore.getState().mode === "online") {
+    if (!timelineCapabilities().canCreateBranch) return;
+    safeSend(
+      JSON.stringify({
+        type: "solo_branch_create",
+        turn_id: turnId,
+        label: label.trim(),
+      }),
+    );
+    return;
+  }
   safeSend(
     JSON.stringify({
       type: "turn_branch_create",
@@ -220,10 +257,22 @@ export function createBranchFromCurrentTurn(label: string) {
   );
 }
 
-/** 重命名一条时间线的显示名。门禁与归档一致：仅本地模式。 */
+/** 重命名一条时间线的显示名。本地全允许；云端仅 solo 房间房主。 */
 export function renameWorld(worldId: string, label: string) {
   const id = String(worldId || "").trim();
-  if (!id || useAppStore.getState().mode !== "local") return;
+  if (!id) return;
+  if (useAppStore.getState().mode === "online") {
+    if (!timelineCapabilities().canRename) return;
+    safeSend(
+      JSON.stringify({
+        type: "solo_world_rename",
+        world_id: id,
+        label: label.trim(),
+      }),
+    );
+    return;
+  }
+  if (useAppStore.getState().mode !== "local") return;
   safeSend(
     JSON.stringify({ type: "world_rename", world_id: id, label: label.trim() }),
   );
@@ -271,6 +320,11 @@ export function createSave() {
 }
 
 export function switchWorld(worldId: string) {
+  if (useAppStore.getState().mode === "online") {
+    if (!timelineCapabilities().canSwitch) return;
+    safeSend(JSON.stringify({ type: "solo_world_switch", world_id: worldId }));
+    return;
+  }
   safeSend(JSON.stringify({ type: "world_switch", world_id: worldId }));
 }
 
@@ -278,11 +332,18 @@ export function switchWorld(worldId: string) {
  * 删除一条已离开的本地时间线分支。
  *
  * UI 只会为非当前的分支展示入口；服务端仍会重新校验分支关系、活动状态
- * 与当前世界，不能把这个客户端检查当作权限边界。
+ * 与当前世界，不能把这个客户端检查当作权限边界。云端走 solo_world_archive
+ * （仅 solo 房间房主，不能删除当前/主根时间线）。
  */
 export function archiveWorld(worldId: string) {
   const id = String(worldId || "").trim();
-  if (!id || useAppStore.getState().mode !== "local") return;
+  if (!id) return;
+  if (useAppStore.getState().mode === "online") {
+    if (!timelineCapabilities().canArchive) return;
+    safeSend(JSON.stringify({ type: "solo_world_archive", world_id: id }));
+    return;
+  }
+  if (useAppStore.getState().mode !== "local") return;
   safeSend(JSON.stringify({ type: "world_archive", world_id: id }));
 }
 

@@ -7,6 +7,10 @@ import {
   type SaveEntry,
 } from "../../state/app-store";
 import type { TimelineEntry } from "../../state/app-store";
+import {
+  useTimelineCapabilities,
+  type TimelineCapabilities,
+} from "../../state/online-store";
 import { CharacterPanelContent } from "./CharacterPanelContent";
 import { useDelayedClose, usePhaseTransition } from "./transitions";
 
@@ -337,6 +341,19 @@ export function SavePanel() {
   const adventuresReady = useAppStore((state) => state.adventuresReady);
   const activeWorldId = useAppStore((state) => state.activeWorldId);
   const latestBranchTurnId = useAppStore((state) => state.latestBranchTurnId);
+  const seededView = useAppStore((state) => state.savePanelView);
+  const onlineCaps = useTimelineCapabilities();
+  // 本地模式时间线能力全允许；联机按 timelineCapabilities（solo + 房主）。
+  const caps: TimelineCapabilities =
+    appMode === "local"
+      ? {
+          canList: true,
+          canCreateBranch: true,
+          canSwitch: true,
+          canRename: true,
+          canArchive: true,
+        }
+      : onlineCaps;
   const [view, setView] = useState<
     { name: "adventures" } | { name: "timelines"; rootId: string }
   >({ name: "adventures" });
@@ -364,6 +381,13 @@ export function SavePanel() {
       setSelectedSaveId(null);
     }
   }, [rendered]);
+
+  // 外部播种的目标视图（云端单人“管理时间线”入口）：消费后即清空。
+  useEffect(() => {
+    if (!seededView) return;
+    useAppStore.setState({ savePanelView: null });
+    setView(seededView);
+  }, [seededView]);
 
   // 面板内部“存档列表 ↔ 时间线”单挂载两阶段换场（面板背景恒定，
   // 旧页快速左/右出后新页进入，不会像开始页那样露出背景闪烁）。
@@ -449,10 +473,11 @@ export function SavePanel() {
     </button>
   );
 
-  // 旧服务端不下发 adventure_list、联机房间协议虽复用本地会话初始化序列
-  // （会带一条空 adventure_list）但房间本就绑定单一世界：联机一律回退到
-  // 平铺存档列表，世界区沿用旧的整树展示。
-  if (!adventuresReady || appMode !== "local") {
+  // 旧服务端不下发 adventure_list；多人房间协议虽复用本地会话初始化序列
+  // （会带一条空 adventure_list）但房间本就绑定单一世界且拒绝时间线消息：
+  // 这两种情况一律回退到平铺存档列表。云端单人房间（canList）与本地模式
+  // 共用下面的两级“存档位 → 时间线”结构。
+  if (!adventuresReady || !caps.canList) {
     return (
       <div
         id="save-panel-overlay"
@@ -597,8 +622,8 @@ export function SavePanel() {
     const active = Boolean(timeline.active) || id === activeWorldId;
     const resumable = timeline.resumable !== false;
     const isBranch = Boolean(timeline.is_branch);
-    const canArchive = appMode === "local" && !active && isBranch;
-    const canRename = appMode === "local";
+    const canArchive = caps.canArchive && !active && isBranch;
+    const canRename = caps.canRename;
     const confirmingArchive = archiveConfirmationId === id;
     const renaming = renamingWorldId === id;
     const timelineSaves = saves.filter((save) =>
@@ -672,7 +697,7 @@ export function SavePanel() {
               >
                 继续游戏
               </button>
-            ) : resumable ? (
+            ) : resumable && caps.canSwitch ? (
               <button
                 className="timeline-resume"
                 onClick={() => panelCommand("resumeTimeline", id, false)}
@@ -753,7 +778,7 @@ export function SavePanel() {
             >
               新建存档点
             </button>
-            {latestBranchTurnId && (
+            {latestBranchTurnId && caps.canCreateBranch && (
               <span className="timeline-branch-form">
                 <input
                   className="timeline-branch-input"

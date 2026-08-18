@@ -141,10 +141,10 @@ export function SoloAdventureExitControl() {
           <>
             <h2 id="solo-adventure-exit-title">确认放弃冒险？</h2>
             <p className="solo-adventure-exit-description">
-              当前云端存档将被归档且无法恢复。这不会被记作结案或通关。
+              当前云端存档（含全部分支时间线）将被归档且无法恢复。这不会被记作结案或通关。
             </p>
             <p className="solo-adventure-exit-warning">
-              若守秘人仍在处理本回合，请等待叙事结束后再操作。
+              若守秘人仍在处理本回合，该回合会被立即中断。
             </p>
             {roomError && (
               <p className="online-notice online-notice--error" role="alert">

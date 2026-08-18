@@ -1,6 +1,7 @@
 import { apiHttpOrigin } from "./api/client";
 import {
   clearTransientHandouts,
+  openSavePanel,
   updateCharPanel,
   updateCluePanel,
 } from "./panels";
@@ -14,6 +15,7 @@ import {
 } from "./state/online-store";
 import { useStartStore } from "./state/start-store";
 import {
+  announceSoloWorldSwitch,
   displayWorldHistory,
   handleRoomTurnRecovery,
   handleServerPayload,
@@ -38,6 +40,57 @@ import {
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
+/**
+ * 云端单人时间线切换/连接重定向：服务端已提交“当前时间线”指针，并将以
+ * 关闭码 4412 断开本连接。把 activeWorldId 指向新时间线后，OnlineShell
+ * 的连接效应会自动断开旧连接并重连 /ws/room?world_id=<新id>，由新房间
+ * 的正常引导（room_full_state）恢复历史、存档与私有状态。
+ */
+function handleSoloWorldSwitch(
+  worldId: string,
+  label: string,
+  reason: string,
+): void {
+  pendingSoloSwitchNotice = { label, reason };
+  reopenSavePanelAfterSwitch = useAppStore.getState().savePanelOpen;
+  if (reopenSavePanelAfterSwitch && reason !== "redirect") {
+    // 切换只能在时间线视图内发起，因此重连后必须把面板视图播种回该存档位的
+    // 时间线列表：重连期间 adventure 数据短暂清空会把视图弹回存档位列表。
+    // 播种由 adventure_list 落地时的 renderAdventurePanel 统一消费。
+    useOnlineStore.setState({ pendingTimelinePanel: true });
+  }
+  try {
+    localStorage.setItem(LAST_ROOM_KEY, worldId);
+  } catch {
+    /* localStorage 不可用不影响重连 */
+  }
+  useOnlineStore.setState({ activeWorldId: worldId });
+}
+
+/** 彻底离开房间（回大厅/退出登录）时丢弃未消费的切换现场。 */
+export function clearPendingSoloSwitch(): void {
+  pendingSoloSwitchNotice = null;
+  reopenSavePanelAfterSwitch = false;
+}
+
+/**
+ * 面板类延迟意图的统一消费点。连接引导里 room_full_state 先于 room_state
+ * 到达，play_mode 未落地前 timelineCapabilities 全 false、solo_world_list
+ * 不会发送，所以必须等 room_state 确认 solo 房间后再打开面板并请求列表。
+ */
+function consumeDeferredTimelinePanels(): void {
+  if (useOnlineStore.getState().playMode !== "solo") return;
+  if (useAppStore.getState().savePanelOpen) return;
+  if (reopenSavePanelAfterSwitch) {
+    reopenSavePanelAfterSwitch = false;
+    openSavePanel(useAppStore.getState().savePanelMode);
+    return;
+  }
+  if (useOnlineStore.getState().pendingTimelinePanel) {
+    openSavePanel("manage");
+  }
+}
+
 let socket: WebSocket | null = null;
 let activeWorldId: string | null = null;
 let reconnectAttempt = 0;
@@ -47,6 +100,9 @@ let lastEventId: number | null = null;
 let roomSnapshotApplied = false;
 let activeRoomTurnId: string | null = null;
 let pendingRoomRecoveryTurnId: string | null = null;
+/** 时间线切换（4412 重连）后的待恢复现场：系统提示与存档面板重开。 */
+let pendingSoloSwitchNotice: { label: string; reason: string } | null = null;
+let reopenSavePanelAfterSwitch = false;
 const sendQueue: string[] = [];
 const MAX_SEND_QUEUE = 64;
 const LAST_ROOM_KEY = "trpg-online-world-id";
@@ -154,6 +210,12 @@ function open(): void {
       pendingRoomRecoveryTurnId = activeRoomTurnId;
       markRoomConnectionLost(activeRoomTurnId);
     }
+    if (event.code === 4412) {
+      // 时间线切换/连接重定向：solo_world_switched 已把 activeWorldId 指向
+      // 新时间线，OnlineShell 会建立新连接。区别于 4404 房间删除：此处不
+      // 报错、不登出，也不向旧世界发起自动重连。
+      return;
+    }
     if (event.code === 4401) {
       // Session 已失效：清空账号与房间数据并停掉重连，认证页显示过期提示。
       disconnectRoom();
@@ -254,6 +316,7 @@ export function disconnectRoom(): void {
     activeInvestigatorId: null,
     privateEvents: [],
     privateState: null,
+    playMode: null,
   });
 }
 
@@ -375,6 +438,10 @@ function applyRoomStateFields(message: Record<string, any>): void {
           (id: unknown): id is string => typeof id === "string",
         )
       : state.onlineUserIds,
+    playMode:
+      typeof message.play_mode === "string"
+        ? message.play_mode
+        : state.playMode,
   }));
 }
 
@@ -445,7 +512,21 @@ function handleRoomMessage(raw: unknown): void {
       break;
     case "room_state":
       applyRoomStateFields(message);
+      consumeDeferredTimelinePanels();
       break;
+    case "solo_world_switched": {
+      // 服务端已提交时间线指针，随后以 4412 断开；重连交给 OnlineShell。
+      const targetWorldId =
+        typeof message.world_id === "string" ? message.world_id : "";
+      if (targetWorldId) {
+        handleSoloWorldSwitch(
+          targetWorldId,
+          typeof message.label === "string" ? message.label : "",
+          typeof message.reason === "string" ? message.reason : "switched",
+        );
+      }
+      break;
+    }
     case "room_full_state": {
       // latest_event_id 必须重置游标（包括服务重启后旧游标大于最新序号的情况）。
       if (typeof message.latest_event_id === "number") {
@@ -533,6 +614,14 @@ function handleRoomMessage(raw: unknown): void {
       // 开场中（starting）也应立即看见游戏区与守秘人的流式叙事，不能等到
       // opening 回合完成才显示；输入仍由 GameControls 的 playing 门禁保持禁用。
       useOnlineStore.setState({ roomSnapshotReady: true });
+      // 时间线切换重连完成：历史已重渲染，此时补系统提示才不会被覆盖；
+      // 面板重开/“管理时间线”意图等 play_mode 落地后统一消费。
+      if (pendingSoloSwitchNotice) {
+        const notice = pendingSoloSwitchNotice;
+        pendingSoloSwitchNotice = null;
+        announceSoloWorldSwitch(notice.label, notice.reason);
+      }
+      consumeDeferredTimelinePanels();
       break;
     }
     case "member_joined":

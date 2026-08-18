@@ -69,13 +69,13 @@ export function LobbyScreen() {
           <h1 className="online-title online-title--small">联机大厅</h1>
           <p className="online-subtitle">创建房间，或用邀请码加入朋友的调查</p>
         </div>
-        <div className="online-header-side">
+        <div className="online-header-side online-account">
           <span className="online-user" title={user?.id}>
             {user?.username}
           </span>
           <button
             type="button"
-            className="btn-ghost"
+            className="account-logout"
             onClick={() => void logout()}
           >
             退出登录

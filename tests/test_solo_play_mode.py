@@ -316,13 +316,12 @@ def test_abandon_solo_world_archives_active_story_without_settling(tmp_path: Pat
         "world_id": "world-solo",
         "status": "archived",
         "abandoned": True,
+        "tree_world_ids": ["world-solo"],
     }
     with session_scope(url) as session:
         assert session.get(World, "world-solo").status == "archived"
         action = (
-            session.query(RoomAction)
-            .filter_by(world_id="world-solo", action_id=action_id)
-            .one()
+            session.query(RoomAction).filter_by(world_id="world-solo", action_id=action_id).one()
         )
         assert action.status == "completed"
         audit_row = (
@@ -332,6 +331,115 @@ def test_abandon_solo_world_archives_active_story_without_settling(tmp_path: Pat
         )
         assert audit_row.details["archive_reason"] == "solo_abandoned"
         assert audit_row.details["action_id"] == action_id
+
+
+def test_abandon_solo_world_cancels_running_turn_and_archives_whole_tree(tmp_path: Path):
+    """放弃不需要先结束游戏：进行中租约被标 unknown，整棵分支树一起归档。"""
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    with session_scope(url) as session:
+        # 同一存档位下的一条分支时间线（metadata.branch 指回树根）。
+        session.add(
+            World(
+                id="world-solo-branch",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={
+                    "name": "私密单人世界",
+                    "room_status": "playing",
+                    "max_players": 1,
+                    "play_mode": "solo",
+                    "branch": {"parent_world_id": "world-solo"},
+                },
+            )
+        )
+        session.add(
+            WorldMember(
+                id=new_id("member"),
+                world_id="world-solo-branch",
+                user_id=owner.id,
+                role="owner",
+            )
+        )
+        # 另一个完全无关的同模组世界不能误伤。
+        session.add(
+            World(
+                id="world-unrelated",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={"play_mode": "solo"},
+            )
+        )
+    reserve_room_action(url, "world-solo", "turn-running", owner.id, "action")
+
+    # 从分支世界发起放弃：存档位语义要求整棵树（根 + 分支）一起删除。
+    result = abandon_solo_world(
+        url,
+        "world-solo-branch",
+        owner.id,
+        runtime_room_status="playing",
+    )
+
+    assert result["status"] == "archived"
+    assert result["abandoned"] is True
+    assert sorted(result["tree_world_ids"]) == ["world-solo", "world-solo-branch"]
+    with session_scope(url) as session:
+        assert session.get(World, "world-solo").status == "archived"
+        assert session.get(World, "world-solo-branch").status == "archived"
+        assert session.get(World, "world-unrelated").status == "active"
+        orphaned_turn = (
+            session.query(RoomAction)
+            .filter_by(world_id="world-solo", action_id="turn-running")
+            .one()
+        )
+        assert orphaned_turn.status == "unknown"
+        audit_row = (
+            session.query(AuditEvent)
+            .filter_by(world_id="world-solo-branch", event_type="world_archived")
+            .one()
+        )
+        assert audit_row.details["cancelled_action_ids"] == ["turn-running"]
+        assert sorted(audit_row.details["tree_world_ids"]) == [
+            "world-solo",
+            "world-solo-branch",
+        ]
+
+    # 被截断回合的迟到收尾不许把租约翻成 completed（unknown = 不可重试）。
+    finish_room_action(url, "world-solo", "turn-running", "completed")
+    with session_scope(url) as session:
+        assert (
+            session.query(RoomAction)
+            .filter_by(world_id="world-solo", action_id="turn-running")
+            .one()
+            .status
+            == "unknown"
+        )
+
+
+def test_abandon_solo_world_idempotent_retry_completes_partial_tree_archive(tmp_path: Path):
+    """重试已归档世界时，仍要把上次没删干净的活跃分支补归档。"""
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    with session_scope(url) as session:
+        session.add(
+            World(
+                id="world-solo-branch",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={
+                    "play_mode": "solo",
+                    "branch": {"parent_world_id": "world-solo"},
+                },
+            )
+        )
+        # 模拟一次只删了树根的历史放弃。
+        session.get(World, "world-solo").status = "archived"
+
+    result = abandon_solo_world(url, "world-solo", owner.id)
+
+    assert result["already_archived"] is True
+    with session_scope(url) as session:
+        assert session.get(World, "world-solo-branch").status == "archived"
 
 
 def test_abandon_solo_world_refuses_competing_turn_and_multiplayer_world(tmp_path: Path):
@@ -419,7 +527,7 @@ def test_active_solo_abandon_http_is_idempotent_and_keeps_normal_delete_strict(
             assert action.status == "completed"
 
 
-def test_active_solo_abandon_http_rejects_other_turn_and_non_solo_owner(tmp_path: Path):
+def test_active_solo_abandon_http_cancels_stale_turn_and_rejects_non_solo(tmp_path: Path):
     url = sqlite_url(tmp_path)
     server, env_patch, db_patch = cloud_client(url)
     Base.metadata.create_all(get_engine(url))
@@ -438,22 +546,26 @@ def test_active_solo_abandon_http_rejects_other_turn_and_non_solo_owner(tmp_path
         ).json()["world_id"]
         with session_scope(url) as session:
             owner_id = session.query(User).filter_by(username="abandon_guard").one().id
+        # 房间未加载但持久租约仍在跑（另一进程或崩溃残留）：删除不再需要
+        # 玩家先“结束游戏”，放弃直接截断回合并归档。
         reserve_room_action(url, solo_id, "still-running", owner_id, "action")
-        blocked = client.post(f"/api/worlds/{solo_id}/abandon", headers=ORIGIN)
-        assert blocked.status_code == 409
-        assert blocked.json()["code"] == "room_turn_in_progress"
+        abandoned = client.post(f"/api/worlds/{solo_id}/abandon", headers=ORIGIN)
+        assert abandoned.status_code == 204
         with session_scope(url) as session:
-            assert session.get(World, solo_id).status == "active"
-        finish_room_action(url, solo_id, "still-running", "completed")
+            assert session.get(World, solo_id).status == "archived"
+            stale = (
+                session.query(RoomAction)
+                .filter_by(world_id=solo_id, action_id="still-running")
+                .one()
+            )
+            assert stale.status == "unknown"
 
         multiplayer_id = client.post(
             "/api/worlds",
             json={"module": "mansion_of_madness"},
             headers=ORIGIN,
         ).json()["world_id"]
-        wrong_mode = client.post(
-            f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN
-        )
+        wrong_mode = client.post(f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN)
         assert wrong_mode.status_code == 403
         assert wrong_mode.json()["code"] == "solo_world_required"
         with session_scope(url) as session:
@@ -461,9 +573,7 @@ def test_active_solo_abandon_http_rejects_other_turn_and_non_solo_owner(tmp_path
             assert world.status == "active"
             # 已归档的多人世界也不能借“幂等”语义伪装成单人放弃成功。
             world.status = "archived"
-        archived_wrong_mode = client.post(
-            f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN
-        )
+        archived_wrong_mode = client.post(f"/api/worlds/{multiplayer_id}/abandon", headers=ORIGIN)
         assert archived_wrong_mode.status_code == 403
         assert archived_wrong_mode.json()["code"] == "solo_world_required"
 
@@ -520,6 +630,88 @@ def test_active_solo_abandon_http_serializes_loaded_room_then_retires_it(
                 .one()
             )
             assert action.status == "completed"
+
+
+def test_active_solo_abandon_http_cancels_busy_room_turn(tmp_path: Path):
+    """回合进行中（本地锁 + 持久租约都占着）也能放弃：归档、断连、租约 unknown。"""
+    import server
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    manager = RoomManager()
+    with (
+        patch.dict(os.environ, {**CLOUD_ENV, "TRPG_DATABASE_URL": url}),
+        patch.object(server, "DATABASE_URL", url),
+        patch.object(server, "ROOM_MANAGER", manager),
+        TestClient(server.app, base_url="https://testserver") as client,
+    ):
+        owner_id = client.post(
+            "/api/auth/register",
+            json={"username": "busy_abandon", "password": "owner password 123"},
+        ).json()["id"]
+        world_id = client.post(
+            "/api/worlds",
+            json={"module": "mansion_of_madness", "play_mode": "solo"},
+            headers=ORIGIN,
+        ).json()["world_id"]
+        room = GameRoom(
+            world_id,
+            SimpleNamespace(),
+            RoomEventHub(world_id),
+            owner_id,
+            current_actor_user_id=owner_id,
+            status="playing",
+            play_mode="solo",
+        )
+        # 回合线程会晚到收尾：这里只验证放弃路径本身不被它阻塞。
+
+        class _Socket:
+            def __init__(self):
+                self.sent: list[dict] = []
+                self.closed: tuple[int, str] | None = None
+
+            async def send_json(self, payload):
+                self.sent.append(dict(payload))
+
+            async def close(self, *, code: int, reason: str):
+                self.closed = (code, reason)
+
+        socket = _Socket()
+
+        async def install_busy_room():
+            installed, created = await manager.get_or_create(world_id, lambda: room)
+            assert created is True
+            assert installed is room
+            # 进行中回合：本地行动锁被占用。
+            await room.reserve_control(owner_id, "turn-in-flight")
+            from src.room_runtime import RoomConnection
+
+            await room.hub.attach(RoomConnection("conn-owner", owner_id, "owner", socket))
+
+        asyncio.run(install_busy_room())
+        reserve_room_action(url, world_id, "turn-in-flight", owner_id, "action")
+
+        response = client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN)
+
+        assert response.status_code == 204
+        assert asyncio.run(manager.get(world_id)) is None
+        assert any(payload.get("type") == "room_deleted" for payload in socket.sent)
+        assert socket.closed is not None and socket.closed[0] == 4404
+        with session_scope(url) as session:
+            assert session.get(World, world_id).status == "archived"
+            orphaned = (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_id="turn-in-flight")
+                .one()
+            )
+            assert orphaned.status == "unknown"
+            # 强制路径不登记 solo_abandon 租约（锁被回合占着，登记会自撞）。
+            assert (
+                session.query(RoomAction)
+                .filter_by(world_id=world_id, action_type="solo_abandon")
+                .first()
+                is None
+            )
 
 
 def test_active_solo_abandon_releases_leases_after_unexpected_failure(tmp_path: Path):
@@ -805,8 +997,7 @@ def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
         USER_TURN_GUARD.release_action(world_id, action_id)
     )
     messages = [
-        {"type": "action", "action_id": f"burst-{index}", "content": "查看"}
-        for index in range(3)
+        {"type": "action", "action_id": f"burst-{index}", "content": "查看"} for index in range(3)
     ]
     socket = _QueueSocket(messages, room=room)
 
@@ -860,8 +1051,7 @@ def test_daily_turn_quota_rejects_when_exhausted(monkeypatch: pytest.MonkeyPatch
         USER_TURN_GUARD.release_action(world_id, action_id)
     )
     messages = [
-        {"type": "action", "action_id": f"quota-{index}", "content": "查看"}
-        for index in range(2)
+        {"type": "action", "action_id": f"quota-{index}", "content": "查看"} for index in range(2)
     ]
     socket = _QueueSocket(messages, room=room)
 

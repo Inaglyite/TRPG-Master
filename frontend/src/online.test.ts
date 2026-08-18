@@ -8,6 +8,7 @@ import {
   registerAccount,
 } from "./api/auth";
 import {
+  abandonWorld,
   createWorld,
   deleteWorld,
   getInvestigatorOptions,
@@ -88,6 +89,7 @@ vi.mock("./api/worlds", () => ({
 }));
 
 vi.mock("./room-ws", () => ({
+  clearPendingSoloSwitch: vi.fn(),
   disconnectRoom: vi.fn(),
   roomSend: vi.fn(),
   newActionId: vi.fn(() => "action-1"),
@@ -728,33 +730,36 @@ describe("云端单人", () => {
       view: "solo",
     });
     localStorage.setItem("trpg-online-world-id", "world-solo");
-    vi.mocked(deleteWorld).mockResolvedValue(undefined);
+    vi.mocked(abandonWorld).mockResolvedValue(undefined);
     vi.mocked(listWorlds).mockResolvedValue([]);
     vi.mocked(listModules).mockResolvedValue([]);
 
-    const ok = await deleteSoloWorld("world-solo");
+    const error = await deleteSoloWorld("world-solo");
 
-    expect(ok).toBe(true);
-    expect(deleteWorld).toHaveBeenCalledWith("world-solo");
+    expect(error).toBeNull();
+    // 大厅删除走单人专用 abandon：进行中的冒险也直接删，不看房间状态。
+    expect(abandonWorld).toHaveBeenCalledWith("world-solo");
+    expect(deleteWorld).not.toHaveBeenCalled();
     expect(listWorlds).toHaveBeenCalled();
     expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
     expect(useOnlineStore.getState().view).toBe("solo");
   });
 
-  it("deleteSoloWorld 409 时提示游戏进行中并留在列表", async () => {
+  it("deleteSoloWorld 失败时返回内联错误且不污染创建表单", async () => {
     useOnlineStore.setState({
       authStatus: "authenticated",
       user: alice,
       view: "solo",
     });
-    vi.mocked(deleteWorld).mockRejectedValue(
-      new ApiError("房间进行中", 409, "room_active"),
+    vi.mocked(abandonWorld).mockRejectedValue(
+      new ApiError("服务器繁忙", 503, "abandon_unavailable"),
     );
 
-    const ok = await deleteSoloWorld("world-solo");
+    const error = await deleteSoloWorld("world-solo");
 
-    expect(ok).toBe(false);
-    expect(useOnlineStore.getState().createError).toContain("游戏进行中");
+    expect(error).toBeTruthy();
+    // 删除报错由列表内联展示，不得写进“开始新冒险”卡片的 createError
+    expect(useOnlineStore.getState().createError).toBeNull();
     expect(useOnlineStore.getState().view).toBe("solo");
   });
 

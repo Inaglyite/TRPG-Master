@@ -3,6 +3,8 @@
 更新日期：2026-08-10。本文件只记录尚需推进的产品阶段和长期边界；已经完成的实现细节写入
 [`ARCHITECTURE.md`](ARCHITECTURE.md)，协议写入 [`API.md`](API.md)，发布操作写入
 [`DEPLOYMENT.md`](DEPLOYMENT.md)，不再为每轮开发另建计划或交接文档。
+Agent 运行时、工具、上下文、Skill 与记忆的长期演进决策见
+[`DEEPSEEK_HARNESS_ADOPTION.md`](DEEPSEEK_HARNESS_ADOPTION.md)。
 
 > 当前开发纪律：先把中心化多人模式收口，再进入场景化 TRPG 与规则系统扩展。地图、房间图和模组
 > 工坊已经确认是收口后的下一阶段，但不混入首发验收；除非影响数据安全、断线恢复或发布稳定性，

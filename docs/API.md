@@ -238,17 +238,22 @@ HTTP 409 / `room_already_started`。
 #### 放弃云端单人冒险
 
 `POST /api/worlds/{id}/abandon` 是 `DELETE /api/worlds/{id}` 的**受限例外**：它只允许
-当前 owner 放弃 `play_mode=solo` 的私密世界，即使该世界处于 `starting` 或 `playing`。成功后仍是
-逻辑归档：世界从正常列表消失，存档/回合/成员记录保留在数据库中，当前客户端收到
+当前 owner 放弃 `play_mode=solo` 的私密世界，即使该世界处于 `starting` 或 `playing`，也不要求先结束
+进行中的回合。成功后仍是逻辑归档：世界从正常列表消失，存档/回合/成员记录保留在数据库中，当前客户端收到
 `room_deleted` 与 WS `4404` 后回到“我的冒险”。
 
 - 它不会调用 `settle_case`、不会写入模组完成记录，也不会给予结案奖励或声望；审计事件仍是
   `world_archived`，并带 `archive_reason: "solo_abandoned"`。
-- 服务端先取得已加载房间的内存行动锁，再创建 `RoomAction(action_type="solo_abandon")` 的持久租约。
-  任一真实回合、控制操作或待确认决定仍在进行时，返回 HTTP 409
-  (`room_turn_in_progress` 或 `room_active`)；客户端应等待本回合结束后重试。
+- 删除的是整个存档位：路径里的 `{id}` 可以是树根或任意分支时间线，服务端会把整棵分支树
+  （根 + 全部分支世界）一起归档，响应/审计带 `tree_world_ids`；树内每个已加载房间运行时都会被拆除。
+- 回合或待确认决定仍在进行时放弃仍然成功：归档事务把树内其他 `running` 的 `RoomAction` 租约
+  就地终结为 `unknown`（不可重试，审计带 `cancelled_action_ids`），房间拆除时驱动收尾会取消
+  模型流式生成并以安全默认值唤醒挂起决策；回合线程晚到的状态写入只落在已归档世界上，其租约
+  收尾写入落空。空闲房间的放弃仍走内存行动锁 + `RoomAction(action_type="solo_abandon")`
+  持久租约的序列化路径。
 - 多人世界、非房主或不存在的世界不能使用该路径，分别返回 403 / `solo_world_required`、403
-  (`owner_required` / `not_a_member`) 或 404。已被同一房主归档的单人世界重复请求返回 204。
+  (`owner_required` / `not_a_member`) 或 404。已被同一房主归档的单人世界重复请求返回 204，
+  并补完上次可能未完成的整树归档与运行时清理。
 - 普通 `DELETE /api/worlds/{id}` 的活动房间限制不变：进行中的单人或多人世界仍返回
   HTTP 409 / `room_active`。不要把本端点当作多人房间的强制删除接口。
 

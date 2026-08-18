@@ -44,6 +44,10 @@ from .room_runtime import (
     RoomManager,
 )
 from .runtime import RuntimeContext
+from .solo_timeline_ws import (
+    SOLO_SWITCH_CLOSE_CODE,
+    resolve_solo_current_world_id,
+)
 
 
 @dataclass(frozen=True)
@@ -245,6 +249,9 @@ class MultiplayerWsController:
             "current_actor_user_id": room.current_actor_user_id,
             "ready_user_ids": sorted(room.ready_users),
             "online_user_ids": sorted(tuple(room.connected_users)),
+            # 前端据此推导 timelineCapabilities（solo + 房主），不再按
+            # mode !== "local" 硬编码门禁；服务端仍逐消息独立校验。
+            "play_mode": room.play_mode,
         }
 
     def set_room_status(self, room: GameRoom, status: str) -> None:
@@ -464,6 +471,33 @@ class MultiplayerWsController:
                     room_metadata["current_actor_user_id"] = owner_user_id
                     world.metadata_json = room_metadata
                     world.updated_at = utcnow()
+
+            if play_mode == "solo":
+                # solo 世界树的“当前时间线”由树根指针决定。客户端拿着旧分支
+                # 的 world_id 来连（过期标签页、旧大厅列表）时，不能就地建房：
+                # claim 已随指针迁走，非当前世界建房会在 roster 核对时缺少
+                # 有效调查员绑定。改为接受后立即告知重定向目标并关闭，客户端
+                # 走与 solo_world_switched 完全相同的重连路径。
+                redirect_world_id = await asyncio.to_thread(
+                    resolve_solo_current_world_id,
+                    self.deps.database_url(),
+                    world_id,
+                )
+                if redirect_world_id != world_id:
+                    await ws.accept()
+                    await ws.send_json(
+                        {
+                            "type": "solo_world_switched",
+                            "world_id": redirect_world_id,
+                            "label": "",
+                            "reason": "redirect",
+                        }
+                    )
+                    await ws.close(
+                        code=SOLO_SWITCH_CLOSE_CODE,
+                        reason="已重定向到当前时间线",
+                    )
+                    return
 
             def build_engine() -> Any:
                 context = RuntimeContext.create(

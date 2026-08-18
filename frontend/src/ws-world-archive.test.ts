@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "./state/app-store";
 import { useMessageStore } from "./state/message-store";
-import { handleServerPayload, setActiveTransport } from "./ws";
+import {
+  announceSoloWorldSwitch,
+  handleServerPayload,
+  setActiveTransport,
+} from "./ws";
 
 let sent: ReturnType<typeof vi.fn>;
 
@@ -60,6 +64,21 @@ describe("本地时间线归档回包", () => {
     expect(lastMessage()).toMatchObject({
       kind: "error",
       text: "当前分支仍在使用，不能删除。",
+    });
+  });
+});
+
+describe("云端单人时间线切换提示", () => {
+  it("切换/建分支提示新时间线名；redirect 静默重连不提示", () => {
+    announceSoloWorldSwitch("分支A", "switched");
+    expect(lastMessage()).toMatchObject({
+      kind: "system",
+      text: "已切换到时间线「分支A」。",
+    });
+    announceSoloWorldSwitch("", "redirect");
+    expect(lastMessage()).toMatchObject({
+      kind: "system",
+      text: "已切换到时间线「分支A」。",
     });
   });
 });

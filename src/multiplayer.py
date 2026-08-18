@@ -404,6 +404,58 @@ def transfer_owner(
         }
 
 
+def _solo_tree_worlds(session, world: World) -> list[World]:
+    """同一棵 solo 分支树内的所有世界行（含已归档的祖先与目标本身）。
+
+    分支通过 ``metadata.branch.parent_world_id`` 链接。删除一个云端单人
+    存档位必须带走整棵树，否则残留的分支世界会成为大厅不可见的孤儿数据。
+    树很小（一个存档位内的几条时间线），直接在候选集里走父链。
+    """
+    candidates = (
+        session.query(World).filter_by(module_name=world.module_name, status="active").all()
+    )
+
+    def parent_of(item: World) -> World | None:
+        branch = dict(item.metadata_json or {}).get("branch")
+        if not isinstance(branch, dict):
+            return None
+        parent_id = str(branch.get("parent_world_id") or "").strip()
+        if not parent_id:
+            return None
+        return session.get(World, parent_id)
+
+    # 走到树根。祖先可能已归档（上次放弃只删了一半），因此不限制在候选集内。
+    root = world
+    visited: set[str] = set()
+    while root.id not in visited:
+        visited.add(root.id)
+        parent = parent_of(root)
+        if parent is None:
+            break
+        root = parent
+
+    def in_tree(item: World) -> bool:
+        current = item
+        seen: set[str] = set()
+        while current.id not in seen:
+            if current.id == root.id:
+                return True
+            seen.add(current.id)
+            parent = parent_of(current)
+            if parent is None:
+                return False
+            current = parent
+        return False
+
+    tree = [item for item in candidates if in_tree(item)]
+    included = {item.id for item in tree}
+    for required in (root, world):
+        if required.id not in included:
+            tree.append(required)
+            included.add(required.id)
+    return tree
+
+
 def _archive_world(
     db_url: str,
     world_id: str,
@@ -417,9 +469,15 @@ def _archive_world(
 
     ``allow_active_solo`` is intentionally private to this module: normal
     room deletion must still refuse an active game, while the dedicated
-    "abandon this private solo adventure" flow may archive an *idle* solo
-    game without pretending that it reached a narrative ending.  In both
-    cases a durable running RoomAction is always a hard stop.
+    "abandon this private solo adventure" flow may archive a solo game
+    without pretending that it reached a narrative ending.  The solo flow
+    deliberately wins over an in-flight turn: any other running RoomAction
+    in the same branch tree is finalized as ``unknown`` (never retryable)
+    inside the same transaction, and the whole tree is archived together so
+    no orphaned branch worlds survive the save slot.  The caller is
+    responsible for tearing down loaded runtimes afterwards; a late turn
+    commit then lands on an already-archived world and its durable status
+    write no-ops because the lease is no longer running.
     """
     with session_scope(db_url) as session:
         world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
@@ -432,80 +490,100 @@ def _archive_world(
                 "只有云端单人冒险可以在进行中放弃",
                 403,
             )
+        tree_worlds = [world]
+        if allow_active_solo:
+            tree_worlds = _solo_tree_worlds(session, world)
+        tree_ids = [item.id for item in tree_worlds]
+        now = utcnow()
+
+        def mark_archived(target: World) -> int:
+            if target.status != "archived":
+                target.status = "archived"
+                target.updated_at = now
+            pending_invites = (
+                session.query(WorldInvite)
+                .filter(
+                    WorldInvite.world_id == target.id,
+                    WorldInvite.revoked_at.is_(None),
+                )
+                .all()
+            )
+            for invite in pending_invites:
+                invite.revoked_at = now
+            return len(pending_invites)
+
         if world.status == "archived":
+            # 幂等重试：把上次可能没走完的整树归档补完。
+            if allow_active_solo:
+                for item in tree_worlds:
+                    mark_archived(item)
             return {
                 "world_id": world_id,
                 "status": "archived",
                 "already_archived": True,
                 **({"abandoned": True} if allow_active_solo else {}),
+                **({"tree_world_ids": tree_ids} if allow_active_solo else {}),
             }
-        # Durable authority: a running RoomAction row means a turn/control
-        # operation is in flight. Checked only after the owner gate so that a
-        # non-owner cannot distinguish busy from idle rooms.
-        running_action = (
-            session.query(RoomAction).filter_by(world_id=world_id, status="running").first()
-        )
         room_status = runtime_room_status or str(
             (world.metadata_json or {}).get("room_status") or "lobby"
         )
         reservation = None
+        cancelled_action_ids: list[str] = []
         if allow_active_solo:
-            reservation = (
-                session.query(RoomAction)
-                .filter_by(world_id=world_id, action_id=str(reservation_action_id or ""))
-                .with_for_update()
-                .one_or_none()
-            )
-            if (
-                reservation is None
-                or reservation.status != "running"
-                or reservation.submitted_by != actor_user_id
-                or reservation.action_type != "solo_abandon"
-            ):
-                raise MultiplayerError(
-                    "abandon_reservation_invalid",
-                    "放弃请求已失效，请返回后重试",
-                    409,
+            if reservation_action_id:
+                reservation = (
+                    session.query(RoomAction)
+                    .filter_by(world_id=world_id, action_id=str(reservation_action_id))
+                    .with_for_update()
+                    .one_or_none()
                 )
-            running_action = (
+                if (
+                    reservation is None
+                    or reservation.status != "running"
+                    or reservation.submitted_by != actor_user_id
+                    or reservation.action_type != "solo_abandon"
+                ):
+                    raise MultiplayerError(
+                        "abandon_reservation_invalid",
+                        "放弃请求已失效，请返回后重试",
+                        409,
+                    )
+            running_actions = (
                 session.query(RoomAction)
                 .filter(
-                    RoomAction.world_id == world_id,
+                    RoomAction.world_id.in_(tree_ids),
                     RoomAction.status == "running",
-                    RoomAction.action_id != reservation.action_id,
                 )
-                .first()
+                .all()
             )
-        if running_action is not None or (
-            not allow_active_solo and room_status in {"starting", "playing"}
-        ):
-            raise MultiplayerError(
-                "room_active",
-                (
-                    "当前回合仍在处理，请稍后再放弃冒险"
-                    if allow_active_solo
-                    else "游戏进行中，请先结束当前游戏再删除房间"
-                ),
-                409,
+            for row in running_actions:
+                if reservation is not None and row.action_id == reservation.action_id:
+                    continue
+                # 放弃优先于进行中的回合：租约标 unknown（不可重试），回合
+                # 线程晚到的 finish_room_action 只会落空。
+                row.status = "unknown"
+                cancelled_action_ids.append(row.action_id)
+        else:
+            # Durable authority: a running RoomAction row means a turn/control
+            # operation is in flight. Checked only after the owner gate so that a
+            # non-owner cannot distinguish busy from idle rooms.
+            running_action = (
+                session.query(RoomAction).filter_by(world_id=world_id, status="running").first()
             )
-        now = utcnow()
-        world.status = "archived"
-        world.updated_at = now
+            if running_action is not None or room_status in {"starting", "playing"}:
+                raise MultiplayerError(
+                    "room_active",
+                    "游戏进行中，请先结束当前游戏再删除房间",
+                    409,
+                )
+        invites_revoked = 0
+        for item in tree_worlds:
+            invites_revoked += mark_archived(item)
         if reservation is not None:
             # The archive and its control lease commit together.  This is not
             # a game settlement: it merely closes the action used to serialize
             # a deliberate abandonment against turn writes.
             reservation.status = "completed"
-        pending = (
-            session.query(WorldInvite)
-            .filter(
-                WorldInvite.world_id == world_id,
-                WorldInvite.revoked_at.is_(None),
-            )
-            .all()
-        )
-        for invite in pending:
-            invite.revoked_at = now
         session.add(
             AuditEvent(
                 id=new_id("audit"),
@@ -515,15 +593,15 @@ def _archive_world(
                 success=True,
                 details={
                     "room_status": room_status,
-                    "invites_revoked": len(pending),
-                    "archive_reason": (
-                        "solo_abandoned" if allow_active_solo else "manual_delete"
-                    ),
+                    "invites_revoked": invites_revoked,
+                    "archive_reason": ("solo_abandoned" if allow_active_solo else "manual_delete"),
+                    **({"action_id": reservation.action_id} if reservation is not None else {}),
                     **(
-                        {"action_id": reservation.action_id}
-                        if reservation is not None
+                        {"cancelled_action_ids": cancelled_action_ids}
+                        if cancelled_action_ids
                         else {}
                     ),
+                    **({"tree_world_ids": tree_ids} if allow_active_solo else {}),
                 },
             )
         )
@@ -531,6 +609,7 @@ def _archive_world(
         "world_id": world_id,
         "status": "archived",
         **({"abandoned": True} if allow_active_solo else {}),
+        **({"tree_world_ids": tree_ids} if allow_active_solo else {}),
     }
 
 
@@ -570,16 +649,22 @@ def abandon_solo_world(
     world_id: str,
     actor_user_id: str,
     *,
-    reservation_action_id: str,
+    reservation_action_id: str | None = None,
     runtime_room_status: str | None = None,
 ) -> dict:
-    """Archive an idle, private solo world without settling the case.
+    """Archive a private solo world (and its whole branch tree) without settling.
 
     This is deliberately not a wrapper around ``engine.settle_case``: giving
     up an investigation must not award module completion/reputation or claim
-    that the narrative reached one of its authored endings.  A concurrent
-    turn/control operation remains forbidden so a partial engine write cannot
-    race this archival transaction.
+    that the narrative reached one of its authored endings.  The player does
+    not have to end the session first: an in-flight turn anywhere in the
+    tree is cut by this transaction (its durable lease becomes ``unknown``),
+    and the caller tears the loaded runtime down afterwards, which makes the
+    room driver's ``finally`` cancel model streaming and wake pending
+    decision handshakes.  ``reservation_action_id`` is the optional control
+    lease used by the idle-room path to serialize against a turn that is
+    about to start; the busy-room path skips it because the turn already
+    holds the in-memory lock.
     """
     return _archive_world(
         db_url,

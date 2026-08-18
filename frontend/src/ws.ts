@@ -348,6 +348,16 @@ export function displayWorldHistory(rawHistory: unknown) {
   attachTurnActions(history);
 }
 
+/**
+ * 云端单人时间线切换完成后的系统提示；必须在新房间 room_full_state
+ * 重渲染历史之后调用，否则提示会被历史渲染覆盖。
+ * reason="redirect" 是连接重定向（静默重连），不提示。
+ */
+export function announceSoloWorldSwitch(label: string, reason: string): void {
+  if (reason === "redirect") return;
+  addMsg("system", `已切换到时间线「${label || "未命名"}」。`, true);
+}
+
 // ---- 连接 ----
 export function connect() {
   if (

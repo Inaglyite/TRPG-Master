@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { enterLobby, refreshRoom } from "./online";
 import {
   clearTransientHandouts,
+  openSavePanel,
   updateCharPanel,
   updateCluePanel,
 } from "./panels";
@@ -18,6 +19,7 @@ import { useAppStore } from "./state/app-store";
 import { initialOnlineState, useOnlineStore } from "./state/online-store";
 import { useStartStore } from "./state/start-store";
 import {
+  announceSoloWorldSwitch,
   displayWorldHistory,
   handleServerPayload,
   recoverRejectedRoomAction,
@@ -33,11 +35,13 @@ vi.mock("./online", () => ({
 
 vi.mock("./panels", () => ({
   clearTransientHandouts: vi.fn(),
+  openSavePanel: vi.fn(),
   updateCharPanel: vi.fn(),
   updateCluePanel: vi.fn(),
 }));
 
 vi.mock("./ws", () => ({
+  announceSoloWorldSwitch: vi.fn(),
   displayWorldHistory: vi.fn(),
   handleRoomTurnRecovery: vi.fn(),
   handleServerPayload: vi.fn(),
@@ -1092,5 +1096,122 @@ describe("injectActionId", () => {
     const b = newActionId();
     expect(a).toBeTruthy();
     expect(a).not.toBe(b);
+  });
+});
+
+describe("云端单人时间线切换", () => {
+  function connectPlayingSoloRoom() {
+    useOnlineStore.setState({
+      view: "room",
+      activeWorldId: "world-old",
+      user: { id: "u1", username: "alice" },
+      members: [{ user_id: "u1", username: "alice", role: "owner" }],
+    });
+    connectRoom("world-old");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    return ws;
+  }
+
+  function sendFullState(ws: FakeWebSocket) {
+    ws.message(
+      JSON.stringify({
+        type: "room_full_state",
+        latest_event_id: 0,
+        status: "playing",
+        history: [],
+        private_state: null,
+      }),
+    );
+  }
+
+  function sendSoloRoomState(ws: FakeWebSocket) {
+    ws.message(
+      JSON.stringify({
+        type: "room_state",
+        status: "playing",
+        play_mode: "solo",
+        ready_user_ids: [],
+        online_user_ids: ["u1"],
+      }),
+    );
+  }
+
+  it("solo_world_switched 指向新 world_id；4412 不报错、不登出、不向旧世界重连", () => {
+    vi.useFakeTimers();
+    const ws = connectPlayingSoloRoom();
+    ws.message(
+      JSON.stringify({
+        type: "solo_world_switched",
+        world_id: "world-new",
+        label: "分支A",
+        reason: "switched",
+      }),
+    );
+    // 重连意图：activeWorldId 指向新时间线（OnlineShell 据此断开并重连）。
+    expect(useOnlineStore.getState().activeWorldId).toBe("world-new");
+    expect(localStorage.getItem("trpg-online-world-id")).toBe("world-new");
+    ws.close(4412);
+    vi.advanceTimersByTime(60000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(useOnlineStore.getState().sessionExpired).toBe(false);
+    expect(useOnlineStore.getState().roomError).toBeNull();
+    expect(useOnlineStore.getState().view).toBe("room");
+  });
+
+  it("切换重连后补系统提示；面板在 play_mode 落地后重开", () => {
+    const ws = connectPlayingSoloRoom();
+    useAppStore.setState({ savePanelOpen: true, savePanelMode: "manage" });
+    ws.message(
+      JSON.stringify({
+        type: "solo_world_switched",
+        world_id: "world-new",
+        label: "分支A",
+        reason: "branch_created",
+      }),
+    );
+    ws.close(4412);
+    // 模拟 OnlineShell 效应对新 world_id 建立的新连接。
+    connectRoom("world-new");
+    const reopened = FakeWebSocket.latest();
+    reopened.open();
+    sendFullState(reopened);
+    expect(announceSoloWorldSwitch).toHaveBeenCalledWith(
+      "分支A",
+      "branch_created",
+    );
+    // room_full_state 先于 room_state 到达：play_mode 未落地前不重开面板。
+    expect(openSavePanel).not.toHaveBeenCalled();
+    sendSoloRoomState(reopened);
+    expect(openSavePanel).toHaveBeenCalledWith("manage");
+  });
+
+  it("reason=redirect 静默重连：仅透传，不额外打开存档面板", () => {
+    const ws = connectPlayingSoloRoom();
+    ws.message(
+      JSON.stringify({
+        type: "solo_world_switched",
+        world_id: "world-current",
+        label: "",
+        reason: "redirect",
+      }),
+    );
+    ws.close(4412);
+    connectRoom("world-current");
+    const reopened = FakeWebSocket.latest();
+    reopened.open();
+    sendFullState(reopened);
+    expect(announceSoloWorldSwitch).toHaveBeenCalledWith("", "redirect");
+    sendSoloRoomState(reopened);
+    expect(openSavePanel).not.toHaveBeenCalled();
+  });
+
+  it("“管理时间线”入口意图在 room_state 确认 solo 后打开存档面板", () => {
+    useOnlineStore.setState({ pendingTimelinePanel: true });
+    const ws = connectPlayingSoloRoom();
+    sendFullState(ws);
+    expect(openSavePanel).not.toHaveBeenCalled();
+    sendSoloRoomState(ws);
+    expect(openSavePanel).toHaveBeenCalledWith("manage");
   });
 });

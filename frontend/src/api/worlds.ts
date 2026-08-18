@@ -28,6 +28,8 @@ export const worldSummarySchema = z.looseObject({
   updated_at: z.string().optional(),
   metadata: worldMetadataSchema.optional(),
   member_count: z.number().int().optional(),
+  // solo 世界的“继续冒险”目标：树根指针指向的当前时间线；其他世界为自身。
+  resume_world_id: z.string().optional(),
 });
 export type WorldSummary = z.infer<typeof worldSummarySchema>;
 
@@ -68,14 +70,99 @@ export function deleteWorld(worldId: string): Promise<void> {
 /**
  * 放弃一份云端私密单人冒险并将其逻辑归档。
  *
- * 与 DELETE 不同：该专用路径只允许单人世界的房主在没有进行中回合时
- * 主动结束一次未结案的调查；不会触发案件结算、角色成长或奖励。
+ * 与 DELETE 不同：该专用路径不要求先结束游戏——单人世界的房主可以在
+ * 回合进行中放弃，服务端会截断进行中回合并把整棵分支时间线树一起归档；
+ * 不会触发案件结算、角色成长或奖励。
  */
 export function abandonWorld(worldId: string): Promise<void> {
   return apiFetch(
     `/api/worlds/${encodeURIComponent(worldId)}/abandon`,
     z.undefined(),
     { method: "POST" },
+  );
+}
+
+// —— 单人时间线控制面（大厅就地管理，不建立房间连接） ——
+
+/** 存档位树根下的一条时间线；active 已按树根指针（active_world_id）计算。 */
+export const soloTimelineSchema = z.looseObject({
+  world_id: z.string(),
+  label: z.string().optional(),
+  is_branch: z.boolean().optional(),
+  parent_world_id: z.string().nullable().optional(),
+  depth: z.number().int().optional(),
+  active: z.boolean().optional(),
+  resumable: z.boolean().optional(),
+  scene_name: z.string().optional(),
+  character_name: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type SoloTimeline = z.infer<typeof soloTimelineSchema>;
+
+export const soloTimelinesSchema = z.looseObject({
+  root_world_id: z.string(),
+  active_world_id: z.string(),
+  worlds: z.array(soloTimelineSchema),
+});
+export type SoloTimelines = z.infer<typeof soloTimelinesSchema>;
+
+/** 列出单人存档位（world_id 为树根）下的全部时间线与当前指针。 */
+export function fetchSoloTimelines(worldId: string): Promise<SoloTimelines> {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/timelines`,
+    soloTimelinesSchema,
+  );
+}
+
+export const soloTimelineSwitchResultSchema = z.looseObject({
+  root_world_id: z.string(),
+  active_world_id: z.string(),
+});
+
+/** 把存档位指针切到目标时间线；target==current 时幂等 200。 */
+export function switchSoloTimeline(
+  worldId: string,
+  targetWorldId: string,
+): Promise<z.infer<typeof soloTimelineSwitchResultSchema>> {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/timelines/switch`,
+    soloTimelineSwitchResultSchema,
+    { method: "POST", body: { target_world_id: targetWorldId } },
+  );
+}
+
+export const soloTimelineRenameResultSchema = z.looseObject({
+  world_id: z.string(),
+  label: z.string(),
+});
+
+/** 重命名时间线；返回 {world_id, label}。 */
+export function renameSoloTimeline(
+  worldId: string,
+  targetWorldId: string,
+  label: string,
+): Promise<z.infer<typeof soloTimelineRenameResultSchema>> {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/timelines/rename`,
+    soloTimelineRenameResultSchema,
+    { method: "POST", body: { target_world_id: targetWorldId, label } },
+  );
+}
+
+export const soloTimelineArchiveResultSchema = z.looseObject({
+  world_id: z.string(),
+  fallback_world_id: z.string().optional(),
+});
+
+/** 归档（删除）分支时间线；当前/主时间线由服务端 409 拒绝。 */
+export function archiveSoloTimeline(
+  worldId: string,
+  targetWorldId: string,
+): Promise<z.infer<typeof soloTimelineArchiveResultSchema>> {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/timelines/archive`,
+    soloTimelineArchiveResultSchema,
+    { method: "POST", body: { target_world_id: targetWorldId } },
   );
 }
 

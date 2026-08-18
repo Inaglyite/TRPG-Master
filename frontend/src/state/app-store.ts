@@ -136,6 +136,10 @@ export type AdventureEntry = {
 };
 export type QuickSaveState = "idle" | "saving" | "success" | "failed";
 
+/** 存档面板的内部视图：存档位列表或某一存档位的时间线。 */
+export type SavePanelView =
+  { name: "adventures" } | { name: "timelines"; rootId: string };
+
 /** 应用运行模式：select=启动后待选择；local=单机本地后端；online=多人云端。 */
 export type AppMode = "select" | "local" | "online";
 
@@ -184,6 +188,8 @@ type AppState = {
   clueToast: string | null;
   savePanelOpen: boolean;
   savePanelMode: "load" | "manage";
+  /** 外部播种的存档面板目标视图（如“管理时间线”入口），面板消费后清空。 */
+  savePanelView: SavePanelView | null;
   saves: SaveEntry[];
   worlds: WorldEntry[];
   adventures: AdventureEntry[];
@@ -273,6 +279,7 @@ export const useAppStore = create<AppState>((set) => ({
   clueToast: null,
   savePanelOpen: false,
   savePanelMode: "manage",
+  savePanelView: null,
   saves: [],
   worlds: [],
   adventures: [],

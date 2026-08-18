@@ -459,7 +459,11 @@
   }
 }
 
-/* 云端单人“我的冒险”大厅 */
+/* 云端单人“我的冒险”大厅：居中有节制的档案栏版面（不铺满全宽） */
+.online-start-view.solo-lobby {
+  width: min(720px, calc(100vw - 32px));
+  gap: var(--sp-5);
+}
 .solo-lobby-header {
   display: flex;
   align-items: flex-start;
@@ -478,6 +482,57 @@
   align-items: center;
   gap: var(--sp-2);
   padding-top: var(--sp-2);
+}
+/* 账号角标：用户名 + 安静的文字式退出，不套描边盒子按钮 */
+.online-account {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.account-logout {
+  position: relative;
+  min-height: 44px;
+  padding: 0 2px 0 var(--sp-3);
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--gold-dim) 38%, transparent);
+  background: transparent;
+  color: var(--gold-dim);
+  font-family: var(--font);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: color 0.16s ease;
+}
+.account-logout::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 9px;
+  left: var(--sp-3);
+  height: 1px;
+  background: currentColor;
+  opacity: 0;
+  transform: scaleX(0.4);
+  transform-origin: left;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.account-logout:hover:not(:disabled) {
+  color: var(--gold-bright);
+}
+.account-logout:hover:not(:disabled)::after {
+  opacity: 0.85;
+  transform: scaleX(1);
+}
+.account-logout:focus-visible {
+  color: var(--gold-bright);
+  outline: 1px solid color-mix(in srgb, var(--gold) 65%, transparent);
+  outline-offset: 3px;
+}
+.account-logout:disabled {
+  cursor: wait;
+  opacity: 0.5;
 }
 .solo-lobby-section {
   display: flex;
@@ -503,20 +558,36 @@
 .solo-world-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .solo-lobby-create-cta {
   align-self: center;
-  min-width: min(360px, 100%);
+  width: min(320px, 92%);
+  min-height: 54px;
 }
+.solo-lobby-create-cta .start-art-label {
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+}
+/* 新建冒险表单：深木雕花框 + 暗底，与同族 mode-card 同一材质 */
 .solo-lobby-create {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-4);
-  border: 1px solid color-mix(in srgb, var(--gold-dim) 40%, transparent);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--bg2) 82%, transparent);
+  padding: var(--sp-3) var(--sp-2) var(--sp-2);
+  border-style: solid;
+  border-width: 26px 32px;
+  border-image: var(--ui-frame-card) 120 130 / 26px 32px / 0 stretch;
+  background: color-mix(in srgb, var(--bg) 90%, black);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.62);
+}
+.solo-lobby-create .online-inline-form .module-select {
+  flex: 1 1 180px;
+}
+.solo-lobby-create .module-select-trigger {
+  padding: 9px 13px;
+  font-size: 13px;
 }
 .solo-lobby-back {
   align-self: center;
@@ -876,6 +947,129 @@
 .solo-adventure-exit-abandon-link:disabled {
   cursor: wait;
   opacity: 0.5;
+}
+
+/* 大厅就地时间线管理面板：与“离开冒险”浮层同一体系；
+   行复用存档面板的 .timeline-entry/.timeline-row 等样式。 */
+.solo-timeline-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1850;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ink) 68%, transparent);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.18s ease;
+}
+
+.solo-timeline-dialog {
+  width: min(640px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--bg3) 94%, black),
+    color-mix(in srgb, var(--bg) 96%, black)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gold) 10%, transparent),
+    0 22px 64px rgba(0, 0, 0, 0.7);
+  outline: none;
+  animation: pop-in 0.2s ease;
+}
+
+.solo-timeline-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 18%, transparent);
+}
+
+.solo-timeline-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.solo-timeline-heading h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solo-timeline-subtitle {
+  margin: 4px 0 0;
+  color: var(--gold-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.solo-timeline-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.solo-timeline-close:hover,
+.solo-timeline-close:focus-visible {
+  color: var(--gold-bright);
+  border-color: var(--gold-dim);
+  outline: none;
+}
+
+.solo-timeline-close:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.solo-timeline-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.solo-timeline-body .online-notice--error {
+  margin-top: var(--sp-3);
+}
+
+@media (max-width: 640px) {
+  .solo-timeline-overlay {
+    padding: 12px;
+  }
+  .solo-timeline-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 16px;
+  }
+  .solo-timeline-dialog .timeline-row {
+    grid-template-columns: 1fr;
+  }
+  .solo-timeline-dialog .timeline-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* 多人游戏进行中的房间坞：聊天面板顶部的正常布局区域（不是浮层）。

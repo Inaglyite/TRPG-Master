@@ -33,6 +33,8 @@ from .multiplayer_room_events import broadcast_investigator_change
 from .multiplayer_world_creation import create_owned_world
 from .room_runtime import GameRoom, RoomManager
 from .runtime import RuntimeContext
+from .solo_timeline_http import register_solo_timeline_http_routes
+from .solo_timeline_ws import solo_current_world_id_in_session
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,13 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
     router = APIRouter()
     db_url = deps.database_url
     register_archive_world_route(router, database_url=db_url, room_manager=deps.room_manager)
+    register_solo_timeline_http_routes(
+        router,
+        database_url=db_url,
+        room_manager=deps.room_manager,
+        project_root=deps.project_root,
+        runtime_root=deps.runtime_root,
+    )
 
     @router.get("/api/worlds")
     async def owned_worlds(request: Request):
@@ -73,6 +82,16 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
                 .filter(WorldMember.user_id == user.id, World.status == "active")
                 .all()
             )
+            # 分支时间线不是独立存档位：大厅只列树根世界，时间线管理在
+            # 房间内部进行。solo 存档位附带 resume_world_id（树根指针指向
+            # 的当前时间线），“继续冒险/管理时间线”据此直连当前分支。
+            visible = [
+                (world, member)
+                for world, member in rows
+                if not isinstance(
+                    dict(world.metadata_json or {}).get("branch"), dict
+                )
+            ]
             return {
                 "worlds": [
                     {
@@ -85,11 +104,16 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
                         "status": str((world.metadata_json or {}).get("room_status") or "lobby"),
                         "max_players": int((world.metadata_json or {}).get("max_players") or 4),
                         "play_mode": world_play_mode(world.metadata_json),
+                        "resume_world_id": (
+                            solo_current_world_id_in_session(session, world.id)
+                            if world_play_mode(world.metadata_json) == "solo"
+                            else world.id
+                        ),
                         "member_count": session.query(WorldMember)
                         .filter_by(world_id=world.id)
                         .count(),
                     }
-                    for world, member in rows
+                    for world, member in visible
                 ]
             }
 

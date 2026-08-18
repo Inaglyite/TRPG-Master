@@ -7,6 +7,7 @@ import {
   enterRoom,
   refreshWorlds,
 } from "../../../online";
+import { fetchSoloTimelines } from "../../../api/worlds";
 import { useAppStore } from "../../../state/app-store";
 import {
   initialOnlineState,
@@ -18,8 +19,17 @@ vi.mock("../../../online", () => ({
   createSoloWorld: vi.fn(),
   deleteSoloWorld: vi.fn(),
   enterRoom: vi.fn(),
+  errorMessage: (error: unknown, fallback: string) =>
+    error instanceof Error ? error.message : fallback,
   logout: vi.fn(),
   refreshWorlds: vi.fn(),
+}));
+
+vi.mock("../../../api/worlds", () => ({
+  archiveSoloTimeline: vi.fn(),
+  fetchSoloTimelines: vi.fn(),
+  renameSoloTimeline: vi.fn(),
+  switchSoloTimeline: vi.fn(),
 }));
 
 vi.mock("../../../desktop", () => ({
@@ -60,6 +70,22 @@ function setupOnline(patch: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(fetchSoloTimelines).mockResolvedValue({
+    root_world_id: "w-solo",
+    active_world_id: "w-solo",
+    worlds: [
+      {
+        world_id: "w-solo",
+        label: "",
+        is_branch: false,
+        active: true,
+        resumable: true,
+        scene_name: "门厅",
+        character_name: "黄千陆",
+        updated_at: "2026-08-16T12:00:00Z",
+      },
+    ],
+  });
   useAppStore.setState({ mode: "online" });
   setupOnline();
 });
@@ -94,34 +120,91 @@ describe("SoloLobbyScreen 冒险列表", () => {
 });
 
 describe("SoloLobbyScreen 操作", () => {
-  it("继续冒险进入对应房间", () => {
+  it("点击存档卡主体打开时间线面板，不进入房间", async () => {
     render(<SoloLobbyScreen />);
     fireEvent.click(screen.getByText("雾中宅邸"));
-    expect(enterRoom).toHaveBeenCalledWith("w-solo");
+    expect(enterRoom).not.toHaveBeenCalled();
+    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
+    expect(
+      await screen.findByRole("dialog", { name: "雾中宅邸" }),
+    ).toBeInTheDocument();
+  });
+
+  it("继续冒险优先连接 resume_world_id（当前时间线）", () => {
+    setupOnline({
+      worlds: [{ ...soloWorld, resume_world_id: "w-timeline-2" }, multiWorld],
+    });
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "继续冒险" }));
+    expect(enterRoom).toHaveBeenCalledWith("w-timeline-2");
+  });
+
+  it("playing 的存档位显示“管理时间线”，点击后在大厅打开面板（不进房）", async () => {
+    setupOnline({
+      worlds: [{ ...soloWorld, resume_world_id: "w-timeline-2" }, multiWorld],
+    });
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "管理时间线" }));
+    expect(enterRoom).not.toHaveBeenCalled();
+    expect(useOnlineStore.getState().pendingTimelinePanel).toBe(false);
+    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
+    expect(
+      await screen.findByRole("dialog", { name: "雾中宅邸" }),
+    ).toBeInTheDocument();
+  });
+
+  it("非 playing 的存档位不显示“管理时间线”", () => {
+    setupOnline({
+      worlds: [
+        {
+          ...soloWorld,
+          metadata: { ...soloWorld.metadata, room_status: "lobby" },
+        },
+        multiWorld,
+      ],
+    });
+    render(<SoloLobbyScreen />);
+    expect(
+      screen.queryByRole("button", { name: "管理时间线" }),
+    ).not.toBeInTheDocument();
   });
 
   it("新建冒险：展开表单后使用选中的模组与名字", () => {
     render(<SoloLobbyScreen />);
-    // 新建表单默认收起，由黄铜主 CTA 展开
+    // 新建表单默认收起，由木牌次级 CTA 展开
     expect(screen.queryByLabelText("冒险名称")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
     fireEvent.change(screen.getByLabelText("冒险名称"), {
       target: { value: "新的调查" },
     });
-    fireEvent.change(screen.getByLabelText("选择模组"), {
-      target: { value: "mod-2" },
-    });
+    // 模组选择是自绘 listbox（ModuleSelect），不是原生 select
+    fireEvent.click(screen.getByRole("button", { name: "选择模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查");
   });
 
   it("删除存档需要行内二次确认", async () => {
-    vi.mocked(deleteSoloWorld).mockResolvedValue(true);
+    vi.mocked(deleteSoloWorld).mockResolvedValue(null);
     render(<SoloLobbyScreen />);
     fireEvent.click(screen.getByRole("button", { name: "删除存档" }));
     expect(deleteSoloWorld).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(deleteSoloWorld).toHaveBeenCalledWith("w-solo"));
+  });
+
+  it("删除失败时报错内联挂在对应冒险卡上，而不是创建卡片", async () => {
+    vi.mocked(deleteSoloWorld).mockResolvedValue("删除存档失败，请重试");
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "删除存档" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("删除存档失败");
+    expect(alert.closest('[data-world="w-solo"]')).not.toBeNull();
+    // 恢复可重试态
+    expect(
+      screen.getByRole("button", { name: "删除存档" }),
+    ).toBeInTheDocument();
   });
 
   it("取消二次确认不删除", () => {

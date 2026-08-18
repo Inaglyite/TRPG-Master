@@ -23,7 +23,12 @@ import {
   transferOwnership,
   updateMember,
 } from "./api/worlds";
-import { disconnectRoom, newActionId, roomSend } from "./room-ws";
+import {
+  clearPendingSoloSwitch,
+  disconnectRoom,
+  newActionId,
+  roomSend,
+} from "./room-ws";
 import {
   bumpOnlineRequestEpoch,
   currentOnlineRequestEpoch,
@@ -31,7 +36,7 @@ import {
   useOnlineStore,
 } from "./state/online-store";
 
-function errorMessage(error: unknown, fallback: string): string {
+export function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.isNetwork) return error.message;
     if (error.status === 429) return "尝试过于频繁，请稍后再试";
@@ -257,6 +262,7 @@ export async function enterSoloLobby(): Promise<void> {
 
 async function enterWorldList(view: "lobby" | "solo"): Promise<void> {
   disconnectRoom();
+  clearPendingSoloSwitch();
   bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     view,
@@ -286,6 +292,8 @@ async function enterWorldList(view: "lobby" | "solo"): Promise<void> {
     joinError: null,
     createError: null,
     roomOpen: false,
+    playMode: null,
+    pendingTimelinePanel: false,
   });
   await Promise.all([refreshWorlds(), ensureModules()]);
 }
@@ -345,22 +353,20 @@ export async function createSoloWorld(
 /**
  * 删除（逻辑归档）云端单人存档。与 deleteCurrentRoom 不同：调用时在
  * “我的冒险”列表而非房间内，成功后留在 solo 视图并刷新列表。
+ * 走单人专用的 abandon 端点：不要求先结束游戏，进行中的回合会被服务端
+ * 截断，整棵时间线树一起归档；通用 DELETE 对进行中房间仍然 409。
+ * 返回 null 表示成功；失败返回给玩家的错误消息，由列表内联展示在
+ * 被删除的冒险卡上（不再借用 createError，避免报错挂到“开始新冒险”卡片）。
  */
-export async function deleteSoloWorld(worldId: string): Promise<boolean> {
+export async function deleteSoloWorld(worldId: string): Promise<string | null> {
   const scope = captureRequestScope();
-  useOnlineStore.setState({ createError: null });
   try {
-    await deleteWorld(worldId);
+    await abandonWorld(worldId);
   } catch (error) {
-    if (!requestScopeIsCurrent(scope)) return false;
-    const message =
-      error instanceof ApiError && error.status === 409
-        ? "游戏进行中无法删除存档，请先结束当前游戏"
-        : errorMessage(error, "删除存档失败，请重试");
-    useOnlineStore.setState({ createError: message });
-    return false;
+    if (!requestScopeIsCurrent(scope)) return null;
+    return errorMessage(error, "删除存档失败，请重试");
   }
-  if (!requestScopeIsCurrent(scope)) return true;
+  if (!requestScopeIsCurrent(scope)) return null;
   try {
     if (localStorage.getItem(LAST_ROOM_KEY) === worldId) {
       localStorage.removeItem(LAST_ROOM_KEY);
@@ -369,12 +375,13 @@ export async function deleteSoloWorld(worldId: string): Promise<boolean> {
     /* localStorage 不可用不影响服务端已经完成的归档 */
   }
   await refreshWorlds();
-  return true;
+  return null;
 }
 
 /**
  * 放弃当前云端单人冒险并归档世界。它与 settle_case 无关：不会结算模组、
- * 增加声望或把放弃误记为通关。服务端会再次校验单人房主与回合空闲状态。
+ * 增加声望或把放弃误记为通关。不要求先结束游戏——服务端会截断进行中
+ * 的回合并把整棵时间线树一起归档，同时复核单人房主身份。
  */
 export async function abandonSoloWorld(): Promise<boolean> {
   const { activeWorldId, roomMetadata, user, members } =
@@ -481,6 +488,7 @@ export async function enterRoom(worldId: string): Promise<void> {
     roomBusy: false,
     roomError: null,
     roomOpen: false,
+    playMode: null,
   });
   await refreshRoom();
 }

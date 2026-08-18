@@ -97,6 +97,10 @@ export type OnlineState = {
   roomError: string | null;
   /** playing 中是否打开了完整房间管理页（OnlineRoomDock 的“房间管理”入口）。 */
   roomOpen: boolean;
+  /** room_state 下发的房间玩法（"solo"|"multiplayer"）；云端单人时间线能力的权威来源。 */
+  playMode: string | null;
+  /** 从“我的冒险”点“管理时间线”进房：房间引导完成后打开存档面板并定位到时间线视图。 */
+  pendingTimelinePanel: boolean;
 };
 
 export const initialOnlineState: OnlineState = {
@@ -141,6 +145,8 @@ export const initialOnlineState: OnlineState = {
   roomBusy: false,
   roomError: null,
   roomOpen: false,
+  playMode: null,
+  pendingTimelinePanel: false,
 };
 
 export const useOnlineStore = create<OnlineState>(() => ({
@@ -197,4 +203,52 @@ export function canCurrentUserAct(): boolean {
   }
   const role = members.find((member) => member.user_id === user.id)?.role;
   return role === "owner" || role === "player";
+}
+
+/** 云端单人房间的时间线管理能力（本地模式视为全允许，不走此判定）。 */
+export type TimelineCapabilities = {
+  canList: boolean;
+  canCreateBranch: boolean;
+  canSwitch: boolean;
+  canRename: boolean;
+  canArchive: boolean;
+};
+
+const NO_TIMELINE_CAPABILITIES: TimelineCapabilities = {
+  canList: false,
+  canCreateBranch: false,
+  canSwitch: false,
+  canRename: false,
+  canArchive: false,
+};
+
+const FULL_TIMELINE_CAPABILITIES: TimelineCapabilities = {
+  canList: true,
+  canCreateBranch: true,
+  canSwitch: true,
+  canRename: true,
+  canArchive: true,
+};
+
+/**
+ * 时间线管理（分支/切换/重命名/删除）的前端门禁：仅云端单人房间的房主。
+ * 多人房间全部 false——UI 不出现任何时间线入口；服务端仍逐消息独立校验。
+ */
+export function timelineCapabilities(): TimelineCapabilities {
+  const allowed =
+    useOnlineStore.getState().playMode === "solo" && isRoomOwner();
+  return allowed ? FULL_TIMELINE_CAPABILITIES : NO_TIMELINE_CAPABILITIES;
+}
+
+/** timelineCapabilities 的响应式版本（组件渲染门控用）。 */
+export function useTimelineCapabilities(): TimelineCapabilities {
+  return useOnlineStore((state) =>
+    state.playMode === "solo" &&
+    state.user !== null &&
+    state.members.some(
+      (member) => member.user_id === state.user?.id && member.role === "owner",
+    )
+      ? FULL_TIMELINE_CAPABILITIES
+      : NO_TIMELINE_CAPABILITIES,
+  );
 }

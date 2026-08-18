@@ -10,7 +10,9 @@ import {
 import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
+import { ModuleSelect } from "../ModuleSelect";
 import { roomStatusLabel } from "./room-status";
+import { SoloTimelinePanel } from "./SoloTimelinePanel";
 
 function formatTime(value?: string): string {
   if (!value) return "";
@@ -23,6 +25,8 @@ function formatTime(value?: string): string {
  * 视觉与本地开始页同一体系（主题背景裸排版 + start-brand 品牌区 +
  * adventure-card 存档卡 + start-art-button 黄铜 CTA），写通路保持
  * HTTP worlds/createSoloWorld 不变。删除即归档，保留二次确认。
+ * 时间线管理由大厅内的 SoloTimelinePanel 就地完成（HTTP 控制面，
+ * 不进房间）；只有“继续冒险”按钮会建立房间连接。
  */
 export function SoloLobbyScreen() {
   const user = useOnlineStore((state) => state.user);
@@ -40,6 +44,11 @@ export function SoloLobbyScreen() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // 删除报错内联挂在被删除的冒险卡上（worldId + 消息），不进创建卡。
+  const [deleteError, setDeleteError] = useState<{
+    worldId: string;
+    message: string;
+  } | null>(null);
 
   const soloWorlds = worlds.filter(
     (world) => world.metadata?.play_mode === "solo",
@@ -47,6 +56,15 @@ export function SoloLobbyScreen() {
   const moduleTitle = (id: string) =>
     modules.find((module) => module.id === id)?.title ?? id;
   const selectedModule = moduleId || modules[0]?.id || "";
+  // solo 世界的连接目标是树根指针指向的当前时间线（缺省即自身）。
+  const resumeWorldId = (world: (typeof soloWorlds)[number]) =>
+    world.resume_world_id || world.world_id;
+  const adventureTitle = (world: (typeof soloWorlds)[number]) =>
+    world.metadata?.name || moduleTitle(world.module);
+  // 时间线管理在大厅就地完成（HTTP 控制面），只有“继续冒险”才进房间。
+  const [timelineWorld, setTimelineWorld] = useState<
+    (typeof soloWorlds)[number] | null
+  >(null);
 
   async function backToModeSelect() {
     const bridge = desktopBridge();
@@ -65,9 +83,11 @@ export function SoloLobbyScreen() {
 
   async function confirmDelete(worldId: string) {
     setConfirmingDelete(null);
+    setDeleteError(null);
     setDeleteBusy(true);
-    await deleteSoloWorld(worldId);
+    const error = await deleteSoloWorld(worldId);
     setDeleteBusy(false);
+    if (error) setDeleteError({ worldId, message: error });
   }
 
   return (
@@ -80,13 +100,13 @@ export function SoloLobbyScreen() {
           <h1 className="online-title fx-glow">我的冒险</h1>
           <p className="online-subtitle">云端私密单人世界，只有你能进入</p>
         </div>
-        <div className="solo-lobby-user">
+        <div className="solo-lobby-user online-account">
           <span className="online-user" title={user?.id}>
             {user?.username}
           </span>
           <button
             type="button"
-            className="btn-ghost"
+            className="account-logout"
             onClick={() => void logout()}
           >
             退出登录
@@ -146,7 +166,7 @@ export function SoloLobbyScreen() {
                 <div className="adventure-card-main">
                   <div
                     className="adventure-card-info"
-                    onClick={() => void enterRoom(world.world_id)}
+                    onClick={() => setTimelineWorld(world)}
                   >
                     <div className="adventure-slot-line">
                       <span className="adventure-slot-no">云端存档</span>
@@ -170,7 +190,7 @@ export function SoloLobbyScreen() {
                     <button
                       type="button"
                       className="adventure-resume"
-                      onClick={() => void enterRoom(world.world_id)}
+                      onClick={() => void enterRoom(resumeWorldId(world))}
                     >
                       继续冒险
                     </button>
@@ -195,18 +215,37 @@ export function SoloLobbyScreen() {
                           </button>
                         </>
                       ) : (
-                        <button
-                          type="button"
-                          className="adventure-delete"
-                          disabled={deleteBusy}
-                          onClick={() => setConfirmingDelete(world.world_id)}
-                        >
-                          删除存档
-                        </button>
+                        <>
+                          {world.metadata?.room_status === "playing" && (
+                            <button
+                              type="button"
+                              className="adventure-manage"
+                              onClick={() => setTimelineWorld(world)}
+                            >
+                              管理时间线
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="adventure-delete"
+                            disabled={deleteBusy}
+                            onClick={() => {
+                              setDeleteError(null);
+                              setConfirmingDelete(world.world_id);
+                            }}
+                          >
+                            删除存档
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
                 </div>
+                {deleteError?.worldId === world.world_id && (
+                  <p className="adventure-delete-error" role="alert">
+                    {deleteError.message}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -220,7 +259,7 @@ export function SoloLobbyScreen() {
         {!createOpen ? (
           <button
             type="button"
-            className="start-art-button solo-lobby-create-cta"
+            className="start-art-button art-plaque solo-lobby-create-cta"
             onClick={() => setCreateOpen(true)}
           >
             <span className="start-art-label">开始新冒险</span>
@@ -240,19 +279,17 @@ export function SoloLobbyScreen() {
                 disabled={createBusy}
                 maxLength={60}
               />
-              <select
+              <span id="solo-create-module-label" hidden>
+                选择模组
+              </span>
+              <ModuleSelect
+                options={modules}
                 value={selectedModule}
-                onChange={(event) => setModuleId(event.target.value)}
                 disabled={createBusy || modulesStatus !== "ready"}
-                aria-label="选择模组"
-              >
-                {modulesStatus !== "ready" && <option>正在读取模组……</option>}
-                {modules.map((module) => (
-                  <option key={module.id} value={module.id}>
-                    {module.title}
-                  </option>
-                ))}
-              </select>
+                labelledBy="solo-create-module-label"
+                listLabel="选择模组"
+                onSelect={(id) => setModuleId(id)}
+              />
               <button
                 type="button"
                 className="btn-primary"
@@ -286,6 +323,14 @@ export function SoloLobbyScreen() {
       >
         ← 返回模式选择
       </button>
+
+      {timelineWorld && (
+        <SoloTimelinePanel
+          world={timelineWorld}
+          title={adventureTitle(timelineWorld)}
+          onClose={() => setTimelineWorld(null)}
+        />
+      )}
     </div>
   );
 }

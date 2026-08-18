@@ -350,6 +350,16 @@
     grid-template-columns: 1fr;
     gap: 10px;
   }
+  /* 窄屏收窄索引卡边框，给正文留空间 */
+  .adventure-card {
+    padding: 4px 8px 6px 10px;
+    border-width: 16px 14px 18px 52px;
+    border-image-width: 16px 14px 18px 52px;
+  }
+  /* 窄屏索引卡正文与按钮改纵排，避免信息列被书脊和按钮挤没 */
+  .adventure-card-main {
+    grid-template-columns: 1fr;
+  }
   .save-slot-title {
     align-items: flex-start;
     flex-direction: column;

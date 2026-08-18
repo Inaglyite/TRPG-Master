@@ -75,6 +75,7 @@ export const serverMessageTypes = [
   "private_event",
   "investigator_roster",
   "protocol_error",
+  "solo_world_switched",
 ] as const;
 
 const serverMessageSchema = z.looseObject({

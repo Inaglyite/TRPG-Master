@@ -27,6 +27,10 @@ from .multiplayer_guards import (
 from .multiplayer_recovery import turn_recovery_payload
 from .player_notes import PlayerNotesConflict, PlayerNotesStore
 from .room_runtime import ActionReservationError, GameRoom
+from .solo_timeline_ws import (
+    SOLO_TIMELINE_MESSAGE_TYPES,
+    handle_solo_timeline_message,
+)
 
 logger = logging.getLogger("trpg.multiplayer_messages")
 
@@ -464,6 +468,20 @@ async def run_room_message_loop(
                     "该确认请求已经失效或尚未发起",
                 )
                 continue
+        if message_type in SOLO_TIMELINE_MESSAGE_TYPES:
+            # 云端单人房间的专用时间线协议；多人房间在 _gate 内继续被拒绝。
+            # 切换/建分支成功后旧房间被拆除，本连接随断开流程退出。
+            outcome = await handle_solo_timeline_message(
+                controller,
+                ws,
+                room,
+                user,
+                role,
+                data,
+            )
+            if outcome == "close":
+                return
+            continue
         if message_type in UNSUPPORTED_ROOM_TYPES:
             await _reject(
                 ws,

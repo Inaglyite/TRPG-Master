@@ -194,27 +194,91 @@
   flex-direction: column;
   gap: 10px;
 }
+/* 手绘档案索引卡：左侧黄铜书脊饰带落在 border-image 左区，中段羊皮纸横向拉伸 */
 .adventure-card {
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg3) 72%, transparent),
-    color-mix(in srgb, var(--bg2) 88%, transparent)
-  );
+  padding: 6px 12px 8px 14px;
+  border-style: solid;
+  border-width: 22px 20px 25px 80px;
+  border-image: var(--ui-save-slot-card) 170 150 190 420 fill / 22px 20px 25px
+      80px / 0 stretch;
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
   transition:
-    border-color 0.18s ease,
+    filter 0.18s ease,
     transform 0.18s ease;
 }
 .adventure-card:hover {
-  border-color: var(--border-bright);
+  filter: brightness(1.05) drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
 }
 .adventure-card.current {
-  border-color: color-mix(in srgb, var(--gold) 68%, transparent);
-  box-shadow:
-    inset 3px 0 0 var(--gold-dim),
-    0 0 14px rgba(200, 162, 78, 0.12);
+  filter: brightness(1.08) drop-shadow(0 0 12px rgba(200, 162, 78, 0.4));
+}
+/* 羊皮纸卡面：文字与幽灵按钮改为墨色系，避免浅色字压在浅纸面上 */
+.adventure-card .adventure-slot-no {
+  color: #6d4d20;
+  text-shadow: 0 1px 0 rgba(255, 244, 214, 0.4);
+}
+.adventure-card .adventure-card-title {
+  color: #2e1d10;
+  text-shadow: 0 1px 0 rgba(255, 244, 214, 0.35);
+}
+.adventure-card .adventure-card-meta {
+  color: #5d4930;
+}
+.adventure-card .adventure-card-meta.dim {
+  color: #6f5a3e;
+}
+.adventure-card .adventure-badge {
+  border-color: rgba(109, 77, 32, 0.55);
+  background: rgba(109, 77, 32, 0.16);
+  color: #5c3f14;
+  text-shadow: none;
+}
+.adventure-card .adventure-manage,
+.adventure-card .adventure-rename {
+  border-color: rgba(93, 66, 30, 0.5);
+  color: #4a3417;
+}
+.adventure-card .adventure-manage:hover,
+.adventure-card .adventure-manage:focus-visible,
+.adventure-card .adventure-rename:hover,
+.adventure-card .adventure-rename:focus-visible {
+  border-color: #8a6a3a;
+  color: #7a5416;
+}
+.adventure-card .adventure-delete {
+  border-color: rgba(140, 47, 42, 0.55);
+  color: #8c2f2a;
+}
+.adventure-card .adventure-delete-confirmation {
+  border-top-color: rgba(140, 47, 42, 0.45);
+  color: #8c2f2a;
+}
+/* 删除失败行内报错（如 409 游戏进行中）：挂在被删除的卡片内部 */
+.adventure-delete-error {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--red) 42%, transparent);
+  color: color-mix(in srgb, var(--red-bright) 82%, var(--text));
+  font-size: 12px;
+  font-weight: 700;
+}
+.adventure-card .adventure-delete-error {
+  border-top-color: rgba(140, 47, 42, 0.45);
+  color: #8c2f2a;
+}
+.adventure-card .world-archive-confirm {
+  border-color: rgba(140, 47, 42, 0.6);
+  background: rgba(154, 59, 59, 0.14);
+  color: #8c2f2a;
+}
+.adventure-card .world-archive-cancel {
+  border-color: rgba(93, 66, 30, 0.5);
+  color: #4a3417;
+}
+.adventure-card .world-archive-cancel:hover,
+.adventure-card .world-archive-cancel:focus-visible {
+  border-color: #8a6a3a;
+  color: #7a5416;
 }
 .adventure-card-main {
   display: grid;
