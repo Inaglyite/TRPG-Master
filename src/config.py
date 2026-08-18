@@ -132,9 +132,8 @@ GLM_MODEL = os.environ.get("GLM_MODEL", "glm-4-flash-250414")
 
 # ---- Skill 加载顺序（常驻 system prompt 的 skill）----
 # 以下 skill 全量塞入 system prompt,贯穿每回合。
-# 场景专用 skill（keeper_combat / keeper_magic / keeper_psychology /
-# investigator_skills / investigator_creation / investigator_methods）
-# 不在此列表——改为运行时按需 read_file 加载,见 trpg_master.skill 路由表。
+# 场景专用 Skill 不常驻 system prompt；只能由受信引擎从下方固定资源
+# allowlist 注入，模型没有通用文件读取能力。
 SKILL_LOAD_ORDER = [
     "core/trpg_master.skill",
     "core/no_spoiler.skill",
@@ -157,6 +156,19 @@ OPTIONAL_SKILL_HINTS = {
     "sanity_loss": "skills/keeper/keeper_psychology.skill",
     "create_character": "skills/investigator/investigator_creation.skill",
 }
+
+# Engine-only resource allowlist.  Keep this explicit rather than accepting a
+# model-supplied relative path: optional Skill text is executable instruction
+# content from the model's perspective.
+OPTIONAL_SKILL_RESOURCES = frozenset({
+    "skills/keeper/keeper_items.skill",
+    "skills/keeper/keeper_combat.skill",
+    "skills/keeper/keeper_psychology.skill",
+    "skills/keeper/keeper_magic.skill",
+    "skills/investigator/investigator_skills.skill",
+    "skills/investigator/investigator_creation.skill",
+    "skills/investigator/investigator_methods.skill",
+})
 
 MAX_TOOL_ROUNDS = 5
 

@@ -572,7 +572,8 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(visible, [])
         self.assertEqual(errors, ["模型服务暂时不可用，请稍后重试。"])
         self.assertNotIn(secret_detail, errors[0])
-        self.assertTrue(any(secret_detail in entry for entry in server_logs))
+        self.assertFalse(any(secret_detail in entry for entry in server_logs))
+        self.assertTrue(any("RuntimeError" in entry for entry in server_logs))
 
     def test_multiplayer_websocket_close_reason_never_echoes_exception(self):
         source = (

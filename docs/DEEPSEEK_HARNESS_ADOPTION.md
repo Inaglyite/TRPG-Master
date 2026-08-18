@@ -1,6 +1,6 @@
 # DeepSeek Harness 借鉴与采纳决策
 
-状态：架构提案（尚未实施）
+状态：H0 安全边界已实施；H1+ 仍为架构提案
 
 评审日期：2026-08-18
 
@@ -49,7 +49,7 @@ Agent，但不是 TRPG Game 必须采用的运行时。
 | Token meter | 同时统计 system、tools、history、provider usage 和 cache hit | 高 |
 | Repeat-tool reminder | 对相同工具与参数的连续调用做有界提醒，不直接修改结果 | 中 |
 | Capability seam | Service Definition / Provider / Consumer 解耦 | 中，借鉴接口即可 |
-| DeepSeek adapter | SSE、工具增量、reasoning passback、usage、稳定错误码、超时/重试 | 中高 |
+| DeepSeek adapter | SSE、工具增量、reasoning passback、usage、稳定错误码、超时与外层重试策略 | 中高 |
 | Cordis / Everything is a plugin | 动态插件树、patch、卸载与热更新 | 低，不采用 |
 | Subagent / shell / filesystem / MCP | 通用编码 Agent 能力 | 在线游戏主链不采用 |
 
@@ -88,6 +88,9 @@ embedding、冲突消解或遗忘策略。参考
   将来放入 Runner/Model adapter，而不是让新逻辑继续堆进 `GameEngine`。
 - [`src/database_turn_journal.py`](../src/database_turn_journal.py) 已能把 `WorldState`、`Turn`、
   `Snapshot`、自动存档、回放事件和模型调用在同一数据库事务中提交。
+- [`src/database_store.py`](../src/database_store.py) 已通过 `turn_cache` 暂存本回合世界变更，再交给
+  TurnJournal 原子提交。这是现有数据库写工具应继续遵守的 Unit of Work；兼容文件导出、外部服务和
+  绕过 `DatabaseWorldStore` 的副作用不自动获得这项原子性。
 - [`src/turn_mutations.py`](../src/turn_mutations.py) 已区分权威世界变更，可作为工具审计的基础。
 - [`src/room_runtime.py`](../src/room_runtime.py) 已提供世界级串行行动、重连和事件补发边界；这些不应
   被通用 Agent 插件系统取代。
@@ -105,20 +108,18 @@ embedding、冲突消解或遗忘策略。参考
    “模型实际可见事件流”；Skill、Lore、控制指令和摘要也缺少统一来源标识。
 2. [`src/history_compactor.py`](../src/history_compactor.py) 按固定玩家回合数触发，并直接替换消息；两次
    摘要失败会丢弃最早历史。摘要没有 source turn，也没有验证权威事实或是否真正缩小请求。
-3. [`src/engine.py`](../src/engine.py) 的可选 Skill 依赖关键词和事后工具名提示，只在当前内存会话去重。
-   首次危险工具已经执行后才加载规则，无法成为执行前约束。
-4. [`src/agent_graph.py`](../src/agent_graph.py) 把工具参数 JSON 解析失败降级为 `{}` 后继续执行；schema、
-   权限、幂等、超时和输出可见性分散在不同模块。
-5. story/combat 请求允许在确认最终是否带工具调用前就向前端流出 prose；如果随后工具失败或改变了
-   权威结果，玩家已经看到了未提交叙事。工具规划和最终叙述需要建立明确提交边界。
-6. `npc_conversations` 保存的是模型曾说过的话，不等于经规则确认的事实；它目前又会被放进后续权威
+3. 可选 Skill 仍保留关键词作为兼容提示，且版本、依赖图、来源追踪尚未成为 manifest；不过模型已不能
+   通过通用文件工具自行加载规则，受信引擎只会读取固定资源 allowlist。
+4. schema、幂等、超时、输出可见性和 durable 工具审计仍分散在不同模块；H0 已补上严格 JSON、请求级
+   allowlist 与模型/内部 caller 边界，H1 再收口为完整 pipeline。
+5. `npc_conversations` 保存的是模型曾说过的话，不等于经规则确认的事实；它目前又会被放进后续权威
    上下文。对话记录、事实记忆和叙事摘要需要分层。
-7. Prompt section、权威上下文、Lore、Skill 和控制消息由多个模块直接拼接，缺少统一的 priority、
+6. Prompt section、权威上下文、Lore、Skill 和控制消息由多个模块直接拼接，缺少统一的 priority、
    token budget、audience、provenance 和 digest。
 
 ### 3.3 必须先修的 P0 工具授权问题
 
-当前“没有把工具 schema 发给模型”并不等于“模型无权执行该工具”：
+H0 实施前，“没有把工具 schema 发给模型”并不等于“模型无权执行该工具”：
 
 - [`src/tools.py`](../src/tools.py) 用 `MODEL_TOOLS` 隐藏 `read_file` 等 engine-only 工具；
 - [`src/tool_protocol.py`](../src/tool_protocol.py) 会把文本 DSML 中任意合法工具名转成普通 tool call；
@@ -130,9 +131,22 @@ embedding、冲突消解或遗忘策略。参考
 prompt injection 或异常模型输出可能绕过 schema 隐藏边界。引入任何新的 Skill、MCP 或插件机制前，
 必须先增加 request-scoped `ToolExecutionPolicy`；DSML 只能是一种解析格式，不能成为第二条授权通道。
 
-同一轮还应收紧当前 story profile 可见的 `get_npc_secret`：完整 NPC 私密对象不应作为普通工具结果
-进入后续模型历史。应由服务端先按当前 tier、已发现线索和本轮目的生成最小的私密投影，并对结果
-附加 sensitivity/audience；prompt 中一句“不要泄漏”不能代替数据最小化。
+request allowlist 还不够：当前模型可见的通用 `state_get`/`state_set` 没有路径级语义授权，前者可读取
+`npcs.*.secret`、`private_memory` 等私密字段，后者可绕过领域工具修改任意权威状态。H0 必须把它们从
+模型目录移除，改成公开投影和 typed domain tools。若为兼容暂时保留，必须按 caller principal 与精确
+root/path policy 拒绝私密、身份、存档和控制字段；“工具名允许”不能等同于“任意参数语义允许”。
+
+`get_npc_secret` 也不能只做一次 LLM 摘要或把 TIER 当作自动切分器。现有模组的 `npc.secret` 是整块
+作者文本，TIER 是玩家披露边界，不是天然的 Keeper 可见字段。H0 选择安全优先：先从模型 catalog
+移除该工具，只注入现有 public/revealed/disposition 投影。若后续确需隐藏动机辅助叙事，模组格式必须
+先增加作者定义的 `keeper_behavior`、`private_motivation`、`reveal_facets`，再由确定性代码按 NPC、
+场景和目的选择最小的 model-private section；该 section 不进入普通 message history、公共事件、摘要
+或遥测。现有 module spine/keeper notes 也可能包含秘密，需按同一 audience 规则盘点，不能宣称仅修
+一个工具就消除了模型对秘密的接触。
+
+H0 已删除 active core/keeper Skill 中要求模型调用 `read_file` 的旧指令，并由受信引擎按固定 resource
+ID 注入内容。native 与 DSML 的模型调用都携带同一请求快照，执行点会拒绝 `read_file`、私密工具和所有
+未下发能力；普通日志只记录元数据。后续 H1 仍要补齐 durable audit、幂等和 timeout。
 
 ## 4. 目标架构
 
@@ -205,6 +219,12 @@ tool result 和 compaction checkpoint。原始 `TurnRecord`、`WorldState`、`Sn
 4. 只有真实回合持续一致后，才让投影成为读取来源；
 5. 旧存档按现有 `messages` 作为一次 seed 导入，不强行伪造历史来源。
 
+在事件投影成为读取来源前，必须先冻结时间线与存档恢复语义：每个分支记录
+`parent_world_id + source_turn_id + source_sequence`；当前分支的可见事件等于祖先截止 source sequence
+的前缀，加上本分支后缀，绝不读取兄弟分支。普通继续游戏留在同一 lineage；从旧存档回滚后继续必须
+建立新的 branch/session epoch，不能把新事件接回未来历史。checkpoint 也必须带 branch/epoch 与覆盖范围。
+删除或归档分支时采用引用感知 GC：仍被后代引用的祖先事件不能删除。
+
 不记录或不传播原始隐藏推理。若 DeepSeek thinking 模式在带工具调用的 assistant 消息上要求
 `reasoning_content` passback，应由 provider adapter 在最小生命周期内保管，并作为高敏感、不可展示
 内容处理；不得进入玩家回放、摘要、普通审计或遥测。
@@ -225,18 +245,26 @@ ToolDescriptor
 - handler / model_renderer / player_renderer
 ```
 
-每次模型请求冻结工具目录并得到 `tool_catalog_digest`。结构化调用和 DSML 统一规范化为 `ToolCall`，
-之后经过同一管线：
+每次模型请求必须产生不可变的执行快照：`request_id`、`step`、`request_profile`、caller principal、
+`allowed_tool_names` 与 `tool_catalog_digest`。`ModelStreamer` 将该快照与调用一同交给执行点；执行时不能
+按当前 role 或全局 registry 重新计算权限。受信引擎内部调用也进入显式 principal 对应的策略，不能为
+兼容旧 handler 留一条无审计旁路。结构化调用和 DSML 统一规范化为 `ToolCall`，之后经过同一管线：
 
 1. 名称必须存在于本次请求冻结的 allowlist；
 2. 严格解析 JSON，解析失败直接形成受控错误结果；
-3. 按 input schema 校验，不能用 `{}` 猜测执行；
+3. 按 input schema 校验：顶层必须是 object、拒绝 unknown/additional properties，不能用 `{}` 猜测执行；
 4. 权限策略单调收紧：后续中间件只能继续允许或拒绝，不能重新放行已拒绝调用；
 5. 绑定 world/turn/step/call_id、actor、revision 和 deadline；
 6. 写工具保持世界级串行；只有冻结 revision 上的纯读取以后才可并行；
 7. handler 输出先按 canonical output schema 验证，再分别渲染模型结果与玩家结果；
-8. call/result 一一配对并写入 TurnJournal，失败、拒绝和超时也必须有 result；
+8. call/result 一一配对并写入 TurnJournal，失败、拒绝和超时也必须有不回显敏感参数的 result；DSML
+   call_id 由 request/step/sequence 组成，不能复用局部的 `dsml_0`；
 9. late callback 不得在取消或回合结束后写世界状态。
+
+“包装现有 handler”只适用于所有写入都经过 `DatabaseWorldStore.turn_cache` 的工具。绕过该缓存的 DB
+写入必须先改成 `ToolUnitOfWork`/`MutationPlan`，和 TurnJournal 在一个事务内提交；兼容文件、对象存储
+或外部 API 等无法同事务的副作用只能在提交后通过 outbox 执行，或提供明确补偿。否则 pipeline 只能
+统一授权和审计，不能承诺原子性。
 
 上游的 repeat-tool reminder 可以小型重实现，但它只是提示。骰子、检定、发线索等不可重复操作仍应由
 持久幂等键保证；不能依赖模型看到提醒后自觉停止。
@@ -248,7 +276,8 @@ ToolDescriptor
 把当前压缩器改造成独立 `ContextCompactor`：
 
 1. 计算下一次真实 request envelope：system、tools、history、Lore、Skill 和 provider usage/cache；
-2. 普通压力达到目标模型容量约 75%–80% 时触发，provider 明确返回 context overflow 时允许一次强制路径；
+2. 只有 provider/model 容量已知且完整 envelope 能装入时，才以容量约 75%–80% 作为可配置触发线；
+   容量未知时使用保守的部署配置与 provider overflow 信号，不能宣称固定比例；
 3. 先确定性裁剪过大的旧工具结果，保留有界 head + marker + tail，原结果仍留在事件日志；
 4. 选择最旧、完整、call/result 配对平衡的 surface 范围；
 5. 摘要必须记录 source sequences/turn ids，并验证输出比被替换范围更小；
@@ -256,9 +285,15 @@ ToolDescriptor
 7. 摘要失败、超时、取消或不收敛时保持原 surface，不再使用“丢弃最早消息”兜底；
 8. 只有发生了持久、可验证的 surface 缩减后，context-overflow 请求才可重试。
 
+若 system core、工具 schema、最新不可拆消息或其他不可裁剪 section 本身已经超过容量，返回明确的
+`irreducible_context` 诊断（包含各 section token、最大项和配置来源），停止自动重试；不得循环摘要或
+偷偷删除安全规则。压缩性能应使用录制请求和构造的极限 context fixture 测量，不把公网模型延迟算作
+本地 pipeline p95。
+
 摘要结构必须是 TRPG 专用的，至少包含：当前场景与世界时间、玩家已知事实、已发现线索、NPC 已公开
-互动、未完成目标、角色资源变化、精确骰值/规则结果、待处理选择和来源 turn_id。摘要只帮助连续叙事，
-不能修改 `WorldState`，也不能把私密事实提升为玩家已知事实。
+互动、未完成目标、角色资源变化、精确骰值/规则结果、待处理选择和来源 turn_id。精确骰值、资源和
+规则结论不能信任摘要模型复述，应在摘要后从 `WorldState`/权威 TurnEvent 确定性拼回。摘要只帮助连续
+叙事，不能修改 `WorldState`，也不能把私密事实提升为玩家已知事实。
 
 ### 5.4 Skill Catalog，不再赌关键词
 
@@ -318,7 +353,22 @@ world、branch、audience、TIER 和 clue gate，不能成为事实来源。
 当前 `npc_conversations` 应逐步拆成“verbatim transcript”和“accepted structured fact”。模型说过一句话
 不等于 NPC 确实知道或世界中确实发生过这件事。
 
-### 5.6 只引入小型 Python seam
+### 5.6 私密上下文的保留、访问与删除
+
+追加式不等于永久保存全部原文。首版采用以下生命周期：
+
+- 不持久化隐藏推理、provider 原始 chunk 或无诊断价值的中间缓冲；
+- 静态 core/module/Skill 优先保存发布版本与 digest，由不可变制品重建，避免每回合复制；
+- 动态 model-private payload 随 world/branch 生命周期保存，并单独加密或至少使用数据库访问边界；
+- `archive` 只是停止活跃使用，不代表删除。用户明确删除世界时，删除该世界独有的私密 payload；共同
+  祖先仍被后代时间线引用时，等引用清零后再 GC；
+- 数据库加密备份按部署保留策略到期清除（当前默认约 30 天），产品界面必须说明删除后的备份窗口；
+- 普通用户 API、WebSocket、前端日志和导出不得读取 model-private payload；管理员紧急访问必须授权、
+  记录审计事件并说明目的；
+- 遥测只记录 event type、digest、token、大小、耗时和策略结论，不记录私密正文；
+- 给每世界/分支设置事件与 payload 容量上限，checkpoint 生效后用引用感知 GC 回收不再可达的派生数据。
+
+### 5.7 只引入小型 Python seam
 
 不复制 Cordis。等对应功能开始实施时，优先定义少量 Python `Protocol`：
 
@@ -333,7 +383,7 @@ world、branch、audience、TIER 和 clue gate，不能成为事实来源。
 这些 seam 应放在 `GameEnginePort` 后面逐步接入。不要在 `GameEngine`、`tools.py` 或 LangGraph state 里
 继续添加任意 plugin hook，也不要为了“可插拔”允许生产环境动态安装代码。
 
-### 5.7 DeepSeek Provider Adapter 的可借鉴项
+### 5.8 DeepSeek Provider Adapter 的可借鉴项
 
 上游 [DeepSeek adapter](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/packages/llm/llm-deepseek/README.md)
 对本项目有以下参考价值：
@@ -369,40 +419,56 @@ Provider 原始流还应先归一化为服务端内部的 `reasoning | public_te
 
 ## 7. 分阶段路线
 
-### H0：先补安全边界与基线测试
+### H0：安全边界与基线测试（已实施，2026-08-18）
 
-- 修复 DSML / structured tool call 共用 request-scoped allowlist；
-- 禁止模型通过通用 `read_file` 加载 Skill，文件访问改成资源 allowlist；
-- 把 `get_npc_secret` 改成经过 TIER 门禁的最小投影，禁止完整私密对象进入普通历史；
-- 参数 JSON 严格失败，补 input schema 校验；
+- 每次模型请求冻结 `request_id/step/profile/caller/allowed_tool_names/catalog_digest`，DSML 与 structured
+  call 携带同一快照到执行点，禁止按全局 registry 重新推导权限；
+- 给工具增加参数语义授权；将通用 `state_get/state_set` 移出模型 catalog，改为公开读取投影与 typed
+  domain tools，内部兼容调用按 principal 和精确 path policy 隔离；
+- 禁止模型通过通用 `read_file` 加载 Skill，同时清理 active core/keeper Skill 中要求模型调用它的旧
+  指令；受信引擎只能按 manifest resource allowlist 注入固定资源；
+- 将 `get_npc_secret` 先移出模型 catalog，禁止完整私密对象进入普通历史；另行设计作者定义、确定性
+  选择且不进入公共历史的最小私密行为投影，不用 TIER 或另一个 LLM 猜测拆分；
+- 参数 JSON 严格失败，补拒绝 additional properties 的 input schema 与 path-level policy 校验；
 - 修正工具轮数边界并为每个 tool call 保证一个结果；
 - 工具规划阶段不向玩家发送未提交 prose；只有确认无工具，或工具提交后的最终叙述才能进入公开流；
 - 建立模型请求 golden fixture：冻结 system section、tool catalog、context section 和 messages digest；
 - 为公开事件、日志和错误路径增加 secret-leak 测试。
 
-验收：任何未下发工具都无法通过 native/DSML/重放调用；参数错误不执行 handler；现有玩法与协议不变。
+验收：任何未下发工具都无法通过 native/DSML/重放调用；`state_get/state_set` 无法触达私密/控制路径；
+模型 caller 不能调用 `read_file/get_npc_secret`，engine-internal 只能读取固定资源；参数错误不执行 handler；
+现有需要规则 Skill 的玩法由确定性注入维持，不因移除文件工具而退化；公开流、玩家可见历史和普通
+日志无 secret 泄漏。
+
+实现落点：`src/tool_policy.py` 冻结并校验请求快照，`src/model_request.py` 生成可重放的 request envelope，
+`src/agent_graph.py` 对 structured/DSML 走同一拒绝路径，`src/skill_resources.py` 只加载固定资源。相关
+golden、拒绝、泄漏与轮次边界回归在 `tests/test_tool_policy.py`，完整 Python 测试基线为 590 passed、5 skipped。
 
 ### H1：Context Envelope + Tool Pipeline V2
 
 - 定义 `ContextSection`、`RequestEnvelope`、`ToolDescriptor`、`ToolCall`、`ToolOutcome`；
-- 先包装现有 handler，不重写领域逻辑；
+- 先包装符合 `turn_cache` 约束的现有 handler，不重写领域逻辑；其余写工具先迁移到
+  `ToolUnitOfWork`/`MutationPlan`，跨介质副作用使用 post-commit outbox 或补偿；
 - 把权限、可见性、幂等、超时、取消、输出校验和 TurnJournal 审计统一到管线；
 - 在 `ModelCall.details` 中记录 provider/model、section/tool digest、容量、usage 和 cache metadata；
 - 新旧路径通过 feature flag 和 shadow comparison 共存。
 
-验收：每次调用可关联 world/turn/step/call_id；重试、取消和重连不重复写世界；管线 p95 自身开销低于
-10ms，正常回合 p95 延迟增幅不超过 5%。
+验收：每次调用可关联 world/turn/step/call_id；重试、取消和重连不重复写世界；用录制和合成 fixture
+测得管线 p95 自身开销低于 10ms，正常回合本地编排 p95 延迟增幅不超过 5%（不把公网模型抖动计入）。
 
 ### H2：追加式 Context Event + 非破坏性压缩
 
 - 双写模型上下文事件；
 - 实现纯投影器并比较现有 messages digest；
+- 固化 fork/save/resume 的 lineage、session epoch、checkpoint 范围和引用感知 GC；
 - 上线 tool-result pruning、平衡边界、summary replace 和 context-overflow 受控重试；
-- 原始 Turn/事件永久保留，旧存档仍可 seed；
+- 原始权威 Turn 按产品存档策略保留；私密 Context Event 遵循第 5.6 节的访问、删除和备份生命周期，
+  旧存档仍可 seed；
 - TRPG 专用摘要对 gold scenes 做事实与可见性验证。
 
 验收：重放得到相同模型可见 surface；摘要失败/崩溃不丢历史；call/result 始终配对；压缩后请求稳定在
-目标上下文的 75%–80% 以下；摘要不能增加权威事实或跨 TIER 泄密。
+配置目标以内；容量已知且 envelope 可压缩时通常维持在 75%–80%，不可约上下文则返回诊断而非删规则；
+摘要不能增加权威事实或跨 TIER 泄密，兄弟时间线不能读取彼此事件。
 
 ### H3：Skill Catalog + 结构化记忆
 
@@ -457,9 +523,8 @@ Agent 框架。** 若某项“插件化”不能改善权限、重放、上下�
 
 ## 10. 建议的下一步
 
-下一轮先只实施 H0，并把它作为独立安全改动：请求级工具 allowlist、严格参数校验、`read_file` 资源
-边界和对应回归测试。H0 合并后，再为 H1 写最小接口和一条只读工具纵切；不要同时启动长期记忆、
-Skill 重做和 Agent loop 替换。
+H0 已作为独立安全改动完成。下一轮为 H1 写最小接口和一条只读工具纵切；不要同时启动长期记忆、Skill
+重做和 Agent loop 替换。
 
 若需要直接复用上游的某段 MIT 代码，应先记录具体文件、固定提交、修改范围和许可证归属；否则默认
 只复用设计思想并在 Python 中独立实现。
@@ -473,6 +538,8 @@ Skill 重做和 Agent loop 替换。
 - [工具执行流水线](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/docs/tool-execution-pipeline.zh.md)
 - [上下文压缩](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/docs/subsystems/compaction.zh.md)
 - [Skill 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/docs/subsystems/skills.zh.md)
+- [Token Meter](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/docs/subsystems/token-meter.zh.md)
+- [Repeat Tool Reminder](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/packages/guard/repeat-tool-reminder/README.zh.md)
 - [DeepSeek Adapter](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/packages/llm/llm-deepseek/README.md)
 - [第三方记忆 MCP 示例](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/examples/mcp-memory/README.zh.md)
 - [MIT License](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/LICENSE)

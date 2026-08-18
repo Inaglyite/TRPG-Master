@@ -126,11 +126,23 @@ def model_call(
 
 
 def _brief(d: dict) -> str:
-    """压缩 dict 为一行的简短描述。"""
+    """Return metadata-only tool arguments for ordinary logs.
+
+    Tool arguments may contain hidden NPC facts or player-private notes.  Full
+    values belong in the durable, access-controlled turn record when needed,
+    not the rotating operational log.
+    """
     parts = []
     for k, v in d.items():
-        s = str(v)
-        if len(s) > 60:
-            s = s[:57] + "..."
-        parts.append(f"{k}={s}")
+        if isinstance(v, bool | int | float):
+            rendered = repr(v)
+        elif isinstance(v, str):
+            rendered = f"<str:{len(v)}>"
+        elif isinstance(v, list):
+            rendered = f"<list:{len(v)}>"
+        elif isinstance(v, dict):
+            rendered = f"<object:{len(v)}>"
+        else:
+            rendered = f"<{type(v).__name__}>"
+        parts.append(f"{k}={rendered}")
     return " | ".join(parts[:4])

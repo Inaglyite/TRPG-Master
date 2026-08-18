@@ -14,6 +14,8 @@ from src.agent_graph import (
     _finalize_turn,
     _prepare_turn,
 )
+from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
+from src.tools import tool_catalog_for_names
 from src.turn_reconciler import (
     apply_turn_commit,
     narrative_body,
@@ -47,11 +49,13 @@ def resolution_world() -> dict:
                 "npcs_present": ["fallon"],
             },
         },
-        "npcs": [{
-            "id": "fallon",
-            "name": "布莱斯·法伦",
-            "revealed": {"level": 0, "entries": []},
-        }],
+        "npcs": [
+            {
+                "id": "fallon",
+                "name": "布莱斯·法伦",
+                "revealed": {"level": 0, "entries": []},
+            }
+        ],
         "clues_found": {
             "investigation": [],
             "event": [],
@@ -68,6 +72,25 @@ def resolution_world() -> dict:
         "flags": {"office_searched": False},
         "endings": [],
     }
+
+
+def model_tool_call(call_id: str, name: str, arguments: str) -> dict:
+    """Build a server-stamped call as ModelStreamer would for graph tests."""
+    catalog = tool_catalog_for_names([name])
+    snapshot = ToolRequestSnapshot.create(
+        step=1,
+        profile="story:test",
+        caller=MODEL_CALLER,
+        tools=catalog,
+    )
+    return attach_request_snapshot(
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": arguments},
+        },
+        snapshot,
+    )
 
 
 class ActionCheckInferenceTests(unittest.TestCase):
@@ -90,12 +113,8 @@ class ActionCheckInferenceTests(unittest.TestCase):
         world = resolution_world()
 
         self.assertIsNone(infer_action_check("我先看一眼莱特的遗体", world))
-        self.assertIsNone(
-            infer_action_check("我问法伦能不能让我搜查办公室", world)
-        )
-        self.assertIsNone(
-            infer_action_check("我问医生：你仔细检查过莱特的遗体吗？", world)
-        )
+        self.assertIsNone(infer_action_check("我问法伦能不能让我搜查办公室", world))
+        self.assertIsNone(infer_action_check("我问医生：你仔细检查过莱特的遗体吗？", world))
         self.assertIsNone(infer_action_check("我不搜查这间屋子", world))
 
     def test_explicit_known_scene_travel_is_resolved_locally(self):
@@ -119,9 +138,7 @@ class ActionCheckInferenceTests(unittest.TestCase):
         world = resolution_world()
 
         self.assertIsNone(infer_scene_transition("我不去莱特的办公室。", world))
-        self.assertIsNone(
-            infer_scene_transition("我问法伦怎么去莱特的办公室。", world)
-        )
+        self.assertIsNone(infer_scene_transition("我问法伦怎么去莱特的办公室。", world))
 
 
 class StoryStreamingTests(unittest.TestCase):
@@ -139,7 +156,7 @@ class StoryStreamingTests(unittest.TestCase):
         self.assertFalse(result["turn_had_check"])
         self.assertFalse(result["opening_turn"])
 
-    def test_control_turn_does_not_buffer_normal_opening_narrative(self):
+    def test_control_turn_buffers_until_tool_plan_is_known(self):
         calls = []
 
         def stream(model, **kwargs):
@@ -148,14 +165,16 @@ class StoryStreamingTests(unittest.TestCase):
 
         engine = SimpleNamespace(current_model="flash", _stream_llm=stream)
 
-        result = _call_story_agent({
-            "engine": engine,
-            "control_turn": True,
-            "tool_round": 0,
-        })
+        result = _call_story_agent(
+            {
+                "engine": engine,
+                "control_turn": True,
+                "tool_round": 0,
+            }
+        )
 
         self.assertEqual(result, {"text": "开场。", "tool_calls": []})
-        self.assertFalse(calls[0][1]["buffer_if_tools"])
+        self.assertTrue(calls[0][1]["buffer_if_tools"])
 
     def test_structured_opening_uses_public_prompt_without_tools(self):
         calls = []
@@ -170,10 +189,12 @@ class StoryStreamingTests(unittest.TestCase):
             _opening_system_prompt=lambda: "public-opening-system",
         )
 
-        result = _call_story_agent({
-            "engine": engine,
-            "opening_turn": True,
-        })
+        result = _call_story_agent(
+            {
+                "engine": engine,
+                "opening_turn": True,
+            }
+        )
 
         self.assertEqual(result["text"], "完整开场。")
         self.assertEqual(
@@ -239,16 +260,20 @@ class FakeCommitEngine:
             elif name == "state_remove_item":
                 state["pc"]["inventory"].remove(args["item"])
             elif name == "state_add_clue":
-                state["clues_found"][args["category"]].append({
-                    "id": args.get("clue_id", "generated"),
-                    "text": args["text"],
-                })
+                state["clues_found"][args["category"]].append(
+                    {
+                        "id": args.get("clue_id", "generated"),
+                        "text": args["text"],
+                    }
+                )
             elif name == "npc_reveal":
                 npc = next(item for item in state["npcs"] if item["id"] == args["npc_id"])
-                npc["revealed"]["entries"].append({
-                    "tier": args["tier"],
-                    "text": args["entry_text"],
-                })
+                npc["revealed"]["entries"].append(
+                    {
+                        "tier": args["tier"],
+                        "text": args["entry_text"],
+                    }
+                )
                 npc["revealed"]["level"] = args["tier"]
 
         self.context.world_store.update(update)
@@ -269,16 +294,20 @@ class TurnCommitTests(unittest.TestCase):
                 "scene_id": "office",
                 "items_add": ["黄铜钥匙", "手电筒"],
                 "items_remove": [],
-                "clues": [{
-                    "text": "裂镜的一角像被高热熔化。",
-                    "category": "investigation",
-                    "clue_id": "melted_mirror",
-                }],
-                "npc_reveals": [{
-                    "npc_id": "fallon",
-                    "tier": 1,
-                    "text": "法伦显得异常紧张。",
-                }],
+                "clues": [
+                    {
+                        "text": "裂镜的一角像被高热熔化。",
+                        "category": "investigation",
+                        "clue_id": "melted_mirror",
+                    }
+                ],
+                "npc_reveals": [
+                    {
+                        "npc_id": "fallon",
+                        "tier": 1,
+                        "text": "法伦显得异常紧张。",
+                    }
+                ],
                 "flags_set": [
                     {"key": "office_searched", "value_json": "true"},
                     {"key": "invented_flag", "value_json": "true"},
@@ -317,19 +346,25 @@ class TurnCommitTests(unittest.TestCase):
             store.initialize(resolution_world())
             engine = FakeCommitEngine(store)
             calls = []
-            arguments = json.dumps({
-                "scene_id": "",
-                "items_add": [],
-                "items_remove": [],
-                "clues": [],
-                "npc_reveals": [],
-                "flags_set": [],
-                "sanity_events": [],
-                "ending_id": "",
-            })
-            message = SimpleNamespace(tool_calls=[SimpleNamespace(
-                function=SimpleNamespace(arguments=arguments),
-            )])
+            arguments = json.dumps(
+                {
+                    "scene_id": "",
+                    "items_add": [],
+                    "items_remove": [],
+                    "clues": [],
+                    "npc_reveals": [],
+                    "flags_set": [],
+                    "sanity_events": [],
+                    "ending_id": "",
+                }
+            )
+            message = SimpleNamespace(
+                tool_calls=[
+                    SimpleNamespace(
+                        function=SimpleNamespace(arguments=arguments),
+                    )
+                ]
+            )
 
             def create(**kwargs):
                 calls.append(kwargs)
@@ -351,36 +386,64 @@ class TurnCommitTests(unittest.TestCase):
             self.assertEqual(result, {"applied": [], "skipped": []})
 
     def test_story_state_commit_skips_second_model_audit(self):
-        self.assertFalse(turn_needs_model_audit([{
-            "name": "state_add_clue",
-            "output": '{"ok": true}',
-        }]))
-        self.assertTrue(turn_needs_model_audit([{
-            "name": "show_handout",
-            "output": '{"found": true}',
-        }]))
-        self.assertTrue(turn_needs_model_audit([{
-            "name": "state_add_item",
-            "output": "[错误] failed",
-        }]))
-        self.assertFalse(turn_needs_model_audit([{
-            "name": "state_set",
-            "output": '{"ok": true}',
-        }]))
+        self.assertFalse(
+            turn_needs_model_audit(
+                [
+                    {
+                        "name": "state_add_clue",
+                        "output": '{"ok": true}',
+                    }
+                ]
+            )
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [
+                    {
+                        "name": "show_handout",
+                        "output": '{"found": true}',
+                    }
+                ]
+            )
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [
+                    {
+                        "name": "state_add_item",
+                        "output": "[错误] failed",
+                    }
+                ]
+            )
+        )
+        self.assertFalse(
+            turn_needs_model_audit(
+                [
+                    {
+                        "name": "state_set",
+                        "output": '{"ok": true}',
+                    }
+                ]
+            )
+        )
 
     def test_routine_prose_skips_second_model_audit(self):
-        self.assertFalse(turn_needs_model_audit(
-            [],
-            player_action="我环顾大厅。",
-            narrative="你仍站在大厅里，雨点轻敲着窗玻璃。",
-        ))
+        self.assertFalse(
+            turn_needs_model_audit(
+                [],
+                player_action="我环顾大厅。",
+                narrative="你仍站在大厅里，雨点轻敲着窗玻璃。",
+            )
+        )
 
     def test_stateful_prose_keeps_second_model_audit_as_fallback(self):
-        self.assertTrue(turn_needs_model_audit(
-            [],
-            player_action="我追问死亡证明。",
-            narrative="医生终于承认，那份死亡证明经过了伪造。",
-        ))
+        self.assertTrue(
+            turn_needs_model_audit(
+                [],
+                player_action="我追问死亡证明。",
+                narrative="医生终于承认，那份死亡证明经过了伪造。",
+            )
+        )
 
     def test_scene_sync_requires_explicit_transition(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -413,9 +476,7 @@ class TurnCommitTests(unittest.TestCase):
                 "布莱斯·法伦随口说莱特从没请过病假，窗外雨声渐密。",
             )
 
-            self.assertFalse(any(
-                name == "state_add_clue" for name, _args in engine.calls
-            ))
+            self.assertFalse(any(name == "state_add_clue" for name, _args in engine.calls))
             self.assertEqual(
                 store.load()["clues_found"],
                 world["clues_found"],
@@ -423,14 +484,16 @@ class TurnCommitTests(unittest.TestCase):
 
     def test_scene_sync_prefers_longest_nested_scene_name(self):
         world = resolution_world()
-        world["scene_catalog"].update({
-            "campus": {"id": "campus", "name": "密斯卡托尼克大学"},
-            "medical": {
-                "id": "medical",
-                "name": "密斯卡托尼克大学医学院",
-                "npcs_present": [],
-            },
-        })
+        world["scene_catalog"].update(
+            {
+                "campus": {"id": "campus", "name": "密斯卡托尼克大学"},
+                "medical": {
+                    "id": "medical",
+                    "name": "密斯卡托尼克大学医学院",
+                    "npcs_present": [],
+                },
+            }
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
             store.initialize(world)
@@ -457,15 +520,17 @@ class FinalizeTurnTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "开场模型未生成任何叙述"):
-            _finalize_turn({
-                "engine": engine,
-                "opening_turn": True,
-                "narrative": "",
-                "text": "",
-                "tool_calls": [],
-                "executed_tools": [],
-                "turn_had_check": False,
-            })
+            _finalize_turn(
+                {
+                    "engine": engine,
+                    "opening_turn": True,
+                    "narrative": "",
+                    "text": "",
+                    "tool_calls": [],
+                    "executed_tools": [],
+                    "turn_had_check": False,
+                }
+            )
 
         self.assertEqual(events, [])
 
@@ -488,14 +553,16 @@ class FinalizeTurnTests(unittest.TestCase):
             _maybe_summarize_after_turn=lambda: None,
         )
 
-        _finalize_turn({
-            "engine": engine,
-            "narrative": "你看见两件编号证物。\n\n你可以——\n1. 检查门锁\n2. [自由行动] 你决定做什么？",
-            "text": "",
-            "tool_calls": [],
-            "executed_tools": [],
-            "turn_had_check": False,
-        })
+        _finalize_turn(
+            {
+                "engine": engine,
+                "narrative": "你看见两件编号证物。\n\n你可以——\n1. 检查门锁\n2. [自由行动] 你决定做什么？",
+                "text": "",
+                "tool_calls": [],
+                "executed_tools": [],
+                "turn_had_check": False,
+            }
+        )
 
         self.assertEqual(events[0][0], "choices")
         self.assertEqual(events[0][1][0]["label"], "检查门锁")
@@ -519,15 +586,17 @@ class FinalizeTurnTests(unittest.TestCase):
             _maybe_summarize_after_turn=lambda: events.append("summary"),
         )
 
-        result = _finalize_turn({
-            "engine": engine,
-            "user_content": "继续调查",
-            "narrative": "第一段叙述。",
-            "text": "第二段叙述。",
-            "tool_calls": [],
-            "executed_tools": [],
-            "turn_had_check": False,
-        })
+        result = _finalize_turn(
+            {
+                "engine": engine,
+                "user_content": "继续调查",
+                "narrative": "第一段叙述。",
+                "text": "第二段叙述。",
+                "tool_calls": [],
+                "executed_tools": [],
+                "turn_had_check": False,
+            }
+        )
 
         self.assertEqual(result["narrative"], "第一段叙述。\n\n第二段叙述。")
         self.assertEqual(engine.messages[-1]["content"], result["narrative"])
@@ -555,15 +624,17 @@ class FinalizeTurnTests(unittest.TestCase):
         )
 
         with patch("src.agent_graph.ENABLE_TURN_AUDIT", True):
-            _finalize_turn({
-                "engine": engine,
-                "user_content": None,
-                "narrative": "法伦随口说了几句模组未定义的往事。",
-                "text": "",
-                "tool_calls": [],
-                "executed_tools": [],
-                "turn_had_check": False,
-            })
+            _finalize_turn(
+                {
+                    "engine": engine,
+                    "user_content": None,
+                    "narrative": "法伦随口说了几句模组未定义的往事。",
+                    "text": "",
+                    "tool_calls": [],
+                    "executed_tools": [],
+                    "turn_had_check": False,
+                }
+            )
 
         self.assertNotIn("audit", events)
         self.assertNotIn("reconcile", events)
@@ -580,27 +651,25 @@ class ToolExecutionSafetyTests(unittest.TestCase):
                 on_tension=lambda *_args: None,
                 on_dice=lambda *_args: None,
             ),
-            _execute_tool=lambda _name, _args: json.dumps({
-                "spec": "1d20",
-                "rolls": [12],
-                "total": 12,
-                "modifier": 0,
-            }),
+            _execute_tool=lambda _name, _args: json.dumps(
+                {
+                    "spec": "1d20",
+                    "rolls": [12],
+                    "total": 12,
+                    "modifier": 0,
+                }
+            ),
             _maybe_hint_optional_skill=lambda _name: None,
         )
 
         with patch("src.agent_graph.glm_quick_summary", return_value=None):
-            _execute_tools({
-                "engine": engine,
-                "tool_round": 0,
-                "tool_calls": [{
-                    "id": "call_check",
-                    "function": {
-                        "name": "dice_roll",
-                        "arguments": '{"spec":"1d20"}',
-                    },
-                }],
-            })
+            _execute_tools(
+                {
+                    "engine": engine,
+                    "tool_round": 0,
+                    "tool_calls": [model_tool_call("call_check", "dice_roll", '{"spec":"1d20"}')],
+                }
+            )
 
         self.assertEqual(engine.current_model, "judge-model")
 
@@ -615,31 +684,35 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _maybe_hint_optional_skill=lambda _name: None,
         )
 
-        result = _execute_tools({
-            "engine": engine,
-            "tool_round": 0,
-            "tool_calls": [{
-                "id": "call_read",
-                "function": {
-                    "name": "read_file",
-                    "arguments": '{"path": ""}',
-                },
-            }],
-        })
+        result = _execute_tools(
+            {
+                "engine": engine,
+                "tool_round": 0,
+                "tool_calls": [model_tool_call("call_read", "read_file", '{"path": ""}')],
+            }
+        )
 
-        self.assertIn("[错误]", result["executed_tools"][0]["output"])
-        self.assertIn("[错误]", engine.messages[-2]["content"])
+        self.assertEqual(
+            json.loads(result["executed_tools"][0]["output"])["reason"],
+            "model_tool_forbidden",
+        )
+        self.assertEqual(
+            json.loads(engine.messages[-2]["content"])["error"],
+            "tool_policy_denied",
+        )
         self.assertIn("NPC 直接引语", engine.messages[-1]["content"])
 
     def test_identical_check_in_one_turn_reuses_result_without_rerolling(self):
         executions = []
         dice_events = []
-        output = json.dumps({
-            "skill": "psychology",
-            "skill_value": 60,
-            "d100_roll": 24,
-            "level": "困难成功",
-        })
+        output = json.dumps(
+            {
+                "skill": "psychology",
+                "skill_value": 60,
+                "d100_roll": 24,
+                "level": "困难成功",
+            }
+        )
         engine = SimpleNamespace(
             messages=[],
             judgement_model="judge-model",
@@ -651,21 +724,18 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _execute_tool=lambda name, args: executions.append((name, args)) or output,
             _maybe_hint_optional_skill=lambda _name: None,
         )
+
         def call(call_id):
-            return {
-                "id": call_id,
-                "function": {
-                    "name": "skill_check",
-                    "arguments": '{"skill":"psychology"}',
-                },
-            }
+            return model_tool_call(call_id, "skill_check", '{"skill":"psychology"}')
 
         with patch("src.agent_graph.glm_quick_summary", return_value=None):
-            result = _execute_tools({
-                "engine": engine,
-                "tool_round": 0,
-                "tool_calls": [call("first"), call("duplicate")],
-            })
+            result = _execute_tools(
+                {
+                    "engine": engine,
+                    "tool_round": 0,
+                    "tool_calls": [call("first"), call("duplicate")],
+                }
+            )
 
         self.assertEqual(len(executions), 1)
         self.assertEqual(len(dice_events), 1)
@@ -676,26 +746,28 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             messages=[],
             cb=SimpleNamespace(on_tension=lambda *_args: None),
             _execute_tool=lambda name, _args: json.dumps({"ok": True, "tool": name}),
-            _maybe_hint_optional_skill=lambda name: engine.messages.append({
-                "role": "user",
-                "content": f"loaded {name}",
-            }),
+            _maybe_hint_optional_skill=lambda name: engine.messages.append(
+                {
+                    "role": "user",
+                    "content": f"loaded {name}",
+                }
+            ),
         )
 
-        _execute_tools({
-            "engine": engine,
-            "tool_round": 0,
-            "tool_calls": [
-                {
-                    "id": "call_one",
-                    "function": {"name": "state_get", "arguments": "{}"},
-                },
-                {
-                    "id": "call_two",
-                    "function": {"name": "state_clues", "arguments": "{}"},
-                },
-            ],
-        })
+        _execute_tools(
+            {
+                "engine": engine,
+                "tool_round": 0,
+                "tool_calls": [
+                    model_tool_call("call_one", "apply_damage", '{"target":"pc","amount":1}'),
+                    model_tool_call(
+                        "call_two",
+                        "use_item",
+                        '{"item":"手电筒","operation":"use","reason":"照明"}',
+                    ),
+                ],
+            }
+        )
 
         self.assertEqual(
             [message["role"] for message in engine.messages],
@@ -711,12 +783,17 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             cb=SimpleNamespace(on_dice=lambda summary, data: events.append((summary, data)))
         )
 
-        _emit_sanity_dice(engine, json.dumps({
-            "san_roll": 42,
-            "san_before": 70,
-            "san_check_success": True,
-            "actual_loss": 1,
-        }))
+        _emit_sanity_dice(
+            engine,
+            json.dumps(
+                {
+                    "san_roll": 42,
+                    "san_before": 70,
+                    "san_check_success": True,
+                    "actual_loss": 1,
+                }
+            ),
+        )
 
         self.assertEqual(len(events), 1)
         self.assertIn("SAN -1", events[0][0])

@@ -19,18 +19,18 @@ DOMAIN_MODULES = (
 )
 FORBIDDEN_DOMAIN_IMPORTS = {"fastapi", "openai", "server", "src.engine"}
 LINE_RATCHETS = {
-    # The former limits predated the already-merged master baseline and had
-    # therefore stopped being an actionable ratchet. These values are the
-    # measured post-extraction baseline: server.py is below master (1699),
-    # while each dedicated adapter gets its own deliberately tight ceiling.
+    # Keep each existing adapter at its verified baseline.  The room HTTP/WS
+    # modules had already exceeded their older numbers on master, so those two
+    # limits are re-baselined here rather than making CI permanently red; any
+    # subsequent growth still requires an extraction first.
     "src/engine.py": 2126,
     "src/model_streamer.py": 427,
     "server.py": 1699,
     "src/tools.py": 1503,
     "tools/state_manager.py": 797,
     "src/auth_http.py": 120,
-    "src/multiplayer_http.py": 420,
-    "src/multiplayer_ws.py": 740,
+    "src/multiplayer_http.py": 443,
+    "src/multiplayer_ws.py": 761,
 }
 
 

@@ -2,82 +2,21 @@
 
 from __future__ import annotations
 
-import json
-import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from .llm_concurrency import LlmBusyError, acquire_llm_slot
-from .lorebook import estimate_text_tokens
-from .persistence import normalize_tool_message_history
-from .speaker_parser import (
-    SpeakerStreamParser,
+from .model_request import StreamPolicy, prepare_model_request
+from .model_stream_helpers import (
+    sanitize_visible_narrative,
+    stream_usage_dict,
+    take_complete_sentences,
 )
-from .speaker_parser import (
-    parse_segments as parse_speaker_segments,
-)
-from .tool_protocol import ToolProtocolFilter, strip_tool_protocol
-from .tools import MODEL_TOOLS, model_tools_for
-
-_INTERNAL_NARRATIVE_PATTERNS = (
-    re.compile(r"(?:让我|我)?先确认(?:一下)?当前(?:的)?信息边界[。.!！]?\s*"),
-    re.compile(r"按玩家(?:的)?明确意图[^。！？\n]*[。！？]?\s*"),
-    re.compile(
-        r"需要(?:确认|记录|写入)[^。！？\n]*(?:world_state|世界状态)[^。！？\n]*[。！？]?\s*",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"当前\s*SAN\s*=\s*\d+\s*[？?][^。！？\n]*(?:应该|不对)[^。！？\n]*[。！？]?\s*",
-        re.IGNORECASE,
-    ),
-)
-
-
-def sanitize_visible_narrative(text: str) -> str:
-    text = strip_tool_protocol(text)
-    for pattern in _INTERNAL_NARRATIVE_PATTERNS:
-        text = pattern.sub("", text)
-    return re.sub(r"\n{3,}", "\n\n", text)
-
-
-def take_complete_sentences(text: str) -> tuple[str, str]:
-    boundaries = list(re.finditer(r"[。！？!?\n]", text))
-    if not boundaries:
-        return "", text
-    cutoff = boundaries[-1].end()
-    return text[:cutoff], text[cutoff:]
-
-
-def stream_usage_dict(usage: object) -> dict:
-    if usage is None:
-        return {}
-    if isinstance(usage, dict):
-        raw = usage
-    elif hasattr(usage, "model_dump"):
-        raw = usage.model_dump()
-    else:
-        raw = {
-            key: getattr(usage, key, None)
-            for key in (
-                "prompt_tokens", "completion_tokens", "total_tokens",
-                "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
-            )
-        }
-    allowed = {
-        "prompt_tokens", "completion_tokens", "total_tokens",
-        "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
-    }
-    return {key: value for key, value in raw.items() if key in allowed and value is not None}
-
-
-@dataclass(frozen=True)
-class StreamPolicy:
-    dynamic_tools: bool
-    stream_usage: bool
-    prompt_profile: str
-    thinking_type: str | None
+from .speaker_parser import SpeakerStreamParser
+from .speaker_parser import parse_segments as parse_speaker_segments
+from .tool_policy import attach_request_snapshot
+from .tool_protocol import ToolProtocolFilter
 
 
 class ModelStreamer:
@@ -112,60 +51,24 @@ class ModelStreamer:
         host = self.host
         started_at = time.monotonic()
         first_token_at: float | None = None
-        if messages_override is None:
-            host.messages = normalize_tool_message_history(host.messages)
-            messages = host.messages
-        else:
-            messages = normalize_tool_message_history([dict(m) for m in messages_override])
-        if system_prompt_override or system_overlay:
-            messages = [dict(message) for message in messages]
-            if system_prompt_override:
-                if messages and messages[0].get("role") == "system":
-                    messages[0]["content"] = system_prompt_override
-                else:
-                    messages.insert(0, {"role": "system", "content": system_prompt_override})
-            if system_overlay and messages and messages[0].get("role") == "system":
-                messages[0]["content"] = f"{messages[0].get('content', '')}\n\n---\n\n{system_overlay}"
-            elif system_overlay:
-                messages.insert(0, {"role": "system", "content": system_overlay})
-
-        request_role = "combat" if system_overlay else "story"
-        request_tools = (
-            model_tools_for(request_role)
-            if enable_tools and policy.dynamic_tools
-            else MODEL_TOOLS if enable_tools else []
+        prepared = prepare_model_request(
+            host,
+            model,
+            policy=policy,
+            system_overlay=system_overlay,
+            system_prompt_override=system_prompt_override,
+            enable_tools=enable_tools,
+            temperature=temperature,
+            messages_override=messages_override,
         )
-        role_chars: dict[str, int] = {}
-        role_tokens: dict[str, int] = {}
-        for message in messages:
-            role = str(message.get("role") or "unknown")
-            content = str(message.get("content") or "")
-            role_chars[role] = role_chars.get(role, 0) + len(content)
-            role_tokens[role] = role_tokens.get(role, 0) + estimate_text_tokens(content)
-        tool_schema_json = json.dumps(request_tools, ensure_ascii=False, separators=(",", ":"))
-        system_chars = role_chars.get("system", 0)
-        tool_schema_chars = len(tool_schema_json)
-        context_sections = {
-            "system": {"chars": system_chars, "estimated_tokens": role_tokens.get("system", 0)},
-            "history": {
-                "chars": sum(v for r, v in role_chars.items() if r != "system"),
-                "estimated_tokens": sum(v for r, v in role_tokens.items() if r != "system"),
-            },
-            "tool_schema": {
-                "chars": tool_schema_chars,
-                "estimated_tokens": estimate_text_tokens(tool_schema_json),
-            },
-        }
-        kwargs: dict[str, Any] = {
-            "model": model, "messages": messages, "temperature": temperature,
-            "max_tokens": 4096, "stream": True,
-        }
-        if enable_tools:
-            kwargs.update(tools=request_tools, tool_choice="auto")
-        if policy.stream_usage:
-            kwargs["stream_options"] = {"include_usage": True}
-        if policy.thinking_type:
-            kwargs["extra_body"] = {"thinking": {"type": policy.thinking_type}}
+        messages = prepared.messages
+        request_role = prepared.request_role
+        request_snapshot = prepared.request_snapshot
+        context_sections = prepared.context_sections
+        request_envelope = prepared.request_envelope
+        kwargs = prepared.provider_kwargs
+        system_chars = prepared.system_chars
+        tool_schema_chars = prepared.tool_schema_chars
 
         llm_slot = None
         try:
@@ -179,22 +82,42 @@ class ModelStreamer:
                 llm_slot.release(status="failed")
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型请求已取消") from exc
-            self._diagnose(host, model, request_role, "request_error", started_at, None,
-                           "request_error", 0, messages, context_sections, {}, policy,
-                           error_type=type(exc).__name__)
+            self._diagnose(
+                host,
+                model,
+                request_role,
+                "request_error",
+                started_at,
+                None,
+                "request_error",
+                0,
+                messages,
+                context_sections,
+                {},
+                policy,
+                error_type=type(exc).__name__,
+                request_snapshot=request_snapshot.to_dict(),
+                request_envelope=request_envelope,
+            )
             if isinstance(exc, LlmBusyError):
                 self.log_error(f"模型并发已满: {exc}")
                 host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
                 return "", []
             if retry_on_empty:
-                self.log_error(f"API 建立流失败，正在重试: {exc}")
+                self.log_error(f"API 建立流失败，正在重试: {type(exc).__name__}")
                 self.sleep(0.4)
-                return self.stream(model, policy=policy, system_overlay=system_overlay,
-                                   system_prompt_override=system_prompt_override,
-                                   enable_tools=enable_tools, temperature=temperature,
-                                   buffer_if_tools=buffer_if_tools,
-                                   messages_override=messages_override, retry_on_empty=False)
-            self.log_error(f"API: {exc}")
+                return self.stream(
+                    model,
+                    policy=policy,
+                    system_overlay=system_overlay,
+                    system_prompt_override=system_prompt_override,
+                    enable_tools=enable_tools,
+                    temperature=temperature,
+                    buffer_if_tools=buffer_if_tools,
+                    messages_override=messages_override,
+                    retry_on_empty=False,
+                )
+            self.log_error(f"API 请求失败: {type(exc).__name__}")
             host.cb.on_error("模型服务暂时不可用，请稍后重试。")
             return "", []
 
@@ -209,8 +132,7 @@ class ModelStreamer:
         # ⟦npc:id⟧ 发言标签增量解析：标签剥离后文本照常流出，
         # speech_start 触发 on_speaker_segment，发言文本带 npc_id 上下文。
         speaker_parser = SpeakerStreamParser(
-            is_valid_npc=getattr(host, "is_valid_npc_id", None)
-            or (lambda _npc_id: False),
+            is_valid_npc=getattr(host, "is_valid_npc_id", None) or (lambda _npc_id: False),
             on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
         )
 
@@ -227,8 +149,7 @@ class ModelStreamer:
                 return False
             segments, clean = parse_speaker_segments(
                 raw,
-                is_valid_npc=getattr(host, "is_valid_npc_id", None)
-                or (lambda _npc_id: False),
+                is_valid_npc=getattr(host, "is_valid_npc_id", None) or (lambda _npc_id: False),
                 on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
                 speaker_aliases=aliases,
             )
@@ -298,10 +219,14 @@ class ModelStreamer:
                                 pending_visible = ""
                                 initial_sentence_released = True
                 for tool_call in delta.tool_calls or []:
-                    acc = tool_calls_acc.setdefault(tool_call.index, {
-                        "id": "", "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    })
+                    acc = tool_calls_acc.setdefault(
+                        tool_call.index,
+                        {
+                            "id": "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        },
+                    )
                     if tool_call.id:
                         acc["id"] += tool_call.id
                     if tool_call.function:
@@ -314,15 +239,21 @@ class ModelStreamer:
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型流已取消") from exc
             if retry_on_empty and not full_text and not tool_calls_acc:
-                self.log_error(f"API 空流中断，正在重试: {exc}")
+                self.log_error(f"API 空流中断，正在重试: {type(exc).__name__}")
                 self.sleep(0.4)
-                return self.stream(model, policy=policy, system_overlay=system_overlay,
-                                   system_prompt_override=system_prompt_override,
-                                   enable_tools=enable_tools, temperature=temperature,
-                                   buffer_if_tools=buffer_if_tools,
-                                   messages_override=messages_override, retry_on_empty=False)
+                return self.stream(
+                    model,
+                    policy=policy,
+                    system_overlay=system_overlay,
+                    system_prompt_override=system_prompt_override,
+                    enable_tools=enable_tools,
+                    temperature=temperature,
+                    buffer_if_tools=buffer_if_tools,
+                    messages_override=messages_override,
+                    retry_on_empty=False,
+                )
             finish_reason = "transport_error"
-            self.log_error(f"API 流式响应中断: {exc}")
+            self.log_error(f"API 流式响应中断: {type(exc).__name__}")
             host.cb.on_error("模型连接中断，已保留本轮收到的内容。")
         finally:
             host._clear_active_stream(provider_stream)
@@ -343,9 +274,7 @@ class ModelStreamer:
             self.log_error("模型同时返回结构化和文本工具协议；已忽略文本协议")
             text_tool_calls = []
         elif protocol_filter.blocks:
-            self.log_error(
-                f"已隔离模型文本工具协议（{len(protocol_filter.blocks)} 个区块）"
-            )
+            self.log_error(f"已隔离模型文本工具协议（{len(protocol_filter.blocks)} 个区块）")
         if protocol_filter.malformed:
             self.log_error("已丢弃未闭合或过长的模型文本工具协议")
 
@@ -365,7 +294,14 @@ class ModelStreamer:
                     host.cb.on_speaker_segment(text)
         if finish_reason == "length" and not tool_calls_acc and not text_tool_calls:
             host.cb.on_error("（叙述过长被截断，请重试或继续）")
-        tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
+        raw_tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
+        tool_calls: list[dict] = []
+        for index, raw_call in enumerate(raw_tool_calls):
+            call = dict(raw_call)
+            call_id = str(call.get("id") or "")
+            if not call_id or call_id.startswith("dsml_"):
+                call["id"] = f"{request_snapshot.request_id}:{request_snapshot.step}:{index}"
+            tool_calls.append(attach_request_snapshot(call, request_snapshot))
         if buffer_if_tools:
             if tool_calls:
                 full_text = ""
@@ -392,36 +328,80 @@ class ModelStreamer:
                 tool_count=len(tool_calls),
             )
         self.log_model_call(
-            model, request_role, elapsed, first_token, finish_reason, len(tool_calls),
-            usage=usage_data, system_chars=system_chars, tool_schema_chars=tool_schema_chars,
+            model,
+            request_role,
+            elapsed,
+            first_token,
+            finish_reason,
+            len(tool_calls),
+            usage=usage_data,
+            system_chars=system_chars,
+            tool_schema_chars=tool_schema_chars,
             prompt_profile=policy.prompt_profile,
             thinking_mode=policy.thinking_type or "provider",
         )
-        self._diagnose(host, model, request_role,
-                       "completed" if finish_reason != "transport_error" else "transport_error",
-                       started_at, first_token, finish_reason, len(tool_calls), messages,
-                       context_sections, usage_data, policy)
+        self._diagnose(
+            host,
+            model,
+            request_role,
+            "completed" if finish_reason != "transport_error" else "transport_error",
+            started_at,
+            first_token,
+            finish_reason,
+            len(tool_calls),
+            messages,
+            context_sections,
+            usage_data,
+            policy,
+            request_snapshot=request_snapshot.to_dict(),
+            request_envelope=request_envelope,
+        )
         if not full_text and not tool_calls and retry_on_empty:
             self.log_error("API 返回空响应，正在重试一次")
             self.sleep(0.4)
-            return self.stream(model, policy=policy, system_overlay=system_overlay,
-                               system_prompt_override=system_prompt_override,
-                               enable_tools=enable_tools, temperature=temperature,
-                               buffer_if_tools=buffer_if_tools,
-                               messages_override=messages_override, retry_on_empty=False)
+            return self.stream(
+                model,
+                policy=policy,
+                system_overlay=system_overlay,
+                system_prompt_override=system_prompt_override,
+                enable_tools=enable_tools,
+                temperature=temperature,
+                buffer_if_tools=buffer_if_tools,
+                messages_override=messages_override,
+                retry_on_empty=False,
+            )
         return full_text, tool_calls
 
     @staticmethod
-    def _diagnose(host: Any, model: str, role: str, status: str, started_at: float,
-                  first_token: float | None, finish_reason: str | None, tool_count: int,
-                  messages: list[dict], context_sections: dict, usage: dict,
-                  policy: StreamPolicy, **extra: Any) -> None:
-        host._append_model_diagnostic({
-            "model": model, "role": role, "status": status,
-            "elapsed_ms": int((time.monotonic() - started_at) * 1000),
-            "first_token_ms": int(first_token * 1000) if first_token is not None else None,
-            "finish_reason": finish_reason, "tool_count": tool_count,
-            "message_count": len(messages), "context_sections": context_sections,
-            "usage": dict(usage), "prompt_profile": policy.prompt_profile,
-            "thinking_mode": policy.thinking_type or "provider", **extra,
-        })
+    def _diagnose(
+        host: Any,
+        model: str,
+        role: str,
+        status: str,
+        started_at: float,
+        first_token: float | None,
+        finish_reason: str | None,
+        tool_count: int,
+        messages: list[dict],
+        context_sections: dict,
+        usage: dict,
+        policy: StreamPolicy,
+        **extra: Any,
+    ) -> None:
+        host._append_model_diagnostic(
+            {
+                "model": model,
+                "role": role,
+                "status": status,
+                "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+                "first_token_ms": int(first_token * 1000) if first_token is not None else None,
+                "finish_reason": finish_reason,
+                "tool_count": tool_count,
+                "message_count": len(messages),
+                "context_sections": context_sections,
+                "usage": dict(usage),
+                "prompt_profile": policy.prompt_profile,
+                "thinking_mode": policy.thinking_type or "provider",
+                **extra,
+            }
+        )

@@ -44,7 +44,7 @@ def combat_world() -> dict:
 
 
 class ReadFileToolSafetyTests(unittest.TestCase):
-    def test_read_file_rejects_empty_path_and_directories(self):
+    def test_read_file_is_disabled_for_all_legacy_paths(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             context = RuntimeContext.create(
                 "read-file-safety",
@@ -58,10 +58,10 @@ class ReadFileToolSafetyTests(unittest.TestCase):
                 "read_file", {"path": "src"}, context=context
             )
 
-            self.assertIn("路径不能为空", empty)
-            self.assertIn("不能读取目录", directory)
+            self.assertIn("read_file 已停用", empty)
+            self.assertEqual(directory, empty)
 
-    def test_read_file_supports_world_and_module_aliases(self):
+    def test_read_file_does_not_expose_world_or_module_aliases(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             context = RuntimeContext.create(
                 "read-file-aliases",
@@ -70,22 +70,19 @@ class ReadFileToolSafetyTests(unittest.TestCase):
                 runtime_root=Path(temp_dir),
             )
 
-            world = json.loads(execute_function(
+            world = execute_function(
                 "read_file",
                 {"path": "modules/mansion_of_madness/world_state.json"},
                 context=context,
-            ))
+            )
             module_text = execute_function(
                 "read_file",
                 {"path": "modules/mansion_of_madness/module.md"},
                 context=context,
             )
 
-            self.assertIn("pc", world)
-            self.assertEqual(
-                module_text,
-                (context.module_dir / "module.md").read_text(encoding="utf-8"),
-            )
+            self.assertIn("read_file 已停用", world)
+            self.assertEqual(module_text, world)
 
     def test_tool_history_moves_interrupted_instruction_after_responses(self):
         messages = [

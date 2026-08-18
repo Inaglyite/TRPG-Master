@@ -5,8 +5,6 @@
 import copy
 import json
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
 
 from openai import OpenAI
 
@@ -28,7 +26,6 @@ from .config import (
     JUDGEMENT_MODEL,
     MODEL_FLASH,
     NARRATIVE_MODEL,
-    OPTIONAL_SKILL_HINTS,
     PROMPT_PROFILE,
     STORY_THINKING_MODE,
     model_timeout_seconds,
@@ -40,6 +37,7 @@ from .discovery import (
     preferred_check_skill,
 )
 from .encounters import SceneEncounterResolution, resolve_scene_encounters
+from .engine_primitives import EngineCallbacks, TurnCancelledError
 from .handouts import matching_handouts
 from .history_compactor import HistoryCompactor, build_summary_input, parse_summary_json
 from .logger import error as log_error
@@ -61,6 +59,11 @@ from .model_streamer import (
 )
 from .npc_conversations import commit_npc_conversations
 from .npc_speaker_aliases import build_npc_speaker_aliases
+from .optional_skills import (
+    hint_optional_skill,
+    inject_optional_skill,
+    inject_skills_for_player_content,
+)
 from .persistence import (
     has_save,
     list_saves,
@@ -107,10 +110,6 @@ _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 出口的台词必须用 【npc:<id>⟧…【/npc】 原样保留或补标；旁白与转述不加标签。"""
 
 
-class TurnCancelledError(RuntimeError):
-    """Raised when a disconnected client cancels an in-flight model turn."""
-
-
 def _sanitize_visible_narrative(text: str) -> str:
     return sanitize_visible_narrative(text)
 
@@ -124,27 +123,6 @@ def _thinking_type_for_request(model: str, request_role: str) -> str | None:
     if "deepseek.com" in BASE_URL.lower() and model == MODEL_FLASH:
         return "disabled"
     return None
-
-
-@dataclass
-class EngineCallbacks:
-    """引擎输出事件回调。每个回调在特定时机触发。"""
-    on_narrative: Callable[..., None] = lambda text, npc_id=None: None  # 流式文本块（npc_id 表示发言 NPC）
-    on_tension: Callable[[str, str], None] = lambda text, cat: None  # 沉浸式提示
-    on_dice: Callable[[str, dict | None], None] = lambda summary, roll_data=None: None  # 骰子结果
-    on_glm_summary: Callable[[str], None] = lambda text: None    # 快速摘要
-    on_suggest: Callable[[dict], bool] = lambda info: False      # 检定确认，返回 True/False
-    on_decision: Callable[[dict], str | None] = lambda info: info.get("default_option")  # 多选决定
-    on_phase: Callable[[str, str], None] = lambda phase, label: None  # 稳定的等待阶段
-    on_choices: Callable[[list[dict]], None] = lambda choices: None   # 结构化行动选项
-    on_done: Callable[[], None] = lambda: None                   # 回合结束
-    on_game_over: Callable[[str, str, str], None] = lambda t, ti, s: None  # 游戏结束
-    on_handout: Callable[[dict], None] = lambda info: None       # 展示材料
-    on_error: Callable[[str], None] = lambda msg: None           # 错误
-    on_speaker_segment: Callable[[str], None] = lambda npc_id: None  # NPC 发言段开始
-    on_narrative_segments: Callable[[list], None] = lambda segments: None  # 发言段定稿
-    on_performance: Callable[[dict], None] = lambda metrics: None
-    on_private_event: Callable[[dict], None] = lambda info: None
 
 
 class GameEngine:
@@ -227,12 +205,8 @@ class GameEngine:
 
     def prepare_session(self):
         """准备一条界面连接使用的空会话，不重置 world_state。"""
-        self.narrative_model = getattr(
-            self, "narrative_model", NARRATIVE_MODEL
-        )
-        self.judgement_model = getattr(
-            self, "judgement_model", JUDGEMENT_MODEL
-        )
+        self.narrative_model = getattr(self, "narrative_model", NARRATIVE_MODEL)
+        self.judgement_model = getattr(self, "judgement_model", JUDGEMENT_MODEL)
         self.messages = [{"role": "system", "content": load_system_prompt(self.context)}]
         self._lorebook = None
         if ENABLE_LOREBOOK:
@@ -332,11 +306,17 @@ class GameEngine:
     def adopt_message_history(self, messages: list[dict]) -> int:
         """Adopt committed public/session history without restoring world state again."""
         normalized = normalize_tool_message_history(copy.deepcopy(messages))
-        system_msg = self.messages[0] if self.messages else {
-            "role": "system",
-            "content": load_system_prompt(self.context),
-        }
-        history = normalized[1:] if normalized and normalized[0].get("role") == "system" else normalized
+        system_msg = (
+            self.messages[0]
+            if self.messages
+            else {
+                "role": "system",
+                "content": load_system_prompt(self.context),
+            }
+        )
+        history = (
+            normalized[1:] if normalized and normalized[0].get("role") == "system" else normalized
+        )
         self.messages = [system_msg, *history]
         self._round_count = 0
         self._player_turn_count = 0
@@ -467,33 +447,29 @@ class GameEngine:
         investigator_roster.project_active_investigator(world_state)
         with self.performance_span("journal_commit"):
             record = journal.complete(
-            turn_id,
-            messages=self.messages,
-            world_state=world_state,
-            narrative=narrative,
-            choices=choices,
-            executed_tools=executed_tools,
-            lore_entry_ids=lore_entry_ids,
-            diagnostics={
-                "model_calls": list(self._turn_diagnostics),
-                "lorebook": dict(self._turn_lore_diagnostics),
-                "performance": performance,
-                "mutations": self._turn_mutations.snapshot(),
-            },
-            narrative_segments=narrative_segments,
-            expected_world_revision=expected_world_revision,
+                turn_id,
+                messages=self.messages,
+                world_state=world_state,
+                narrative=narrative,
+                choices=choices,
+                executed_tools=executed_tools,
+                lore_entry_ids=lore_entry_ids,
+                diagnostics={
+                    "model_calls": list(self._turn_diagnostics),
+                    "lorebook": dict(self._turn_lore_diagnostics),
+                    "performance": performance,
+                    "mutations": self._turn_mutations.snapshot(),
+                },
+                narrative_segments=narrative_segments,
+                expected_world_revision=expected_world_revision,
             )
         accept_commit = getattr(self.context.world_store, "accept_turn_commit", None)
         if accept_commit:
             accept_commit(world_state)
         if perf is not None:
             performance = perf.snapshot()
-            persisted_performance = (
-                record.get("diagnostics", {}).get("performance", {})
-            )
-            journal_ms = persisted_performance.get("phases_ms", {}).get(
-                "journal_commit"
-            )
+            persisted_performance = record.get("diagnostics", {}).get("performance", {})
+            journal_ms = persisted_performance.get("phases_ms", {}).get("journal_commit")
             if journal_ms is not None:
                 performance.setdefault("phases_ms", {})["journal_commit"] = journal_ms
             record.setdefault("diagnostics", {})["performance"] = performance
@@ -555,10 +531,12 @@ class GameEngine:
             role = message.get("role")
             if role not in {"user", "assistant"}:
                 continue
-            recent_context.append({
-                "role": role,
-                "content": clip(message.get("content"), 1200),
-            })
+            recent_context.append(
+                {
+                    "role": role,
+                    "content": clip(message.get("content"), 1200),
+                }
+            )
         fixed_outcomes = [
             {
                 "tool": item.get("name"),
@@ -653,23 +631,24 @@ class GameEngine:
 
     def append_control_instruction(self, content: str) -> None:
         """追加程序控制消息，并与真实玩家发言明确隔离。"""
-        self.messages.append({
-            "role": "user",
-            "content": (
-                f"{self.CONTROL_MESSAGE_PREFIX}\n"
-                "静默执行下列指令。不要确认、复述或说明执行过程；"
-                "不要把这条消息的发出者称为守秘人或 GM。\n"
-                f"{content}"
-            ),
-        })
+        self.messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"{self.CONTROL_MESSAGE_PREFIX}\n"
+                    "静默执行下列指令。不要确认、复述或说明执行过程；"
+                    "不要把这条消息的发出者称为守秘人或 GM。\n"
+                    f"{content}"
+                ),
+            }
+        )
 
     def _has_pending_control_instruction(self) -> bool:
         if not self.messages:
             return False
         latest = self.messages[-1]
-        return (
-            latest.get("role") == "user"
-            and latest.get("content", "").startswith(self.CONTROL_MESSAGE_PREFIX)
+        return latest.get("role") == "user" and latest.get("content", "").startswith(
+            self.CONTROL_MESSAGE_PREFIX
         )
 
     def _has_pending_new_game_opening(self) -> bool:
@@ -700,10 +679,13 @@ class GameEngine:
         selected_character = self._apply_starting_character(character_ref)
         identity_instruction = ""
         if selected_character:
-            identity = json.dumps({
-                "name": selected_character.get("name", ""),
-                "occupation": selected_character.get("occupation", ""),
-            }, ensure_ascii=False)
+            identity = json.dumps(
+                {
+                    "name": selected_character.get("name", ""),
+                    "occupation": selected_character.get("occupation", ""),
+                },
+                ensure_ascii=False,
+            )
             identity_instruction = f"本局玩家调查员身份已锁定为 {identity}；"
 
         self.prepare_session()
@@ -891,18 +873,18 @@ class GameEngine:
         decision = preview["decision"]
         selected = self.cb.on_decision(decision)
         valid_options = {
-            option.get("id")
-            for option in decision.get("options", [])
-            if isinstance(option, dict)
+            option.get("id") for option in decision.get("options", []) if isinstance(option, dict)
         }
         if selected not in valid_options:
             selected = decision.get("default_option")
         authorization = preview["authorization"]
         if selected != authorization["confirm_option"]:
-            self.messages.append({
-                "role": "user",
-                "content": f"[玩家在行动发生前取消，场景状态不变] 原提议：{content}",
-            })
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": f"[玩家在行动发生前取消，场景状态不变] 原提议：{content}",
+                }
+            )
             self.save("slot_000")
             return None
 
@@ -1029,14 +1011,17 @@ class GameEngine:
         for match in matches:
             rule = match.rule
             required_skill = str(rule.get("skill") or "")
-            check_failed = bool(rule.get("requires_success") and (
-                not check_result
-                or not check_result.get("success")
-                or (
-                    rule.get("check_type") != "luck"
-                    and str(check_result.get("skill") or "") != required_skill
+            check_failed = bool(
+                rule.get("requires_success")
+                and (
+                    not check_result
+                    or not check_result.get("success")
+                    or (
+                        rule.get("check_type") != "luck"
+                        and str(check_result.get("skill") or "") != required_skill
+                    )
                 )
-            ))
+            )
             fallback = rule.get("fallback") if check_failed else None
             fallback = fallback if isinstance(fallback, dict) else None
             if fallback and fallback.get("cost_clock") and fallback.get("cost_amount"):
@@ -1045,48 +1030,55 @@ class GameEngine:
                     world = self.context.world_store.load()
                     current = int((world.get("case_clocks") or {}).get(clock_id, 0))
                     amount = int(fallback.get("cost_amount") or 0)
-                    self._execute_tool("state_set", {
-                        "path": f"case_clocks.{clock_id}",
-                        "value": json.dumps(current + amount),
-                    })
+                    self._execute_tool(
+                        "state_set",
+                        {
+                            "path": f"case_clocks.{clock_id}",
+                            "value": json.dumps(current + amount),
+                        },
+                    )
                 except (OSError, TypeError, ValueError):
                     pass
             if check_failed and fallback and fallback.get("mode") == "alternate_clue":
                 alternate_id = str(fallback.get("clue_id") or "")
                 try:
                     alternate = (
-                        self.context.world_store.load().get("clue_catalog", {})
+                        self.context.world_store.load()
+                        .get("clue_catalog", {})
                         .get(alternate_id, {})
                     )
-                    alternate_category = str(
-                        alternate.get("category") or "investigation"
-                    )
+                    alternate_category = str(alternate.get("category") or "investigation")
                 except (OSError, TypeError, AttributeError):
                     alternate_category = "investigation"
-                self._execute_tool("state_add_clue", {
-                    "text": "",
-                    "category": alternate_category,
-                    "clue_id": alternate_id,
-                })
-                resolved.append({
-                    "clue_id": match.clue_id,
-                    "discovered": False,
-                    "reason": "required_check_failed",
-                    "fallback": {
-                        "mode": "alternate_clue",
+                self._execute_tool(
+                    "state_add_clue",
+                    {
+                        "text": "",
+                        "category": alternate_category,
                         "clue_id": alternate_id,
-                        "narrative": fallback.get("narrative", ""),
                     },
-                })
+                )
+                resolved.append(
+                    {
+                        "clue_id": match.clue_id,
+                        "discovered": False,
+                        "reason": "required_check_failed",
+                        "fallback": {
+                            "mode": "alternate_clue",
+                            "clue_id": alternate_id,
+                            "narrative": fallback.get("narrative", ""),
+                        },
+                    }
+                )
                 continue
-            if check_failed and not (
-                fallback and fallback.get("mode") == "grant_clue"
-            ):
-                resolved.append({
-                    "clue_id": match.clue_id,
-                    "discovered": False,
-                    "reason": "required_check_failed",
-                })
+            if check_failed and not (fallback and fallback.get("mode") == "grant_clue"):
+                resolved.append(
+                    {
+                        "clue_id": match.clue_id,
+                        "discovered": False,
+                        "reason": "required_check_failed",
+                    }
+                )
                 continue
 
             npc_reveals = rule.get("npc_reveals", [])
@@ -1097,50 +1089,63 @@ class GameEngine:
                 from .llm import tension
 
                 self.cb.on_tension(tension("sanity"), "sanity")
-                output = self._execute_tool("sanity_event", {
-                    "description": str(match.clue.get("text") or ""),
-                    "severity": severity,
-                    "clue_id": match.clue_id,
-                    "npc_reveals": npc_reveals,
-                })
+                output = self._execute_tool(
+                    "sanity_event",
+                    {
+                        "description": str(match.clue.get("text") or ""),
+                        "severity": severity,
+                        "clue_id": match.clue_id,
+                        "npc_reveals": npc_reveals,
+                    },
+                )
                 self._emit_sanity_result(output)
                 try:
                     sanity = json.loads(output)
                 except json.JSONDecodeError:
                     sanity = {}
-                resolved.append({
+                resolved.append(
+                    {
+                        "clue_id": match.clue_id,
+                        "discovered": True,
+                        "text": match.clue.get("text"),
+                        "type": match.clue.get("type"),
+                        "sanity": {
+                            key: sanity.get(key)
+                            for key in (
+                                "san_before",
+                                "san_after",
+                                "san_roll",
+                                "san_check_success",
+                                "actual_loss",
+                            )
+                        },
+                        "npc_reveals": npc_reveals,
+                        "fallback": fallback if check_failed else None,
+                    }
+                )
+                continue
+
+            self._execute_tool(
+                "state_add_clue",
+                {
+                    "text": "",
+                    "category": match.clue.get("category", "investigation"),
+                    "clue_id": match.clue_id,
+                },
+            )
+            for reveal in npc_reveals:
+                if isinstance(reveal, dict):
+                    self._execute_tool("npc_reveal", reveal)
+            resolved.append(
+                {
                     "clue_id": match.clue_id,
                     "discovered": True,
                     "text": match.clue.get("text"),
                     "type": match.clue.get("type"),
-                    "sanity": {
-                        key: sanity.get(key)
-                        for key in (
-                            "san_before", "san_after", "san_roll",
-                            "san_check_success", "actual_loss",
-                        )
-                    },
                     "npc_reveals": npc_reveals,
                     "fallback": fallback if check_failed else None,
-                })
-                continue
-
-            self._execute_tool("state_add_clue", {
-                "text": "",
-                "category": match.clue.get("category", "investigation"),
-                "clue_id": match.clue_id,
-            })
-            for reveal in npc_reveals:
-                if isinstance(reveal, dict):
-                    self._execute_tool("npc_reveal", reveal)
-            resolved.append({
-                "clue_id": match.clue_id,
-                "discovered": True,
-                "text": match.clue.get("text"),
-                "type": match.clue.get("type"),
-                "npc_reveals": npc_reveals,
-                "fallback": fallback if check_failed else None,
-            })
+                }
+            )
         return resolved
 
     def _resolve_scene_transition(self, content: str) -> str | None:
@@ -1158,41 +1163,57 @@ class GameEngine:
             luck_check=self._resolve_luck_check,
         )
         self._encounter_resolution = encounter
-        output = self._execute_tool("state_set", {
-            "path": "current_scene.id",
-            "value": json.dumps(scene_id, ensure_ascii=False),
-            "npcs_present": list(encounter.present_npc_ids),
-        })
+        output = self._execute_tool(
+            "state_set",
+            {
+                "path": "current_scene.id",
+                "value": json.dumps(scene_id, ensure_ascii=False),
+                "npcs_present": list(encounter.present_npc_ids),
+            },
+        )
         for outcome in encounter.outcomes:
             if not outcome.cached:
-                self._execute_tool("state_set", {
-                    "path": (
-                        f"encounter_history.{scene_id}.{outcome.encounter_id}"
-                    ),
-                    "value": json.dumps({
-                        "present": outcome.present,
-                        "availability": outcome.availability,
-                        "check_result": outcome.check_result,
-                    }, ensure_ascii=False),
-                })
-            npc_index = next((
-                index
-                for index, npc in enumerate(world.get("npcs", []))
-                if isinstance(npc, dict) and str(npc.get("id") or "") == outcome.npc_id
-            ), None)
+                self._execute_tool(
+                    "state_set",
+                    {
+                        "path": (f"encounter_history.{scene_id}.{outcome.encounter_id}"),
+                        "value": json.dumps(
+                            {
+                                "present": outcome.present,
+                                "availability": outcome.availability,
+                                "check_result": outcome.check_result,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+            npc_index = next(
+                (
+                    index
+                    for index, npc in enumerate(world.get("npcs", []))
+                    if isinstance(npc, dict) and str(npc.get("id") or "") == outcome.npc_id
+                ),
+                None,
+            )
             if npc_index is None:
                 continue
             previous = str(world["npcs"][npc_index].get("current_location") or "")
             if outcome.present and previous != scene_id:
-                self._execute_tool("state_set", {
-                    "path": f"npcs.{npc_index}.current_location",
-                    "value": json.dumps(scene_id),
-                })
+                self._execute_tool(
+                    "state_set",
+                    {
+                        "path": f"npcs.{npc_index}.current_location",
+                        "value": json.dumps(scene_id),
+                    },
+                )
             elif not outcome.present and previous == scene_id:
-                self._execute_tool("state_set", {
-                    "path": f"npcs.{npc_index}.current_location",
-                    "value": '"unknown"',
-                })
+                self._execute_tool(
+                    "state_set",
+                    {
+                        "path": f"npcs.{npc_index}.current_location",
+                        "value": '"unknown"',
+                    },
+                )
         try:
             result = json.loads(output)
         except json.JSONDecodeError:
@@ -1244,16 +1265,18 @@ class GameEngine:
             if not isinstance(npc, dict) or npc.get("id") not in present_npc_ids:
                 continue
             revealed = npc.get("revealed") or {}
-            present_npcs.append({
-                "id": npc.get("id"),
-                "name": npc.get("name"),
-                "visible_tags": npc.get("visible_tags", []),
-                "revealed_level": revealed.get("level", 0),
-                "revealed_entries": revealed.get("entries", []),
-                "keeper_private": {
-                    "disposition": npc.get("disposition"),
-                },
-            })
+            present_npcs.append(
+                {
+                    "id": npc.get("id"),
+                    "name": npc.get("name"),
+                    "visible_tags": npc.get("visible_tags", []),
+                    "revealed_level": revealed.get("level", 0),
+                    "revealed_entries": revealed.get("entries", []),
+                    "keeper_private": {
+                        "disposition": npc.get("disposition"),
+                    },
+                }
+            )
         known_clues = []
         clue_groups = world.get("clues_found", {})
         if isinstance(clue_groups, dict):
@@ -1262,11 +1285,13 @@ class GameEngine:
                     continue
                 for clue in clues[-8:]:
                     if isinstance(clue, dict):
-                        known_clues.append({
-                            "id": clue.get("catalog_id") or clue.get("id"),
-                            "category": category,
-                            "text": str(clue.get("text") or "")[:220],
-                        })
+                        known_clues.append(
+                            {
+                                "id": clue.get("catalog_id") or clue.get("id"),
+                                "category": category,
+                                "text": str(clue.get("text") or "")[:220],
+                            }
+                        )
         scene_clues = []
         clue_catalog = world.get("clue_catalog", {})
         if isinstance(clue_catalog, dict):
@@ -1274,26 +1299,19 @@ class GameEngine:
                 if not isinstance(clue, dict):
                     continue
                 related_scenes = clue.get("related_scenes", [])
-                if (
-                    clue.get("source") != scene.get("id")
-                    and scene.get("id") not in related_scenes
-                ):
+                if clue.get("source") != scene.get("id") and scene.get("id") not in related_scenes:
                     continue
-                scene_clues.append({
-                    "id": clue.get("id") or clue_id,
-                    "text": str(clue.get("text") or "")[:300],
-                    "category": clue.get("category"),
-                    "type": clue.get("type"),
-                    "discovery_notes": str(
-                        clue.get("discovery_notes") or ""
-                    )[:300],
-                })
+                scene_clues.append(
+                    {
+                        "id": clue.get("id") or clue_id,
+                        "text": str(clue.get("text") or "")[:300],
+                        "category": clue.get("category"),
+                        "type": clue.get("type"),
+                        "discovery_notes": str(clue.get("discovery_notes") or "")[:300],
+                    }
+                )
         module_rules = world.get("module_rules") or {}
-        latest_content = (
-            str(self.messages[-1].get("content") or "")
-            if self.messages
-            else ""
-        )
+        latest_content = str(self.messages[-1].get("content") or "") if self.messages else ""
         opening = (
             str(world.get("module_opening") or "")[:1600]
             if latest_content.startswith(self.CONTROL_MESSAGE_PREFIX)
@@ -1305,16 +1323,12 @@ class GameEngine:
         encounter_resolution = getattr(self, "_encounter_resolution", None)
         arrival_only = bool(action_resolution and action_resolution.is_arrival)
         opening_public_facts = (
-            [str(clue.get("text") or "")[:400] for clue in known_clues]
-            if opening
-            else []
+            [str(clue.get("text") or "")[:400] for clue in known_clues] if opening else []
         )
         newly_confirmed_facts = [
             str(discovery.get("text") or "")[:400]
             for discovery in resolved_discoveries
-            if isinstance(discovery, dict)
-            and discovery.get("discovered")
-            and discovery.get("text")
+            if isinstance(discovery, dict) and discovery.get("discovered") and discovery.get("text")
         ]
         payload = {
             "module": world.get("module_meta") or {"id": world.get("module")},
@@ -1374,15 +1388,12 @@ class GameEngine:
             ),
             "narrative_fact_scope": {
                 "closed_world_for_this_action": bool(
-                    opening or arrival_only
-                    or check_result is not None or resolved_discoveries
+                    opening or arrival_only or check_result is not None or resolved_discoveries
                 ),
                 "mode": "module_opening" if opening else "normal_turn",
                 "opening_public_facts": opening_public_facts,
                 "uncatalogued_opening_details": (
-                    "flavor_only_never_persist_as_clue_or_state"
-                    if opening
-                    else ""
+                    "flavor_only_never_persist_as_clue_or_state" if opening else ""
                 ),
                 "newly_confirmed_facts": newly_confirmed_facts,
                 "unlisted_observations": "本行动没有额外可验证发现",
@@ -1462,11 +1473,14 @@ class GameEngine:
         if not isinstance(pending, dict) or not pending.get("id"):
             return
         decision = {key: value for key, value in pending.items() if key != "action"}
-        selected = self.cb.on_decision(decision) if not getattr(self, "_multiplayer_roster_active", False) or investigator_roster.decision_has_controller(self.context, decision) else decision.get("default_option")
+        selected = (
+            self.cb.on_decision(decision)
+            if not getattr(self, "_multiplayer_roster_active", False)
+            or investigator_roster.decision_has_controller(self.context, decision)
+            else decision.get("default_option")
+        )
         valid_options = {
-            option.get("id")
-            for option in decision.get("options", [])
-            if isinstance(option, dict)
+            option.get("id") for option in decision.get("options", []) if isinstance(option, dict)
         }
         if selected not in valid_options:
             selected = decision.get("default_option")
@@ -1478,10 +1492,12 @@ class GameEngine:
             },
             context=self.context,
         )
-        self.messages.append({
-            "role": "user",
-            "content": f"[恢复的战斗决定已结算] {result}",
-        })
+        self.messages.append(
+            {
+                "role": "user",
+                "content": f"[恢复的战斗决定已结算] {result}",
+            }
+        )
 
     # ---- 工具执行 ----
 
@@ -1502,14 +1518,17 @@ class GameEngine:
         action_resolution = getattr(self, "_action_resolution", None)
         arrival_only = bool(action_resolution and action_resolution.is_arrival)
         if arrival_only and name in {"state_add_clue", "sanity_event"}:
-            return json.dumps({
-                "ok": False,
-                "error": "arrival_turn_effect_not_authorized",
-                "instruction": (
-                    "跨场景抵达回合不能提交线索或理智事件；"
-                    "先叙述抵达与接洽，把实际调查留给玩家下一次明确行动。"
-                ),
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "arrival_turn_effect_not_authorized",
+                    "instruction": (
+                        "跨场景抵达回合不能提交线索或理智事件；"
+                        "先叙述抵达与接洽，把实际调查留给玩家下一次明确行动。"
+                    ),
+                },
+                ensure_ascii=False,
+            )
         if arrival_only and name == "state_set":
             path = str(args.get("path") or "")
             try:
@@ -1523,12 +1542,15 @@ class GameEngine:
                 for key in (clue.get("flag_effects", {}) or {})
             }
             if path in protected_flags:
-                return json.dumps({
-                    "ok": False,
-                    "error": "arrival_turn_flag_not_authorized",
-                    "path": path,
-                    "instruction": "该标志由目录线索发现流程提交，抵达场景不能提前修改。",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "arrival_turn_flag_not_authorized",
+                        "path": path,
+                        "instruction": "该标志由目录线索发现流程提交，抵达场景不能提前修改。",
+                    },
+                    ensure_ascii=False,
+                )
         if name not in {"state_add_clue", "sanity_event"}:
             return self._execute_tool(name, args)
         try:
@@ -1542,12 +1564,15 @@ class GameEngine:
         clue_id = str(args.get("clue_id") or "")
         asset_id = str(args.get("asset_id") or "")
         if not clue_id and asset_id:
-            clue_id = next((
-                str(candidate_id)
-                for candidate_id, clue in catalog.items()
-                if isinstance(clue, dict)
-                and str((clue.get("asset") or {}).get("id") or "") == asset_id
-            ), "")
+            clue_id = next(
+                (
+                    str(candidate_id)
+                    for candidate_id, clue in catalog.items()
+                    if isinstance(clue, dict)
+                    and str((clue.get("asset") or {}).get("id") or "") == asset_id
+                ),
+                "",
+            )
         clue = catalog.get(clue_id) if clue_id else None
         rules = clue.get("discovery_rules", []) if isinstance(clue, dict) else []
         if not isinstance(rules, list) or not rules:
@@ -1560,32 +1585,32 @@ class GameEngine:
             for known in clues
             if isinstance(known, dict)
         }
-        action_matches = {
-            match.clue_id
-            for match in match_discovery_rules(player_action, world)
-        }
+        action_matches = {match.clue_id for match in match_discovery_rules(player_action, world)}
         if clue_id not in known_ids:
             reason = (
                 "catalog_clue_not_resolved"
                 if clue_id in action_matches
                 else "catalog_clue_not_authorized"
             )
-            return json.dumps({
-                "ok": False,
-                "error": reason,
-                "clue_id": clue_id,
-                "instruction": (
-                    "该目录线索尚未由引擎发现流程结算；"
-                    "若只是NPC口述的新信息，可改为不带 clue_id/asset_id 的普通线索。"
-                ),
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": reason,
+                    "clue_id": clue_id,
+                    "instruction": (
+                        "该目录线索尚未由引擎发现流程结算；"
+                        "若只是NPC口述的新信息，可改为不带 clue_id/asset_id 的普通线索。"
+                    ),
+                },
+                ensure_ascii=False,
+            )
         return self._execute_tool(name, args)
 
     def _execute_tool(self, name: str, args: dict) -> str:
         """执行工具。确认类工具通过回调与玩家交互。"""
         if name == "state_set" and args.get("path") == "current_scene.id":
             try:
-                scene_id = json.loads(args.get("value", "\"\""))
+                scene_id = json.loads(args.get("value", '""'))
             except (TypeError, json.JSONDecodeError):
                 scene_id = args.get("value", "")
             try:
@@ -1638,11 +1663,14 @@ class GameEngine:
             if clue_id and isinstance(catalog, dict) and clue_id in catalog:
                 clue = catalog[clue_id]
                 if isinstance(clue, dict):
-                    self._execute_tool("state_add_clue", {
-                        "text": "",
-                        "category": clue.get("category", "investigation"),
-                        "clue_id": clue_id,
-                    })
+                    self._execute_tool(
+                        "state_add_clue",
+                        {
+                            "text": "",
+                            "category": clue.get("category", "investigation"),
+                            "clue_id": clue_id,
+                        },
+                    )
             committed_npcs = []
             for reveal in args.get("npc_reveals", [])[:8]:
                 if not isinstance(reveal, dict):
@@ -1655,11 +1683,14 @@ class GameEngine:
                     continue
                 if not npc_id or not entry_text or tier not in {1, 2, 3}:
                     continue
-                reveal_result = self._execute_tool("npc_reveal", {
-                    "npc_id": npc_id,
-                    "tier": tier,
-                    "entry_text": entry_text,
-                })
+                reveal_result = self._execute_tool(
+                    "npc_reveal",
+                    {
+                        "npc_id": npc_id,
+                        "tier": tier,
+                        "entry_text": entry_text,
+                    },
+                )
                 try:
                     reveal_data = json.loads(reveal_result)
                 except json.JSONDecodeError:
@@ -1689,11 +1720,7 @@ class GameEngine:
                 "flags": changed_flags,
                 "npc_ids": sorted(set(committed_npcs)),
             }
-            if (
-                data["auto_committed"]["clue_ids"]
-                or changed_flags
-                or committed_npcs
-            ):
+            if data["auto_committed"]["clue_ids"] or changed_flags or committed_npcs:
                 data["instruction"] = (
                     "以上线索、标志与 NPC 揭示已由引擎提交，不要重复调用状态工具。"
                 )
@@ -1709,8 +1736,14 @@ class GameEngine:
             }
             confirmed = self.cb.on_suggest(info)
             if confirmed:
-                return json.dumps({"confirmed": True, "skill": info["skill"],
-                                   "attribute": info["attribute"], "dc": info["dc"]})
+                return json.dumps(
+                    {
+                        "confirmed": True,
+                        "skill": info["skill"],
+                        "attribute": info["attribute"],
+                        "dc": info["dc"],
+                    }
+                )
             else:
                 return json.dumps({"confirmed": False, "reason": "玩家选择不冒险"})
 
@@ -1763,57 +1796,14 @@ class GameEngine:
         self._handle_tool_handouts(name, args, result)
         return result
 
-    # ---- 按需 Skill 加载提示 ----
-
-    # 玩家消息关键词 → 对应按需 skill（引擎侧主动检测，不依赖模型判断）
-    _KEYWORD_SKILL_MAP = {
-        "skills/keeper/keeper_items.skill": [
-            "鸣枪", "开枪", "射击", "扣动扳机", "子弹", "装弹", "换弹",
-            "喝下", "服用", "点燃", "烧掉", "使用钥匙", "打开手电筒",
-            "急救包", "消耗道具", "使用物品",
-        ],
-        "skills/keeper/keeper_combat.skill": [
-            "开枪", "射击", "攻击", "挥拳", "拔枪", "持枪", "用枪", "枪指", "瞄准",
-            "威胁", "拔刀", "砍", "刺", "砸",
-            "战斗", "搏斗", "斗殴", "反击", "闪避", "伤害", "受伤", "倒地",
-            "武器", "手枪", "左轮", "刀", "棍", "枪", "弹药",
-        ],
-        "skills/keeper/keeper_psychology.skill": [
-            "疯狂", "崩溃", "失控", "幻觉", "尖叫", "发疯", "恐惧症", "躁狂",
-        ],
-        "skills/keeper/keeper_magic.skill": [
-            "魔法", "咒语", "施法", "仪式", "召唤", "神话典籍", "诅咒", "克苏鲁神话",
-        ],
-    }
-
     def _load_optional_skill(self, skill_path: str):
-        """按需把 skill 文件内容直接注入上下文——不再提示模型 read_file 多跑一整轮。
-        读不到就静默跳过，不阻塞回合。"""
-        if skill_path in self._loaded_optional_skills:
-            return
-        self._loaded_optional_skills.add(skill_path)
-        try:
-            content = (self.context.project_root / skill_path).read_text(encoding="utf-8")
-        except Exception:
-            return  # 文件读不到就算了，别打断回合
-        self.append_control_instruction(
-            f"以下 Skill 规则已经由引擎加载，请在本回合应用：{skill_path}\n\n{content}"
-        )
+        inject_optional_skill(self, skill_path, log_error=log_error)
 
     def _maybe_hint_optional_skill(self, tool_name: str):
-        """工具调用后,若该工具对应一个按需 skill 且本会话尚未加载,直接注入其内容。"""
-        skill_path = OPTIONAL_SKILL_HINTS.get(tool_name)
-        if skill_path:
-            self._load_optional_skill(skill_path)
+        hint_optional_skill(self, tool_name, log_error=log_error)
 
     def _detect_content_skill_hint(self, content: str):
-        """检测玩家消息内容,若包含战斗/魔法/疯狂等关键词且对应 skill 未加载,直接注入。
-        这是"第三重保险"——不依赖模型判断,引擎直接检测。"""
-        for skill_path, keywords in self._KEYWORD_SKILL_MAP.items():
-            if skill_path in self._loaded_optional_skills:
-                continue
-            if any(kw in content for kw in keywords):
-                self._load_optional_skill(skill_path)
+        inject_skills_for_player_content(self, content, log_error=log_error)
 
     # ---- 记忆管理 ----
 
@@ -1955,15 +1945,13 @@ class GameEngine:
             return
 
         current_scene = state.get("current_scene", {})
-        present_npc_ids = {
-            str(npc_id)
-            for npc_id in current_scene.get("npcs_present", [])
-        } if isinstance(current_scene, dict) else set()
+        present_npc_ids = (
+            {str(npc_id) for npc_id in current_scene.get("npcs_present", [])}
+            if isinstance(current_scene, dict)
+            else set()
+        )
         for npc in state.get("npcs", []):
-            if (
-                not isinstance(npc, dict)
-                or str(npc.get("id") or "") not in present_npc_ids
-            ):
+            if not isinstance(npc, dict) or str(npc.get("id") or "") not in present_npc_ids:
                 continue
             npc_id = str(npc.get("id") or "")
             name = str(npc.get("name") or "")
@@ -1988,9 +1976,7 @@ class GameEngine:
         seen = state.get("seen_handouts", {})
         seen_assets = state.get("seen_handout_assets", {})
         seen_clues = seen.get("clues", []) if isinstance(seen, dict) else []
-        seen_clue_assets = (
-            seen_assets.get("clues", []) if isinstance(seen_assets, dict) else []
-        )
+        seen_clue_assets = seen_assets.get("clues", []) if isinstance(seen_assets, dict) else []
         clues_found = state.get("clues_found", {})
         if not isinstance(clues_found, dict):
             return
@@ -2039,11 +2025,7 @@ class GameEngine:
         )
         try:
             info = json.loads(result)
-            if (
-                info.get("found")
-                and not info.get("already_seen")
-                and info.get("asset_data_uri")
-            ):
+            if info.get("found") and not info.get("already_seen") and info.get("asset_data_uri"):
                 self.cb.on_handout(info)
         except Exception:
             pass
@@ -2077,10 +2059,7 @@ class GameEngine:
 
     def handle_action(self, user_content: str | None = None):
         """执行一个完整回合"""
-        if (
-            getattr(self, "_active_turn_id", None) is None
-            and hasattr(self, "turn_journal")
-        ):
+        if getattr(self, "_active_turn_id", None) is None and hasattr(self, "turn_journal"):
             self.begin_turn_record(
                 kind="action" if user_content else "control",
                 player_input=user_content,

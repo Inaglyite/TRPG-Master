@@ -25,7 +25,20 @@ from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
 from .speaker_parser import parse_segments as parse_speaker_segments
-from .tools import COMPLEX_FUNCTIONS, dice_summary
+from .tool_policy import (
+    REQUEST_METADATA_KEY,
+    ToolPolicyError,
+    ToolRequestSnapshot,
+    authorize_model_tool_call,
+    denied_tool_result,
+    public_tool_call,
+)
+from .tools import (
+    COMPLEX_FUNCTIONS,
+    TOOL_SCHEMA_BY_NAME,
+    dice_summary,
+    tool_catalog_for_names,
+)
 
 _NON_REPEATABLE_CHECKS = {
     "skill_check", "attribute_check", "luck_check",
@@ -53,7 +66,8 @@ class TurnState(TypedDict, total=False):
 def _tool_category(tool_calls: list[dict]) -> str:
     cat = "dice"
     for tc in tool_calls:
-        name = tc["function"]["name"]
+        function = tc.get("function") if isinstance(tc, dict) else {}
+        name = str(function.get("name") or "") if isinstance(function, dict) else ""
         if name.startswith("sanity"):
             return "sanity"
         if name in ("apply_damage", "apply_heal", "combat_start", "combat_action", "combat_end"):
@@ -240,19 +254,24 @@ def _call_story_agent(state: TurnState) -> dict:
         enable_tools=not opening_turn and not state.get("turn_had_check", False),
         prompt_profile="opening" if opening_turn else None,
         temperature=0.65 if opening_turn else 0.8,
-            buffer_if_tools=False,
+            buffer_if_tools=True,
         )
     return {"text": text, "tool_calls": tool_calls}
 
 
 def _call_combat_agent(state: TurnState) -> dict:
     engine = state["engine"]
+    load_skill = getattr(engine, "_load_optional_skill", None)
+    if load_skill:
+        # Combat state is an authoritative capability, so this does not depend
+        # on a keyword or on the model first attempting an unsafe file read.
+        load_skill("skills/keeper/keeper_combat.skill")
     _emit_phase(engine, "narrating", "守秘人正在结算战局……")
     with _performance_span(engine, "combat_model"):
         text, tool_calls = engine._stream_llm(
             getattr(engine, "judgement_model", JUDGEMENT_MODEL),
             system_overlay=engine._combat_system_overlay(),
-            buffer_if_tools=False,
+            buffer_if_tools=True,
         )
     return {"text": text, "tool_calls": tool_calls}
 
@@ -281,7 +300,11 @@ def _execute_tools(state: TurnState) -> dict:
     narrative = state.get("narrative", "")
     turn_had_check = state.get("turn_had_check", False)
 
-    complex_hit = any(tc["function"]["name"] in COMPLEX_FUNCTIONS for tc in tool_calls)
+    complex_hit = any(
+        str((tc.get("function") or {}).get("name") or "") in COMPLEX_FUNCTIONS
+        for tc in tool_calls
+        if isinstance(tc, dict)
+    )
     if complex_hit:
         turn_had_check = True
         engine.current_model = getattr(
@@ -295,11 +318,15 @@ def _execute_tools(state: TurnState) -> dict:
 
     assistant_msg: dict = {"role": "assistant", "content": text}
     if tool_calls:
-        assistant_msg["tool_calls"] = tool_calls
+        # Request authorization metadata is server-only evidence.  Persisting it
+        # in provider history would leak an internal protocol and some OpenAI
+        # compatible APIs reject unknown tool-call fields.
+        assistant_msg["tool_calls"] = [public_tool_call(tc) for tc in tool_calls]
     engine.messages.append(assistant_msg)
 
     tool_outputs: list[tuple[str, str]] = []
     executed_tools = list(state.get("executed_tools", []))
+    executed_call_names: list[str] = []
     prior_checks = {
         json.dumps(
             {"name": entry.get("name"), "args": entry.get("args", {})},
@@ -312,11 +339,35 @@ def _execute_tools(state: TurnState) -> dict:
     }
     for tc in tool_calls:
         _check_cancelled(engine)
-        name = tc["function"]["name"]
+        function = tc.get("function") if isinstance(tc, dict) else {}
+        function = function if isinstance(function, dict) else {}
+        raw_name = str(function.get("name") or "unknown")
+        call_id = str(tc.get("id") or "") if isinstance(tc, dict) else ""
         try:
-            args = json.loads(tc["function"]["arguments"])
-        except (json.JSONDecodeError, TypeError):
-            args = {}
+            snapshot = ToolRequestSnapshot.from_dict(
+                tc.get(REQUEST_METADATA_KEY) if isinstance(tc, dict) else None
+            )
+            snapshot, name, args = authorize_model_tool_call(
+                tc,
+                tool_schemas=TOOL_SCHEMA_BY_NAME,
+                ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
+            )
+        except ToolPolicyError as exc:
+            # A rejected call still gets one paired tool result so the next
+            # provider request sees a valid assistant/tool batch.  Do not log
+            # model-controlled arguments: they may themselves contain secrets.
+            output = denied_tool_result(exc)
+            executed_tools.append({
+                "name": raw_name,
+                "args": {},
+                "output": output,
+                "policy_denied": exc.code,
+            })
+            engine.messages.append({
+                "role": "tool", "tool_call_id": call_id, "content": output,
+            })
+            log_error(f"工具策略拒绝: name={raw_name} reason={exc.code}")
+            continue
 
         fingerprint = json.dumps(
             {"name": name, "args": args},
@@ -340,7 +391,7 @@ def _execute_tools(state: TurnState) -> dict:
                     else:
                         output = engine._execute_tool(name, args)
             except Exception as exc:
-                log_error(f"工具 {name} 执行异常: {type(exc).__name__}: {exc}")
+                log_error(f"工具 {name} 执行异常: {type(exc).__name__}")
                 output = "[错误] 工具执行失败，请检查参数后重试"
             if name in _NON_REPEATABLE_CHECKS:
                 prior_checks[fingerprint] = output
@@ -348,8 +399,9 @@ def _execute_tools(state: TurnState) -> dict:
         ledger = getattr(engine, "_turn_mutations", None)
         if ledger is not None and not reused:
             ledger.record_tool(name, args, output)
-        engine.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": output})
+        engine.messages.append({"role": "tool", "tool_call_id": call_id, "content": output})
         log_tool(name, args)
+        executed_call_names.append(name)
 
         if not reused and name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
             summary = dice_summary(output)
@@ -375,9 +427,7 @@ def _execute_tools(state: TurnState) -> dict:
     # A tool-calling assistant message must be followed immediately by every
     # matching tool response. Optional skill instructions are user messages, so
     # they can only be appended after the whole batch has been answered.
-    for name in dict.fromkeys(
-        tc["function"]["name"] for tc in tool_calls
-    ):
+    for name in dict.fromkeys(executed_call_names):
         engine._maybe_hint_optional_skill(name)
 
     # 工具结果之后会发起一次新的模型调用。此时最靠近模型的是 tool 消息，
@@ -422,7 +472,7 @@ def _handle_end_game(engine: Any, output: str) -> None:
 
 
 def _route_after_tools(state: TurnState) -> str:
-    if state.get("tool_round", 0) <= MAX_TOOL_ROUNDS:
+    if state.get("tool_round", 0) < MAX_TOOL_ROUNDS:
         return _route_to_agent(state)
     return "finalize"
 
