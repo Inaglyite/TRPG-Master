@@ -515,6 +515,7 @@ PY
     runuser -u trpgdeploy -- python3 -m venv "$candidate/.venv"
     runuser -u trpgdeploy -- "$candidate/.venv/bin/pip" \
         install --disable-pip-version-check --no-cache-dir \
+        --retries 8 --resume-retries 8 --timeout 120 \
         -r "$candidate/requirements.txt"
     # pip writes absolute shebangs to console scripts.  The venv is built in
     # a temporary directory and then atomically renamed to the release path,
