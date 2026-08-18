@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from .config import AUTO_SAVE_SLOT
+from .context_checkpoint import ContextCheckpoint, resolve_checkpoint
 from .database import (
     ACTIVE_TURN_WORLD_INDEX,
     AuditEvent,
@@ -473,7 +474,10 @@ class DatabaseTurnJournal:
         diagnostics=None,
         narrative_segments=None,
         expected_world_revision: int | None = None,
+        checkpoint: ContextCheckpoint | dict | None = None,
     ) -> dict:
+        # 写前校验：非法 checkpoint 在打开数据库事务之前抛错。
+        checkpoint = resolve_checkpoint(checkpoint)
         journal_started = time.monotonic()
         with session_scope(self.database_url) as session:
             row = self._row(session, turn_id, for_update=True)
@@ -517,6 +521,8 @@ class DatabaseTurnJournal:
                     "diagnostics": _json_safe(diagnostics or {}),
                 }
             )
+            if checkpoint is not None:
+                record["context"] = checkpoint.to_dict()
             row.status = "completed"
             row.record = copy.deepcopy(record)
             row.messages = serializable
@@ -549,6 +555,8 @@ class DatabaseTurnJournal:
             auto_save.messages = serializable
             auto_save.world_revision = int(world_state.get("revision", 0))
             auto_save.metadata_json = self._save_metadata(world_state, serializable)
+            if checkpoint is not None:
+                auto_save.metadata_json = checkpoint.merge_into(auto_save.metadata_json)
             auto_save.updated_at = utcnow()
             for sequence, event in enumerate(events):
                 session.add(

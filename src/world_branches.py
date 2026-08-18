@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy import func
 
 from .config import AUTO_SAVE_SLOT
+from .context_checkpoint import public_copy
 from .database import SaveSlot, Turn, World, WorldState, database_url, session_scope, utcnow
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
 from .persistence import save_game
@@ -498,7 +499,7 @@ class WorldBranchService:
                     session.query(SaveSlot).filter_by(world_id=world_id).all()
                 )
                 for slot in slots:
-                    meta = dict(slot.metadata_json or {})
+                    meta = public_copy(slot.metadata_json or {})
                     meta["id"] = slot.slot_key
                     meta["world_id"] = world_id
                     meta["timeline_label"] = label

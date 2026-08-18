@@ -13,8 +13,10 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .config import (
     AUTO_SAVE_SLOT,
@@ -24,6 +26,7 @@ from .config import (
     RUNTIME_ROOT,
     SKILL_LOAD_ORDER,
 )
+from .context_checkpoint import ContextCheckpoint, public_copy, resolve_checkpoint
 from .database import SaveSlot, Snapshot, new_id, session_scope, utcnow
 from .handouts import refresh_static_handout_config
 from .runtime import RuntimeContext, default_world_id
@@ -248,13 +251,21 @@ def save_game(
     slot_id: str | None = None,
     *,
     context: RuntimeContext | None = None,
+    checkpoint: ContextCheckpoint | Mapping[str, Any] | None = None,
 ) -> str:
-    """保存游戏到指定槽位（默认自动存档）。返回槽位 ID。"""
+    """保存游戏到指定槽位（默认自动存档）。返回槽位 ID。
+
+    ``checkpoint`` 是可选的 H2 私有上下文检查点（实例或 mapping）：任何持久化
+    写入之前都会严格校验，非法值抛错且不写库。校验通过后合并进内部
+    ``metadata["context"]``；公开的 ``list_saves`` 会剥离该键。
+    """
     context = _runtime_context(context)
     if slot_id is None:
         slot_id = AUTO_SAVE_SLOT
 
     _slot_dir(slot_id, context)  # validation only
+    # 写前校验：非法 checkpoint 在进入数据库事务之前抛错。
+    checkpoint = resolve_checkpoint(checkpoint)
 
     # 序列化消息（去掉不可序列化的字段）
     serializable = []
@@ -270,6 +281,8 @@ def save_game(
     world_state = context.world_store.load()
 
     meta = _slot_meta(serializable, world_state, context)
+    if checkpoint is not None:
+        meta = checkpoint.merge_into(meta)
     with session_scope(context.database_url) as session:
         row = (
             session.query(SaveSlot)
@@ -373,12 +386,15 @@ def normalize_tool_message_history(messages: list[dict]) -> list[dict]:
     return repaired
 
 
-def load_game(
+def load_game_artifacts(
     slot_id: str | None = None,
     *,
     context: RuntimeContext | None = None,
-) -> tuple[list, dict] | tuple[None, None]:
-    """读取存档。返回 (messages, world_snapshot) 或 (None, None)。
+) -> tuple[list, dict, dict] | tuple[None, None, None]:
+    """内部读取存档。返回 (messages, world_snapshot, metadata)。
+
+    ``metadata`` 是完整内部元数据，可能含私有 ``context`` 键；公开层
+    （``load_game``/``list_saves``）必须剥离该键后再对外暴露。
     如果 slot_id 为 None，加载最新存档（按修改时间）。
     """
     context = _runtime_context(context)
@@ -393,24 +409,45 @@ def load_game(
             if row is None:
                 imported = _import_legacy_slot(context, slot_id)
                 if imported is None:
-                    return None, None
+                    return None, None, None
                 with session_scope(context.database_url) as imported_session:
                     snapshot = imported_session.get(Snapshot, imported.snapshot_id)
-                    return normalize_tool_message_history(imported.messages or []), dict(
-                        snapshot.state if snapshot else {}
+                    return (
+                        normalize_tool_message_history(imported.messages or []),
+                        dict(snapshot.state if snapshot else {}),
+                        dict(imported.metadata_json or {}),
                     )
             snapshot = session.get(Snapshot, row.snapshot_id)
-            return normalize_tool_message_history(row.messages or []), dict(
-                snapshot.state if snapshot else {}
+            return (
+                normalize_tool_message_history(row.messages or []),
+                dict(snapshot.state if snapshot else {}),
+                dict(row.metadata_json or {}),
             )
 
     # 找最新存档
     slots = list_saves(context=context)
     if not slots:
-        return None, None
+        return None, None, None
 
     latest = slots[0]  # 已按时间倒序
-    return load_game(latest["id"], context=context)
+    return load_game_artifacts(latest["id"], context=context)
+
+
+def load_game(
+    slot_id: str | None = None,
+    *,
+    context: RuntimeContext | None = None,
+) -> tuple[list, dict] | tuple[None, None]:
+    """读取存档。返回 (messages, world_snapshot) 或 (None, None)。
+    如果 slot_id 为 None，加载最新存档（按修改时间）。
+
+    返回形状保持不变；内部私有元数据（含 context）通过
+    ``load_game_artifacts`` 获取。
+    """
+    messages, snapshot, _metadata = load_game_artifacts(slot_id, context=context)
+    if messages is None:
+        return None, None
+    return messages, snapshot
 
 
 def _load_slot(slot_dir: Path) -> tuple[list, dict] | tuple[None, None]:
@@ -472,7 +509,7 @@ def list_saves(*, context: RuntimeContext | None = None) -> list[dict]:
     with session_scope(context.database_url) as session:
         rows = session.query(SaveSlot).filter_by(world_id=context.world_id).all()
         for row in rows:
-            meta = dict(row.metadata_json or {})
+            meta = public_copy(row.metadata_json or {})
             meta["id"] = row.slot_key
             result.append(meta)
 

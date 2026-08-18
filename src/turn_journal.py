@@ -15,10 +15,12 @@ import secrets
 import socket
 import threading
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .context_checkpoint import ContextCheckpoint, resolve_checkpoint
 from .world_store import atomic_write_json, file_lock
 
 TURN_RECORD_SCHEMA_VERSION = 1
@@ -384,7 +386,10 @@ class TurnJournal:
         lore_entry_ids: list[str] | None = None,
         diagnostics: dict | None = None,
         narrative_segments: list[dict] | None = None,
+        checkpoint: ContextCheckpoint | Mapping[str, Any] | None = None,
     ) -> dict:
+        # 写前校验：非法 checkpoint 在触碰锁/写盘之前抛错。
+        checkpoint = resolve_checkpoint(checkpoint)
         with self._thread_lock, file_lock(self.lock_path):
             index = self._load_index_unlocked()
             record = self._read_record_unlocked(turn_id)
@@ -421,6 +426,8 @@ class TurnJournal:
                     "diagnostics": _json_safe(diagnostics or {}),
                 }
             )
+            if checkpoint is not None:
+                record["context"] = checkpoint.to_dict()
             # record.json is the commit marker: snapshots are written first.
             self._write_record_unlocked(record)
             index["active_turn_id"] = None
