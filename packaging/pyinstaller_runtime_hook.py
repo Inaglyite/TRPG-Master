@@ -16,7 +16,17 @@ from sqlalchemy import create_engine, inspect, text
 # The last revision whose *table/column fingerprint* is represented below.
 # Later data/default-only revisions are still applied by ``upgrade head``.
 BASELINE_SCHEMA_REVISION = "20260722_0004"
-LATER_TABLES = {"world_invites", "world_investigators", "room_actions"}
+# Tables created by migrations after the baseline fingerprint.  They are not
+# part of the create_all baseline check: an old unversioned database simply
+# lacks them (0008 will create them), while a fresh create_all database that
+# already carries them is adopted shape-checked by the migration itself.
+LATER_TABLES = {
+    "world_invites",
+    "world_investigators",
+    "room_actions",
+    "context_sessions",
+    "model_context_events",
+}
 
 
 def packaged_resource_root() -> Path:

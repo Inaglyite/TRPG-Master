@@ -249,3 +249,120 @@ def test_electron_setup_uses_scoped_ipc_and_source_backend_is_on_demand() -> Non
     assert 'URL="http://localhost:8765/?mode=local"' in launcher
     assert '"dist": "node electron/reject-linux-package.cjs"' in package
     assert '"linux"' not in package
+
+
+def _alembic_config_for(database_url: str) -> Config:
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    return config
+
+
+def test_migration_0008_fresh_creates_tables(tmp_path: Path, monkeypatch) -> None:
+    """0008 on an empty database creates both tables with full shape."""
+    database_url = _sqlite_url(tmp_path / "fresh0008.db")
+    config = _alembic_config_for(database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260811_0007")
+    command.upgrade(config, "20260818_0008")
+
+    engine = sa.create_engine(database_url)
+    try:
+        inspector = sa.inspect(engine)
+        tables = set(inspector.get_table_names())
+        assert "context_sessions" in tables
+        assert "model_context_events" in tables
+        session_columns = {c["name"] for c in inspector.get_columns("context_sessions")}
+        assert {
+            "id", "world_id", "root_world_id", "session_epoch", "parent_session_id",
+            "parent_world_id", "source_sequence", "head_sequence", "status",
+            "seed_digest", "created_at", "closed_at",
+        } <= session_columns
+        event_columns = {c["name"] for c in inspector.get_columns("model_context_events")}
+        assert {"source_sequences", "payload"} <= event_columns
+        session_uniques = {u["name"] for u in inspector.get_unique_constraints("context_sessions")}
+        assert "uq_context_session_world_epoch" in session_uniques
+        event_uniques = {u["name"] for u in inspector.get_unique_constraints("model_context_events")}
+        assert "uq_context_event_sequence" in event_uniques
+        indexes = {i["name"]: i for i in inspector.get_indexes("context_sessions")}
+        assert "uq_context_sessions_one_active_per_world" in indexes
+        active = indexes["uq_context_sessions_one_active_per_world"]
+        assert active["unique"] == 1
+        assert str(active["dialect_options"]["sqlite_where"]) == "status = 'active'"
+    finally:
+        engine.dispose()
+
+
+def test_migration_0008_adopts_create_all_database(tmp_path: Path, monkeypatch) -> None:
+    """0008 no-ops on an already-created (create_all) exact shape."""
+    database_url = _sqlite_url(tmp_path / "adopt0008.db")
+    engine = sa.create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    config = _alembic_config_for(database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260811_0007")
+    command.upgrade(config, "20260818_0008")
+
+    assert _revision(database_url) == "20260818_0008"
+
+
+def test_migration_0008_rejects_partial_context_schema(tmp_path: Path, monkeypatch) -> None:
+    """0008 fails closed when only one context table exists."""
+    database_url = _sqlite_url(tmp_path / "partial0008.db")
+    engine = sa.create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "CREATE TABLE context_sessions ("
+                "id VARCHAR(48) PRIMARY KEY,"
+                "world_id VARCHAR(160) NOT NULL,"
+                "root_world_id VARCHAR(160) NOT NULL,"
+                "session_epoch BIGINT NOT NULL,"
+                "parent_session_id VARCHAR(48),"
+                "parent_world_id VARCHAR(160),"
+                "source_sequence BIGINT NOT NULL DEFAULT 0,"
+                "head_sequence BIGINT NOT NULL DEFAULT 0,"
+                "status VARCHAR(20) NOT NULL DEFAULT 'active',"
+                "seed_digest VARCHAR(64) NOT NULL DEFAULT '',"
+                "created_at DATETIME NOT NULL,"
+                "closed_at DATETIME"
+                ")"
+            )
+        )
+    engine.dispose()
+
+    config = _alembic_config_for(database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260811_0007")
+    try:
+        command.upgrade(config, "20260818_0008")
+    except RuntimeError as error:
+        assert "只存在一部分" in str(error)
+    else:
+        raise AssertionError("partial context schema must fail closed")
+
+
+def test_migration_0008_rejects_existing_tables_without_active_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Existing context tables are adopted only as one exact schema unit."""
+    database_url = _sqlite_url(tmp_path / "missing-context-index.db")
+    engine = sa.create_engine(database_url)
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text("DROP INDEX uq_context_sessions_one_active_per_world")
+        )
+    engine.dispose()
+
+    config = _alembic_config_for(database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260811_0007")
+    try:
+        command.upgrade(config, "20260818_0008")
+    except RuntimeError as error:
+        assert "缺少索引" in str(error)
+    else:
+        raise AssertionError("context schema without its active index must fail closed")

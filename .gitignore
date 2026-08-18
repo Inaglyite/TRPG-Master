@@ -7,6 +7,7 @@ saves/
 worlds/
 trpg-master.db*
 .claude/
+.reasonix/
 .collab/
 node_modules/
 frontend/dist/

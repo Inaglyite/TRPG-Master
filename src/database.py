@@ -305,6 +305,89 @@ class AuditEvent(Base):
     )
 
 
+ACTIVE_CONTEXT_SESSION_INDEX = "uq_context_sessions_one_active_per_world"
+
+
+class ContextSession(Base):
+    """One append-only model-context timeline for a world.
+
+    A world normally keeps one active session; ``begin_epoch`` closes it and
+    opens a new epoch whose parent points at the old session, so resuming from
+    an old save can never see events written after that save's cutoff.  The
+    partial unique index (mirroring the single-active-turn invariant) is the
+    final authority on both backends.
+    """
+
+    __tablename__ = "context_sessions"
+    __table_args__ = (
+        UniqueConstraint("world_id", "session_epoch", name="uq_context_session_world_epoch"),
+        Index(
+            ACTIVE_CONTEXT_SESSION_INDEX,
+            "world_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
+    )
+    root_world_id: Mapped[str] = mapped_column(String(160), index=True)
+    session_epoch: Mapped[int] = mapped_column(BigInteger)
+    parent_session_id: Mapped[str | None] = mapped_column(
+        # RESTRICT: never delete an ancestor while a descendant still points
+        # at it.  The reference-aware GC only deletes sessions with no
+        # remaining children.
+        ForeignKey("context_sessions.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    parent_world_id: Mapped[str | None] = mapped_column(String(160))
+    source_sequence: Mapped[int] = mapped_column(BigInteger, default=0)
+    head_sequence: Mapped[int] = mapped_column(BigInteger, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    seed_digest: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ModelContextEvent(Base):
+    """One immutable event on a model-context timeline.
+
+    ``payload`` holds the model-visible message for that event; it is never
+    returned by ordinary APIs or diagnostics.  A ``replace`` checkpoint masks
+    the explicit ``source_sequences`` in the projection without deleting the
+    raw events.
+    """
+
+    __tablename__ = "model_context_events"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_context_event_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("context_sessions.id", ondelete="CASCADE"), index=True
+    )
+    world_id: Mapped[str] = mapped_column(String(160), index=True)
+    root_world_id: Mapped[str] = mapped_column(String(160), index=True)
+    turn_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    step: Mapped[int | None] = mapped_column(Integer)
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    source_kind: Mapped[str] = mapped_column(String(40))
+    source_id: Mapped[str] = mapped_column(String(200), default="")
+    source_version: Mapped[str] = mapped_column(String(80), default="")
+    content_digest: Mapped[str] = mapped_column(String(64), index=True)
+    audience: Mapped[str] = mapped_column(String(32), default="model_private")
+    sensitivity: Mapped[str] = mapped_column(String(32), default="private")
+    surface_op: Mapped[str] = mapped_column(String(16), default="append")
+    source_sequences: Mapped[list[Any]] = mapped_column(JSON_VALUE, default=list)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 _ENGINES: dict[str, Engine] = {}
 _ENGINE_LOCK = threading.Lock()
 
