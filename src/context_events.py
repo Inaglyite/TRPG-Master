@@ -51,6 +51,7 @@ from sqlalchemy import func
 from .database import (
     ContextSession,
     ModelContextEvent,
+    SaveSlot,
     Turn,
     World,
     new_id,
@@ -179,6 +180,16 @@ def messages_digest(messages: Sequence[dict[str, Any]]) -> str:
     return payload_digest(normalized)
 
 
+def _lineage_seed_digest(parent_id: str, cutoff: int) -> str:
+    """Seed marker for a session created over a parent (begin_epoch/fork/resume).
+
+    A non-empty ``seed_digest`` means the session descends from a lineage and
+    must never accept a ``seed_legacy`` import; the digest is derived from the
+    parent identity + cutoff so two distinct forks can never collide.
+    """
+    return hashlib.sha256(f"lineage:{parent_id}:{cutoff}".encode()).hexdigest()
+
+
 def _session_dict(row: ContextSession) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -220,6 +231,16 @@ class ContextEventStore:
             .one_or_none()
         )
 
+    @staticmethod
+    def _next_epoch_locked(session, world_id: str) -> int:
+        current = (
+            session.query(func.max(ContextSession.session_epoch))
+            .filter_by(world_id=world_id)
+            .scalar()
+            or 0
+        )
+        return int(current) + 1
+
     def _create_session_locked(
         self,
         session,
@@ -231,6 +252,7 @@ class ContextEventStore:
         source_sequence: int = 0,
         session_epoch: int = 1,
         cross_world_parent: bool = False,
+        seed_digest: str = "",
     ) -> ContextSession:
         """Create the next session inside an already-locked transaction.
 
@@ -256,7 +278,7 @@ class ContextEventStore:
             source_sequence=source_sequence,
             head_sequence=0,
             status="active",
-            seed_digest="",
+            seed_digest=seed_digest,
         )
         session.add(row)
         session.flush()
@@ -278,7 +300,12 @@ class ContextEventStore:
                 active = self._active_session(session, world_id)
                 if active is not None:
                     return _session_dict(active)
-                row = self._create_session_locked(session, world_id, root_world_id=root_world_id)
+                row = self._create_session_locked(
+                    session,
+                    world_id,
+                    root_world_id=root_world_id,
+                    session_epoch=self._next_epoch_locked(session, world_id),
+                )
                 return _session_dict(row)
 
     def begin_epoch(
@@ -304,7 +331,10 @@ class ContextEventStore:
                     # transaction (never call ensure_session here — it would open
                     # a nested scope while we already hold the World lock).
                     row = self._create_session_locked(
-                        session, world_id, root_world_id=root_world_id
+                        session,
+                        world_id,
+                        root_world_id=root_world_id,
+                        session_epoch=self._next_epoch_locked(session, world_id),
                     )
                     return _session_dict(row)
                 if cutoff_sequence is None:
@@ -324,6 +354,7 @@ class ContextEventStore:
                     parent_world_id=active.world_id,
                     source_sequence=cutoff,
                     session_epoch=int(active.session_epoch) + 1,
+                    seed_digest=_lineage_seed_digest(active.id, cutoff),
                 )
                 return _session_dict(new_row)
 
@@ -398,6 +429,90 @@ class ContextEventStore:
                     source_sequence=cutoff,
                     session_epoch=int(max_epoch) + 1,
                     cross_world_parent=True,
+                    seed_digest=_lineage_seed_digest(source.id, cutoff),
+                )
+                return _session_dict(row)
+
+    def begin_fresh_epoch(
+        self,
+        world_id: str,
+        *,
+        root_world_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Close the active session and open a fresh, parentless next epoch.
+
+        Used to start a brand-new game in the same world: old events are kept
+        in their (now closed) sessions but are never inherited because the new
+        session has no parent, so its projection starts empty.  The new epoch
+        is still seedable (no parent, head 0, empty seed marker).
+        """
+        with _world_write_lock(self.url, world_id):
+            with session_scope(self.url) as session:
+                self._lock_world(session, world_id)
+                active = self._active_session(session, world_id)
+                if active is not None:
+                    active.status = "closed"
+                    active.closed_at = utcnow()
+                max_epoch = (
+                    session.query(func.max(ContextSession.session_epoch))
+                    .filter_by(world_id=world_id)
+                    .scalar()
+                    or 0
+                )
+                row = self._create_session_locked(
+                    session,
+                    world_id,
+                    root_world_id=root_world_id,
+                    session_epoch=int(max_epoch) + 1,
+                )
+                return _session_dict(row)
+
+    def resume_from(
+        self,
+        world_id: str,
+        source_session_id: str,
+        cutoff: int,
+    ) -> dict[str, Any]:
+        """Close the active session and open a new epoch from a historical
+        cutoff of ``source_session_id`` (which must belong to ``world_id``).
+
+        Unlike ``begin_epoch`` (which resumes from the current active session)
+        this can resume from any earlier session in the world, e.g. loading an
+        old save slot.  Resuming from the active session itself is atomic and
+        equivalent to ``begin_epoch`` at that cutoff.
+        """
+        with _world_write_lock(self.url, world_id):
+            with session_scope(self.url) as session:
+                self._lock_world(session, world_id)
+                source = session.get(ContextSession, source_session_id)
+                if source is None:
+                    raise ValueError(f"源 context session 不存在: {source_session_id}")
+                if source.world_id != world_id:
+                    raise ValueError("resume 的 source session 不属于同一世界")
+                cutoff = int(cutoff)
+                if cutoff < 0 or cutoff > int(source.head_sequence):
+                    raise ValueError(
+                        f"resume cutoff {cutoff} 超出 [0, {source.head_sequence}]"
+                    )
+                active = self._active_session(session, world_id)
+                if active is not None:
+                    active.status = "closed"
+                    active.closed_at = utcnow()
+                max_epoch = (
+                    session.query(func.max(ContextSession.session_epoch))
+                    .filter_by(world_id=world_id)
+                    .scalar()
+                    or 0
+                )
+                row = self._create_session_locked(
+                    session,
+                    world_id,
+                    root_world_id=source.root_world_id,
+                    parent_session_id=source.id,
+                    parent_world_id=source.world_id,
+                    source_sequence=cutoff,
+                    session_epoch=int(max_epoch) + 1,
+                    seed_digest=_lineage_seed_digest(source.id, cutoff),
                 )
                 return _session_dict(row)
 
@@ -590,10 +705,16 @@ class ContextEventStore:
                     active = self._create_session_locked(
                         session, world_id, root_world_id=root_world_id
                     )
+                if active.parent_session_id is not None:
+                    raise ValueError("有 parent 的 context session 不能 seed_legacy")
                 if active.seed_digest:
                     if active.seed_digest == digest:
                         return int(active.head_sequence)
                     raise ValueError("context session 已由不同的历史 seed，拒绝覆盖")
+                if int(active.head_sequence) > 0:
+                    raise ValueError(
+                        "无 parent 的 context session 已有事件但未标记 seed，拒绝 seed_legacy"
+                    )
                 base = int(active.head_sequence)
                 rows: list[ModelContextEvent] = []
                 for index, message in enumerate(normalized):
@@ -808,36 +929,76 @@ class ContextEventStore:
     ) -> tuple[str, list[int]]:
         """Append only when the current projection is a prefix of ``messages``.
 
-        Returns ``("appended", [sequences])`` on success, or
-        ``("mismatch", [])`` when the projection diverges from the actual
-        message list (fail closed; no full-snapshot fallback is written).
+        Returns ``("appended", [sequences])`` on success, ``("noop", [])``
+        when the projection already covers every message (e.g. re-syncing the
+        same active turn), or ``("mismatch", [])`` when the projection
+        diverges from the actual message list (fail closed; no full-snapshot
+        fallback is written).
+
+        The current turn is explicitly surfaced during the prefix check so a
+        repeated sync of the same in-flight turn is a noop.  The projection,
+        prefix comparison and the delta batch-append all run under one
+        per-world process lock + one World row lock + one DB transaction, so a
+        concurrent ``append`` cannot land between the projection and the
+        write, and a failure mid-batch rolls back with no partial write.
         """
-        projected = self.project(session_id)
-        normalized = self._normalize_messages(messages)
-        prefix_len = self._common_prefix_len(projected, normalized)
-        if prefix_len < len(projected):
-            return "mismatch", []
-        if prefix_len == len(normalized):
-            return "noop", []
-        sequences: list[int] = []
-        for message in normalized[prefix_len:]:
-            event_type = infer_event_type(message)
-            sequence = self.append(
-                session_id,
-                event_type=event_type,
-                payload=dict(message),
-                turn_id=turn_id,
-                step=step,
-                source_kind=source_kind,
-                source_id="turn",
-                source_version="1",
-                audience="model_private",
-                sensitivity="private"
-                if event_type in {EVENT_TOOL_RESULT, EVENT_TOOL_CALL}
-                else "public",
-            )
-            sequences.append(sequence)
-        return "appended", sequences
+        with session_scope(self.url) as session:
+            session_row = session.get(ContextSession, session_id)
+            if session_row is None:
+                raise ValueError(f"context session 不存在: {session_id}")
+            world_id = session_row.world_id
+        with _world_write_lock(self.url, world_id):
+            with session_scope(self.url) as session:
+                self._lock_world(session, world_id)
+                locked = session.get(
+                    ContextSession, session_id, populate_existing=True, with_for_update=True
+                )
+                if locked is None or locked.status != "active":
+                    raise ValueError(f"context session 已关闭或不存在: {session_id}")
+                if locked.world_id != world_id:
+                    raise ValueError("context session 不属于传入 world_id")
+                # Project + prefix comparison inside the held World lock: no
+                # concurrent append can mutate the surface between the read
+                # and the batch insert below.
+                projected = self.project(session_id, include_turn_id=turn_id)
+                normalized = self._normalize_messages(messages)
+                prefix_len = self._common_prefix_len(projected, normalized)
+                if prefix_len < len(projected):
+                    return "mismatch", []
+                if prefix_len == len(normalized):
+                    return "noop", []
+                delta = normalized[prefix_len:]
+                sequences: list[int] = []
+                for message in delta:
+                    event_type = infer_event_type(message)
+                    sequence = int(locked.head_sequence) + 1
+                    session.add(
+                        ModelContextEvent(
+                            id=new_id("cev"),
+                            session_id=locked.id,
+                            world_id=world_id,
+                            root_world_id=locked.root_world_id,
+                            turn_id=turn_id,
+                            step=step,
+                            sequence=sequence,
+                            event_type=event_type,
+                            source_kind=source_kind,
+                            source_id="turn",
+                            source_version="1",
+                            content_digest=payload_digest(message),
+                            audience="model_private",
+                            sensitivity="private"
+                            if event_type in {EVENT_TOOL_RESULT, EVENT_TOOL_CALL}
+                            else "public",
+                            surface_op="append",
+                            source_sequences=[],
+                            payload=dict(message),
+                        )
+                    )
+                    locked.head_sequence = sequence
+                    sequences.append(sequence)
+                session.flush()
+                return "appended", sequences
 
     @staticmethod
     def _normalize_messages(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -939,6 +1100,18 @@ class ContextEventStore:
                     .filter(ContextSession.parent_session_id.isnot(None))
                     .all()
                 }
+                # Also protect any session referenced from a save slot's
+                # metadata or a turn's record (context.session_id).
+                for (slot_meta,) in (
+                    session.query(SaveSlot.metadata_json)
+                    .filter(SaveSlot.metadata_json.isnot(None))
+                    .all()
+                ):
+                    referenced.update(_referenced_session_ids_from_payload(slot_meta))
+                for (turn_record,) in (
+                    session.query(Turn.record).filter(Turn.record.isnot(None)).all()
+                ):
+                    referenced.update(_referenced_session_ids_from_payload(turn_record))
                 current_ids = {
                     row[0]
                     for row in session.query(ContextSession.id).filter_by(status="active").all()
@@ -960,6 +1133,25 @@ class ContextEventStore:
                     removed_sessions += 1
                 session.flush()
         return {"sessions": removed_sessions, "events": removed_events}
+
+
+def _referenced_session_ids_from_payload(value: Any) -> set[str]:
+    """Collect every ``{"context": {"session_id": ...}}`` reference found
+    anywhere in a nested JSON structure (save-slot metadata, turn record)."""
+    ids: set[str] = set()
+    stack: list[Any] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            context = item.get("context")
+            if isinstance(context, dict):
+                sid = str(context.get("session_id") or "")
+                if sid:
+                    ids.add(sid)
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return ids
 
 
 def _normalise_source_sequences(

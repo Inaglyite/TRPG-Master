@@ -20,7 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import event, inspect
 
 from src.context_events import (
     EVENT_ASSISTANT_MESSAGE,
@@ -39,6 +39,8 @@ from src.database import (
     Base,
     ContextSession,
     ModelContextEvent,
+    SaveSlot,
+    Snapshot,
     Turn,
     World,
     get_engine,
@@ -90,6 +92,20 @@ def test_ensure_session_creates_epoch_one_and_is_idempotent(tmp_path: Path):
     with session_scope(url) as session:
         active = session.query(ContextSession).filter_by(world_id="world-a", status="active").all()
         assert len(active) == 1
+
+
+def test_ensure_session_after_closed_epoch_uses_next_epoch(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    first = store.ensure_session("world-a")
+    store.close_session("world-a")
+
+    second = store.ensure_session("world-a")
+
+    assert second["session_epoch"] == 2
+    assert second["parent_session_id"] is None
+    assert second["id"] != first["id"]
 
 
 def test_migration_ddl_shape_sqlite(tmp_path: Path):
@@ -567,6 +583,20 @@ def test_begin_epoch_without_active_session_inlines_creation(tmp_path: Path):
     assert result["source_sequence"] == 0
 
 
+def test_begin_epoch_after_closed_session_uses_next_epoch(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    first = store.ensure_session("world-a")
+    store.close_session("world-a")
+
+    result = store.begin_epoch("world-a")
+
+    assert result["session_epoch"] == 2
+    assert result["parent_session_id"] is None
+    assert result["id"] != first["id"]
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint replace: masks explicit (session_id, sequence) refs only
 # ---------------------------------------------------------------------------
@@ -1008,3 +1038,298 @@ def _json_dumps(value: object) -> str:
 
 # re-export for the metadata assertion above
 json_dumps = _json_dumps
+
+
+# ---------------------------------------------------------------------------
+# sync_messages: active-turn noop + atomic batch
+# ---------------------------------------------------------------------------
+
+
+def test_sync_messages_active_turn_repeated_sync_is_noop(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session_id = store.ensure_session("world-a")["id"]
+    make_turn(url, "world-a", "turn-active", status="active")
+    messages = [
+        {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "c"},
+    ]
+    result, sequences = store.sync_messages(session_id, messages, turn_id="turn-active")
+    assert result == "appended"
+    assert sequences == [1, 2, 3]
+    assert store.head_sequence(session_id) == 3
+    # re-syncing the same in-flight turn is a noop (projection now includes it)
+    result2, sequences2 = store.sync_messages(session_id, messages, turn_id="turn-active")
+    assert result2 == "noop"
+    assert sequences2 == []
+    assert store.head_sequence(session_id) == 3
+    with session_scope(url) as session:
+        count = session.query(ModelContextEvent).filter_by(session_id=session_id).count()
+        assert count == 3
+
+
+def test_sync_messages_batch_failure_is_atomic_no_partial_write(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session_id = store.ensure_session("world-a")["id"]
+    make_turn(url, "world-a", "turn-active", status="active")
+    messages = [
+        {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "c"},
+    ]
+    calls = {"n": 0}
+
+    def fail_second(_mapper, _connection, _target):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("boom")
+
+    event.listen(ModelContextEvent, "before_insert", fail_second)
+    try:
+        with pytest.raises(RuntimeError):
+            store.sync_messages(session_id, messages, turn_id="turn-active")
+    finally:
+        event.remove(ModelContextEvent, "before_insert", fail_second)
+    # the whole batch rolled back: head and event count are both still 0
+    assert store.head_sequence(session_id) == 0
+    with session_scope(url) as session:
+        count = session.query(ModelContextEvent).filter_by(session_id=session_id).count()
+        assert count == 0
+
+
+def test_sync_messages_projects_while_world_write_lock_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The prefix snapshot and batch write share one serialization window."""
+    from contextlib import contextmanager
+
+    import src.context_events as context_events_module
+
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session_id = store.ensure_session("world-a")["id"]
+    make_turn(url, "world-a", "turn-active", status="active")
+
+    real_lock = context_events_module._world_write_lock
+    lock_held = False
+
+    @contextmanager
+    def tracking_lock(database_url: str, world_id: str):
+        nonlocal lock_held
+        with real_lock(database_url, world_id):
+            lock_held = True
+            try:
+                yield
+            finally:
+                lock_held = False
+
+    real_project = store.project
+
+    def observed_project(*args, **kwargs):
+        assert lock_held is True
+        return real_project(*args, **kwargs)
+
+    monkeypatch.setattr(context_events_module, "_world_write_lock", tracking_lock)
+    monkeypatch.setattr(store, "project", observed_project)
+
+    result, sequences = store.sync_messages(
+        session_id,
+        [{"role": "user", "content": "a"}],
+        turn_id="turn-active",
+    )
+    assert result == "appended"
+    assert sequences == [1]
+    assert lock_held is False
+
+
+# ---------------------------------------------------------------------------
+# Lineage seed markers: parent sessions can never be re-seeded
+# ---------------------------------------------------------------------------
+
+
+def test_seed_legacy_rejects_session_with_parent(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    epoch1 = store.ensure_session("world-a")
+    store.seed_legacy("world-a", [{"role": "user", "content": "m1"}])
+    epoch2 = store.begin_epoch("world-a", cutoff_sequence=1)
+    assert epoch2["parent_session_id"] == epoch1["id"]
+    assert epoch2["seed_digest"]  # lineage marker present
+    with pytest.raises(ValueError, match="parent"):
+        store.seed_legacy("world-a", [{"role": "user", "content": "x"}])
+
+
+def test_seed_legacy_rejects_unmarked_root_with_events(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session_id = store.ensure_session("world-a")["id"]
+    make_turn(url, "world-a", "turn-1", status="completed")
+    store.append(
+        session_id,
+        event_type=EVENT_ENTERED_PLAYER_ACTION,
+        payload={"role": "user", "content": "m1"},
+        turn_id="turn-1",
+        source_kind="turn",
+    )
+    # root session with head > 0 but no seed marker must refuse a seed
+    with pytest.raises(ValueError, match="未标记"):
+        store.seed_legacy("world-a", [{"role": "user", "content": "x"}])
+
+
+# ---------------------------------------------------------------------------
+# begin_fresh_epoch: new game, old events kept but never inherited
+# ---------------------------------------------------------------------------
+
+
+def test_begin_fresh_epoch_keeps_old_events_without_inheriting(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    epoch1 = store.ensure_session("world-a")
+    store.seed_legacy("world-a", [{"role": "user", "content": "old"}])
+    make_turn(url, "world-a", "turn-1", status="completed")
+    store.append(
+        epoch1["id"],
+        event_type=EVENT_ENTERED_PLAYER_ACTION,
+        payload={"role": "user", "content": "old-2"},
+        turn_id="turn-1",
+        source_kind="turn",
+    )
+    fresh = store.begin_fresh_epoch("world-a")
+    assert fresh["parent_session_id"] is None
+    assert fresh["session_epoch"] == 2
+    assert fresh["head_sequence"] == 0
+    assert fresh["seed_digest"] == ""
+    # old events are kept in the closed session but never inherited
+    assert store.project(fresh["id"]) == []
+    assert len(store.event_metadata(epoch1["id"])) == 2
+    with session_scope(url) as db:
+        assert db.get(ContextSession, epoch1["id"]).status == "closed"
+    # the fresh session is the new active one
+    assert store.session_for_world("world-a")["id"] == fresh["id"]
+
+
+# ---------------------------------------------------------------------------
+# resume_from: reopen a historical cutoff (including the active source)
+# ---------------------------------------------------------------------------
+
+
+def test_resume_from_old_cutoff(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    epoch1 = store.ensure_session("world-a")
+    store.seed_legacy(
+        "world-a",
+        [{"role": "user", "content": "s"}, {"role": "user", "content": "u1"}],
+    )
+    epoch2 = store.begin_epoch("world-a", cutoff_sequence=2)
+    # resume from the historical epoch1 at cutoff 1 (only "s" is inherited)
+    resumed = store.resume_from("world-a", epoch1["id"], cutoff=1)
+    assert resumed["parent_session_id"] == epoch1["id"]
+    assert resumed["source_sequence"] == 1
+    assert resumed["session_epoch"] == 3
+    assert [m["content"] for m in store.project(resumed["id"])] == ["s"]
+    # epoch2 was the active session and is now closed
+    with session_scope(url) as db:
+        assert db.get(ContextSession, epoch2["id"]).status == "closed"
+
+
+def test_resume_from_active_source_is_atomic(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session = store.ensure_session("world-a")
+    make_turn(url, "world-a", "turn-1", status="completed")
+    store.append(
+        session["id"],
+        event_type=EVENT_ENTERED_PLAYER_ACTION,
+        payload={"role": "user", "content": "m1"},
+        turn_id="turn-1",
+        source_kind="turn",
+    )
+    store.append(
+        session["id"],
+        event_type=EVENT_ENTERED_PLAYER_ACTION,
+        payload={"role": "user", "content": "m2"},
+        turn_id="turn-1",
+        source_kind="turn",
+    )
+    resumed = store.resume_from("world-a", session["id"], cutoff=1)
+    assert resumed["parent_session_id"] == session["id"]
+    assert resumed["source_sequence"] == 1
+    assert resumed["session_epoch"] == 2
+    assert [m["content"] for m in store.project(resumed["id"])] == ["m1"]
+    with session_scope(url) as db:
+        assert db.get(ContextSession, session["id"]).status == "closed"
+
+
+def test_resume_from_validates_world_and_cutoff(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url, "world-a")
+    seed_world(url, "world-b")
+    store = ContextEventStore(url)
+    session = store.ensure_session("world-a")
+    other = store.ensure_session("world-b")
+    with pytest.raises(ValueError, match="同一世界"):
+        store.resume_from("world-a", other["id"], cutoff=0)
+    with pytest.raises(ValueError, match="cutoff"):
+        store.resume_from("world-a", session["id"], cutoff=999)
+
+
+# ---------------------------------------------------------------------------
+# Reference-aware GC also protects save-slot and turn-record references
+# ---------------------------------------------------------------------------
+
+
+def test_reference_aware_gc_protects_save_and_turn_references(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url, "world-save")
+    seed_world(url, "world-turn")
+    store = ContextEventStore(url)
+
+    # a closed session referenced from a SaveSlot.metadata_json
+    save_session = store.ensure_session("world-save")
+    store.close_session("world-save")
+    with session_scope(url) as db:
+        snapshot = Snapshot(id=new_id("snap"), world_id="world-save", revision=1, state={})
+        db.add(snapshot)
+        snapshot_id = snapshot.id
+    with session_scope(url) as db:
+        db.add(
+            SaveSlot(
+                id=new_id("slot"),
+                world_id="world-save",
+                slot_key="auto",
+                metadata_json={"context": {"session_id": save_session["id"]}},
+                snapshot_id=snapshot_id,
+            )
+        )
+
+    # a closed session referenced from a Turn.record
+    turn_session = store.ensure_session("world-turn")
+    store.close_session("world-turn")
+    with session_scope(url) as db:
+        db.add(
+            Turn(
+                pk=new_id("turnrow"),
+                id="turn-ref",
+                world_id="world-turn",
+                kind="action",
+                status="completed",
+                record={"context": {"session_id": turn_session["id"]}},
+            )
+        )
+
+    assert store.reference_aware_gc("world-save")["sessions"] == 0
+    assert store.reference_aware_gc("world-turn")["sessions"] == 0
+    with session_scope(url) as db:
+        assert db.get(ContextSession, save_session["id"]) is not None
+        assert db.get(ContextSession, turn_session["id"]) is not None
