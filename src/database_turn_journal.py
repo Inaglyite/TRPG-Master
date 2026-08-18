@@ -205,9 +205,7 @@ class DatabaseTurnJournal:
             raise ValueError("operator 必须为 1-120 个字符")
 
         with session_scope(self.database_url) as session:
-            world = session.scalar(
-                select(World).where(World.id == self.world_id).with_for_update()
-            )
+            world = session.scalar(select(World).where(World.id == self.world_id).with_for_update())
             if world is None:
                 raise TurnJournalError(f"世界不存在: {self.world_id}")
             row = session.scalar(
@@ -223,9 +221,7 @@ class DatabaseTurnJournal:
             record = self._record(row)
             current_owner_token = row.owner_token or str(record.get("owner_token") or "")
             if current_owner_token != owner_token:
-                raise TurnJournalError(
-                    f"回合 {turn_id} 的 owner token 已变化；请重新检查后再执行"
-                )
+                raise TurnJournalError(f"回合 {turn_id} 的 owner token 已变化；请重新检查后再执行")
 
             now = _now()
             record["owner_token"] = current_owner_token
@@ -420,6 +416,50 @@ class DatabaseTurnJournal:
         else:
             events.append(event)
 
+    def append_tool_outcome(
+        self,
+        turn_id: str,
+        *,
+        outcome: dict,
+        mutation_plan: dict | None = None,
+    ) -> None:
+        """Durably append redacted V2 tool audit while a turn remains active.
+
+        Tool handlers still write only to ``WorldStore.turn_cache``.  This
+        method never persists their state; it is a fenced correlation ledger
+        for cancellation/reconnect diagnosis and completed-turn audit.
+        """
+        safe_outcome = _json_safe(outcome)
+        if not isinstance(safe_outcome, dict):
+            raise TurnJournalError("工具审计记录格式无效")
+        call_id = str(safe_outcome.get("call_id") or "")
+        if not call_id:
+            raise TurnJournalError("工具审计记录缺少 call_id")
+        with session_scope(self.database_url) as session:
+            row = self._row(session, turn_id, for_update=True)
+            if row.status != "active":
+                return
+            record = self._record(row)
+            record["owner_token"] = row.owner_token or record.get("owner_token", "")
+            _assert_active_turn_owner(record, self.owner_token, "写入工具审计")
+            pipeline = record.setdefault("tool_pipeline", {"version": 2, "outcomes": []})
+            if not isinstance(pipeline, dict):
+                pipeline = {"version": 2, "outcomes": []}
+                record["tool_pipeline"] = pipeline
+            outcomes = pipeline.setdefault("outcomes", [])
+            if not isinstance(outcomes, list):
+                outcomes = []
+                pipeline["outcomes"] = outcomes
+            # A retried persistence attempt must not manufacture a second
+            # audit event for the same model call id.
+            if not any(
+                isinstance(item, dict) and item.get("call_id") == call_id for item in outcomes
+            ):
+                outcomes.append(safe_outcome)
+            if mutation_plan:
+                pipeline["mutation_plan"] = _json_safe(mutation_plan)
+            row.record = copy.deepcopy(record)
+
     def complete(
         self,
         turn_id: str,
@@ -447,16 +487,12 @@ class DatabaseTurnJournal:
             serializable = serialize_messages(messages)
             if expected_world_revision is not None:
                 world_row = session.scalar(
-                    select(WorldState)
-                    .where(WorldState.world_id == self.world_id)
-                    .with_for_update()
+                    select(WorldState).where(WorldState.world_id == self.world_id).with_for_update()
                 )
                 if world_row is None:
                     raise TurnJournalError(f"世界状态不存在: {self.world_id}")
                 if world_row.revision != expected_world_revision:
-                    raise StaleRevisionError(
-                        expected_world_revision, world_row.revision
-                    )
+                    raise StaleRevisionError(expected_world_revision, world_row.revision)
                 world_row.state = _json_safe(world_state)
                 world_row.revision = int(world_state.get("revision", 0))
                 world_row.schema_version = int(world_state.get("schema_version", 0))
@@ -544,9 +580,7 @@ class DatabaseTurnJournal:
                     )
                 )
             session.flush()
-            performance = record.setdefault("diagnostics", {}).setdefault(
-                "performance", {}
-            )
+            performance = record.setdefault("diagnostics", {}).setdefault("performance", {})
             performance.setdefault("phases_ms", {})["journal_commit"] = round(
                 (time.monotonic() - journal_started) * 1000, 3
             )
@@ -562,7 +596,9 @@ class DatabaseTurnJournal:
         clue_count = (
             sum(len(items) for items in clues.values())
             if isinstance(clues, dict)
-            else len(clues) if isinstance(clues, list) else 0
+            else len(clues)
+            if isinstance(clues, list)
+            else 0
         )
         return {
             "created_at": _now(),
@@ -582,7 +618,10 @@ class DatabaseTurnJournal:
 
     def _export_auto_save(self, messages: list[dict], state: dict, metadata: dict) -> None:
         if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() not in {
-            "1", "true", "yes", "on"
+            "1",
+            "true",
+            "yes",
+            "on",
         }:
             return
         slot_dir = self.world_dir / "saves" / AUTO_SAVE_SLOT

@@ -75,6 +75,7 @@ from .persistence import (
 )
 from .runtime import RuntimeContext
 from .speaker_parser import parse_segments as parse_speaker_segments
+from .tool_pipeline import ToolExecutionLedger
 from .tools import (
     dice_summary,
     execute_function,
@@ -198,6 +199,9 @@ class GameEngine:
         self._turn_lore_diagnostics: dict = {}
         self._turn_performance: TurnPerformance | None = None
         self._turn_mutations = TurnMutationLedger()
+        self._tool_pipeline_ledger = ToolExecutionLedger()
+        self._tool_pipeline_audit: list[dict] = []
+        self._tool_pipeline_shadow: list[dict] = []
         # 摘要策略：按玩家回合静默压缩，避免内部工具消息过多导致频繁打断沉浸。
         self.SUMMARY_PLAYER_TURN_INTERVAL = 50
         self.SUMMARY_KEEP_RECENT_MESSAGES = 24
@@ -225,6 +229,9 @@ class GameEngine:
         self._preconfirmed_escalation = None
         self._turn_diagnostics = []
         self._turn_lore_diagnostics = {}
+        self._tool_pipeline_ledger = ToolExecutionLedger()
+        self._tool_pipeline_audit = []
+        self._tool_pipeline_shadow = []
 
     def configure_models(self, narrative_model: object, judgement_model: object) -> dict:
         settings = ModelSettings.validated(narrative_model, judgement_model)
@@ -367,6 +374,9 @@ class GameEngine:
         self._turn_lore_diagnostics = {}
         self._turn_performance = TurnPerformance()
         self._turn_mutations = TurnMutationLedger()
+        self._tool_pipeline_ledger = ToolExecutionLedger()
+        self._tool_pipeline_audit = []
+        self._tool_pipeline_shadow = []
         return turn_id
 
     def performance_span(self, name: str):
@@ -459,6 +469,11 @@ class GameEngine:
                     "lorebook": dict(self._turn_lore_diagnostics),
                     "performance": performance,
                     "mutations": self._turn_mutations.snapshot(),
+                    "tool_pipeline": {
+                        "version": 2,
+                        "outcomes": list(getattr(self, "_tool_pipeline_audit", [])),
+                        "shadow": list(getattr(self, "_tool_pipeline_shadow", [])),
+                    },
                 },
                 narrative_segments=narrative_segments,
                 expected_world_revision=expected_world_revision,

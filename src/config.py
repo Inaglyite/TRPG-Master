@@ -119,6 +119,41 @@ if PROMPT_PROFILE not in {"full", "hybrid"}:
 ENABLE_DYNAMIC_TOOLS = os.environ.get("TRPG_DYNAMIC_TOOLS", "1").lower() not in (
     "0", "false", "no", "off",
 )
+
+
+def _enabled_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+# H1 rollout controls.  V2 wraps the existing handler implementations rather
+# than changing their rules or transaction boundary; setting it to false keeps
+# the H0 graph loop available for a reversible rollout.  Shadow mode validates
+# the V2 plan while that legacy loop executes and never runs a second handler.
+ENABLE_TOOL_PIPELINE_V2 = _enabled_env("TRPG_TOOL_PIPELINE_V2", True)
+ENABLE_TOOL_PIPELINE_SHADOW = _enabled_env("TRPG_TOOL_PIPELINE_SHADOW", False)
+
+
+def tool_pipeline_v2_enabled() -> bool:
+    """Read the feature flag at execution time for test and staged rollout."""
+    return _enabled_env("TRPG_TOOL_PIPELINE_V2", ENABLE_TOOL_PIPELINE_V2)
+
+
+def tool_pipeline_shadow_enabled() -> bool:
+    return _enabled_env("TRPG_TOOL_PIPELINE_SHADOW", ENABLE_TOOL_PIPELINE_SHADOW)
+
+
+def tool_execution_timeout_ms() -> int:
+    """Cooperative handler deadline, bounded to avoid accidental zero/huge values."""
+    raw = os.environ.get("TRPG_TOOL_EXECUTION_TIMEOUT_MS", "5000")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 5000
+    return max(1, min(value, 120_000))
+
 STORY_THINKING_MODE = os.environ.get(
     "TRPG_STORY_THINKING", "auto"
 ).strip().lower()

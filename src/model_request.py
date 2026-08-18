@@ -8,6 +8,7 @@ from typing import Any
 
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
+from .tool_pipeline import ContextSection, RequestEnvelope
 from .tool_policy import MODEL_CALLER, ToolRequestSnapshot, payload_digest
 from .tools import MODEL_TOOLS, model_tools_for
 
@@ -29,6 +30,7 @@ class PreparedModelRequest:
     request_tools: list[dict]
     request_snapshot: ToolRequestSnapshot
     context_sections: dict[str, dict[str, int]]
+    envelope: RequestEnvelope
     request_envelope: dict[str, object]
     provider_kwargs: dict[str, Any]
     system_chars: int
@@ -91,21 +93,65 @@ def prepare_model_request(
     tool_schema_json = json.dumps(request_tools, ensure_ascii=False, separators=(",", ":"))
     system_chars = role_chars.get("system", 0)
     tool_schema_chars = len(tool_schema_json)
+    system_content = "\n\n".join(
+        str(message.get("content") or "") for message in messages if message.get("role") == "system"
+    )
+    history_content = "\n\n".join(
+        str(message.get("content") or "") for message in messages if message.get("role") != "system"
+    )
+    sections = (
+        ContextSection(
+            section_id="system",
+            audience="model_private",
+            priority=100,
+            content=system_content,
+            source="system_prompt",
+            estimated_tokens=role_tokens.get("system", 0),
+        ),
+        ContextSection(
+            section_id="history",
+            audience="model_private",
+            priority=60,
+            content=history_content,
+            source="message_history",
+            estimated_tokens=sum(value for role, value in role_tokens.items() if role != "system"),
+        ),
+        ContextSection(
+            section_id="tool_schema",
+            audience="model_private",
+            priority=90,
+            content=tool_schema_json,
+            source="tool_catalog",
+            estimated_tokens=estimate_text_tokens(tool_schema_json),
+        ),
+    )
     context_sections = {
-        "system": {"chars": system_chars, "estimated_tokens": role_tokens.get("system", 0)},
-        "history": {
-            "chars": sum(value for role, value in role_chars.items() if role != "system"),
-            "estimated_tokens": sum(
-                value for role, value in role_tokens.items() if role != "system"
-            ),
-        },
-        "tool_schema": {
-            "chars": tool_schema_chars,
-            "estimated_tokens": estimate_text_tokens(tool_schema_json),
-        },
+        section.section_id: {
+            "chars": len(section.content),
+            "estimated_tokens": section.estimated_tokens,
+        }
+        for section in sections
     }
-    request_envelope = {
-        "message_digest": payload_digest(messages),
+    runtime_context = getattr(host, "context", None)
+    envelope = RequestEnvelope(
+        request_id=request_snapshot.request_id,
+        world_id=str(getattr(runtime_context, "world_id", "") or ""),
+        turn_id=getattr(host, "active_turn_id", None) or getattr(host, "_active_turn_id", None),
+        step=request_snapshot.step,
+        profile=request_snapshot.profile,
+        caller=MODEL_CALLER,
+        provider="openai_compatible",
+        model=model,
+        max_output_tokens=4096,
+        sections=sections,
+        allowed_tool_names=request_snapshot.allowed_tool_names,
+        tool_catalog_digest=request_snapshot.tool_catalog_digest,
+        message_digest=payload_digest(messages),
+        cache_metadata={"stream_usage_requested": bool(policy.stream_usage)},
+    )
+    # H0's digest-only shape remains for existing diagnostics and its golden
+    # fixture.  The typed envelope above is the H1 source of truth.
+    request_envelope = envelope.audit_dict() | {
         "context_section_digests": {
             "system": payload_digest(
                 [message for message in messages if message.get("role") == "system"]
@@ -135,6 +181,7 @@ def prepare_model_request(
         request_tools=request_tools,
         request_snapshot=request_snapshot,
         context_sections=context_sections,
+        envelope=envelope,
         request_envelope=request_envelope,
         provider_kwargs=provider_kwargs,
         system_chars=system_chars,

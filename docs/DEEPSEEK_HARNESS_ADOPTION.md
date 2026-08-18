@@ -444,17 +444,34 @@ Provider 原始流还应先归一化为服务端内部的 `reasoning | public_te
 `src/agent_graph.py` 对 structured/DSML 走同一拒绝路径，`src/skill_resources.py` 只加载固定资源。相关
 golden、拒绝、泄漏与轮次边界回归在 `tests/test_tool_policy.py`，完整 Python 测试基线为 590 passed、5 skipped。
 
-### H1：Context Envelope + Tool Pipeline V2
+### H1：Context Envelope + Tool Pipeline V2（已实施，2026-08-18）
 
-- 定义 `ContextSection`、`RequestEnvelope`、`ToolDescriptor`、`ToolCall`、`ToolOutcome`；
-- 先包装符合 `turn_cache` 约束的现有 handler，不重写领域逻辑；其余写工具先迁移到
-  `ToolUnitOfWork`/`MutationPlan`，跨介质副作用使用 post-commit outbox 或补偿；
-- 把权限、可见性、幂等、超时、取消、输出校验和 TurnJournal 审计统一到管线；
-- 在 `ModelCall.details` 中记录 provider/model、section/tool digest、容量、usage 和 cache metadata；
-- 新旧路径通过 feature flag 和 shadow comparison 共存。
+- `src/tool_pipeline.py` 定义 `ContextSection`、`RequestEnvelope`、`ToolDescriptor`、`ToolCall`、
+  `ToolOutcome`、`ToolUnitOfWork` 和 `MutationPlan`。`RequestEnvelope` 把 H0 请求快照扩展为
+  world/turn/step、provider/model、容量、context section 和工具目录的类型化不可变记录；持久审计只保留
+  digest、计数和来源，不复制 prompt 或私密 tool output。
+- 所有当前**模型可调用**写工具（线索、物品、NPC 揭示、SAN、战斗、心理特质、结局等）都由既有
+  `WorldStore.turn_cache` 包裹，最终仍只在 `DatabaseTurnJournal.complete()` 中与 WorldState、Snapshot、
+  SaveSlot 原子提交。`MutationPlan` 只描述这些缓存内 mutation；`create_character`、文件读取、素材展示和
+  私密读取均不在模型目录中。今后新增跨介质副作用必须走 post-commit outbox 或具补偿动作的专用路径，不能
+  直接注册为 V2 model tool。
+- `ToolPipeline` 将 H0 的 request-scoped policy/schema 校验、descriptor visibility、semantic-turn
+  幂等、协作式 deadline、取消检查、输出大小/类型校验和每调用必有一个 outcome 收敛为一条路径。取消会向上
+  传播，外层 `turn_cache` 丢弃未提交状态；同一 turn 中同一语义的写调用返回既有 outcome 而不再次执行。
+  同步 handler 不能被安全强杀，因此 deadline 仅阻断**尚未开始**的 handler；开始后的 handler 必须完成，
+  随后由取消/失败的回合工作单元整体丢弃，避免产生“超时但已半写入”的假象。
+- active turn 与 completed turn 都记录去敏的 `call_id/request_id/world_id/turn_id/step/name`、参数/输出
+  digest、状态、耗时和 mutation plan；`ModelCall.details` 记录 typed request envelope、实际 usage 与
+  provider cache hit/miss 元数据。
+- `TRPG_TOOL_PIPELINE_V2=0` 保留 H0 旧执行环；此时 `TRPG_TOOL_PIPELINE_SHADOW=1` 仅预检 V2 descriptor
+  和 policy、记录差异，不会二次调用 handler。`TRPG_TOOL_EXECUTION_TIMEOUT_MS`（1–120000，默认 5000）控制
+  协作式 handler deadline。默认启用 V2。
 
-验收：每次调用可关联 world/turn/step/call_id；重试、取消和重连不重复写世界；用录制和合成 fixture
-测得管线 p95 自身开销低于 10ms，正常回合本地编排 p95 延迟增幅不超过 5%（不把公网模型抖动计入）。
+验收证据：`tests/test_tool_pipeline.py` 覆盖类型化 envelope、语义幂等、取消、deadline、非法输出、旧路径
+shadow、active/completed TurnJournal audit 以及 `ModelCall.details`；H0 的 native/DSML/重放 fixture 继续由
+`tests/test_tool_policy.py` 覆盖。`PYTHONPATH=. ./venv/bin/python tools/benchmark_tool_pipeline.py --assert-budget`
+以固定的本地 recorded-shaped handler fixture 在每次验证时输出 80 次样本的 p95；命令会对 pipeline 自身
+`<10ms`、正常本地编排 `<=5%`（公网 LLM 未计入）两项预算失败关闭。
 
 ### H2：追加式 Context Event + 非破坏性压缩
 

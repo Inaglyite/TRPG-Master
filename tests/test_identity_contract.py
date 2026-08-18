@@ -458,6 +458,14 @@ class IdentityContractTests(unittest.TestCase):
             diagnostic["context_sections"]["tool_schema"]["estimated_tokens"],
             0,
         )
+        self.assertEqual(
+            diagnostic["request_envelope"]["cache"]["prompt_cache_hit_tokens"],
+            1100,
+        )
+        self.assertEqual(
+            diagnostic["request_envelope"]["cache"]["prompt_cache_miss_tokens"],
+            100,
+        )
 
     def test_authoritative_context_closes_resolved_fact_scope(self):
         world = {

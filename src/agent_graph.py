@@ -19,12 +19,16 @@ from .config import (
     JUDGEMENT_MODEL,
     MAX_TOOL_ROUNDS,
     NARRATIVE_MODEL,
+    tool_execution_timeout_ms,
+    tool_pipeline_shadow_enabled,
+    tool_pipeline_v2_enabled,
 )
 from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
 from .speaker_parser import parse_segments as parse_speaker_segments
+from .tool_pipeline import ToolPipeline, record_engine_tool_shadow
 from .tool_policy import (
     REQUEST_METADATA_KEY,
     ToolPolicyError,
@@ -41,9 +45,14 @@ from .tools import (
 )
 
 _NON_REPEATABLE_CHECKS = {
-    "skill_check", "attribute_check", "luck_check",
-    "sanity_check", "sanity_loss", "sanity_event",
-    "psychoanalysis", "reality_check",
+    "skill_check",
+    "attribute_check",
+    "luck_check",
+    "sanity_check",
+    "sanity_loss",
+    "sanity_event",
+    "psychoanalysis",
+    "reality_check",
 }
 
 
@@ -101,9 +110,7 @@ def _prepare_turn(state: TurnState) -> dict:
     _check_cancelled(engine)
     user_content = state.get("user_content")
     control_turn = user_content is None and engine._has_pending_control_instruction()
-    opening_turn = bool(
-        control_turn and engine._has_pending_new_game_opening()
-    )
+    opening_turn = bool(control_turn and engine._has_pending_new_game_opening())
     _emit_phase(
         engine,
         "preparing",
@@ -111,9 +118,7 @@ def _prepare_turn(state: TurnState) -> dict:
     )
 
     with _performance_span(engine, "prepare"):
-        result = _prepare_turn_inner(
-            state, engine, user_content, control_turn, opening_turn
-        )
+        result = _prepare_turn_inner(state, engine, user_content, control_turn, opening_turn)
     return result
 
 
@@ -155,8 +160,7 @@ def _prepare_turn_inner(
         # An authored unconditional discovery is itself the authority for this
         # action.  Do not let the generic language matcher invent an extra roll.
         needs_discovery_check = any(
-            bool(match.rule.get("requires_success"))
-            for match in discovery_matches
+            bool(match.rule.get("requires_success")) for match in discovery_matches
         )
         _emit_phase(engine, "resolving", "正在结算本轮行动……")
         luck_difficulty = preferred_luck_difficulty(discovery_matches)
@@ -206,7 +210,9 @@ def _prepare_turn_inner(
         check_result = None
         if control_turn:
             authority = engine._authoritative_turn_context()
-            if authority and "[引擎权威状态｜仅供守秘人，不得复述]" not in engine.messages[-1].get("content", ""):
+            if authority and "[引擎权威状态｜仅供守秘人，不得复述]" not in engine.messages[-1].get(
+                "content", ""
+            ):
                 engine.messages[-1]["content"] += f"\n\n{authority}"
             retrieve_lore = getattr(engine, "_retrieve_lore_context", None)
             lore_selection = retrieve_lore() if retrieve_lore else None
@@ -245,15 +251,13 @@ def _call_story_agent(state: TurnState) -> dict:
     with _performance_span(engine, "story_model"):
         text, tool_calls = engine._stream_llm(
             engine.current_model,
-        system_prompt_override=(
-            engine._opening_system_prompt() if opening_turn else None
-        ),
-        # A resolved check is an immutable fact for this player action. The
-        # follow-up request may narrate it, but must not roll again or enter a
-        # second tool-planning loop.
-        enable_tools=not opening_turn and not state.get("turn_had_check", False),
-        prompt_profile="opening" if opening_turn else None,
-        temperature=0.65 if opening_turn else 0.8,
+            system_prompt_override=(engine._opening_system_prompt() if opening_turn else None),
+            # A resolved check is an immutable fact for this player action. The
+            # follow-up request may narrate it, but must not roll again or enter a
+            # second tool-planning loop.
+            enable_tools=not opening_turn and not state.get("turn_had_check", False),
+            prompt_profile="opening" if opening_turn else None,
+            temperature=0.65 if opening_turn else 0.8,
             buffer_if_tools=True,
         )
     return {"text": text, "tool_calls": tool_calls}
@@ -307,9 +311,7 @@ def _execute_tools(state: TurnState) -> dict:
     )
     if complex_hit:
         turn_had_check = True
-        engine.current_model = getattr(
-            engine, "judgement_model", JUDGEMENT_MODEL
-        )
+        engine.current_model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
     if complex_hit and state.get("tool_round", 0) == 0:
         engine.cb.on_tension(tension(_tool_category(tool_calls)), _tool_category(tool_calls))
 
@@ -327,6 +329,12 @@ def _execute_tools(state: TurnState) -> dict:
     tool_outputs: list[tuple[str, str]] = []
     executed_tools = list(state.get("executed_tools", []))
     executed_call_names: list[str] = []
+    use_pipeline_v2 = tool_pipeline_v2_enabled()
+    shadow_pipeline = (
+        ToolPipeline(engine, timeout_ms=tool_execution_timeout_ms())
+        if (use_pipeline_v2 or tool_pipeline_shadow_enabled())
+        else None
+    )
     prior_checks = {
         json.dumps(
             {"name": entry.get("name"), "args": entry.get("args", {})},
@@ -343,59 +351,84 @@ def _execute_tools(state: TurnState) -> dict:
         function = function if isinstance(function, dict) else {}
         raw_name = str(function.get("name") or "unknown")
         call_id = str(tc.get("id") or "") if isinstance(tc, dict) else ""
-        try:
-            snapshot = ToolRequestSnapshot.from_dict(
-                tc.get(REQUEST_METADATA_KEY) if isinstance(tc, dict) else None
-            )
-            snapshot, name, args = authorize_model_tool_call(
-                tc,
-                tool_schemas=TOOL_SCHEMA_BY_NAME,
-                ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
-            )
-        except ToolPolicyError as exc:
-            # A rejected call still gets one paired tool result so the next
-            # provider request sees a valid assistant/tool batch.  Do not log
-            # model-controlled arguments: they may themselves contain secrets.
-            output = denied_tool_result(exc)
-            executed_tools.append({
-                "name": raw_name,
-                "args": {},
-                "output": output,
-                "policy_denied": exc.code,
-            })
-            engine.messages.append({
-                "role": "tool", "tool_call_id": call_id, "content": output,
-            })
-            log_error(f"工具策略拒绝: name={raw_name} reason={exc.code}")
-            continue
-
-        fingerprint = json.dumps(
-            {"name": name, "args": args},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        reused = name in _NON_REPEATABLE_CHECKS and fingerprint in prior_checks
-        if reused:
-            output = prior_checks[fingerprint]
+        if use_pipeline_v2:
+            assert shadow_pipeline is not None
+            with _performance_span(engine, "tool_execution"):
+                outcome = shadow_pipeline.execute(
+                    tc,
+                    player_action=state.get("user_content") or "",
+                )
+            name = outcome.name
+            args = dict(outcome.args)
+            output = outcome.output
+            reused = outcome.reused
+            executed_tools.append(outcome.executed_tool_dict())
+            if outcome.status == "denied":
+                log_error(f"工具策略拒绝: name={raw_name} reason={outcome.error_code or 'unknown'}")
+            elif outcome.status not in {"ok", "reused"}:
+                log_error(f"工具管线拒绝或失败: name={name} status={outcome.status}")
         else:
+            if shadow_pipeline is not None:
+                record_engine_tool_shadow(engine, shadow_pipeline.shadow(tc))
             try:
-                with _performance_span(engine, "tool_execution"):
-                    execute_model_tool = getattr(engine, "_execute_model_tool", None)
-                    if execute_model_tool:
-                        output = execute_model_tool(
-                            name,
-                            args,
-                            player_action=state.get("user_content") or "",
-                        )
-                    else:
-                        output = engine._execute_tool(name, args)
-            except Exception as exc:
-                log_error(f"工具 {name} 执行异常: {type(exc).__name__}")
-                output = "[错误] 工具执行失败，请检查参数后重试"
-            if name in _NON_REPEATABLE_CHECKS:
-                prior_checks[fingerprint] = output
-        executed_tools.append({"name": name, "args": args, "output": output})
+                snapshot = ToolRequestSnapshot.from_dict(
+                    tc.get(REQUEST_METADATA_KEY) if isinstance(tc, dict) else None
+                )
+                snapshot, name, args = authorize_model_tool_call(
+                    tc,
+                    tool_schemas=TOOL_SCHEMA_BY_NAME,
+                    ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
+                )
+            except ToolPolicyError as exc:
+                # A rejected call still gets one paired tool result so the next
+                # provider request sees a valid assistant/tool batch.  Do not log
+                # model-controlled arguments: they may themselves contain secrets.
+                output = denied_tool_result(exc)
+                executed_tools.append(
+                    {
+                        "name": raw_name,
+                        "args": {},
+                        "output": output,
+                        "policy_denied": exc.code,
+                    }
+                )
+                engine.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": output,
+                    }
+                )
+                log_error(f"工具策略拒绝: name={raw_name} reason={exc.code}")
+                continue
+
+            fingerprint = json.dumps(
+                {"name": name, "args": args},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            reused = name in _NON_REPEATABLE_CHECKS and fingerprint in prior_checks
+            if reused:
+                output = prior_checks[fingerprint]
+            else:
+                try:
+                    with _performance_span(engine, "tool_execution"):
+                        execute_model_tool = getattr(engine, "_execute_model_tool", None)
+                        if execute_model_tool:
+                            output = execute_model_tool(
+                                name,
+                                args,
+                                player_action=state.get("user_content") or "",
+                            )
+                        else:
+                            output = engine._execute_tool(name, args)
+                except Exception as exc:
+                    log_error(f"工具 {name} 执行异常: {type(exc).__name__}")
+                    output = "[错误] 工具执行失败，请检查参数后重试"
+                if name in _NON_REPEATABLE_CHECKS:
+                    prior_checks[fingerprint] = output
+            executed_tools.append({"name": name, "args": args, "output": output})
         ledger = getattr(engine, "_turn_mutations", None)
         if ledger is not None and not reused:
             ledger.record_tool(name, args, output)
@@ -403,7 +436,12 @@ def _execute_tools(state: TurnState) -> dict:
         log_tool(name, args)
         executed_call_names.append(name)
 
-        if not reused and name in ("skill_check", "dice_roll", "dice_roll_advantage", "dice_roll_disadvantage"):
+        if not reused and name in (
+            "skill_check",
+            "dice_roll",
+            "dice_roll_advantage",
+            "dice_roll_disadvantage",
+        ):
             summary = dice_summary(output)
             if summary:
                 try:
@@ -433,15 +471,17 @@ def _execute_tools(state: TurnState) -> dict:
     # 工具结果之后会发起一次新的模型调用。此时最靠近模型的是 tool 消息，
     # 首轮玩家消息末尾的发言格式契约容易被长工具输出稀释，因此在合法的
     # tool-response 批次结束后重新锚定协议。它是引擎控制指令，不是玩家台词。
-    engine.messages.append({
-        "role": "user",
-        "content": (
-            "[引擎控制指令｜非玩家发言] 基于以上工具结果继续完成本轮叙述；"
-            "不要复述工具调用过程。所有 NPC 直接引语必须逐段使用 "
-            "【npc:<npc_public_state 中的 id>】…【/npc】 包裹，短句、寒暄和"
-            "同一人物再次开口也不得省略标签；旁白和动作不加标签。"
-        ),
-    })
+    engine.messages.append(
+        {
+            "role": "user",
+            "content": (
+                "[引擎控制指令｜非玩家发言] 基于以上工具结果继续完成本轮叙述；"
+                "不要复述工具调用过程。所有 NPC 直接引语必须逐段使用 "
+                "【npc:<npc_public_state 中的 id>】…【/npc】 包裹，短句、寒暄和"
+                "同一人物再次开口也不得省略标签；旁白和动作不加标签。"
+            ),
+        }
+    )
 
     if tool_outputs:
         quick = glm_quick_summary(tool_outputs, text or narrative)
@@ -549,12 +589,9 @@ def _finalize_turn(state: TurnState) -> dict:
     # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
     narrative_segments, narrative = parse_speaker_segments(
         narrative,
-        is_valid_npc=getattr(engine, "is_valid_npc_id", None)
-        or (lambda _npc_id: False),
+        is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
-        speaker_aliases=(
-            getattr(engine, "npc_speaker_aliases", lambda: {})()
-        ),
+        speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
     )
     segment_dicts = [s.to_dict() for s in narrative_segments]
     if state.get("opening_turn") and not narrative.strip():
@@ -575,8 +612,7 @@ def _finalize_turn(state: TurnState) -> dict:
             engine._reconcile_narrative_entities(narrative)
         if (
             ENABLE_TURN_AUDIT
-            and
-            state.get("user_content")
+            and state.get("user_content")
             and engine._turn_needs_model_audit(
                 state.get("executed_tools", []),
                 player_action=state.get("user_content") or "",
@@ -626,10 +662,14 @@ def build_turn_graph():
     graph.add_node("finalize", _finalize_turn)
 
     graph.add_edge(START, "prepare_turn")
-    graph.add_conditional_edges("prepare_turn", _route_to_agent, {
-        "call_story_agent": "call_story_agent",
-        "call_combat_agent": "call_combat_agent",
-    })
+    graph.add_conditional_edges(
+        "prepare_turn",
+        _route_to_agent,
+        {
+            "call_story_agent": "call_story_agent",
+            "call_combat_agent": "call_combat_agent",
+        },
+    )
     for agent_node in ("call_story_agent", "call_combat_agent"):
         graph.add_conditional_edges(
             agent_node,

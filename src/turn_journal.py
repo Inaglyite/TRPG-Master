@@ -141,9 +141,7 @@ def _assert_active_turn_owner(record: dict, owner_token: str, action: str) -> No
     """Fence a live turn so another backend cannot finish or cancel it."""
     if str(record.get("owner_token") or "") == str(owner_token):
         return
-    raise TurnJournalError(
-        f"回合 {record.get('turn_id')} 正由另一服务进程处理，不能{action}"
-    )
+    raise TurnJournalError(f"回合 {record.get('turn_id')} 正由另一服务进程处理，不能{action}")
 
 
 def serialize_messages(messages: list[dict]) -> list[dict]:
@@ -246,11 +244,13 @@ class TurnJournal:
             return True
         if not _foreign_owner_is_recoverable(record, self.owner_token):
             return False
-        record.update({
-            "status": "interrupted",
-            "interrupted_at": _now(),
-            "error": "服务进程在回合提交前结束",
-        })
+        record.update(
+            {
+                "status": "interrupted",
+                "interrupted_at": _now(),
+                "error": "服务进程在回合提交前结束",
+            }
+        )
         self._write_record_unlocked(record)
         index["active_turn_id"] = None
         return True
@@ -334,12 +334,43 @@ class TurnJournal:
                 and not event.get("npc_id")
                 and not events[-1].get("npc_id")
             ):
-                events[-1]["text"] = (
-                    str(events[-1].get("text", "")) + str(event.get("text", ""))
-                )
+                events[-1]["text"] = str(events[-1].get("text", "")) + str(event.get("text", ""))
                 events[-1]["offset_ms"] = elapsed
                 return
             events.append(event)
+
+    def append_tool_outcome(
+        self,
+        turn_id: str,
+        *,
+        outcome: dict,
+        mutation_plan: dict | None = None,
+    ) -> None:
+        """Persist redacted V2 tool correlation without committing world state."""
+        safe_outcome = _json_safe(outcome)
+        if not isinstance(safe_outcome, dict) or not str(safe_outcome.get("call_id") or ""):
+            raise TurnJournalError("工具审计记录无效")
+        with self._thread_lock, file_lock(self.lock_path):
+            record = self._read_record_unlocked(turn_id)
+            if record.get("status") != "active":
+                return
+            _assert_active_turn_owner(record, self.owner_token, "写入工具审计")
+            pipeline = record.setdefault("tool_pipeline", {"version": 2, "outcomes": []})
+            if not isinstance(pipeline, dict):
+                pipeline = {"version": 2, "outcomes": []}
+                record["tool_pipeline"] = pipeline
+            outcomes = pipeline.setdefault("outcomes", [])
+            if not isinstance(outcomes, list):
+                outcomes = []
+                pipeline["outcomes"] = outcomes
+            call_id = safe_outcome["call_id"]
+            if not any(
+                isinstance(item, dict) and item.get("call_id") == call_id for item in outcomes
+            ):
+                outcomes.append(safe_outcome)
+            if mutation_plan:
+                pipeline["mutation_plan"] = _json_safe(mutation_plan)
+            self._write_record_unlocked(record)
 
     def complete(
         self,
@@ -360,9 +391,7 @@ class TurnJournal:
             if record.get("status") == "completed":
                 return record
             if record.get("status") != "active":
-                raise TurnJournalError(
-                    f"回合 {turn_id} 状态为 {record.get('status')}，不能提交"
-                )
+                raise TurnJournalError(f"回合 {turn_id} 状态为 {record.get('status')}，不能提交")
             _assert_active_turn_owner(record, self.owner_token, "提交")
 
             serializable_messages = serialize_messages(messages)
@@ -372,23 +401,26 @@ class TurnJournal:
 
             events = self._active_events.pop(turn_id, [])
             started_at = self._started_at.pop(turn_id, None)
-            record.update({
-                "status": "completed",
-                "completed_at": _now(),
-                "duration_ms": (
-                    max(0, int((time.monotonic() - started_at) * 1000))
-                    if started_at is not None else None
-                ),
-                "world_revision": int(world_state.get("revision", 0)),
-                "message_count": len(serializable_messages),
-                "narrative": str(narrative or ""),
-                "choices": _json_safe(choices),
-                "narrative_segments": _json_safe(narrative_segments or []),
-                "events": events,
-                "executed_tools": _json_safe(executed_tools or []),
-                "lore_entry_ids": [str(item) for item in (lore_entry_ids or [])],
-                "diagnostics": _json_safe(diagnostics or {}),
-            })
+            record.update(
+                {
+                    "status": "completed",
+                    "completed_at": _now(),
+                    "duration_ms": (
+                        max(0, int((time.monotonic() - started_at) * 1000))
+                        if started_at is not None
+                        else None
+                    ),
+                    "world_revision": int(world_state.get("revision", 0)),
+                    "message_count": len(serializable_messages),
+                    "narrative": str(narrative or ""),
+                    "choices": _json_safe(choices),
+                    "narrative_segments": _json_safe(narrative_segments or []),
+                    "events": events,
+                    "executed_tools": _json_safe(executed_tools or []),
+                    "lore_entry_ids": [str(item) for item in (lore_entry_ids or [])],
+                    "diagnostics": _json_safe(diagnostics or {}),
+                }
+            )
             # record.json is the commit marker: snapshots are written first.
             self._write_record_unlocked(record)
             index["active_turn_id"] = None
@@ -413,15 +445,18 @@ class TurnJournal:
             _assert_active_turn_owner(record, self.owner_token, "结束")
             self._active_events.pop(turn_id, None)
             started_at = self._started_at.pop(turn_id, None)
-            record.update({
-                "status": status,
-                f"{status}_at": _now(),
-                "duration_ms": (
-                    max(0, int((time.monotonic() - started_at) * 1000))
-                    if started_at is not None else None
-                ),
-                "error": str(error or ""),
-            })
+            record.update(
+                {
+                    "status": status,
+                    f"{status}_at": _now(),
+                    "duration_ms": (
+                        max(0, int((time.monotonic() - started_at) * 1000))
+                        if started_at is not None
+                        else None
+                    ),
+                    "error": str(error or ""),
+                }
+            )
             self._write_record_unlocked(record)
             if index.get("active_turn_id") == turn_id:
                 index["active_turn_id"] = None
@@ -482,9 +517,7 @@ class TurnJournal:
                     "actor": copy.deepcopy(record.get("actor")),
                     "narrative": record.get("narrative", ""),
                     "choices": copy.deepcopy(record.get("choices", [])),
-                    "narrative_segments": copy.deepcopy(
-                        record.get("narrative_segments", [])
-                    ),
+                    "narrative_segments": copy.deepcopy(record.get("narrative_segments", [])),
                     "completed_at": record.get("completed_at"),
                     "world_revision": record.get("world_revision"),
                 }
@@ -499,23 +532,15 @@ class TurnJournal:
                 turn_id = str(record["turn_id"])
                 turn_dir = self._turn_dir(turn_id)
                 try:
-                    messages = json.loads(
-                        (turn_dir / "messages.json").read_text(encoding="utf-8")
-                    )
-                    snapshot = json.loads(
-                        (turn_dir / "snapshot.json").read_text(encoding="utf-8")
-                    )
+                    messages = json.loads((turn_dir / "messages.json").read_text(encoding="utf-8"))
+                    snapshot = json.loads((turn_dir / "snapshot.json").read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError) as exc:
-                    raise TurnJournalError(
-                        f"回合 {turn_id} 的分支快照不完整: {exc}"
-                    ) from exc
+                    raise TurnJournalError(f"回合 {turn_id} 的分支快照不完整: {exc}") from exc
                 artifacts.append((copy.deepcopy(record), messages, snapshot))
 
         with target._thread_lock, file_lock(target.lock_path):
             target_index = target._load_index_unlocked()
-            if target_index.get("active_turn_id") or target_index.get(
-                "latest_completed_turn_id"
-            ):
+            if target_index.get("active_turn_id") or target_index.get("latest_completed_turn_id"):
                 raise TurnJournalError("目标世界已经包含回合记录")
             for record, messages, snapshot in artifacts:
                 turn_id = str(record["turn_id"])
@@ -555,13 +580,15 @@ class TurnJournal:
             if not isinstance(variants, list):
                 variants = []
             if not variants:
-                variants.append({
-                    "variant_id": "original",
-                    "created_at": record.get("completed_at"),
-                    "narrative": record.get("narrative", ""),
-                    "model": None,
-                    "selected": False,
-                })
+                variants.append(
+                    {
+                        "variant_id": "original",
+                        "created_at": record.get("completed_at"),
+                        "narrative": record.get("narrative", ""),
+                        "model": None,
+                        "selected": False,
+                    }
+                )
             for variant in variants:
                 if isinstance(variant, dict):
                     variant["selected"] = False
@@ -582,31 +609,35 @@ class TurnJournal:
                 if isinstance(event, dict)
             ]
             narrative_indices = [
-                index for index, event in enumerate(events)
+                index
+                for index, event in enumerate(events)
                 if event.get("type") == "narrative_chunk"
             ]
             if narrative_indices:
                 insertion_source = narrative_indices[-1]
                 offset_ms = events[insertion_source].get("offset_ms", 0)
                 insertion_index = sum(
-                    1 for event in events[:insertion_source]
+                    1
+                    for event in events[:insertion_source]
                     if event.get("type") != "narrative_chunk"
                 )
-                events = [
-                    event for event in events
-                    if event.get("type") != "narrative_chunk"
-                ]
-                events.insert(insertion_index, {
-                    "type": "narrative_chunk",
-                    "text": narrative,
-                    "offset_ms": offset_ms,
-                })
+                events = [event for event in events if event.get("type") != "narrative_chunk"]
+                events.insert(
+                    insertion_index,
+                    {
+                        "type": "narrative_chunk",
+                        "text": narrative,
+                        "offset_ms": offset_ms,
+                    },
+                )
             else:
-                events.append({
-                    "type": "narrative_chunk",
-                    "text": narrative,
-                    "offset_ms": 0,
-                })
+                events.append(
+                    {
+                        "type": "narrative_chunk",
+                        "text": narrative,
+                        "offset_ms": 0,
+                    }
+                )
 
             serializable_messages = serialize_messages(messages)
             atomic_write_json(
@@ -616,21 +647,25 @@ class TurnJournal:
             rewrite_diagnostics = record.get("rewrite_diagnostics")
             if not isinstance(rewrite_diagnostics, list):
                 rewrite_diagnostics = []
-            rewrite_diagnostics.append({
-                "variant_id": variant_id,
-                "created_at": variant["created_at"],
-                "model_calls": _json_safe(diagnostics or []),
-            })
-            record.update({
-                "narrative": narrative,
-                "narrative_variants": variants,
-                "selected_variant_id": variant_id,
-                "rewrite_diagnostics": rewrite_diagnostics,
-                "narrative_segments": _json_safe(narrative_segments or []),
-                "events": events,
-                "message_count": len(serializable_messages),
-                "updated_at": _now(),
-            })
+            rewrite_diagnostics.append(
+                {
+                    "variant_id": variant_id,
+                    "created_at": variant["created_at"],
+                    "model_calls": _json_safe(diagnostics or []),
+                }
+            )
+            record.update(
+                {
+                    "narrative": narrative,
+                    "narrative_variants": variants,
+                    "selected_variant_id": variant_id,
+                    "rewrite_diagnostics": rewrite_diagnostics,
+                    "narrative_segments": _json_safe(narrative_segments or []),
+                    "events": events,
+                    "message_count": len(serializable_messages),
+                    "updated_at": _now(),
+                }
+            )
             self._write_record_unlocked(record)
             return copy.deepcopy(variant)
 
@@ -737,4 +772,4 @@ class TurnJournal:
                 if isinstance(record, dict) and record.get("status") == "completed":
                     records.append(record)
         records.sort(key=lambda item: str(item.get("completed_at", "")), reverse=True)
-        return [self._public_record(item) or {} for item in records[:max(0, limit)]]
+        return [self._public_record(item) or {} for item in records[: max(0, limit)]]

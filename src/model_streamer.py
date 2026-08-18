@@ -320,6 +320,21 @@ class ModelStreamer:
 
         elapsed = time.monotonic() - started_at
         first_token = first_token_at - started_at if first_token_at is not None else None
+        # The typed envelope is frozen before the request.  Provider usage is
+        # completion metadata, so merge only normalized cache counters into a
+        # copy for durable ``ModelCall.details`` rather than mutating authority
+        # evidence or persisting provider-specific raw chunks.
+        if usage_data:
+            request_envelope = dict(request_envelope)
+            cache = dict(request_envelope.get("cache") or {})
+            cache.update(
+                {
+                    key: usage_data[key]
+                    for key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
+                    if key in usage_data
+                }
+            )
+            request_envelope["cache"] = cache
         record_performance = getattr(host, "record_model_performance", None)
         if record_performance:
             record_performance(
