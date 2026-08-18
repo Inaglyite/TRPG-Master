@@ -155,39 +155,56 @@
   background-size: 58px 58px;
 }
 
-/* 云端单人中唯一的房间级出口。它故意是紧凑文字铭牌，而不是再塞一个
-   贴图大图标：玩家需要一眼找到“离开冒险”，但不能压过角色/笔记等常用工具。 */
-#toolbar #btn-solo-adventure-exit {
-  width: auto;
-  min-width: 82px;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--gold-dim) 76%, transparent);
-  border-radius: var(--r-md);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg3) 94%, black),
-    color-mix(in srgb, var(--bg) 90%, black)
-  );
-  color: var(--gold-bright);
+/* 左上角标题区：标题 + 云端单人唯一的房间级出口。
+   “离开冒险”是导航（回大厅），不是与角色/笔记同级的游戏工具，因此做成
+   标题下方的面包屑式小字入口，而不是工具栏里再塞一块贴图按钮。 */
+.header-leading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+#btn-solo-adventure-exit {
+  align-self: flex-start;
+  /* 与标题文字左缘对齐（烛火宽 20 + 间距 12） */
+  margin-left: 32px;
+  padding: 2px 2px 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold-dim);
   font-family: var(--font);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-indent: 0;
-  overflow: visible;
-  filter: none;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    text-shadow 0.16s ease;
 }
-#toolbar #btn-solo-adventure-exit::after {
-  display: none;
+#btn-solo-adventure-exit .exit-chevron {
+  display: inline-block;
+  margin-right: 2px;
+  font-size: 14px;
+  line-height: 1;
+  transform: translateY(-1px);
+  transition: transform 0.16s ease;
 }
-#toolbar #btn-solo-adventure-exit:hover,
-#toolbar #btn-solo-adventure-exit:focus-visible {
-  border-color: var(--gold);
-  background: color-mix(in srgb, var(--bg4) 92%, black);
+#btn-solo-adventure-exit:hover:not(:disabled),
+#btn-solo-adventure-exit:focus-visible {
   color: var(--gold-bright);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--gold) 36%, transparent));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--gold) 40%, transparent);
   outline: none;
+}
+#btn-solo-adventure-exit:hover:not(:disabled) .exit-chevron {
+  transform: translate(-2px, -1px);
+}
+#btn-solo-adventure-exit:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gold) 60%, transparent);
+  outline-offset: 2px;
+}
+#btn-solo-adventure-exit:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 @keyframes quick-save-pulse {

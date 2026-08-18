@@ -375,9 +375,23 @@
   #header h1 {
     display: none;
   }
+  /* 标题隐藏后，云端的“离开冒险”入口仍留在左上角 */
+  .header-leading {
+    flex: 0 0 auto;
+  }
+  #btn-solo-adventure-exit {
+    margin-left: 0;
+    font-size: 11px;
+  }
   #toolbar {
     width: 100%;
     justify-content: center;
+  }
+  /* 只有云端（出口按钮存在）才把工具栏让到右侧，本地模式保持居中 */
+  .header-leading:has(#btn-solo-adventure-exit) + #toolbar {
+    width: auto;
+    flex: 1 1 auto;
+    justify-content: flex-end;
   }
   #toolbar button {
     width: calc((100vw - 40px) / 6);

@@ -192,6 +192,9 @@ export function SoloAdventureExitControl() {
           setOpen(true);
         }}
       >
+        <span className="exit-chevron" aria-hidden="true">
+          ‹
+        </span>
         离开冒险
       </button>
       {dialog && createPortal(dialog, document.body)}

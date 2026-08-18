@@ -53,15 +53,18 @@ export function AppHeader() {
 
   return (
     <>
-      <h1>
-        <span className="header-candle" aria-hidden="true" />
-        {title}
-        <span
-          id="conn-status"
-          className={connection}
-          title={connectionTitles[connection]}
-        />
-      </h1>
+      <div className="header-leading">
+        <h1>
+          <span className="header-candle" aria-hidden="true" />
+          {title}
+          <span
+            id="conn-status"
+            className={connection}
+            title={connectionTitles[connection]}
+          />
+        </h1>
+        {mode === "online" && <SoloAdventureExitControl />}
+      </div>
       <div id="toolbar">
         {saveOpsVisible && (
           <>
@@ -112,7 +115,6 @@ export function AppHeader() {
             🆕
           </button>
         )}
-        {mode === "online" && <SoloAdventureExitControl />}
         <button
           id="btn-panel"
           title="角色/线索"
