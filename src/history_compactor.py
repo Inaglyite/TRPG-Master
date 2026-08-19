@@ -9,6 +9,10 @@ from typing import Any
 from .llm_concurrency import llm_call_slot
 from .logger import summary_event as log_summary
 
+# Tool results older than the keep-recent window are pruned in place once
+# they exceed this size (raw events stay in the context event log).
+TOOL_RESULT_PRUNE_MIN_CHARS = 500
+
 
 def build_summary_input(messages: list[dict]) -> str:
     parts = []
@@ -93,21 +97,102 @@ class HistoryCompactor:
         )
 
     def maybe_after_turn(self) -> None:
-        if not self.should_summarize():
-            return
-        current_turn = self.engine._player_turn_count
-        changed = self.summarize(silent=True)
-        self.engine._last_summary_player_turn = current_turn
-        if changed:
+        pruned = self.prune_old_tool_results()
+        changed = False
+        if self.should_summarize():
+            current_turn = self.engine._player_turn_count
+            changed = self.summarize(silent=True)
+            self.engine._last_summary_player_turn = current_turn
+        if pruned or changed:
             self.engine.save("slot_000")
 
-    def summarize(self, *, silent: bool = False) -> bool:
+    def _compaction_cutoff(self) -> int:
+        """Window end for compaction: walked back to a user-message boundary.
+
+        Cutting immediately before a user message can never split an
+        assistant ``tool_calls`` batch from its ``tool`` results, because a
+        batch's results always precede the next user message.
+        """
+        messages = self.engine.messages
+        cutoff = len(messages) - self.engine.SUMMARY_KEEP_RECENT_MESSAGES
+        while cutoff > 1 and messages[cutoff].get("role") != "user":
+            cutoff -= 1
+        return cutoff
+
+    def _replace_window(
+        self,
+        replacement: dict,
+        recent_messages: list[dict],
+        *,
+        allow_rebase_fallback: bool,
+    ) -> bool:
+        """Swap the old window for ``replacement``, non-destructively first.
+
+        Preferred path: one ``replace`` checkpoint masks the window in the
+        context event log (raw events survive).  Only when the shadow cannot
+        prove projection == messages do we fall back to the legacy rebase
+        (fresh root + seed), and never during an active turn.
+        """
+        from .context_shadow import compact_engine, rebase_engine
+
+        engine = self.engine
+        system_message = engine.messages[0]
+        cutoff = len(engine.messages) - len(recent_messages)
+        if compact_engine(engine, 1, cutoff, replacement):
+            engine.messages = [system_message, replacement, *recent_messages]
+            return True
+        if not allow_rebase_fallback:
+            return False
+        engine.messages = [system_message, replacement, *recent_messages]
+        rebase_engine(engine)
+        return True
+
+    def prune_old_tool_results(self) -> int:
+        """Replace bulky old tool results with digest placeholders in place.
+
+        Only messages outside the keep-recent window are pruned; the
+        placeholder keeps ``tool_call_id`` so call/result pairing survives.
+        Each prune is one single-source ``replace`` checkpoint — the raw
+        result stays in the event log.  Returns the number of pruned results.
+        """
+        from .context_events import payload_digest
+        from .context_shadow import prune_engine
+
+        engine = self.engine
+        messages = engine.messages
+        cutoff = self._compaction_cutoff()
+        if cutoff <= 1:
+            return 0
+        replacements: dict[int, dict] = {}
+        for index in range(1, cutoff):
+            message = messages[index]
+            if message.get("role") != "tool":
+                continue
+            content = str(message.get("content") or "")
+            if len(content) <= TOOL_RESULT_PRUNE_MIN_CHARS:
+                continue
+            placeholder = {
+                "role": "tool",
+                "content": (
+                    f"（工具结果已修剪：原 {len(content)} 字符，"
+                    f"digest {payload_digest(content)[:12]}）"
+                ),
+            }
+            if message.get("tool_call_id"):
+                placeholder["tool_call_id"] = message["tool_call_id"]
+            replacements[index] = placeholder
+        applied = prune_engine(engine, replacements)
+        for index in applied:
+            messages[index] = replacements[index]
+        if applied:
+            self.estimate_tokens()
+        return len(applied)
+
+    def summarize(self, *, silent: bool = False, allow_rebase_fallback: bool = True) -> bool:
         from .llm import _get_glm
 
         engine = self.engine
-        cutoff = len(engine.messages) - engine.SUMMARY_KEEP_RECENT_MESSAGES
-        while cutoff > 1 and engine.messages[cutoff].get("role") != "user":
-            cutoff -= 1
+        cutoff = self._compaction_cutoff()
         if cutoff <= 1:
             return False
         old_messages = engine.messages[1:cutoff]
@@ -120,14 +205,26 @@ class HistoryCompactor:
         if glm is not None:
             summary = self.try_model(glm, "glm-4-flash-250414", old_text)
             if summary is not None:
-                self.apply(system_message, summary, recent_messages, "GLM-4 Flash", silent)
-                return True
+                return self.apply(
+                    system_message,
+                    summary,
+                    recent_messages,
+                    "GLM-4 Flash",
+                    silent,
+                    allow_rebase_fallback=allow_rebase_fallback,
+                )
         if not silent:
             engine.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
         summary = self.try_model(engine.client, engine.judgement_model, old_text)
         if summary is not None:
-            self.apply(system_message, summary, recent_messages, "DeepSeek Pro", silent)
-            return True
+            return self.apply(
+                system_message,
+                summary,
+                recent_messages,
+                "DeepSeek Pro",
+                silent,
+                allow_rebase_fallback=allow_rebase_fallback,
+            )
         dropped = len(old_messages)
         note = {
             "role": "user",
@@ -136,10 +233,10 @@ class HistoryCompactor:
                 "当前世界状态保存在 world_state.json 中，请查询线索和 NPC 状态后继续。）"
             ),
         }
-        engine.messages = [system_message, note, *recent_messages]
-        from .context_shadow import rebase_engine
-
-        rebase_engine(engine)
+        if not self._replace_window(
+            note, recent_messages, allow_rebase_fallback=allow_rebase_fallback
+        ):
+            return False
         self.estimate_tokens()
         if not silent:
             engine.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
@@ -152,7 +249,9 @@ class HistoryCompactor:
         recent_messages: list[dict],
         model_name: str,
         silent: bool = False,
-    ) -> None:
+        *,
+        allow_rebase_fallback: bool = True,
+    ) -> bool:
         summary_message = {
             "role": "user",
             "content": (
@@ -161,14 +260,15 @@ class HistoryCompactor:
                 f"{summary}\n\n——摘要结束。以下是最近的对话——）"
             ),
         }
-        self.engine.messages = [system_message, summary_message, *recent_messages]
-        from .context_shadow import rebase_engine
-
-        rebase_engine(self.engine)
+        if not self._replace_window(
+            summary_message, recent_messages, allow_rebase_fallback=allow_rebase_fallback
+        ):
+            return False
         self.estimate_tokens()
         log_summary(model_name, "成功")
         if not silent:
             self.engine.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
+        return True
 
     @staticmethod
     def try_model(client: Any, model: str, old_text: str) -> str | None:

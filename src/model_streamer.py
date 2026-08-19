@@ -7,15 +7,18 @@ from collections.abc import Callable
 from typing import Any
 
 from . import context_shadow as _context_shadow
+from .context_overflow import is_context_overflow as _is_context_overflow
+from .context_overflow import retry_after_overflow as _retry_after_overflow
 from .llm_concurrency import LlmBusyError, acquire_llm_slot
 from .model_request import StreamPolicy, prepare_model_request
 from .model_stream_helpers import (
+    emit_inferred_speaker_segments,
+    flush_speaker_segments,
     sanitize_visible_narrative,
     stream_usage_dict,
     take_complete_sentences,
 )
 from .speaker_parser import SpeakerStreamParser
-from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_policy import attach_request_snapshot
 from .tool_protocol import ToolProtocolFilter
 
@@ -48,6 +51,7 @@ class ModelStreamer:
         buffer_if_tools: bool = False,
         messages_override: list[dict] | None = None,
         retry_on_empty: bool = True,
+        _overflow_retried: bool = False,
     ) -> tuple[str, list]:
         host = self.host
         started_at = time.monotonic()
@@ -105,6 +109,24 @@ class ModelStreamer:
                 self.log_error(f"模型并发已满: {exc}")
                 host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
                 return "", []
+            if (
+                messages_override is None
+                and not _overflow_retried
+                and _is_context_overflow(exc)
+            ):
+                retried = _retry_after_overflow(
+                    self,
+                    model,
+                    policy=policy,
+                    system_overlay=system_overlay,
+                    system_prompt_override=system_prompt_override,
+                    enable_tools=enable_tools,
+                    temperature=temperature,
+                    buffer_if_tools=buffer_if_tools,
+                    retry_on_empty=retry_on_empty,
+                )
+                if retried is not None:
+                    return retried
             if retry_on_empty:
                 self.log_error(f"API 建立流失败，正在重试: {type(exc).__name__}")
                 self.sleep(0.4)
@@ -118,6 +140,7 @@ class ModelStreamer:
                     buffer_if_tools=buffer_if_tools,
                     messages_override=messages_override,
                     retry_on_empty=False,
+                    _overflow_retried=_overflow_retried,
                 )
             self.log_error(f"API 请求失败: {type(exc).__name__}")
             host.cb.on_error("模型服务暂时不可用，请稍后重试。")
@@ -138,42 +161,8 @@ class ModelStreamer:
             on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
         )
 
-        def emit_inferred_segments(raw: str) -> bool:
-            """Emit an untagged provider block with deterministic live speakers.
-
-            Some compatible APIs return the entire answer in one content delta
-            while ignoring the requested NPC tags.  The finalizer can infer those
-            novel-style quotes, but doing it here is what makes the correct bubble
-            exist while the presentation queue is still typing.
-            """
-            aliases = getattr(host, "npc_speaker_aliases", lambda: {})()
-            if not aliases or not any(mark in raw for mark in ("“", "「", '"')):
-                return False
-            segments, clean = parse_speaker_segments(
-                raw,
-                is_valid_npc=getattr(host, "is_valid_npc_id", None) or (lambda _npc_id: False),
-                on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
-                speaker_aliases=aliases,
-            )
-            if not any(segment.kind == "speech" and segment.npc_id for segment in segments):
-                return False
-            if clean != raw:
-                # Explicit tags belong to the incremental parser, whose state may
-                # span provider chunks.  This fallback is only for untagged prose.
-                return False
-            for segment in segments:
-                visible = sanitize_visible_narrative(segment.text)
-                if not visible:
-                    continue
-                if segment.kind == "speech" and segment.npc_id:
-                    host.cb.on_speaker_segment(segment.npc_id)
-                    host.cb.on_narrative(visible, segment.npc_id)
-                else:
-                    host.cb.on_narrative(visible)
-            return True
-
         def emit_visible(raw: str) -> None:
-            if emit_inferred_segments(raw):
+            if emit_inferred_speaker_segments(host, raw):
                 return
             for kind, text, npc_id in speaker_parser.feed(raw):
                 if kind == "text":
@@ -240,6 +229,26 @@ class ModelStreamer:
         except Exception as exc:
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型流已取消") from exc
+            if (
+                messages_override is None
+                and not _overflow_retried
+                and not full_text
+                and not tool_calls_acc
+                and _is_context_overflow(exc)
+            ):
+                retried = _retry_after_overflow(
+                    self,
+                    model,
+                    policy=policy,
+                    system_overlay=system_overlay,
+                    system_prompt_override=system_prompt_override,
+                    enable_tools=enable_tools,
+                    temperature=temperature,
+                    buffer_if_tools=buffer_if_tools,
+                    retry_on_empty=retry_on_empty,
+                )
+                if retried is not None:
+                    return retried
             if retry_on_empty and not full_text and not tool_calls_acc:
                 self.log_error(f"API 空流中断，正在重试: {type(exc).__name__}")
                 self.sleep(0.4)
@@ -253,6 +262,7 @@ class ModelStreamer:
                     buffer_if_tools=buffer_if_tools,
                     messages_override=messages_override,
                     retry_on_empty=False,
+                    _overflow_retried=_overflow_retried,
                 )
             finish_reason = "transport_error"
             self.log_error(f"API 流式响应中断: {type(exc).__name__}")
@@ -284,16 +294,7 @@ class ModelStreamer:
         if not buffer_if_tools:
             if pending_visible:
                 emit_visible(pending_visible)
-            for kind, text, npc_id in speaker_parser.flush():
-                if kind == "text":
-                    visible = sanitize_visible_narrative(text)
-                    if visible:
-                        if npc_id:
-                            host.cb.on_narrative(visible, npc_id)
-                        else:
-                            host.cb.on_narrative(visible)
-                elif kind == "speech_start":
-                    host.cb.on_speaker_segment(text)
+            flush_speaker_segments(host, speaker_parser)
         if finish_reason == "length" and not tool_calls_acc and not text_tool_calls:
             host.cb.on_error("（叙述过长被截断，请重试或继续）")
         raw_tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
@@ -309,16 +310,7 @@ class ModelStreamer:
                 full_text = ""
             elif full_text:
                 emit_visible(full_text)
-                for kind, text, npc_id in speaker_parser.flush():
-                    if kind == "text":
-                        visible = sanitize_visible_narrative(text)
-                        if visible:
-                            if npc_id:
-                                host.cb.on_narrative(visible, npc_id)
-                            else:
-                                host.cb.on_narrative(visible)
-                    elif kind == "speech_start":
-                        host.cb.on_speaker_segment(text)
+                flush_speaker_segments(host, speaker_parser)
 
         elapsed = time.monotonic() - started_at
         first_token = first_token_at - started_at if first_token_at is not None else None
@@ -386,6 +378,7 @@ class ModelStreamer:
                 buffer_if_tools=buffer_if_tools,
                 messages_override=messages_override,
                 retry_on_empty=False,
+                _overflow_retried=_overflow_retried,
             )
         return full_text, tool_calls
 

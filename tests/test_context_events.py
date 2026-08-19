@@ -1333,3 +1333,85 @@ def test_reference_aware_gc_protects_save_and_turn_references(tmp_path: Path):
     with session_scope(url) as db:
         assert db.get(ContextSession, save_session["id"]) is not None
         assert db.get(ContextSession, turn_session["id"]) is not None
+
+
+# ---------------------------------------------------------------------------
+# project_with_refs: per-message provenance for compaction checkpoints
+# ---------------------------------------------------------------------------
+
+
+def test_project_with_refs_matches_project_and_addresses_events(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session = store.ensure_session("world-a")
+    messages = [
+        {"role": "system", "content": "keeper"},
+        {"role": "user", "content": "行动一"},
+        {"role": "assistant", "content": "结果一"},
+    ]
+    store.seed_legacy("world-a", messages)
+
+    projected = store.project(session["id"])
+    with_refs = store.project_with_refs(session["id"])
+
+    assert [message for message, _sid, _seq in with_refs] == projected
+    assert [(sid, seq) for _m, sid, seq in with_refs] == [
+        (session["id"], 1),
+        (session["id"], 2),
+        (session["id"], 3),
+    ]
+
+
+def test_project_with_refs_replacement_maps_to_checkpoint_event(tmp_path: Path):
+    url = sqlite_url(tmp_path)
+    seed_world(url)
+    store = ContextEventStore(url)
+    session = store.ensure_session("world-a")
+    store.seed_legacy(
+        "world-a",
+        [
+            {"role": "system", "content": "keeper"},
+            {"role": "user", "content": "旧行动"},
+            {"role": "assistant", "content": "旧结果"},
+            {"role": "user", "content": "新行动"},
+        ],
+    )
+    replacement = {"role": "user", "content": "（摘要）"}
+    checkpoint_seq = store.append(
+        session["id"],
+        event_type=EVENT_CHECKPOINT,
+        payload={"replacement": replacement},
+        surface_op="replace",
+        source_sequences=[
+            {"session_id": session["id"], "sequence": 2},
+            {"session_id": session["id"], "sequence": 3},
+        ],
+    )
+
+    with_refs = store.project_with_refs(session["id"])
+
+    assert [m["content"] for m, _s, _q in with_refs] == [
+        "keeper",
+        "（摘要）",
+        "新行动",
+    ]
+    # The replacement position is addressed by the checkpoint event itself,
+    # so a later nested replace can reference it.
+    assert with_refs[1][1:] == (session["id"], checkpoint_seq)
+
+    # A nested replace through the refs view works end to end.
+    store.append(
+        session["id"],
+        event_type=EVENT_CHECKPOINT,
+        payload={"replacement": {"role": "user", "content": "（二次摘要）"}},
+        surface_op="replace",
+        source_sequences=[
+            {"session_id": with_refs[1][1], "sequence": with_refs[1][2]},
+            {"session_id": with_refs[2][1], "sequence": with_refs[2][2]},
+        ],
+    )
+    assert [m["content"] for m in store.project(session["id"])] == [
+        "keeper",
+        "（二次摘要）",
+    ]

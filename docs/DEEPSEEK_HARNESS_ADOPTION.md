@@ -473,7 +473,7 @@ shadow、active/completed TurnJournal audit 以及 `ModelCall.details`；H0 的 
 以固定的本地 recorded-shaped handler fixture 在每次验证时输出 80 次样本的 p95；命令会对 pipeline 自身
 `<10ms`、正常本地编排 `<=5%`（公网 LLM 未计入）两项预算失败关闭。
 
-### H2：追加式 Context Event + 非破坏性压缩
+### H2：追加式 Context Event + 非破坏性压缩（压缩部分已实施，2026-08-19）
 
 - 双写模型上下文事件；
 - 实现纯投影器并比较现有 messages digest；
@@ -486,6 +486,22 @@ shadow、active/completed TurnJournal audit 以及 `ModelCall.details`；H0 的 
 验收：重放得到相同模型可见 surface；摘要失败/崩溃不丢历史；call/result 始终配对；压缩后请求稳定在
 配置目标以内；容量已知且 envelope 可压缩时通常维持在 75%–80%，不可约上下文则返回诊断而非删规则；
 摘要不能增加权威事实或跨 TIER 泄密，兄弟时间线不能读取彼此事件。
+
+实施落点（2026-08-19，本批压缩部分）：`src/context_events.py` 新增
+`project_with_refs`（投影逐条带 `(session_id, sequence)` provenance，replacement 位映射到
+checkpoint 事件自身，支持嵌套引用）；`src/context_shadow.py` 新增 `replace_range` /
+`prune_messages` 与 adapter `compact_engine` / `prune_engine`——压缩先校验投影==权威 messages
+再发 `replace` checkpoint，失败只诊断且回退 rebase（回合内不回退）；`src/history_compactor.py`
+的 summary/截断兜底改走 replace（raw events 保留），新增窗口外大 tool 结果原地修剪
+（保留 `tool_call_id` 配对）；`src/model_streamer.py` 识别 provider 上下文溢出后强制压缩并重试
+一次（不可约则诊断，不删规则；`messages_override` 请求不触发；回合内压缩同步更新
+`_turn_context_surface`，rollback 落在压缩后表面）。语义分工：**rebase 换历史**（reset/load 兜底/
+adopt/branch/rewrite），**replace 压历史**（summary/pruning），replace 事件一律不带 turn_id。
+验收证据：`tests/test_context_compaction.py`（replace 签发、边界不拆 call/result、截断兜底不丢
+历史、diverge 回退 rebase、回合内 rollback 一致性、pruning 配对、overflow 重试一次/不可约不
+重试）+ `tests/test_context_events.py` 的 with_refs  golden；全量基线 682 passed、5 skipped。
+尚未做：gold scenes 摘要事实性 LLM 评测、GC 定时/管理面接入（`reference_aware_gc` 仍为手动
+入口）、私密事件备份生命周期的显式确认。
 
 ### H3：Skill Catalog + 结构化记忆
 

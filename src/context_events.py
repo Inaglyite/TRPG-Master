@@ -881,23 +881,18 @@ class ContextEventStore:
                     visible.add((world_id, include_turn_id))
         return visible
 
-    def project(
+    def _project_inputs(
         self,
         session_id: str,
-        *,
-        include_turn_id: str | None = None,
-        to_sequence: int | None = None,
-        _replay_turn_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Project the full visible surface for one session (server-internal).
-
-        Message events from failed/cancelled/interrupted turns are excluded;
-        the current active turn is included only when ``include_turn_id`` is
-        given.  ``to_sequence`` pins the current session to a historical
-        request boundary; ancestor cutoffs still come from the lineage.
-        Non-surface events (request envelopes, request patches, checkpoints)
-        never produce a message in the result.
-        """
+        include_turn_id: str | None,
+        to_sequence: int | None,
+        replay_turn_id: str | None,
+    ) -> tuple[
+        list[dict[str, Any]],
+        dict[str, list[dict[str, Any]]],
+        set[tuple[str, str]],
+    ]:
+        """Assemble the pure projector inputs for one session chain."""
         sessions = self._session_chain(session_id)
         if to_sequence is not None:
             current_head = int(sessions[-1]["head_sequence"])
@@ -928,16 +923,63 @@ class ContextEventStore:
                 if turn_id:
                     event_turns.add((str(event.get("world_id") or ""), str(turn_id)))
         visible_turns = self._visible_turn_ids(event_turns, include_turn_id)
-        if _replay_turn_id:
+        if replay_turn_id:
             # Exact private request replay may inspect a request from a turn
             # that later failed.  This opt-in never affects the ordinary
             # projection used as a future model surface.
-            visible_turns.update(
-                key for key in event_turns if key[1] == _replay_turn_id
-            )
+            visible_turns.update(key for key in event_turns if key[1] == replay_turn_id)
+        return sessions, events_by_session, visible_turns
+
+    def project(
+        self,
+        session_id: str,
+        *,
+        include_turn_id: str | None = None,
+        to_sequence: int | None = None,
+        _replay_turn_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Project the full visible surface for one session (server-internal).
+
+        Message events from failed/cancelled/interrupted turns are excluded;
+        the current active turn is included only when ``include_turn_id`` is
+        given.  ``to_sequence`` pins the current session to a historical
+        request boundary; ancestor cutoffs still come from the lineage.
+        Non-surface events (request envelopes, request patches, checkpoints)
+        never produce a message in the result.
+        """
+        sessions, events_by_session, visible_turns = self._project_inputs(
+            session_id, include_turn_id, to_sequence, _replay_turn_id
+        )
         return ContextProjector.project_timeline(
             sessions, events_by_session, visible_turn_ids=visible_turns
         )
+
+    def project_with_refs(
+        self,
+        session_id: str,
+        *,
+        include_turn_id: str | None = None,
+    ) -> list[tuple[dict[str, Any], str, int]]:
+        """Project the visible surface with per-message provenance.
+
+        Returns ``(message, session_id, sequence)`` triples, one per projected
+        message; the ``(session_id, sequence)`` pair is a valid checkpoint
+        source reference (a replacement position maps to the checkpoint event
+        that produced it).  Same visibility rules as :meth:`project`.
+        """
+        sessions, events_by_session, visible_turns = self._project_inputs(
+            session_id, include_turn_id, None, None
+        )
+        messages, refs = ContextProjector.project_timeline(
+            sessions,
+            events_by_session,
+            visible_turn_ids=visible_turns,
+            collect_refs=True,
+        )
+        return [
+            (message, ref_session, ref_sequence)
+            for message, (ref_session, ref_sequence) in zip(messages, refs, strict=True)
+        ]
 
     def replay_request_messages(
         self,
@@ -1301,7 +1343,8 @@ class ContextProjector:
         events_by_session: dict[str, list[dict[str, Any]]],
         *,
         visible_turn_ids: set[tuple[str, str]] | None = None,
-    ) -> list[dict[str, Any]]:
+        collect_refs: bool = False,
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[tuple[str, int]]]:
         """Project the model-visible message surface (item/ref model).
 
         Ancestor sessions contribute events up to their ``source_sequence``;
@@ -1328,10 +1371,19 @@ class ContextProjector:
         id in another world can never leak.  Events without a turn id (seeds)
         are always kept.  ``None`` keeps everything (pure-function testing
         convenience; the store always passes a set).
+
+        With ``collect_refs=True`` the return value is ``(messages, refs)``
+        where ``refs[i]`` is the ``(session_id, sequence)`` of the event that
+        produced ``messages[i]`` — a replacement position maps to the
+        checkpoint event itself (consistent with nested-replacement
+        addressing), so every projected position is a valid checkpoint source.
         """
         if not sessions:
-            return []
+            return ([], []) if collect_refs else []
         result: list[dict[str, Any]] = []
+        # result index → producing event: message events map to themselves,
+        # a replacement position maps to the checkpoint event that landed it.
+        index_to_ref: dict[int, tuple[str, int]] = {}
         # (session_id, sequence) → result index: every projected message and
         # every checkpoint (at the position its replacement landed) is
         # addressable, so checkpoints can reference earlier checkpoints.
@@ -1373,6 +1425,7 @@ class ContextProjector:
                     # position its replacement landed, so a later checkpoint
                     # can reference it (nested replacement).
                     seq_to_index[(session_id, sequence)] = position
+                    index_to_ref[position] = (session_id, sequence)
                     continue
                 if event_type not in SURFACE_EVENT_TYPES:
                     # Metadata-only events (request envelopes, …) never
@@ -1385,14 +1438,18 @@ class ContextProjector:
                         if (world_id, str(turn_id)) not in visible_turn_ids:
                             continue
                 seq_to_index[(session_id, sequence)] = len(result)
+                index_to_ref[len(result)] = (session_id, sequence)
                 result.append(dict(event.get("payload") or {}))
         final: list[dict[str, Any]] = []
+        final_refs: list[tuple[str, int]] = []
         for index, message in enumerate(result):
             if index in replacements:
                 final.append(replacements[index])
+                final_refs.append(index_to_ref[index])
             elif index not in masked_indexes:
                 final.append(message)
-        return final
+                final_refs.append(index_to_ref[index])
+        return (final, final_refs) if collect_refs else final
 
     @staticmethod
     def digest(messages: Sequence[dict[str, Any]]) -> str:

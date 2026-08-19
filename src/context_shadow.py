@@ -29,6 +29,7 @@ from typing import Any
 
 from .context_checkpoint import ContextCheckpoint
 from .context_events import (
+    EVENT_CHECKPOINT,
     EVENT_REQUEST_PATCH,
     ContextEventStore,
     messages_digest,
@@ -239,6 +240,178 @@ class ContextShadowCoordinator:
         except Exception as exc:  # noqa: BLE001 - fail-safe
             self._diagnose("resume", exc)
             return self.bind_legacy(messages)
+
+    # -- compaction (replace checkpoints; raw events are never deleted) -----
+
+    def _projection_with_refs(
+        self,
+        include_turn_id: str | None = None,
+    ) -> tuple[dict[str, Any] | None, list[tuple[dict[str, Any], str, int]] | None]:
+        session = self._session()
+        if session is None:
+            return None, None
+        try:
+            projected = self.store.project_with_refs(
+                str(session["id"]), include_turn_id=include_turn_id
+            )
+            return session, projected
+        except Exception as exc:  # noqa: BLE001 - fail-safe
+            self._diagnose("project_with_refs", exc)
+            return None, None
+
+    def replace_range(
+        self,
+        messages: list[dict],
+        start_index: int,
+        end_index: int,
+        replacement: dict,
+        *,
+        include_turn_id: str | None = None,
+        max_ref_index: int | None = None,
+    ) -> bool:
+        """Mask projection window ``[start_index, end_index)`` with one checkpoint.
+
+        Non-destructive compaction: every surface event in the window is
+        referenced explicitly (the store masks only listed refs), the
+        ``replacement`` message lands at the earliest matched position, and
+        raw events stay in the append-only log.  Returns False (diagnosis
+        only) when the projection does not match ``messages``, the window is
+        invalid, or the window would cross ``max_ref_index`` (an in-turn
+        compaction must stay inside the pre-turn surface so a later rollback
+        still lands on the compacted surface).
+        """
+        if not self.enabled:
+            return False
+        if (
+            isinstance(start_index, bool)
+            or isinstance(end_index, bool)
+            or not isinstance(start_index, int)
+            or not isinstance(end_index, int)
+            or not 0 <= start_index < end_index
+            or not isinstance(replacement, dict)
+        ):
+            self._diagnose("replace_range", "invalid_window")
+            return False
+        if max_ref_index is not None and end_index > max_ref_index:
+            self._diagnose("replace_range", "window_crosses_turn_surface")
+            return False
+        session, projected = self._projection_with_refs(include_turn_id)
+        if session is None or projected is None:
+            return False
+        if end_index > len(projected):
+            self._diagnose("replace_range", "invalid_window")
+            return False
+        if messages_digest([m for m, _sid, _seq in projected]) != messages_digest(messages):
+            self._diagnose("replace_range", "projection_mismatch")
+            return False
+        refs = [
+            {"session_id": ref_session, "sequence": ref_sequence}
+            for _message, ref_session, ref_sequence in projected[start_index:end_index]
+        ]
+        if not refs:
+            self._diagnose("replace_range", "empty_window")
+            return False
+        expected = (
+            [dict(m) for m in messages[:start_index]]
+            + [dict(replacement)]
+            + [dict(m) for m in messages[end_index:]]
+        )
+        try:
+            self.store.append(
+                str(session["id"]),
+                event_type=EVENT_CHECKPOINT,
+                payload={"replacement": dict(replacement)},
+                turn_id=None,
+                source_kind="compaction",
+                source_id="compactor",
+                source_version="1",
+                audience="model_private",
+                sensitivity="private",
+                surface_op="replace",
+                source_sequences=refs,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-safe
+            self._diagnose("replace_range_append", exc)
+            return False
+        try:
+            projected_after = self.store.project(
+                str(session["id"]), include_turn_id=include_turn_id
+            )
+        except Exception as exc:  # noqa: BLE001 - fail-safe
+            self._diagnose("replace_range_verify", exc)
+            return False
+        if messages_digest(projected_after) != messages_digest(expected):
+            self._diagnose("replace_range", "post_projection_mismatch")
+            return False
+        return True
+
+    def prune_messages(
+        self,
+        messages: list[dict],
+        replacements: dict[int, dict],
+        *,
+        include_turn_id: str | None = None,
+    ) -> list[int]:
+        """Replace single projection positions in place (tool-result pruning).
+
+        ``replacements`` maps a projection index to its replacement message.
+        Each position becomes one single-source ``replace`` checkpoint, so
+        every other position keeps its address.  Returns the sorted indices
+        that were actually pruned; the caller must apply exactly those
+        replacements to its own message list.
+        """
+        if not self.enabled or not replacements:
+            return []
+        session, projected = self._projection_with_refs(include_turn_id)
+        if session is None or projected is None:
+            return []
+        if messages_digest([m for m, _sid, _seq in projected]) != messages_digest(messages):
+            self._diagnose("prune_messages", "projection_mismatch")
+            return []
+        applied: list[int] = []
+        for index in sorted(replacements):
+            replacement = replacements[index]
+            if (
+                isinstance(index, bool)
+                or not isinstance(index, int)
+                or not 0 <= index < len(projected)
+                or not isinstance(replacement, dict)
+            ):
+                self._diagnose("prune_messages", "invalid_index")
+                continue
+            _message, ref_session, ref_sequence = projected[index]
+            try:
+                self.store.append(
+                    str(session["id"]),
+                    event_type=EVENT_CHECKPOINT,
+                    payload={"replacement": dict(replacement)},
+                    turn_id=None,
+                    source_kind="compaction",
+                    source_id="tool-result-pruning",
+                    source_version="1",
+                    audience="model_private",
+                    sensitivity="private",
+                    surface_op="replace",
+                    source_sequences=[{"session_id": ref_session, "sequence": ref_sequence}],
+                )
+                applied.append(index)
+            except Exception as exc:  # noqa: BLE001 - fail-safe
+                self._diagnose("prune_message_append", exc)
+        if applied:
+            expected = [dict(m) for m in messages]
+            for index in applied:
+                expected[index] = dict(replacements[index])
+            try:
+                projected_after = self.store.project(
+                    str(session["id"]), include_turn_id=include_turn_id
+                )
+                if messages_digest(projected_after) != messages_digest(expected):
+                    self._diagnose("prune_messages", "post_projection_mismatch")
+                    return []
+            except Exception as exc:  # noqa: BLE001 - fail-safe
+                self._diagnose("prune_messages_verify", exc)
+                return []
+        return applied
 
     # -- per-request shadow ------------------------------------------------
 
@@ -547,3 +720,62 @@ def rollback_turn_surface(engine: Any) -> None:
     previous = engine.__dict__.pop("_turn_context_surface", None)
     if previous is not None:
         engine.messages = previous
+
+
+def compact_engine(
+    engine: Any,
+    start_index: int,
+    end_index: int,
+    replacement: dict,
+) -> bool:
+    """Non-destructive compaction of the current surface window.
+
+    Post-turn (no active turn) this is a plain session-level replace.  During
+    a turn (context-overflow retry) the window must stay inside the captured
+    pre-turn surface and that surface is updated in lockstep, so a later
+    rollback still lands on the compacted surface and the projection stays
+    consistent either way.  Fail-open: any inconsistency returns False and
+    the caller decides the fallback (rebase after a turn; skip during one).
+    """
+    shadow = for_engine(engine)
+    if shadow is None:
+        return False
+    surface = engine.__dict__.get("_turn_context_surface")
+    active_turn_id = getattr(engine, "_active_turn_id", None)
+    if active_turn_id and surface is None:
+        # No captured pre-turn surface: cannot bound an in-turn window.
+        return False
+    max_ref_index = len(surface) if active_turn_id else None
+    try:
+        replaced = shadow.replace_range(
+            list(engine.messages),
+            start_index,
+            end_index,
+            replacement,
+            include_turn_id=str(active_turn_id) if active_turn_id else None,
+            max_ref_index=max_ref_index,
+        )
+    except Exception as exc:  # noqa: BLE001 - compaction must never break play
+        _remember_outer_failure(engine, "compact_engine", exc)
+        return False
+    if replaced and surface is not None:
+        engine.__dict__["_turn_context_surface"] = (
+            surface[:start_index] + [dict(replacement)] + surface[end_index:]
+        )
+    return replaced
+
+
+def prune_engine(engine: Any, replacements: dict[int, dict]) -> list[int]:
+    """In-place single-position replacements (tool-result pruning)."""
+    shadow = for_engine(engine)
+    if shadow is None or not replacements:
+        return []
+    if getattr(engine, "_active_turn_id", None) is not None:
+        # Pruning is a post-turn operation; an in-turn prune would desync the
+        # captured rollback surface.  Refuse instead of repairing later.
+        return []
+    try:
+        return shadow.prune_messages(list(engine.messages), replacements)
+    except Exception as exc:  # noqa: BLE001 - pruning must never break play
+        _remember_outer_failure(engine, "prune_engine", exc)
+        return []

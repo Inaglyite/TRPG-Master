@@ -326,7 +326,7 @@ def test_tier_reminder_is_append_only_context_injection(tmp_path: Path) -> None:
     assert "[核心约束" in engine.messages[-1]["content"]
 
 
-def test_existing_destructive_compactor_explicitly_rebases_shadow(tmp_path: Path) -> None:
+def test_compactor_compacts_via_replace_checkpoint_without_rebase(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path)
     base = [
         {"role": "system", "content": "keeper"},
@@ -342,7 +342,7 @@ def test_existing_destructive_compactor_explicitly_rebases_shadow(tmp_path: Path
         _summary_token_estimate=0,
     )
 
-    HistoryCompactor(engine).apply(
+    changed = HistoryCompactor(engine).apply(
         base[0],
         '{"events":["old action"]}',
         [base[-1]],
@@ -350,10 +350,21 @@ def test_existing_destructive_compactor_explicitly_rebases_shadow(tmp_path: Path
         silent=True,
     )
 
+    assert changed is True
     active = coordinator.store.session_for_world("world-shadow")
-    assert active["id"] != previous["id"]
-    assert active["parent_session_id"] is None
+    # Non-destructive: same session, one replace checkpoint, raw events kept.
+    assert active["id"] == previous["id"]
     assert coordinator.store.project(active["id"]) == engine.messages
+    events = coordinator.store.load_event_payloads(active["id"])
+    assert len([e for e in events if e["surface_op"] == "append"]) == len(base)
+    checkpoints = [e for e in events if e["event_type"] == "compaction_checkpoint"]
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["surface_op"] == "replace"
+    assert checkpoints[0]["turn_id"] is None
+    assert len(checkpoints[0]["source_sequences"]) == 1  # 窗口 [1, 2) 内全部 surface 事件
+    # Metadata view never exposes the replacement payload.
+    for row in coordinator.store.event_metadata(active["id"]):
+        assert "payload" not in row
 
 
 def test_shadow_store_failure_does_not_block_authoritative_save(
