@@ -4,7 +4,9 @@ import { useAppStore } from "../state/app-store";
 
 const BOOT_BUILD_KEY = "trpg-boot-build";
 const DEFAULT_CONCURRENCY = 6;
-const DEFAULT_TIMEOUT_MS = 20_000;
+// 兜底上限：正常完成由 worker 驱动，不要把首载拦腰切断（Pi/慢网络下 18M
+// 资源远超 20s）。超时只防极端卡死，放行后剩余资源仍在后台继续缓存。
+const DEFAULT_TIMEOUT_MS = 180_000;
 const BG_WAIT_TIMEOUT_MS = 3_000;
 const CONNECTION_WAIT_TIMEOUT_MS = 5_000;
 const BG_IMAGE_VAR = "--module-bg-image";
