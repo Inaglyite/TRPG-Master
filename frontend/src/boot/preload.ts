@@ -51,7 +51,14 @@ export function recordBuildBooted(
 function preloadOne(url: string): Promise<void> {
   return new Promise((resolve) => {
     const image = new Image();
-    image.onload = () => resolve();
+    image.onload = () => {
+      // 只进内存缓存不解码的话，Chromium 的 border-image 首帧可能不绘制
+      // （hover 触发重绘才出现）。显式 decode 让图片以解码态落缓存；
+      // decode 失败不影响缓存结果，照常放行。
+      const decoding = image.decode?.();
+      if (decoding) decoding.catch(() => {}).finally(resolve);
+      else resolve();
+    };
     image.onerror = () => resolve(); // 单个资源失败不阻塞进入
     image.src = url;
   });

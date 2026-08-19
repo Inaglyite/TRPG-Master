@@ -74,21 +74,29 @@ describe("preloadImages", () => {
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
     static fail = new Set<string>();
+    static decoded: string[] = [];
+    private url = "";
     set src(url: string) {
+      this.url = url;
       queueMicrotask(() => {
         if (FakeImage.fail.has(url)) this.onerror?.();
         else this.onload?.();
       });
     }
+    decode() {
+      FakeImage.decoded.push(this.url);
+      return Promise.resolve();
+    }
   }
 
   beforeEach(() => {
     FakeImage.fail.clear();
+    FakeImage.decoded = [];
     vi.stubGlobal("Image", FakeImage);
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("逐个加载并汇报进度", async () => {
+  it("逐个加载、解码并汇报进度", async () => {
     const progress: Array<[number, number]> = [];
     await preloadImages(["a.png", "b.png", "c.png"], (loaded, total) =>
       progress.push([loaded, total]),
@@ -98,6 +106,8 @@ describe("preloadImages", () => {
       [2, 3],
       [3, 3],
     ]);
+    // border-image 首帧绘制要求图片已解码进缓存
+    expect(FakeImage.decoded.sort()).toEqual(["a.png", "b.png", "c.png"]);
   });
 
   it("单个资源失败计入进度且不阻塞", async () => {
