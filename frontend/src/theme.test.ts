@@ -136,6 +136,21 @@ describe("applyTheme", () => {
     );
   });
 
+  it("appends the module version as a cache key when available", async () => {
+    const { useStartStore } = await import("./state/start-store");
+    useStartStore.setState({
+      modules: [{ id: "猩红文档", title: "猩红文档", version: "1.4.0" }],
+    });
+    useAppStore.getState().setWorld("world-1", "猩红文档");
+    applyTheme({ backgroundImage: "bg.png" });
+    const value =
+      document.documentElement.style.getPropertyValue("--module-bg-image");
+    expect(value).toBe(
+      'url("http://localhost:8765/api/assets/%E7%8C%A9%E7%BA%A2%E6%96%87%E6%A1%A3/bg.png?v=1.4.0")',
+    );
+    useStartStore.setState({ modules: [] });
+  });
+
   it("rejects unsafe backgroundImage values and missing modules", () => {
     const style = document.documentElement.style;
     applyTheme({ backgroundImage: "../secret.png" });

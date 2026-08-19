@@ -34,7 +34,12 @@ export type CharacterGroup = {
   title: string;
   characters: CharacterOption[];
 };
-export type ModuleOption = { id: string; title: string };
+export type ModuleOption = {
+  id: string;
+  title: string;
+  version?: string;
+  asset_version?: string;
+};
 
 type StartState = {
   gameStarted: boolean;

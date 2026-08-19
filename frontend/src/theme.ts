@@ -5,6 +5,7 @@ import {
   DEFAULT_TITLE,
   useAppStore,
 } from "./state/app-store";
+import { useStartStore } from "./state/start-store";
 
 function isSafeThemeColor(value: unknown): value is string {
   return (
@@ -92,7 +93,14 @@ function moduleAssetUrl(path: string): string | null {
   const moduleName = useAppStore.getState().activeModule;
   if (!moduleName) return null;
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-  return `${backendHttpOrigin()}/api/assets/${encodeURIComponent(moduleName)}/${encodedPath}`;
+  const base = `${backendHttpOrigin()}/api/assets/${encodeURIComponent(moduleName)}/${encodedPath}`;
+  // 模块资源版本只作缓存键：内容变化产生新 URL，带 v 的响应由后端标记为
+  // immutable 长缓存；拿不到版本时回退为 ETag 条件请求。
+  const entry = useStartStore
+    .getState()
+    .modules.find((module) => module.id === moduleName);
+  const version = entry?.asset_version ?? entry?.version;
+  return version ? `${base}?v=${encodeURIComponent(version)}` : base;
 }
 
 export function applyTheme(theme: any) {

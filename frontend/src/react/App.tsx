@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { useAppStore } from "../state/app-store";
 import { connect } from "../ws";
+import { BootLoader } from "./components/BootLoader";
 import { GameShell } from "./GameShell";
 
 export function App() {
@@ -13,5 +14,10 @@ export function App() {
     if (mode === "local") connect();
   }, [mode]);
 
-  return <GameShell />;
+  return (
+    <>
+      <GameShell />
+      <BootLoader />
+    </>
+  );
 }

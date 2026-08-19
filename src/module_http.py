@@ -100,6 +100,7 @@ def serve_module_asset(
     hosted: bool,
     module_name: str,
     filename: str,
+    versioned: bool = False,
 ) -> FileResponse | JSONResponse:
     """Serve a local-mode asset while preventing traversal and hosted spoilers."""
     if hosted:
@@ -115,7 +116,12 @@ def serve_module_asset(
     if not asset_path.is_file():
         return JSONResponse({"error": "not found"}, status_code=404)
     mime, _ = mimetypes.guess_type(str(asset_path))
-    return FileResponse(asset_path, media_type=mime or "image/png")
+    # ?v=<模块版本> 只是缓存键：版本升级产生新 URL，因此带 v 的响应可以安全
+    # 长期缓存；不带 v 的旧客户端回退到 ETag 条件请求。
+    headers = (
+        {"Cache-Control": "public, max-age=31536000, immutable"} if versioned else None
+    )
+    return FileResponse(asset_path, media_type=mime or "image/png", headers=headers)
 
 
 def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
@@ -216,12 +222,13 @@ def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
         return {"ok": True, "module": name, "world_id": context.world_id}
 
     @router.get("/api/assets/{module_name}/{filename:path}")
-    async def serve_asset(module_name: str, filename: str):
+    async def serve_asset(module_name: str, filename: str, v: str | None = None):
         return serve_module_asset(
             deps.registry(),
             hosted=deps.auth_required(),
             module_name=module_name,
             filename=filename,
+            versioned=v is not None,
         )
 
     return router

@@ -1,6 +1,7 @@
 /* 样式入口：按原 style.css 的规则顺序组合，保持级联不变 */
 @import "./tokens.css";
 @import "./base.css";
+@import "./components/boot-loader.css";
 @import "./layout.css";
 @import "./effects.css";
 @import "./buttons.css";

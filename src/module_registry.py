@@ -113,6 +113,25 @@ def _check_zip_info(info: zipfile.ZipInfo) -> None:
             raise ModulePackageError("compression_bomb", f"文件压缩比异常: {info.filename}")
 
 
+def _legacy_asset_version(path: Path) -> str:
+    """legacy 模组的资源缓存键：assets 内文件的最新 mtime（秒）。"""
+    latest = 0
+    assets = path / "assets"
+    if assets.is_dir():
+        for root, _dirs, files in os.walk(assets):
+            for name in files:
+                try:
+                    latest = max(latest, int((Path(root) / name).stat().st_mtime))
+                except OSError:
+                    continue
+    if latest == 0:
+        try:
+            latest = int(path.stat().st_mtime)
+        except OSError:
+            pass
+    return f"legacy-{latest}"
+
+
 @dataclass(frozen=True)
 class ModuleRecord:
     key: str
@@ -126,12 +145,16 @@ class ModuleRecord:
     source: str
     format_version: str
     capabilities: tuple[str, ...] = ()
+    # 静态资源缓存键：installed 模组等于清单版本；legacy 模组没有版本概念，
+    # 用 assets 内容最新 mtime 代替，保证改图后 URL 变化、长缓存不失效。
+    asset_version: str = ""
 
     def to_dict(self) -> dict:
         return {
             "id": self.key,
             "package_id": self.package_id,
             "version": self.version,
+            "asset_version": self.asset_version or self.version,
             "title": self.title,
             "description": self.description,
             "author": self.author,
@@ -203,6 +226,7 @@ class ModuleRegistry:
             path=path.resolve(),
             source="builtin",
             format_version="legacy",
+            asset_version=_legacy_asset_version(path),
         )
 
     def _installed_record(self, path: Path) -> ModuleRecord | None:
