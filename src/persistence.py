@@ -30,11 +30,12 @@ from .database import SaveSlot, Snapshot, new_id, session_scope, utcnow
 from .handouts import refresh_static_handout_config
 from .logger import error as log_error
 from .runtime import RuntimeContext, default_world_id
-from .skill_manifest import CatalogError, SkillCatalog, catalog_for
+from .skill_manifest import CatalogError, SkillCatalog, catalog_for, read_skill_content
 from .skill_pins import (
     PinUnavailable,
     ensure_world_pins,
     pinned_catalog,
+    probe_world_pins,
     read_world_pins,
 )
 from .world_migrations import migrate_world_state
@@ -199,6 +200,12 @@ def _catalog_skill_parts(
     try:
         catalog = catalog_for(context)
     except CatalogError as exc:
+        # A persisted world with zero pins has not yet frozen its authority
+        # surface.  If its catalog is now invalid, loading old disk files here
+        # would silently make that mutable disk state authoritative.  Legacy
+        # duck/no-world contexts remain the only compatibility fallback.
+        if probe_world_pins(context).state == "empty":
+            raise PinUnavailable("世界尚未冻结 Skill 且 catalog 不可用") from exc
         log_error(f"Skill catalog 不可用，回退磁盘加载: {exc}")
         return [], [], None
     try:
@@ -225,7 +232,14 @@ def _catalog_skill_parts(
                 continue
             content = pin.content.strip()
         else:
-            content = _read_disk_skill(Path(context.project_root) / entry.path)
+            content = (
+                read_skill_content(
+                    context.project_root,
+                    entry,
+                    module_dir=getattr(context, "module_dir", None),
+                )
+                or ""
+            ).strip()
         if not content:
             continue
         if entry.trust == "bundled-module":

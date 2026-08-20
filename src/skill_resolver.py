@@ -32,6 +32,21 @@ def _world_scene_id(world: dict[str, Any]) -> str:
     return str(scene.get("id") or "") if isinstance(scene, dict) else ""
 
 
+def _world_scene_capabilities(world: dict[str, Any]) -> set[str]:
+    """Read authored scene capabilities from the authoritative world projection."""
+
+    scene = world.get("current_scene")
+    if not isinstance(scene, dict):
+        return set()
+    values = scene.get("capabilities")
+    if not isinstance(values, list):
+        scene_id = str(scene.get("id") or "")
+        catalog = world.get("scene_catalog")
+        candidate = catalog.get(scene_id) if isinstance(catalog, dict) else None
+        values = candidate.get("capabilities") if isinstance(candidate, dict) else []
+    return {str(value) for value in values if isinstance(value, (str, int, float))}
+
+
 def _activation_matches(
     entry: SkillEntry,
     *,
@@ -58,6 +73,10 @@ def _activation_matches(
         return True
     if activation.scenes and _world_scene_id(world) in activation.scenes:
         return True
+    if activation.scene_capabilities and set(activation.scene_capabilities) & _world_scene_capabilities(
+        world
+    ):
+        return True
     if activation.module_capabilities and set(activation.module_capabilities) & module_capabilities:
         return True
     if activation.rulesets and ruleset and ruleset in activation.rulesets:
@@ -74,6 +93,7 @@ def resolve_activations(
     ruleset: str = "",
     module_capabilities: Iterable[str] = (),
     available_ids: set[str] | None = None,
+    force_ids: Iterable[str] = (),
 ) -> list[SkillEntry]:
     """返回本回合必须加载的 deterministic Skill，按 catalog 顺序。
 
@@ -85,7 +105,7 @@ def resolve_activations(
         raw_phase = getattr(action_resolution, "phase", None)
         phase = str(getattr(raw_phase, "value", raw_phase) or "") or None
     capabilities = {str(cap) for cap in module_capabilities}
-    selected = []
+    selected_ids: set[str] = set()
     for entry in catalog.skills:
         if entry.residency != "deterministic":
             continue
@@ -99,8 +119,63 @@ def resolve_activations(
             ruleset=ruleset,
             module_capabilities=capabilities,
         ):
-            selected.append(entry)
-    return selected
+            selected_ids.add(entry.id)
+    # ``force_ids`` is an engine-private continuation of a deterministic
+    # activation that already happened in the *current* turn (for example a
+    # tool-triggered rule whose old control message was compacted away).  It
+    # is never derived from model text and still resolves only from the frozen
+    # catalog.  Unknown/non-deterministic ids are ignored fail-closed.
+    by_id = catalog.by_id
+    for skill_id in force_ids:
+        entry = by_id.get(str(skill_id))
+        if entry is not None and entry.residency == "deterministic":
+            selected_ids.add(entry.id)
+    return _dependency_closure(catalog, selected_ids, available_ids=available_ids)
+
+
+def _dependency_closure(
+    catalog: SkillCatalog,
+    selected_ids: set[str],
+    *,
+    available_ids: set[str] | None,
+) -> list[SkillEntry]:
+    """Return selected deterministic Skills plus dependencies, dependency-first.
+
+    Catalog parsing rejects cycles and non-deterministic dependencies.  This
+    second defensive pass still refuses a malformed pinned/synthetic catalog
+    instead of returning a partial rule set.
+    """
+
+    by_id = catalog.by_id
+    ordered: list[SkillEntry] = []
+    emitted: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(skill_id: str) -> bool:
+        if skill_id in emitted:
+            return True
+        if skill_id in visiting:
+            return False
+        entry = by_id.get(skill_id)
+        if entry is None:
+            return False
+        if available_ids is not None and skill_id not in available_ids:
+            return False
+        if entry.residency != "deterministic":
+            return False
+        visiting.add(skill_id)
+        if not all(visit(dependency_id) for dependency_id in entry.dependencies):
+            visiting.remove(skill_id)
+            return False
+        visiting.remove(skill_id)
+        emitted.add(skill_id)
+        ordered.append(entry)
+        return True
+
+    for entry in catalog.skills:
+        if entry.id in selected_ids:
+            visit(entry.id)
+    return ordered
 
 
 def keyword_misses(

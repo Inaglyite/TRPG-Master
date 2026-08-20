@@ -19,6 +19,7 @@ Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **�
 - **Server-authoritative combat.** A dedicated state machine handles initiative, opposed d100 rolls, damage, firearm ammo and player defense choices. First lethal aggression against non-hostile NPCs is confirmed with you before the story commits.
 - **Modules you can write and share.** Modules are safe, sandboxed `.trpgmod` ZIP packages (JSON + Markdown + assets) with JSON Schema validation, one-click import, side-by-side versions and a v2 format that guarantees the main investigation can never dead-end on a failed roll. A ready-to-copy [template](examples/module-template/manifest.json) is included.
 - **Lorebook-powered context.** Character Card V3 lorebooks retrieve module lore per turn with budgets, groups and cooldowns; tiered information boundaries keep the model from spoiling secrets it shouldn't know yet.
+- **Frozen rules per adventure.** A database-backed world snapshots its Skill content, manifest and catalog order once, so a later deployment cannot silently change an ongoing case. The H3 memory tables are deliberately an internal shadow foundation, not a player-visible “long-term memory” feature.
 - **Saves, journals and timeline branches.** Per-world save slots, a persistent turn journal that survives disconnects, and branching timelines: rewind to any decision point and play out a different choice without rerolling the past.
 - **Desktop or official cloud.** Linux runs the Electron desktop from source; Windows supports NSIS and portable packages. The official service adds shared 2–4 player rooms, Argon2id accounts, revocable sessions, turn ownership, private-event isolation and PostgreSQL persistence.
 
@@ -175,6 +176,22 @@ The project documentation is written in Chinese:
 - [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md) — browser/Electron login, rooms, turns, saves and reconnection
 - [模组格式](docs/MODULE_FORMAT.md) — the `.trpgmod` v1/v2 package specification for module authors
 - [开发路线图](docs/ROADMAP.md) — current local/multiplayer baseline and remaining release work
+- [Harness 采纳与 H3 边界](docs/DEEPSEEK_HARNESS_ADOPTION.md) — request safety, context compaction, frozen Skill catalog and the explicitly deferred structured-memory surface
+
+### H3 rule and memory boundary
+
+For a database-backed world, the first resolved Skill catalog is stored as immutable pin rows: content and
+digest in `world_skill_pins`, plus the full manifest snapshot and order in
+`world_skill_pin_manifests`. If an older world has a complete pre-sidecar pin set, it remains readable only as
+bounded, non-invocable core text; it never rereads the current on-disk catalog. A partial sidecar,
+unreadable pin store or malformed database schema fails closed instead of silently changing the rules in a running
+world.
+
+`memory_fact_candidates` and `memory_facts` are currently an internal, shadow-only schema/service boundary. No
+normal game turn, model tool, HTTP endpoint, WebSocket message, player UI or prompt reads or writes them. This
+non-exposure is an intentional H3 completion boundary, not an accidentally missing screen. The tables do not alter
+`WorldState`, turn outcomes, narration or what a player can see; those continue to be governed by the authoritative
+world and turn records. Treat them as implementation groundwork rather than as a public memory or export API.
 
 ## Development
 

@@ -1,9 +1,11 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config import PROJECT_ROOT
 from src.engine import GameEngine
 from src.runtime import RuntimeContext
 from src.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
@@ -19,6 +21,10 @@ class TurnJournalTests(unittest.TestCase):
         )
 
     def make_engine(self, root: Path) -> GameEngine:
+        # RuntimeContext makes this a real DB world.  H3 must reject a missing
+        # catalog there, so the isolated project fixture supplies the same
+        # complete checked-in Skill surface as production.
+        shutil.copytree(PROJECT_ROOT / "skills", root / "skills", dirs_exist_ok=True)
         module_dir = root / "mod" / "test-module"
         module_dir.mkdir(parents=True, exist_ok=True)
         (module_dir / "module.md").write_text("# Test", encoding="utf-8")

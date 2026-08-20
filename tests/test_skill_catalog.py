@@ -1,6 +1,6 @@
 """H3 Skill Catalog tests: manifest / pins freeze / resolver / load_skill / 溯源。
 
-Contract covered (see /tmp/H3_SKILL_IMPLEMENTATION.md):
+Contract covered (see docs/DEEPSEEK_HARNESS_ADOPTION.md §5.4):
 - catalog.json is the single metadata source; invalid catalogs fail closed
 - world_skill_pins freeze per world: pin once, never re-pin, branch inherits
 - resolver activation is fully deterministic; keywords only diagnose
@@ -170,9 +170,82 @@ def test_module_skills_synthesize_bundled_entries():
     for entry in module_entries:
         assert entry.residency == "core"
         assert not entry.model_invocable
+        # Bundled Skills carry a logical URI only; the trusted runtime module
+        # root is the sole authority that can resolve it.
+        assert entry.path.startswith("module://skills/")
         # 非 ASCII 模组名也必须产生合法 id
         assert entry.id.startswith("module.m")
-        assert read_skill_content(PROJECT_ROOT, entry)
+        assert read_skill_content(PROJECT_ROOT, entry, module_dir=context.module_dir)
+        assert read_skill_content(PROJECT_ROOT, entry) is None
+
+
+def test_installed_module_skills_use_only_a_trusted_logical_root(tmp_path: Path):
+    """User packages never put absolute custom-Skill paths in the catalog."""
+    project = tmp_project(tmp_path)
+    runtime = tmp_path / "runtime"
+    module_dir = runtime / "modules" / "demo" / "1.0.0"
+    (module_dir / "skills").mkdir(parents=True)
+    (module_dir / "skills" / "guide.skill").write_text("# frozen module rule", encoding="utf-8")
+    context = SimpleNamespace(
+        project_root=project,
+        runtime_root=runtime,
+        module_dir=module_dir,
+        module_name="demo@1.0.0",
+        module_record=SimpleNamespace(
+            path=module_dir,
+            source="user",
+            version="1.0.0",
+            capabilities=("custom_skills",),
+        ),
+    )
+
+    entry = next(entry for entry in catalog_for(context).skills if entry.trust == "bundled-module")
+    assert entry.path == "module://skills/guide.skill"
+    assert str(module_dir) not in entry.path
+    assert read_skill_content(project, entry, module_dir=module_dir) == "# frozen module rule"
+    assert read_skill_content(project, entry) is None
+
+    # Even an internally constructed absolute-path entry cannot turn the
+    # content reader into a generic filesystem primitive.
+    absolute = entry.model_copy(update={"path": str(module_dir / "skills" / "guide.skill")})
+    assert read_skill_content(project, absolute, module_dir=module_dir) is None
+
+    context.module_record.capabilities = ()
+    with pytest.raises(CatalogError, match="custom_skills"):
+        catalog_for(context)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda entry: {**entry, "unknown_permission": True},
+        lambda entry: {**entry, "activation": {"typo": ["combat_start"]}},
+        lambda entry: {**entry, "user_invocable": True},
+        lambda entry: {**entry, "required_tools": ["skill_check"]},
+        lambda entry: {**entry, "allowed_tools": ["skill_check"]},
+    ),
+)
+def test_manifest_rejects_unknown_or_unenforceable_permission_fields(
+    tmp_path: Path, mutate
+):
+    """Typos and unenforceable H3 declarations must fail instead of silently no-oping."""
+    root = tmp_path / "proj"
+    skill_dir = root / "skills" / "core"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "a.skill").write_text("# A", encoding="utf-8")
+    base = {
+        "id": "core.a",
+        "path": "skills/core/a.skill",
+        "version": "1.0.0",
+        "trust": "core",
+        "residency": "core",
+    }
+    (root / "skills" / "catalog.json").write_text(
+        json.dumps({"catalog_version": 1, "skills": [mutate(base)]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(CatalogError):
+        load_official_catalog(root)
 
 
 # ---- pins -----------------------------------------------------------------
@@ -270,6 +343,7 @@ def test_resolver_phase_scene_capability_ruleset_predicates():
         activation={
             "phases": ["contact"],
             "scenes": ["hall"],
+            "scene_capabilities": ["occult"],
             "module_capabilities": ["custom_skills"],
             "rulesets": ["COC 第七版"],
         },
@@ -282,6 +356,12 @@ def test_resolver_phase_scene_capability_ruleset_predicates():
     hit = resolve_activations(catalog2, world=world, module_capabilities={"custom_skills"})
     assert synthetic in hit
     hit = resolve_activations(catalog2, world=world, ruleset="COC 第七版")
+    assert synthetic in hit
+    capability_world = {
+        **world,
+        "current_scene": {"id": "cellar", "capabilities": ["occult"]},
+    }
+    hit = resolve_activations(catalog2, world=capability_world)
     assert synthetic in hit
     miss = resolve_activations(catalog2, world={**world, "current_scene": {"id": " cellar "}})
     assert synthetic not in miss
@@ -299,6 +379,44 @@ def test_resolver_respects_available_ids_and_keywords_only_diagnose():
     missed = keyword_misses(catalog, "我拔枪瞄准他", {e.id for e in activated})
     assert [e.id for e in missed] == ["keeper.combat"]
     assert activated == []
+
+
+def test_deterministic_dependencies_are_validated_and_loaded_first():
+    """Dependency closure is deterministic and never relies on prompt ordering luck."""
+    from src.skill_manifest import SkillCatalog, SkillEntry, validate_catalog
+
+    prerequisite = SkillEntry(
+        id="keeper.prerequisite",
+        path="skills/keeper/keeper_core.skill",
+        version="1.0.0",
+        trust="core",
+        residency="deterministic",
+        activation={"tools": ["prepare_ritual"]},
+    )
+    target = SkillEntry(
+        id="keeper.ritual",
+        path="skills/keeper/keeper_core.skill",
+        version="1.0.0",
+        trust="core",
+        residency="deterministic",
+        activation={"tools": ["cast_ritual"]},
+        dependencies=["keeper.prerequisite"],
+    )
+    catalog = validate_catalog(SkillCatalog(catalog_version=1, skills=[target, prerequisite]))
+    activated = resolve_activations(catalog, world={}, tool_name="cast_ritual")
+    assert [entry.id for entry in activated] == ["keeper.prerequisite", "keeper.ritual"]
+
+    core = SkillEntry(
+        id="core.always",
+        path="skills/core/trpg_master.skill",
+        version="1.0.0",
+        trust="core",
+        residency="core",
+    )
+    with pytest.raises(CatalogError, match="deterministic"):
+        validate_catalog(
+            SkillCatalog(catalog_version=1, skills=[core, target.model_copy(update={"dependencies": ["core.always"]})])
+        )
 
 
 # ---- load_skill 工具（H0 快照 + H1 管线）---------------------------------
@@ -623,6 +741,34 @@ def test_deterministic_skill_refresh_uses_current_surface_not_lifetime_set(tmp_p
     ) == 1
 
 
+def test_tool_triggered_skill_restores_after_same_turn_compaction(tmp_path: Path):
+    """A transient tool predicate survives H2 surface replacement for its live turn."""
+    from src.skill_activation import refresh_deterministic_skills
+
+    engine = _engine_stub(tmp_path, "world-a")
+    engine.context.world_store = SimpleNamespace(
+        load=lambda: {"combat_state": {"active": False}, "pc": {"san": 90}}
+    )
+    engine._active_turn_id = "turn-use-item"
+    engine._maybe_hint_optional_skill("use_item")
+    assert "keeper.items" in engine._loaded_optional_skills
+    assert any("[skill-pin id=keeper.items " in item["content"] for item in engine.messages)
+
+    # A capacity preflight/overflow compaction may remove the engine control
+    # after the tool handler completed.  World state alone cannot rederive
+    # this tools-only predicate, so the per-turn frozen continuation restores
+    # it before the retry request is built.
+    engine.messages = [{"role": "system", "content": "compacted surface"}]
+    assert refresh_deterministic_skills(engine) == 1
+    assert any("[skill-pin id=keeper.items " in item["content"] for item in engine.messages)
+
+    # The continuation is deliberately scoped to the durable turn id; it
+    # cannot make a tool-only rule leak into the next player action.
+    engine._active_turn_id = "turn-next"
+    engine.messages = [{"role": "system", "content": "next turn surface"}]
+    assert refresh_deterministic_skills(engine) == 0
+
+
 def test_player_control_lookalike_cannot_suppress_skill_refresh(tmp_path: Path):
     """Only the engine-registered current control object can count as loaded."""
     from src.skill_activation import refresh_deterministic_skills
@@ -850,6 +996,64 @@ def test_existing_world_pin_failure_fails_closed(tmp_path: Path):
     with _execution_window(engine, skill_allowlist=()):
         result = json.loads(execute_load_skill(engine, "keeper.magic"))
     assert result["ok"] is False
+
+
+def test_zero_pin_db_world_with_broken_catalog_never_falls_back_to_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A persisted but not-yet-pinned world has no mutable-disk escape hatch."""
+    from src.persistence import load_system_prompt
+    from src.skill_pins import PinUnavailable
+
+    project = tmp_project(tmp_path)
+    seed_world(sqlite_url(tmp_path), "world-a")
+    context = tmp_context(tmp_path, "world-a", project)
+    # The fallback helper is deliberately booby-trapped: the controlled error
+    # must happen before any legacy disk reader gets a chance to run.
+    monkeypatch.setattr(
+        "src.persistence._read_disk_skill",
+        lambda _path: pytest.fail("zero-pin DB world read a live disk Skill"),
+    )
+    (project / "skills" / "catalog.json").unlink()
+    with pytest.raises(PinUnavailable, match="尚未冻结"):
+        load_system_prompt(context)
+    with session_scope(context.database_url) as session:
+        assert session.query(WorldSkillPin).filter_by(world_id="world-a").count() == 0
+
+
+def test_legacy_content_only_pins_stay_playable_without_current_catalog(tmp_path: Path):
+    """Pre-0011 rows become bounded core text solely from frozen content."""
+    from src.persistence import load_system_prompt
+    from src.skill_pins import pinned_catalog, read_world_pins
+
+    project = tmp_project(tmp_path)
+    url = sqlite_url(tmp_path)
+    seed_world(url, "world-a")
+    legacy_content = "# Legacy keeper rule\nUse only this frozen rule text."
+    with session_scope(url) as session:
+        session.add(
+            WorldSkillPin(
+                id="wsp_legacy_on_demand",
+                world_id="world-a",
+                skill_id="keeper.magic",
+                skill_version="0.9.0",
+                content_digest=skill_content_digest(legacy_content),
+                trust="core",
+                residency="on_demand",
+                content=legacy_content,
+            )
+        )
+    context = tmp_context(tmp_path, "world-a", project)
+    (project / "skills" / "catalog.json").unlink()
+
+    pins = read_world_pins(context)
+    assert pins is not None
+    pin = pins["keeper.magic"]
+    assert pin.entry.residency == "core"
+    assert pin.entry.model_invocable is False
+    assert pin.entry.activation.model_dump(exclude_defaults=True) == {}
+    assert [entry.id for entry in pinned_catalog(pins).core_entries()] == ["keeper.magic"]
+    assert legacy_content in load_system_prompt(context)
 
 
 def test_branch_world_inherits_parent_pins_not_drifted_disk(tmp_path: Path):
@@ -1144,24 +1348,39 @@ def test_branch_inherit_without_live_catalog_and_copy_fail_closed(tmp_path: Path
 
 
 def test_load_skill_enforces_frozen_max_context_tokens(tmp_path: Path):
-    """内容超出冻结元数据的 max_context_tokens → 拒绝加载。"""
+    """内容超出冻结元数据的 max_context_tokens → 整个 pin 集 fail closed。"""
     project = tmp_project(tmp_path)
-    catalog_path = project / "skills" / "catalog.json"
-    raw = json.loads(catalog_path.read_text(encoding="utf-8"))
-    for skill in raw["skills"]:
-        if skill["id"] == "keeper.magic":
-            skill["max_context_tokens"] = 1
-    catalog_path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
-
     engine = _engine_stub(tmp_path, "world-a")
     engine.context = tmp_context(tmp_path, "world-a", project)
     engine.context.world_store = SimpleNamespace(load=lambda: {})
+
+    # This is a frozen-metadata test, rather than a source-catalog test: an
+    # invalid source budget must now be rejected before pinning.  Pin a valid
+    # catalog first, then simulate a corrupted/overly-small frozen budget.
+    from src.database import WorldSkillPinManifest
+
+    assert ensure_world_pins(engine.context, catalog_for(engine.context))
+    with session_scope(engine.context.database_url) as session:
+        pin = (
+            session.query(WorldSkillPin)
+            .filter_by(world_id="world-a", skill_id="keeper.magic")
+            .one()
+        )
+        manifest = session.get(WorldSkillPinManifest, pin.id)
+        assert manifest is not None
+        manifest.entry_snapshot = {**manifest.entry_snapshot, "max_context_tokens": 1}
+    engine._skill_catalog_cache = None
+    engine._skill_pins_cache = None
+
     from src.skill_activation import execute_load_skill
 
     with _execution_window(engine):
         result = json.loads(execute_load_skill(engine, "keeper.magic"))
     assert result["ok"] is False
-    assert result["error"] == "skill_over_budget"
+    # A frozen manifest/content mismatch is integrity corruption.  It is
+    # rejected before the tool can enter a model request, rather than merely
+    # returning the over-budget body to an otherwise live request.
+    assert result["error"] == "skill_not_loadable"
     assert "keeper.magic" not in engine._loaded_optional_skills
 
 

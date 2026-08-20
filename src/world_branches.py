@@ -9,17 +9,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from .config import AUTO_SAVE_SLOT
 from .context_checkpoint import public_copy
 from .database import SaveSlot, Turn, World, WorldState, database_url, session_scope, utcnow
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
-from .logger import error as log_error
 from .persistence import save_game
 from .player_notes import PlayerNotesStore
 from .runtime import RuntimeContext
-from .skill_manifest import CatalogError
 from .skill_pins import inherit_pins_for_branch
 from .structured_memory import backfill_world_root_ids
 from .world_store import atomic_write_json
@@ -59,6 +57,34 @@ class WorldBranchService:
     def _clean_label(label: object, fallback: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(label or "")).strip()
         return (cleaned or fallback)[:60]
+
+    @staticmethod
+    def _capture_memory_cutoff(source_context: RuntimeContext) -> str:
+        """Freeze the branch's accepted-memory horizon before cloning it.
+
+        ``StructuredMemoryService.accept_fact`` takes the same ``World`` row
+        lock before it creates an accepted fact.  On PostgreSQL this gives
+        branch creation and accepted-memory writes one serial order: a fact
+        committed before this lock is eligible for the child; a fact accepted
+        after it has a later ``decided_at`` and is not.  The timestamp is
+        persisted in branch metadata because facts intentionally have no
+        branch-specific copy table.
+
+        SQLite has no row-level ``FOR UPDATE`` semantics, but the timestamp is
+        still an explicit conservative cutoff for its shadow-only desktop
+        service.  Production memory writes use PostgreSQL's shared row lock.
+        """
+        with session_scope(source_context.database_url) as session:
+            source_world = session.scalar(
+                select(World)
+                .where(World.id == source_context.world_id)
+                .with_for_update()
+            )
+            if source_world is None:
+                raise FileNotFoundError(f"世界不存在: {source_context.world_id}")
+            if source_world.status != "active":
+                raise ValueError(f"世界不可用于创建时间线: {source_context.world_id}")
+            return utcnow().isoformat()
 
     def _new_world_id(self, parent_world_id: str) -> str:
         stem = re.sub(r"[^\w-]+", "-", parent_world_id, flags=re.UNICODE).strip("-_")
@@ -119,6 +145,11 @@ class WorldBranchService:
         record = source_journal.read(turn_id)
         if record.get("status") != "completed":
             raise ValueError("只能从完整提交的回合创建分支")
+        # Capture this before cloning any state.  The value is later written
+        # with the branch metadata, but its semantic instant is the source
+        # world's shared lock order, not the end of the potentially slow
+        # filesystem copy below.
+        memory_cutoff_at = self._capture_memory_cutoff(source_context)
         messages, snapshot = source_journal.load_artifacts(turn_id)
         scene = snapshot.get("current_scene", {})
         scene_name = scene.get("name") if isinstance(scene, dict) else ""
@@ -146,13 +177,9 @@ class WorldBranchService:
             source_journal.clone_lineage_to(target_journal, turn_id)
             save_game(messages, "slot_000", context=target_context)
             # 分支继承源世界的 Skill pin：源已有 pin 时直接复制（不读活
-            # catalog）；catalog 不可读的环境（如合成测试根）只诊断跳过；
-            # 源 pin 失效或复制失败（PinUnavailable）则整个分支创建受控
-            # 失败，进入下方 except 清理——目标绝不独立按磁盘 pin。
-            try:
-                inherit_pins_for_branch(source_context, target_context)
-            except CatalogError as exc:
-                log_error(f"Skill catalog 不可用，分支跳过 pin 继承: {exc}")
+            # catalog）；源目录不可读、pin 失效或复制失败都必须让创建失败并
+            # 进入下方清理。不能生成一个之后会按新磁盘独立 pin 的分支。
+            inherit_pins_for_branch(source_context, target_context)
             source_notes = PlayerNotesStore(source_context.world_dir, user_id=user_id).load()
             if source_notes.get("text"):
                 PlayerNotesStore(target_context.world_dir, user_id=user_id).save(
@@ -169,7 +196,12 @@ class WorldBranchService:
                             "parent_world_id": source_context.world_id,
                             "source_turn_id": turn_id,
                             "source_world_revision": record.get("world_revision"),
-                            "created_at": datetime.now(UTC).isoformat(),
+                            # ``created_at`` stays as a legacy fallback for
+                            # branches created before H3.  New branches write
+                            # the dedicated field at the exact same instant,
+                            # making the memory visibility contract explicit.
+                            "created_at": memory_cutoff_at,
+                            "memory_cutoff_at": memory_cutoff_at,
                         },
                     }
                 )

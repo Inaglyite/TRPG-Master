@@ -33,6 +33,10 @@ MIGRATION_0011 = _load_module(
     "trpg_skill_pin_manifest_migration",
     PROJECT_ROOT / "migrations" / "versions" / "20260821_0011_skill_pin_manifests.py",
 )
+MIGRATION_0012 = _load_module(
+    "trpg_h3_schema_integrity_migration",
+    PROJECT_ROOT / "migrations" / "versions" / "20260821_0012_h3_schema_integrity.py",
+)
 
 
 def _sqlite_url(path: Path) -> str:
@@ -170,6 +174,142 @@ def test_skill_pin_manifest_adoption_rejects_weakened_constraints(
         engine.dispose()
 
 
+def test_h3_schema_guard_adopts_current_create_all_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0012 is a no-op only for the complete current ORM shape."""
+    database_url = _sqlite_url(tmp_path / "h3-create-all.db")
+    engine = sa.create_engine(database_url)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260821_0011")
+    command.upgrade(config, "head")
+
+    assert _revision(database_url) == MIGRATION_0012.revision
+    engine = sa.create_engine(database_url)
+    try:
+        MIGRATION_0012._validate_h3_schema(engine)
+    finally:
+        engine.dispose()
+
+
+def test_h3_schema_guard_rejects_missing_pin_cascade_foreign_key(tmp_path: Path) -> None:
+    """0009's old column/unique-only adoption must no longer be sufficient."""
+    engine = sa.create_engine(_sqlite_url(tmp_path / "pin-fk.db"))
+    try:
+        Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(sa.text("DROP TABLE world_skill_pin_manifests"))
+            connection.execute(sa.text("DROP TABLE world_skill_pins"))
+            connection.execute(
+                sa.text(
+                    "CREATE TABLE world_skill_pins ("
+                    "id VARCHAR(48) NOT NULL PRIMARY KEY,"
+                    "world_id VARCHAR(160) NOT NULL,"
+                    "skill_id VARCHAR(120) NOT NULL,"
+                    "skill_version VARCHAR(80) NOT NULL,"
+                    "content_digest VARCHAR(80) NOT NULL,"
+                    "trust VARCHAR(32) NOT NULL,"
+                    "residency VARCHAR(32) NOT NULL,"
+                    "content TEXT NOT NULL,"
+                    "pinned_at DATETIME NOT NULL,"
+                    "CONSTRAINT uq_world_skill_pin UNIQUE (world_id, skill_id)"
+                    ")"
+                )
+            )
+            connection.execute(
+                sa.text(
+                    "CREATE INDEX ix_world_skill_pins_world_id "
+                    "ON world_skill_pins (world_id)"
+                )
+            )
+        with pytest.raises(RuntimeError, match="外键或 ON DELETE"):
+            MIGRATION_0012._validate_h3_schema(engine)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("case", "column", "definition", "expected"),
+    [
+        ("value-text", "value", "TEXT NOT NULL", "value 类型必须是 json"),
+        ("provenance-null", "provenance", "JSON", "provenance 必须 NOT NULL"),
+    ],
+)
+def test_h3_schema_guard_rejects_memory_candidate_type_or_nullability_drift(
+    tmp_path: Path,
+    case: str,
+    column: str,
+    definition: str,
+    expected: str,
+) -> None:
+    """0010 candidate values stay JSON and provenance stays non-null."""
+    engine = sa.create_engine(_sqlite_url(tmp_path / f"candidate-{case}.db"))
+    try:
+        Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(sa.text("DROP TABLE memory_fact_candidates"))
+            value_definition = definition if column == "value" else "JSON NOT NULL"
+            provenance_definition = definition if column == "provenance" else "JSON NOT NULL"
+            connection.execute(
+                sa.text(
+                    "CREATE TABLE memory_fact_candidates ("
+                    "id VARCHAR(48) NOT NULL PRIMARY KEY,"
+                    "world_id VARCHAR(160) NOT NULL,"
+                    "root_world_id VARCHAR(160) NOT NULL,"
+                    "source_turn_id VARCHAR(80) NOT NULL,"
+                    "subject_id VARCHAR(200) NOT NULL,"
+                    "subject_kind VARCHAR(32) NOT NULL,"
+                    "fact_type VARCHAR(64) NOT NULL,"
+                    f"value {value_definition},"
+                    "digest VARCHAR(64) NOT NULL,"
+                    "audience VARCHAR(32) NOT NULL,"
+                    "owner_user_id VARCHAR(48),"
+                    "tier INTEGER,"
+                    f"provenance {provenance_definition},"
+                    "status VARCHAR(20) NOT NULL,"
+                    "created_at DATETIME NOT NULL,"
+                    "CONSTRAINT uq_memory_candidate_dedupe UNIQUE "
+                    "(world_id, source_turn_id, subject_id, fact_type, digest),"
+                    "FOREIGN KEY(world_id) REFERENCES worlds(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE SET NULL"
+                    ")"
+                )
+            )
+        with pytest.raises(RuntimeError, match=expected):
+            MIGRATION_0012._validate_h3_schema(engine)
+    finally:
+        engine.dispose()
+
+
+def test_h3_schema_guard_blocks_upgrade_when_fact_current_index_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A DB stamped at 0011 cannot silently cross 0012 with a weak 0010 index."""
+    database_url = _sqlite_url(tmp_path / "missing-current-index.db")
+    engine = sa.create_engine(database_url)
+    try:
+        Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(sa.text("DROP INDEX uq_memory_facts_current_per_subject_type"))
+    finally:
+        engine.dispose()
+
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(PROJECT_ROOT / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    monkeypatch.delenv("TRPG_DATABASE_URL", raising=False)
+    command.stamp(config, "20260821_0011")
+    with pytest.raises(RuntimeError, match="缺少索引 uq_memory_facts_current_per_subject_type"):
+        command.upgrade(config, "head")
+    assert _revision(database_url) == "20260821_0011"
+
+
 def test_packaged_migrations_upgrade_unversioned_revision_0002(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -231,6 +371,7 @@ def _fake_bundle(tmp_path: Path) -> Path:
         "_internal/migrations/env.py",
         "_internal/migrations/versions/20260722_0001_database_control_plane.py",
         "_internal/migrations/versions/20260722_0004_room_action_idempotency.py",
+        "_internal/migrations/versions/20260821_0012_h3_schema_integrity.py",
         "_internal/mod/.keep",
         "_internal/rules/.keep",
         "_internal/skills/.keep",

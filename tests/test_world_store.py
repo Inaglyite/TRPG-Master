@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config import PROJECT_ROOT
 from src.engine import GameEngine
 from src.runtime import RuntimeContext, default_world_id
 from src.world_migrations import (
@@ -39,6 +40,10 @@ def base_world(name: str = "调查员") -> dict:
 
 
 def make_project(root: Path, module: str = "test_module") -> None:
+    # RuntimeContext.create persists a DB-backed world.  The H3 catalog/pin
+    # boundary should stay fail-closed for missing catalogs, so test projects
+    # explicitly carry the official manifest and Skill bodies.
+    shutil.copytree(PROJECT_ROOT / "skills", root / "skills", dirs_exist_ok=True)
     module_dir = root / "mod" / module
     module_dir.mkdir(parents=True)
     (module_dir / "module.md").write_text("# Test", encoding="utf-8")

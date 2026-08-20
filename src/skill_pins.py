@@ -39,6 +39,8 @@ from .skill_manifest import (
     catalog_for,
     read_skill_content,
     skill_content_digest,
+    skill_content_within_budget,
+    validate_catalog,
 )
 
 
@@ -64,6 +66,16 @@ _MAX_LINEAGE_DEPTH = 8
 _ENTRY_SNAPSHOT_FIELDS = frozenset(SkillEntry.model_fields)
 _ACTIVATION_SNAPSHOT_FIELDS = frozenset(SkillActivation.model_fields)
 _SNAPSHOT_FIELDS = frozenset({"order", "catalog_version", "catalog_ids"}) | _ENTRY_SNAPSHOT_FIELDS
+# New H3 declarations added after the first sidecar release are safe only
+# when omitted: all default to no capability / no dependency / no resource.
+# Existing frozen worlds therefore remain readable without consulting current
+# disk metadata, while an unknown or partially written authorization field is
+# still rejected.
+_OPTIONAL_SNAPSHOT_FIELDS = frozenset(
+    {"required_tools", "allowed_tools", "dependencies", "user_invocable", "resources"}
+)
+_OPTIONAL_ACTIVATION_SNAPSHOT_FIELDS = frozenset({"scene_capabilities"})
+_LEGACY_PIN_MAX_CONTEXT_TOKENS = 12_000
 
 
 def _pin_lock(database_url: str, world_id: str) -> threading.RLock:
@@ -87,16 +99,17 @@ def _snapshot_payload(entry: SkillEntry, order: int, catalog: SkillCatalog) -> d
 def _legacy_entry_from_row(skill_row: WorldSkillPin) -> tuple[SkillEntry, int]:
     """Conservative compatibility view for a *pure* pre-0011 pin set."""
 
-    # 内容-only 遗产 pin：元数据缺失时一律按最保守解释（非常驻 opening、
-    # 不可模型调用、无激活谓词），而不是去反读当前 catalog。
+    # 内容-only 遗产 pin：元数据缺失时不能反读当前 catalog。为了保留可玩
+    # 的规则行为，全部当作 normal prompt 的 core 内容（不是模型按需或自动
+    # 工具能力），并施加固定的单条安全上限。这样旧 deterministic/on_demand
+    # 内容仍来自冻结正文，却不会猜测已丢失的 activation/model 权限。
     entry = SkillEntry(
         id=skill_row.skill_id,
-        path="(pinned)",
+        path="skills/legacy-pinned.skill",
         version=skill_row.skill_version or "0",
         trust=skill_row.trust if skill_row.trust in ("core", "bundled-module") else "core",
-        residency=skill_row.residency
-        if skill_row.residency in ("core", "deterministic", "on_demand")
-        else "core",
+        residency="core",
+        max_context_tokens=_LEGACY_PIN_MAX_CONTEXT_TOKENS,
     )
     return entry, 1 << 30
 
@@ -113,9 +126,11 @@ def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[
     if not isinstance(snapshot, dict) or not snapshot:
         raise ValueError("快照不是非空 JSON object")
     snapshot_keys = set(snapshot)
-    if snapshot_keys != _SNAPSHOT_FIELDS:
-        missing = sorted(_SNAPSHOT_FIELDS - snapshot_keys)
-        extra = sorted(snapshot_keys - _SNAPSHOT_FIELDS)
+    missing_fields = _SNAPSHOT_FIELDS - snapshot_keys
+    extra_fields = snapshot_keys - _SNAPSHOT_FIELDS
+    if extra_fields or missing_fields - _OPTIONAL_SNAPSHOT_FIELDS:
+        missing = sorted(missing_fields - _OPTIONAL_SNAPSHOT_FIELDS)
+        extra = sorted(extra_fields)
         details = []
         if missing:
             details.append("缺少 " + ", ".join(missing))
@@ -123,16 +138,20 @@ def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[
             details.append("未知 " + ", ".join(extra))
         raise ValueError("快照字段不完整: " + "; ".join(details))
 
-    order = snapshot["order"]
+    # ``0011`` snapshots predate the capability declarations above.  Omission
+    # of only those explicitly safe defaults is compatible; source catalogs
+    # still emit the complete modern shape for every new pin.
+    normalized = dict(snapshot)
+    for field_name in _OPTIONAL_SNAPSHOT_FIELDS - snapshot_keys:
+        normalized[field_name] = SkillEntry.model_fields[field_name].get_default(call_default_factory=True)
+
+    order = normalized["order"]
     if isinstance(order, bool) or not isinstance(order, int) or order < 0:
         raise ValueError("order 非法")
-    catalog_version = snapshot["catalog_version"]
-    if isinstance(catalog_version, bool) or not isinstance(catalog_version, int):
+    catalog_version = normalized["catalog_version"]
+    if isinstance(catalog_version, bool) or catalog_version != 1:
         raise ValueError("catalog_version 非法")
-    # Reuse the schema's current bounded catalog-version contract instead of
-    # accepting an arbitrary integer from a DB row.
-    SkillCatalog.model_validate({"catalog_version": catalog_version, "skills": []})
-    catalog_ids = snapshot["catalog_ids"]
+    catalog_ids = normalized["catalog_ids"]
     if (
         not isinstance(catalog_ids, list)
         or not catalog_ids
@@ -141,11 +160,21 @@ def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[
     ):
         raise ValueError("catalog_ids 非法")
 
-    activation = snapshot["activation"]
-    if not isinstance(activation, dict) or set(activation) != _ACTIVATION_SNAPSHOT_FIELDS:
+    activation = normalized["activation"]
+    if not isinstance(activation, dict):
         raise ValueError("activation 快照字段不完整")
+    missing_activation = _ACTIVATION_SNAPSHOT_FIELDS - set(activation)
+    extra_activation = set(activation) - _ACTIVATION_SNAPSHOT_FIELDS
+    if extra_activation or missing_activation - _OPTIONAL_ACTIVATION_SNAPSHOT_FIELDS:
+        raise ValueError("activation 快照字段不完整")
+    activation = dict(activation)
+    for field_name in _OPTIONAL_ACTIVATION_SNAPSHOT_FIELDS - set(activation):
+        activation[field_name] = SkillActivation.model_fields[field_name].get_default(
+            call_default_factory=True
+        )
+    normalized["activation"] = activation
     entry = SkillEntry.model_validate(
-        {key: snapshot[key] for key in _ENTRY_SNAPSHOT_FIELDS}
+        {key: normalized[key] for key in _ENTRY_SNAPSHOT_FIELDS}
     )
     activation_values = entry.activation.model_dump(exclude_defaults=True)
     if entry.model_invocable and entry.residency != "on_demand":
@@ -173,6 +202,8 @@ def _pin_from_row(
         raise PinUnavailable(f"pin 快照非法: {row.skill_id} ({type(exc).__name__})") from exc
     if entry.id != row.skill_id:
         raise PinUnavailable(f"pin 快照 id 与列不一致: {row.skill_id}")
+    if not skill_content_within_budget(row.content, entry):
+        raise PinUnavailable(f"pin 内容超出 max_context_tokens: {row.skill_id}")
     if not legacy:
         if entry.trust != row.trust or entry.residency != row.residency:
             raise PinUnavailable(f"pin 快照 trust/residency 与列不一致: {row.skill_id}")
@@ -224,6 +255,11 @@ def _read_pins(database_url: str, world_id: str) -> dict[str, PinnedSkill]:
         raise PinUnavailable(f"world={world_id} Skill pin 存在重复 skill_id")
     if pins:
         _validate_pin_set(world_id, pins, rows, snapshots)
+        # Validate the frozen catalog at the earliest shared read boundary,
+        # not only in prompt/resolver callers.  Otherwise a malformed sidecar
+        # could be consumed by a narrower path such as the model loader before
+        # its unsupported capability/dependency declaration was rejected.
+        pinned_catalog(pins)
     return pins
 
 
@@ -275,13 +311,19 @@ def _world_row(database_url: str, world_id: str) -> World | None:
 
 
 def _snapshot_catalog(
-    world_id: str, project_root, catalog: SkillCatalog
+    world_id: str,
+    project_root,
+    catalog: SkillCatalog,
+    *,
+    module_dir=None,
 ) -> list[tuple[WorldSkillPin, WorldSkillPinManifest]]:
     rows = []
     for order, entry in enumerate(catalog.skills):
-        content = read_skill_content(project_root, entry)
+        content = read_skill_content(project_root, entry, module_dir=module_dir)
         if content is None:
             raise CatalogError(f"skill 内容不可读: {entry.id} ({entry.path})")
+        if not skill_content_within_budget(content, entry):
+            raise CatalogError(f"skill 内容超出 max_context_tokens: {entry.id}")
         pin = WorldSkillPin(
             id=new_id("wsp"),
             world_id=world_id,
@@ -358,6 +400,7 @@ def _ensure_impl(
     catalog: SkillCatalog,
     *,
     depth: int,
+    module_dir=None,
     lineage: tuple[str, ...] = (),
 ) -> dict[str, PinnedSkill]:
     """世界行已确认存在后的 pin 读取/继承/首 pin（全程 fail-closed）。"""
@@ -414,6 +457,7 @@ def _ensure_impl(
                 project_root,
                 catalog,
                 depth=depth + 1,
+                module_dir=module_dir,
                 lineage=lineage,
             )
             copy_world_pins(database_url, parent_id, world_id)
@@ -425,7 +469,12 @@ def _ensure_impl(
             )
 
         try:
-            rows = _snapshot_catalog(world_id, project_root, catalog)
+            rows = _snapshot_catalog(
+                world_id,
+                project_root,
+                catalog,
+                module_dir=module_dir,
+            )
             _insert_pins(database_url, rows)
         except IntegrityError:
             # 并发首 pin 的 loser：唯一约束兜底，回滚后读 winner 的结果。
@@ -455,19 +504,34 @@ def ensure_world_pins(context, catalog: SkillCatalog) -> dict[str, PinnedSkill] 
         raise PinUnavailable("Skill pin 数据库不可读")
     if probe.state != "empty":
         return None
+    try:
+        # A caller may have assembled a synthetic catalog rather than using
+        # ``catalog_for``.  Never let that bypass cross-entry dependency or
+        # capability validation at the one irreversible pinning boundary.
+        catalog = validate_catalog(catalog)
+    except CatalogError as exc:
+        raise PinUnavailable("Skill catalog 语义非法，拒绝首 pin") from exc
     return _ensure_impl(
         str(context.database_url),
         str(context.world_id),
         context.project_root,
         catalog,
         depth=0,
+        module_dir=getattr(context, "module_dir", None),
     )
 
 
 def pinned_catalog(pins: dict[str, PinnedSkill]) -> SkillCatalog:
     """用冻结快照重建该世界的有效 catalog（行为治理只认它，不认当前磁盘 catalog）。"""
     entries = [pin.entry for pin in sorted(pins.values(), key=lambda pin: pin.order)]
-    return SkillCatalog(catalog_version=1, skills=entries)
+    try:
+        # A frozen sidecar may contain an old absolute ``path`` from a prior
+        # runtime release.  It is never used to read the pin's body, so retain
+        # it as historical metadata while still enforcing every semantic
+        # cross-entry invariant (dependencies, residency and permissions).
+        return validate_catalog(SkillCatalog(catalog_version=1, skills=entries), frozen=True)
+    except Exception as exc:
+        raise PinUnavailable(f"冻结 Skill catalog 语义非法: {type(exc).__name__}") from exc
 
 
 def copy_world_pins(database_url: str, source_world_id: str, target_world_id: str) -> int:

@@ -313,10 +313,30 @@ flowchart TD
 
 ### 7.1 常驻上下文
 
-`src.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin；已有 pin 时，核心与模组
-Skill 的正文、顺序、`opening` 行为均由 pin 中的 manifest 快照决定，绝不反读已变化的磁盘 catalog。
-没有 DB pin 的遗留桌面世界才走受限的磁盘兼容路径。非 opening 请求再按 `full`/`hybrid` 决定使用
+`src.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin。对已有数据库 `world` 行，零 pin
+会原子写入当时完整 catalog；已有 pin 时，核心与模组 Skill 的正文、顺序、`opening` 行为均由 pin 中的
+manifest 快照决定，绝不反读已变化的磁盘 catalog。pin 表不可读、digest/sidecar 校验失败或数据库 schema
+不完整时必须 fail-closed，不能把错误误判成“没有 pin”再回退磁盘。
+
+只有**整套** pre-0011 内容 pin 且完全没有 sidecar 的旧世界可走保守兼容：保留 pin 行中有效的
+`version`/`trust`，但统一降格成带固定单条预算的常驻 core 正文，且一律非 `opening`、不可模型调用、无
+activation；仍然不读当前磁盘 catalog。0011 sidecar 若只缺后来新增且默认安全的声明字段，会按空/`false`
+规范化；其他任何“部分 sidecar”、空 sidecar 或行列不一致都不是 legacy，会受控失败。真正没有数据库世界的
+旧导入/鸭子上下文才允许旧磁盘兼容路径。非 opening 请求再按 `full`/`hybrid` 决定使用
 `module.md` 或已声明 spine 的模组 Skill；`module.md` 中的默认 PC 会替换为运行时调查员约束。
+
+当前已交付的每个 pin 由 `world_skill_pins` 冻结 `content`、`content_digest`、`skill_version`、`trust` 和
+`residency`；1:1 的 `world_skill_pin_manifests.entry_snapshot` 冻结 `SkillEntry` 的
+`id/path/version/trust/residency/description/opening/model_invocable/max_context_tokens/required_tools/allowed_tools/`
+`dependencies/user_invocable/resources/activation/diagnostic_keywords` 以及 `order`、`catalog_version`、完整
+`catalog_ids`。`activation` 目前含 `tools/combat_active/san_below/phases/scenes/scene_capabilities/`
+`module_capabilities/rulesets`；deterministic `dependencies` 有闭包/循环校验，`resources` 只能由受信引擎通过
+manifest allowlist 读取，模型没有文件读取工具。`required_tools`、`allowed_tools` 与 `user_invocable` 目前虽有
+严格字段校验，但非空/`true` 会在 catalog 校验时拒绝，绝不假装已经改变请求级工具权限。
+
+**H3.1（未开始）** 才会实现这些被安全门禁的工具/UI capability 的真实执行策略，并考虑 `local-author` trust、
+catalog version migration 和作者编辑 UI；工具授权在那之前仍只由每次签发的模型 catalog 管理，不能把声明字段
+误当作已交付的权限机制。
 
 按需 Skill 只以有界的 `id + description` 目录出现在 system prompt 中。模型无法调用通用文件工具；它
 只能在本次服务端签发的 `load_skill` schema 中选择被冻结、`on_demand`、`model_invocable` 的 ID。
@@ -352,6 +372,21 @@ Skill 的正文、顺序、`opening` 行为均由 pin 中的 manifest 快照决�
 
 TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险回合，也会每 10 轮至少注入一次。前 3 轮不重复注入。
 
+### 7.5 结构化记忆（shadow-only，尚非游戏功能）
+
+H3 已有 `memory_fact_candidates` 和 `memory_facts` 的 ORM、迁移与内部 `StructuredMemoryService`：前者表示
+候选，后者表示经受信代码接受的事实，并带 world/root/turn、subject、audience、owner、tier、digest、
+provenance、revision 与 supersede 关系。其 branch/audience/tier 查询规则仅作为内部 shadow 验证基础。
+祖先 fact 还必须同时落在分叉的 `source_world_revision` 和接受时间截点内：新分支写入
+`branch.memory_cutoff_at`，旧分支仅兼容带时区的 `branch.created_at`。因此分叉后才被接受、即使引用旧回合的
+fact 也不会倒灌到子线；损坏 branch metadata 一律 fail-closed。
+
+它**没有**接入正常游戏回合：当前没有模型 tool、HTTP/WS 协议、前端面板、prompt 注入或自动 transcript
+提取会读写这些表；这正是 H3 的完成边界，而不是漏接了一条产品链路。`WorldState`、`Turn`、`Snapshot` 和
+确定性领域工具仍是唯一会影响规则、叙事和玩家可见状态的权威来源。`world_branches` 对 root id 的回填不等于
+启用记忆召回。未来若接入，必须先提供独立 principal/API、明确的写入接受者、branch/audience/TIER/clue gate、
+并发幂等、泄漏测试与 gold precision 评测；在此之前不得把它宣传为玩家的长期记忆或导出接口。
+
 ## 8. 数据所有权
 
 | 数据 | 路径 | 写入者 | 生命周期 |
@@ -361,6 +396,10 @@ TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险
 | 叙事知识库 | `mod/<name>/lorebook.json` 或用户模组同名文件 | 模组作者 | 模组版本 |
 | 用户模组源文件 | `modules/<id>/<version>/manifest.json`、`module.json`、`keeper.md` | `.trpgmod` 导入器 | 指定模组版本 |
 | 用户模组编译产物 | `modules/<id>/<version>/module.md`、`world_state_initial.json` | `module_compiler` | 指定模组版本 |
+| 官方 Skill catalog / 正文 | `skills/catalog.json`、`skills/*.skill` | 开发者/受信发布制品 | 版本控制；只供首次 pin 或无数据库兼容路径读取 |
+| 世界 Skill 内容 pin | `world_skill_pins` | `ensure_world_pins()` 一次性快照；分支 copier | 该世界生命周期；不允许热更新或 reset 重 pin，删世界时外键级联 |
+| 世界 Skill manifest sidecar | `world_skill_pin_manifests` | 与对应 pin 同事务写入 | 1:1 随 pin 级联删除；完整快照优先，部分 sidecar fail-closed |
+| Shadow 记忆候选 / facts | `memory_fact_candidates`、`memory_facts` | 仅内部 `StructuredMemoryService` / 测试与未来受信路径 | 当前不接入游戏热路径、prompt、HTTP/WS 或玩家导出；不拥有世界事实 |
 | 世界元数据 | `worlds.metadata_json` | `RuntimeContext` / 世界服务 | 世界生命周期 |
 | 当前世界 | `world_states.state` JSONB | `DatabaseWorldStore` | 当前案件 |
 | 主题 | `mod/<name>/theme.json` | 模组作者 | 版本控制 |

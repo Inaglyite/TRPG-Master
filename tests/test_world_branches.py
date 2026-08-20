@@ -1,9 +1,12 @@
 import json
+import shutil
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from src.config import PROJECT_ROOT
 from src.database import SaveSlot, Turn, World, new_id, session_scope
 from src.database_turn_journal import DatabaseTurnJournal
 from src.engine import GameEngine
@@ -15,6 +18,11 @@ from src.world_branches import WorldBranchService
 
 class WorldBranchTests(unittest.TestCase):
     def make_engine(self, root: Path) -> GameEngine:
+        # RuntimeContext creates a real DB world.  H3 rightly refuses to
+        # construct its prompt from a corrupt/missing catalog for such a
+        # world, so this isolated project fixture must provide the same
+        # checked-in catalog surface as a real installation.
+        shutil.copytree(PROJECT_ROOT / "skills", root / "skills")
         module_dir = root / "mod" / "branch-module"
         module_dir.mkdir(parents=True)
         (module_dir / "module.md").write_text("# Branch Test", encoding="utf-8")
@@ -127,6 +135,15 @@ class WorldBranchTests(unittest.TestCase):
             self.assertEqual("不碰书架", metadata["display_name"])
             self.assertEqual("main-world", metadata["branch"]["parent_world_id"])
             self.assertEqual(first_turn, metadata["branch"]["source_turn_id"])
+            # New branches persist a dedicated, timezone-aware accepted-memory
+            # horizon; legacy readers may still use the identical created_at.
+            self.assertEqual(
+                metadata["branch"]["created_at"],
+                metadata["branch"]["memory_cutoff_at"],
+            )
+            cutoff = datetime.fromisoformat(metadata["branch"]["memory_cutoff_at"])
+            self.assertIsNotNone(cutoff.tzinfo)
+            self.assertEqual(UTC, cutoff.astimezone(UTC).tzinfo)
 
             listed = service.list_worlds(
                 "branch-module",
@@ -137,6 +154,37 @@ class WorldBranchTests(unittest.TestCase):
             self.assertTrue(listed[0]["resumable"])
             reopened = service.open(branch.context.world_id)
             self.assertEqual(branch.context.world_id, reopened.world_id)
+
+    def test_branch_catalog_error_propagates_and_cleans_target_world(self):
+        """A branch must never survive if pin inheritance cannot establish authority."""
+        from src.skill_manifest import CatalogError
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            engine = self.make_engine(root)
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "你记住了这里。\n\n**你可以——**\n1. 继续",
+                [],
+            )
+            engine.handle_action("环顾四周")
+            turn_id = engine.turn_journal.latest_completed_id()
+            self.assertIsNotNone(turn_id)
+            assert turn_id is not None
+
+            with patch(
+                "src.world_branches.inherit_pins_for_branch",
+                side_effect=CatalogError("catalog broken"),
+            ):
+                with self.assertRaises(CatalogError):
+                    WorldBranchService(root, root).create(
+                        engine.context,
+                        engine.turn_journal,
+                        turn_id,
+                    )
+
+            with session_scope(engine.context.database_url) as session:
+                worlds = session.query(World).filter(World.id != "main-world").all()
+            self.assertEqual([], worlds)
 
     def test_list_worlds_only_returns_the_current_branch_tree(self):
         with tempfile.TemporaryDirectory() as temp:

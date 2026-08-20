@@ -20,11 +20,13 @@ from .skill_manifest import (
     catalog_for,
     read_skill_content,
     skill_content_digest,
+    skill_content_within_budget,
 )
 from .skill_pins import (
     PinUnavailable,
     ensure_world_pins,
     pinned_catalog,
+    probe_world_pins,
     read_world_pins,
 )
 from .skill_resolver import keyword_misses, resolve_activations
@@ -167,12 +169,30 @@ def inject_skill(engine: Any, entry: Any) -> bool:
             return False
         content, digest = pin.content, pin.digest
     else:
-        content = read_skill_content(engine.context.project_root, entry)
+        # A real DB world with no pins is not a legacy runtime.  Its catalog
+        # may already have failed to load, and accepting a caller-provided
+        # entry here would recreate the forbidden live-disk authority path.
+        if probe_world_pins(engine.context).state == "empty":
+            log_error(f"世界尚未冻结 Skill，拒绝磁盘注入: {entry.id}")
+            return False
+        content = read_skill_content(
+            engine.context.project_root,
+            entry,
+            module_dir=getattr(engine.context, "module_dir", None),
+        )
         if content is None:
             log_error(f"可选 Skill 加载失败: {entry.id}")
             return False
         digest = skill_content_digest(content)
         log_error(f"Skill pin 不可用，回退磁盘内容注入: {entry.id}")
+    if not skill_content_within_budget(content, entry):
+        # This is defense in depth for non-DB/legacy callers.  DB worlds are
+        # rejected while reading their pin; neither path may append an
+        # author-controlled automatic Skill beyond its frozen budget.
+        log_error(f"Skill 超出 max_context_tokens，拒绝自动注入: {entry.id}")
+        return False
+    if entry.residency == "deterministic":
+        _record_turn_deterministic_skill(engine, entry.id, digest)
     # This is intentionally surface-based, not lifetime-based.  H2 may remove
     # an old control instruction during a preflight/overflow compaction and
     # retry the same turn; re-inject the exact pin before that retry, but never
@@ -201,7 +221,12 @@ def inject_skill(engine: Any, entry: Any) -> bool:
     return True
 
 
-def resolve_for_engine(engine: Any, *, tool_name: str | None = None) -> list:
+def resolve_for_engine(
+    engine: Any,
+    *,
+    tool_name: str | None = None,
+    force_skill_ids: tuple[str, ...] = (),
+) -> list:
     try:
         catalog = effective_skill_catalog(engine)
     except PinUnavailable as exc:
@@ -221,6 +246,7 @@ def resolve_for_engine(engine: Any, *, tool_name: str | None = None) -> list:
         tool_name=tool_name,
         ruleset=_ruleset_name(engine),
         module_capabilities=_module_capabilities(engine),
+        force_ids=force_skill_ids,
     )
 
 
@@ -268,9 +294,48 @@ def refresh_deterministic_skills(engine: Any) -> int:
     if not all(hasattr(engine, attribute) for attribute in required):
         return 0
     restored = 0
-    for entry in resolve_for_engine(engine):
+    # A tool-only predicate may no longer be derivable from world state after
+    # its handler has returned.  Keep its *already deterministic* activation
+    # only for this active turn, then re-resolve it from the frozen catalog if
+    # H2 replaced the original control surface before the retry.
+    tracked = _current_turn_deterministic_skill_ids(engine)
+    for entry in resolve_for_engine(engine, force_skill_ids=tracked):
         restored += int(inject_skill(engine, entry))
     return restored
+
+
+def _record_turn_deterministic_skill(engine: Any, skill_id: str, digest: str) -> None:
+    """Remember a tool-triggered activation only until the current turn ends."""
+
+    turn_id = str(getattr(engine, "_active_turn_id", "") or "")
+    if not turn_id:
+        # Session/preflight calls without a durable turn may still inject a
+        # state-triggered rule, but they must not leak a transient tool trigger
+        # into an unrelated future turn.
+        return
+    state = getattr(engine, "__dict__", {}).get("_turn_deterministic_skills")
+    if not isinstance(state, dict) or state.get("turn_id") != turn_id:
+        state = {"turn_id": turn_id, "skills": {}}
+        engine.__dict__["_turn_deterministic_skills"] = state
+    skills = state.get("skills")
+    if isinstance(skills, dict):
+        skills[skill_id] = digest
+
+
+def _current_turn_deterministic_skill_ids(engine: Any) -> tuple[str, ...]:
+    """Read the private activation continuation only for the live turn id."""
+
+    turn_id = str(getattr(engine, "_active_turn_id", "") or "")
+    state = getattr(engine, "__dict__", {}).get("_turn_deterministic_skills")
+    if not turn_id or not isinstance(state, dict) or state.get("turn_id") != turn_id:
+        return ()
+    skills = state.get("skills")
+    if not isinstance(skills, dict):
+        return ()
+    # Digests are checked again by normal pinned injection; retain only valid
+    # nonempty ids here so a corrupted in-memory diagnostic object cannot add
+    # arbitrary catalog entries.
+    return tuple(sorted(skill_id for skill_id, digest in skills.items() if skill_id and digest))
 
 
 def loadable_skill_allowlist(engine: Any) -> tuple[tuple[str, str], ...]:

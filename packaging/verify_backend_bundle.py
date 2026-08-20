@@ -16,6 +16,10 @@ def bundle_violations(bundle: Path, *, windows: bool = True) -> list[str]:
         internal / "migrations" / "env.py",
         internal / "migrations" / "versions" / "20260722_0001_database_control_plane.py",
         internal / "migrations" / "versions" / "20260722_0004_room_action_idempotency.py",
+        # The H3 guard is intentionally required by the bundle verifier, not
+        # merely picked up incidentally by a directory glob.  Shipping a
+        # backend without it could stamp a weakened create_all schema.
+        internal / "migrations" / "versions" / "20260821_0012_h3_schema_integrity.py",
         internal / "mod",
         internal / "rules",
         internal / "skills",

@@ -1,6 +1,7 @@
 # DeepSeek Harness 借鉴与采纳决策
 
-状态：H0/H1/H2 已实施并受本地回归保护；H3 的 Skill Catalog/pin 已实施，结构化记忆仍为未接入模型与公网 API 的 shadow foundation
+状态：H0/H1/H2 已实施并受本地回归保护；H3 的 Skill Catalog、世界级内容/manifest pin 与 schema
+integrity guard 已实施。结构化记忆仅为未接入模型、游戏回合、公网 API 或玩家界面的 shadow foundation。
 
 评审日期：2026-08-21
 
@@ -109,8 +110,9 @@ Skill Catalog/pin，不存在另一套 Harness runtime，也不依赖其内部�
    envelope 与 checkpoint，并在 shadow 模式比较投影 digest；它尚未成为唯一读取来源。
 2. 历史压缩现在只使用可验证的 replace/rebase checkpoint，失败不会删历史；摘要是**非权威连续性缓存**，
    不能证明模型没有杜撰公开事实，所以权威场景、线索、骰值和资源每回合仍从 `WorldState`/Turn 重投影。
-3. Skill 已有 manifest、世界级 content/manifest pin、确定性 resolver 和来源事件；关键词只保留为漏加载
-   诊断。结构化记忆表仍是 shadow foundation，尚未暴露给模型工具、HTTP 或 WebSocket。
+3. Skill 已有 manifest、世界级 content/manifest pin、确定性 resolver、来源事件与 fail-closed schema
+   guard；关键词只保留为漏加载诊断。结构化记忆表仍是 shadow foundation，尚未暴露给模型工具、HTTP、
+   WebSocket、prompt 或正常游戏回合。
 4. H1 已将模型调用收束进 issued request snapshot + V2 pipeline；受信引擎内部兼容调用和跨介质副作用仍
    需要继续按 principal/outbox 边界扩展，不能把新 handler 直接塞进全局 registry。
 5. `npc_conversations` 仍是叙事 transcript，不是 accepted fact；任何未来记忆接入必须保持 transcript、
@@ -300,17 +302,31 @@ ToolDescriptor
 
 参考上游
 [Skill 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca/docs/subsystems/skills.zh.md)，
-为每个 Skill 增加 manifest：
+当前已交付的 manifest 不是下列“理想字段清单”的超集，而是一个有限、可验证的
+`SkillEntry`。`skills/catalog.json` / 运行时模组合成条目提供：
 
 ```text
-id / version / content_digest
-rulesets / module_capabilities / scene_capabilities
-activation predicates
-required_tools / allowed_tools / dependencies
-model_invocable / user_invocable
-trust: core | bundled-module | local-author
-max_context_tokens / resource allowlist
+id / path / version / trust(core | bundled-module) / residency
+description / opening / model_invocable / max_context_tokens
+required_tools / allowed_tools / dependencies / user_invocable / resources
+activation: tools / combat_active / san_below / phases / scenes / scene_capabilities /
+            module_capabilities / rulesets
+diagnostic_keywords
 ```
+
+首次 pin 时，`world_skill_pins` 另存正文、`content_digest`、version、trust、residency；其 1:1
+sidecar `world_skill_pin_manifests.entry_snapshot` 冻结上述完整 `SkillEntry`，再加
+`order`、`catalog_version` 与完整 `catalog_ids`。因此 `content_digest` 是**pin 完整性字段**，不是会被
+当前 catalog 反读或热更新的 manifest 值。
+
+`dependencies` 与 `scene_capabilities` 已有确定性校验/解析；`resources` 已有受信引擎的 manifest allowlist
+读取路径，模型仍不能调用它。`required_tools`、`allowed_tools`、`user_invocable` 也已进入严格 schema，
+但任何非空/`true` 声明会被 catalog fail-closed 拒绝——字段存在不代表权限生效。
+
+以下是**未开始的 H3.1 manifest 扩展**，不能在设计文档中被误写成现有能力：被安全门禁的
+`required_tools`/`allowed_tools`/`user_invocable` 的真实执行策略、`local-author` trust、catalog 版本迁移和
+作者编辑 UI。工具权限目前由服务端签发的 request-scoped model catalog 管理；受信引擎的固定资源路径规则
+不是给模型的任意文件读取能力。
 
 加载分三类：
 
@@ -322,7 +338,10 @@ max_context_tokens / resource allowlist
 
 关键词命中可以保留为召回信号和漏加载诊断，但不能成为唯一条件。Skill 内容按
 `world + version + digest` 固定；正在进行的世界不因磁盘文件变化热更新。每次激活/加载都作为带来源的
-模型上下文事件记录，压缩后若目录消失，应由 ContextBuilder 重新建立当前目录。
+模型上下文事件记录，压缩后若目录消失，应由 ContextBuilder 重新建立当前目录。若数据库世界存在完整的
+pre-0011 content-only pin 集，则只用 pin 行能证明的保守 metadata 兼容读取（固定预算 core 正文、非 opening、
+不可模型调用、无 activation），绝不查询当前 catalog；0011 sidecar 缺少仅限后来新增且默认安全字段时按空/
+`false` 规范化，其他部分/空 sidecar、pin 损坏或 schema 不可读一律 fail-closed。
 
 第三方 Skill 首版只允许声明式文本和受控资源引用，不允许运行脚本、安装依赖、调用 shell、任意网络
 或任意文件系统。模组制作 Agent 的 Skill 与在线守秘人 Skill 也要分开信任域。
@@ -337,8 +356,10 @@ max_context_tokens / resource allowlist
 | 对话记忆 | NPC 曾经说过什么、玩家互动 | 非事实记录 | 不可自动升级为线索或世界事实 |
 | 叙事 checkpoint | 对旧 surface 的有来源摘要 | 派生缓存 | 可重建、可废弃、不可反写权威状态 |
 | 临时上下文 | 本回合 Lore/Skill/提醒/检查结果 | 临时 | 带 audience、TTL、来源和预算 |
+| H3 结构化候选 / fact | `memory_fact_candidates` / `memory_facts` | shadow-only | 仅内部 schema/service；不是 prompt、玩家功能或世界事实来源 |
 
-如果以后增加结构化玩家/NPC 长期记忆，每条至少带：
+H3 已把下列字段落入候选/fact 表，并为 accepted fact 提供 digest 去重、同一
+`(world, subject, fact_type)` 的 partial-unique current 约束和 `supersedes_id` 版本链：
 
 ```text
 world_id / root_world_id / source_turn_id
@@ -347,9 +368,17 @@ audience / owner_user_id / tier
 revision / provenance / supersedes / created_at
 ```
 
-时间线只能读取共同祖先与当前分支上的事实，不能读取兄弟分支的新事件。模型只能提出 memory candidate；
-引擎验证来源、权限、冲突和幂等后才能提交。embedding 或全文检索只能召回候选，结果注入前仍要经过
-world、branch、audience、TIER 和 clue gate，不能成为事实来源。
+但这只是 schema 与受限内部服务的 shadow foundation：正常 `GameEngine` 回合不会产生 candidate、
+`ModelSession` 不会查询或注入它、模型没有工具可读写、HTTP/WS/前端也没有入口。即使测试或未来受信
+维护代码调用 `StructuredMemoryService`，其结果也不能反写 `WorldState`、改变检定/叙事或直接显示给玩家。
+这种不暴露正是 H3 的安全完成条件，不是遗漏了一个待补 UI 或协议。
+
+时间线只应读取共同祖先与当前分支上的事实，不能读取兄弟分支的新事件；祖先 fact 同时必须落在分叉的
+`source_world_revision` 和接受时间截点内（新分支写 `branch.memory_cutoff_at`，旧分支仅兼容其带时区的
+`branch.created_at`）。因此分叉后才接受、即使引用旧 source turn 的 fact 也不能倒灌到子线；损坏时间线
+metadata 一律 fail-closed。这是已被 service 单测覆盖的**未来接入前提**，不是已经启用的玩家记忆体验。未来接入时，模型至多提出 candidate；独立的受信接受者
+必须验证来源、principal、权限、冲突和幂等。embedding 或全文检索只能召回候选，结果注入前仍要经过
+world、branch、audience、TIER 和 clue gate，且不能成为事实来源。
 
 当前 `npc_conversations` 应逐步拆成“verbatim transcript”和“accepted structured fact”。模型说过一句话
 不等于 NPC 确实知道或世界中确实发生过这件事。
@@ -520,19 +549,35 @@ surface、diverge 回退 rebase、回合内 rollback 一致性、pruning 配对�
 `tests/test_context_maintenance.py`。PostgreSQL 迁移/并发检查由 CI 的 `TRPG_TEST_POSTGRES_URL` 运行；
 本地无该数据库时对应集成用例按测试配置跳过，而不是以 SQLite 冒充 PostgreSQL。
 
-### H3：Skill Catalog + 结构化记忆（Skill 已实施；记忆仅 shadow foundation）
+### H3：Skill Catalog + 结构化记忆（Skill 已完成；记忆严格 shadow-only）
 
-- 官方 Skill 先迁移 manifest/catalog；
-- 关键规则由 action/ruleset/state/capability 确定性激活；
-- 模型按需 loader 仅覆盖非关键 Skill；
-- 固定 world 级 Skill version/hash；
-- `MemoryFactCandidate` / `MemoryFact` 将 NPC transcript 与 accepted fact 分开；当前没有模型工具、HTTP 或
-  WebSocket 读取/写入该表；
-- branch-aware、audience-aware 的记忆候选只运行 shadow mode，不注入模型也不能改变权威状态。
+已交付：
 
-当前验收：安全关键规则的 manifest resolver/pin/branch inheritance、max context budget、load_skill
-冻结 digest 与来源事件受定向回归保护；结构化记忆在它具备独立 principal/API 边界、并发幂等和 gold
-precision 评测前，不能宣称为可用的玩家功能。
+- 官方 Skill 已迁移为 `skills/catalog.json` + 正文文件；关键规则由 action/ruleset/state/capability
+  确定性激活，模型按需 loader 只覆盖被冻结、非关键且 `model_invocable` 的 on-demand Skill；
+- 每个数据库世界首次解析 catalog 时冻结正文、digest、version、trust、residency、完整 `SkillEntry`
+  snapshot、catalog order/version/ID 列表；分支复制源世界 pin，运行中的世界不因磁盘发布热更新；
+- pre-0011 的完整 content-only pin 集可保守读取；部分 sidecar、损坏 digest、孤儿/循环分支 pin、不可读
+  数据库或未通过 schema 检查的世界都拒绝继续，而不是回退活 catalog；
+- `20260821_0012` 在升级时只做 fail-closed H3 schema integrity guard：严格验证 0009/0010/0011 的列、
+  类型、NOT NULL、主键/唯一约束、外键 `ON DELETE` 和查询/partial index。它不猜测或修复未知旧库；健康的
+  fresh 与 `Base.metadata.create_all` 数据库可原样接管；
+- `MemoryFactCandidate` / `MemoryFact` 的候选—accepted 边界、branch/audience/tier 查询与数据库约束已作为
+  shadow service 建好；分叉读取同时受 source revision 与 accepted-time cutoff 约束，SQLite 的重复 candidate
+  提案会收敛到同一 winner，但没有任何模型工具、HTTP/WS、前端、prompt 或正常回合接线。
+
+**H3.1（未开始）manifest 扩展**：被安全门禁的 `required_tools`、`allowed_tools`、`user_invocable` 的真实
+执行策略、`local-author` trust、catalog version migration 与作者编辑 UI。`dependencies`、scene capability
+解析和受信 `resources` allowlist 已在 H3 落地，不能再列作未实现。
+
+另行规划的结构化记忆产品工作：principal/API、生产写入接受者、自动 candidate 抽取、模型/玩家查询、
+向量检索、导出、管理 UI、并发生产监测与 gold precision 评测。它们完成前，`memory_fact_*` 不拥有世界事实，
+也不能被宣传为可用的玩家长期记忆；不暴露给模型、HTTP、WS 或玩家正是当前 H3 的完成条件。
+
+验收证据：`tests/test_skill_catalog.py` 覆盖 manifest resolver、pin/sidecar 完整性、branch inheritance、
+load_skill digest 与来源事件；`tests/test_structured_memory.py` 覆盖 shadow service 的 candidate/fact、
+branch/audience/tier 隔离和幂等约束；`tests/test_electron_packaging.py` 覆盖 fresh/create_all→Alembic 的
+0012 接管与被削弱 schema 的 fail-closed 拒绝。
 
 ### H4：Provider 与评测收口
 
@@ -575,9 +620,9 @@ Agent 框架。** 若某项“插件化”不能改善权限、重放、上下�
 
 ## 10. 建议的下一步
 
-H0/H1/H2 已作为当前发布基线完成，H3 的 Skill freeze 也已接入。下一轮优先做 H4：录制 provider
-stream fixture、离线 turn replay、模型错误分级和 Pi staging 灰度；不要把尚未有 principal/评测边界的
-结构化记忆接成模型能力，更不要启动长期记忆 MCP 或 Agent loop 替换。
+H0/H1/H2 已作为当前发布基线完成，H3 的 Skill freeze 与 schema integrity guard 也已接入。下一轮优先
+做 H4：录制 provider stream fixture、离线 turn replay、模型错误分级和 Pi staging 灰度；不要把尚未有
+principal/评测边界的结构化记忆接成模型能力，更不要启动长期记忆 MCP 或 Agent loop 替换。
 
 若需要直接复用上游的某段 MIT 代码，应先记录具体文件、固定提交、修改范围和许可证归属；否则默认
 只复用设计思想并在 Python 中独立实现。
