@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from .context_summary import is_control_message, validate_summary_visibility
 from .llm_concurrency import llm_call_slot
 from .logger import summary_event as log_summary
 
@@ -16,14 +17,44 @@ TOOL_RESULT_PRUNE_MIN_CHARS = 500
 
 def build_summary_input(messages: list[dict]) -> str:
     parts = []
+    tool_names: dict[str, str] = {}
     for message in messages:
         role = message.get("role", "?")
         content = message.get("content", "") or ""
-        if not content.strip():
+        # Engine control messages contain authority snapshots, private Skill
+        # text and other keeper-only material. A summary model never needs
+        # them: fresh authority is rebuilt by the engine on the next turn.
+        if is_control_message(message):
             continue
-        if role == "tool":
-            content = content[:200] + "..." if len(content) > 200 else content
-        elif role in ("user", "assistant"):
+        if role == "assistant":
+            # Provider assistant tool_calls usually have empty content.  Keep
+            # the public call identity (not raw arguments) so a summary can
+            # preserve event ordering without handing arbitrary tool payloads
+            # to a second model.
+            calls = message.get("tool_calls")
+            if isinstance(calls, list):
+                for call in calls:
+                    function = call.get("function") if isinstance(call, dict) else None
+                    call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+                    name = str(function.get("name") or "") if isinstance(function, dict) else ""
+                    if call_id and name:
+                        tool_names[call_id] = name
+                        parts.append(f"[assistant_tool_call]: {name} (id={call_id})")
+            if not content.strip():
+                continue
+            content = content[:500] + "..." if len(content) > 500 else content
+        elif role == "tool":
+            # Tool results may contain private keeper projections or output
+            # from a previously unsafe tool.  Do not send raw result text to
+            # the summarizer.  Canonical dice/resources/clues remain in the
+            # authoritative WorldState/Turn records rebuilt each turn.
+            call_id = str(message.get("tool_call_id") or "")
+            name = tool_names.get(call_id, "tool")
+            parts.append(f"[tool_result]: {name} (id={call_id or 'unknown'}), authoritative result recorded")
+            continue
+        elif role == "user":
+            if not content.strip():
+                continue
             content = content[:500] + "..." if len(content) > 500 else content
         else:
             continue
@@ -90,11 +121,18 @@ class HistoryCompactor:
 
     def should_summarize(self) -> bool:
         engine = self.engine
-        return (
+        if not (
             engine._player_turn_count > 0
             and engine._player_turn_count - engine._last_summary_player_turn
             >= engine.SUMMARY_PLAYER_TURN_INTERVAL
-        )
+        ):
+            return False
+        # A transient provider failure should not suppress compaction for 50
+        # more turns, nor should it cause a summary request after every
+        # action.  This session-local backoff is intentionally small and
+        # never changes authoritative state.
+        failed_at = engine.__dict__.get("_last_summary_failure_player_turn")
+        return not isinstance(failed_at, int) or engine._player_turn_count - failed_at >= 3
 
     def maybe_after_turn(self) -> None:
         pruned = self.prune_old_tool_results()
@@ -102,7 +140,14 @@ class HistoryCompactor:
         if self.should_summarize():
             current_turn = self.engine._player_turn_count
             changed = self.summarize(silent=True)
-            self.engine._last_summary_player_turn = current_turn
+            # A failed summary leaves the surface untouched.  Do not pretend
+            # it ran successfully and postpone the next opportunity by the
+            # full 50-turn interval; retry after a small, in-memory backoff.
+            if changed:
+                self.engine._last_summary_player_turn = current_turn
+                self.engine.__dict__.pop("_last_summary_failure_player_turn", None)
+            else:
+                self.engine.__dict__["_last_summary_failure_player_turn"] = current_turn
         if pruned or changed:
             self.engine.save("slot_000")
 
@@ -143,9 +188,17 @@ class HistoryCompactor:
             return True
         if not allow_rebase_fallback:
             return False
-        engine.messages = [system_message, replacement, *recent_messages]
-        rebase_engine(engine)
-        return True
+        original_messages = list(engine.messages)
+        candidate = [system_message, replacement, *recent_messages]
+        engine.messages = candidate
+        if rebase_engine(engine):
+            return True
+        # ``rebase_engine`` is the durable fallback only.  If the shadow
+        # store cannot prove the new epoch, keep the prior model surface
+        # exactly intact rather than turning a storage incident into history
+        # loss.
+        engine.messages = original_messages
+        return False
 
     def prune_old_tool_results(self) -> int:
         """Replace bulky old tool results with digest placeholders in place.
@@ -171,11 +224,20 @@ class HistoryCompactor:
             content = str(message.get("content") or "")
             if len(content) <= TOOL_RESULT_PRUNE_MIN_CHARS:
                 continue
+            # Preserve a bounded public head/tail so the next narration can
+            # still see dice values, object ids and final state.  Raw output
+            # remains in the append-only event log; the marker makes that
+            # provenance explicit without duplicating an unbounded payload.
+            head = content[:160]
+            tail = content[-160:] if len(content) > 320 else ""
+            excerpt = head
+            if tail:
+                excerpt += "\n…（中间已修剪）…\n" + tail
             placeholder = {
                 "role": "tool",
                 "content": (
                     f"（工具结果已修剪：原 {len(content)} 字符，"
-                    f"digest {payload_digest(content)[:12]}）"
+                    f"digest {payload_digest(content)[:12]}）\n{excerpt}"
                 ),
             }
             if message.get("tool_call_id"):
@@ -201,9 +263,24 @@ class HistoryCompactor:
         recent_messages = engine.messages[cutoff:]
         system_message = engine.messages[0]
         old_text = build_summary_input(old_messages)
+
+        def safe_summary(candidate: str | None) -> str | None:
+            if candidate is None:
+                return None
+            try:
+                world = engine.context.world_store.load()
+            except Exception:  # noqa: BLE001 - visibility guard must fail closed
+                self._record_summary_rejection("world_state_unavailable")
+                return None
+            result = validate_summary_visibility(candidate, world)
+            if not result.allowed:
+                self._record_summary_rejection(result.reason or "visibility_guard")
+                return None
+            return candidate
+
         glm = _get_glm()
         if glm is not None:
-            summary = self.try_model(glm, "glm-4-flash-250414", old_text)
+            summary = safe_summary(self.try_model(glm, "glm-4-flash-250414", old_text))
             if summary is not None:
                 return self.apply(
                     system_message,
@@ -212,10 +289,11 @@ class HistoryCompactor:
                     "GLM-4 Flash",
                     silent,
                     allow_rebase_fallback=allow_rebase_fallback,
+                    replaced_messages=old_messages,
                 )
         if not silent:
             engine.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
-        summary = self.try_model(engine.client, engine.judgement_model, old_text)
+        summary = safe_summary(self.try_model(engine.client, engine.judgement_model, old_text))
         if summary is not None:
             return self.apply(
                 system_message,
@@ -224,23 +302,20 @@ class HistoryCompactor:
                 "DeepSeek Pro",
                 silent,
                 allow_rebase_fallback=allow_rebase_fallback,
+                replaced_messages=old_messages,
             )
-        dropped = len(old_messages)
-        note = {
-            "role": "user",
-            "content": (
-                f"（上下文压缩——摘要模型均不可用，已丢弃最早的 {dropped} 条消息。"
-                "当前世界状态保存在 world_state.json 中，请查询线索和 NPC 状态后继续。）"
-            ),
-        }
-        if not self._replace_window(
-            note, recent_messages, allow_rebase_fallback=allow_rebase_fallback
-        ):
-            return False
-        self.estimate_tokens()
-        if not silent:
-            engine.cb.on_glm_summary(f"📋 截断 {dropped} 条旧消息（摘要模型不可用）。")
-        return True
+        # H2 deliberately rejects the legacy "truncate on failure" fallback.
+        # Raw events surviving in the timeline is not sufficient if the active
+        # model surface was replaced by a fabricated truncation note. Failures,
+        # timeouts and visibility rejects leave the surface unchanged.
+        self._record_summary_rejection("summarizer_unavailable")
+        return False
+
+    def _record_summary_rejection(self, reason: str) -> None:
+        """Record metadata only; never persist candidate summary text."""
+        diagnostic = getattr(self.engine, "_append_model_diagnostic", None)
+        if callable(diagnostic):
+            diagnostic({"event": "context_summary_rejected", "reason": reason})
 
     def apply(
         self,
@@ -251,6 +326,7 @@ class HistoryCompactor:
         silent: bool = False,
         *,
         allow_rebase_fallback: bool = True,
+        replaced_messages: list[dict] | None = None,
     ) -> bool:
         summary_message = {
             "role": "user",
@@ -260,6 +336,14 @@ class HistoryCompactor:
                 f"{summary}\n\n——摘要结束。以下是最近的对话——）"
             ),
         }
+        if replaced_messages is not None:
+            original_chars = len(
+                json.dumps(replaced_messages, ensure_ascii=False, separators=(",", ":"))
+            )
+            replacement_chars = len(summary_message["content"])
+            if replacement_chars >= original_chars:
+                self._record_summary_rejection("summary_not_smaller")
+                return False
         if not self._replace_window(
             summary_message, recent_messages, allow_rebase_fallback=allow_rebase_fallback
         ):
@@ -298,6 +382,4 @@ class HistoryCompactor:
             parsed = parse_summary_json(raw)
             if parsed is not None:
                 return parsed
-            if len(raw) > 50 and attempt == 1:
-                return f"（纯文本摘要）\n{raw}"
         return None

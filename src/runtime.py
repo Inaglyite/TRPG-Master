@@ -164,6 +164,7 @@ class RuntimeContext:
                     module_id=self.module_record.package_id,
                     module_version=self.module_record.version,
                     metadata_json=metadata,
+                    root_world_id=self.world_id,
                 )
                 session.add(world)
             elif world.module_name != self.module_name:

@@ -97,6 +97,9 @@ Environment variables take precedence over the file. The full list — model-rol
 | `TRPG_REQUIRE_AUTH` | Enable account, HTTP and WebSocket permission gates | `0`; the production service sets `1` |
 | `TRPG_ALLOW_REGISTRATION` | Open the registration endpoint; when off, accounts are provisioned manually (`tools/manage_users.py`) | `1`; the production service sets `0` |
 | `TRPG_LLM_MAX_CONCURRENCY` | Process-wide cap on concurrent model calls; excess calls queue and time out after 60s with a "server busy" error | `2` |
+| `TRPG_CONTEXT_WINDOW_TOKENS` | Total provider context window used for preflight capacity checks; set this to the documented limit of the selected gateway/model | `65536` (bounded to `8192`–`1048576`) |
+| `TRPG_CONTEXT_TARGET_RATIO` | Fraction of that window at which the server attempts non-destructive context compaction before the next request | `0.78` (bounded to `0.50`–`0.90`) |
+| `TRPG_MAX_OUTPUT_TOKENS` | Maximum completion tokens reserved in each provider request; automatically clamped to leave a real compaction band | `4096` |
 | `TRPG_ACTION_RATE_PER_MINUTE` | Per-account per-minute action rate limit (start/continue/action); excess is rejected with `rate_limited` | `10` |
 | `TRPG_DAILY_TURN_QUOTA` | Per-account daily generated-turn quota; excess is rejected with `daily_quota_exceeded`; in-memory counter, resets on restart | `200` |
 | `TRPG_ALLOWED_ORIGINS` | Origins allowed to carry the login cookie over HTTP/WebSocket | must be set explicitly in production |

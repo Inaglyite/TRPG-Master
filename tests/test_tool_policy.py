@@ -15,15 +15,18 @@ from src.tool_policy import (
     attach_request_snapshot,
     public_tool_call,
 )
-from src.tools import MODEL_TOOLS, execute_function, tool_catalog_for_names
+from src.tool_request_authority import issue_model_request, issued_model_request
+from src.tools import MODEL_TOOLS, execute_function, model_tools_for, tool_catalog_for_names
 
 
 def stream_chunk(*, content=None, tool_calls=None, finish_reason=None):
     return SimpleNamespace(
-        choices=[SimpleNamespace(
-            delta=SimpleNamespace(content=content, tool_calls=tool_calls),
-            finish_reason=finish_reason,
-        )]
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=content, tool_calls=tool_calls),
+                finish_reason=finish_reason,
+            )
+        ]
     )
 
 
@@ -64,14 +67,27 @@ class ToolPolicyExecutionTests(unittest.TestCase):
 
     def _run(self, call: dict):
         engine, calls = self._engine()
+        metadata = call.get(REQUEST_METADATA_KEY) if isinstance(call, dict) else None
+        if isinstance(metadata, dict):
+            snapshot = ToolRequestSnapshot.from_dict(metadata)
+            issue_model_request(
+                engine,
+                snapshot,
+                tool_catalog_for_names(
+                    snapshot.allowed_tool_names,
+                    skill_allowlist=snapshot.skill_allowlist,
+                ),
+            )
         result = _execute_tools({"engine": engine, "tool_round": 0, "tool_calls": [call]})
         return engine, calls, result
 
     def test_missing_snapshot_replay_is_rejected_without_execution(self):
-        engine, calls, result = self._run({
-            "id": "replay-1",
-            "function": {"name": "state_add_item", "arguments": '{"item":"钥匙"}'},
-        })
+        engine, calls, result = self._run(
+            {
+                "id": "replay-1",
+                "function": {"name": "state_add_item", "arguments": '{"item":"钥匙"}'},
+            }
+        )
 
         self.assertEqual(calls, [])
         self.assertEqual(
@@ -80,10 +96,84 @@ class ToolPolicyExecutionTests(unittest.TestCase):
         )
         self.assertEqual(engine.messages[1]["tool_call_id"], "replay-1")
 
+    def test_attached_but_unissued_snapshot_is_rejected_without_execution(self):
+        engine, calls = self._engine()
+        call = model_call("unissued", "state_add_item", '{"item":"钥匙"}')
+        result = _execute_tools({"engine": engine, "tool_round": 0, "tool_calls": [call]})
+        self.assertEqual(calls, [])
+        self.assertEqual(
+            json.loads(result["executed_tools"][0]["output"])["reason"],
+            "request_not_issued",
+        )
+
+    def test_new_server_issuance_invalidates_old_snapshot_replay(self):
+        engine, _calls = self._engine()
+        old = model_call("old", "state_add_item", '{"item":"钥匙"}')
+        old_snapshot = ToolRequestSnapshot.from_dict(old[REQUEST_METADATA_KEY])
+        old_catalog = tool_catalog_for_names(old_snapshot.allowed_tool_names)
+        issue_model_request(engine, old_snapshot, old_catalog)
+        replacement = model_call("new", "state_add_item", '{"item":"地图"}')
+        replacement_snapshot = ToolRequestSnapshot.from_dict(replacement[REQUEST_METADATA_KEY])
+        issue_model_request(
+            engine,
+            replacement_snapshot,
+            tool_catalog_for_names(replacement_snapshot.allowed_tool_names),
+        )
+        result = _execute_tools({"engine": engine, "tool_round": 0, "tool_calls": [old]})
+        self.assertEqual(
+            json.loads(result["executed_tools"][0]["output"])["reason"],
+            "request_snapshot_mismatch",
+        )
+
+    def test_issued_snapshot_is_bound_to_its_world_and_turn(self):
+        host = SimpleNamespace(
+            context=SimpleNamespace(world_id="world-a"), _active_turn_id="turn-a"
+        )
+        catalog = tool_catalog_for_names(["state_add_item"])
+        snapshot = ToolRequestSnapshot.create(
+            step=1,
+            profile="story:test",
+            caller=MODEL_CALLER,
+            tools=catalog,
+            world_id="world-a",
+            turn_id="turn-a",
+        )
+        issue_model_request(host, snapshot, catalog)
+        host.context.world_id = "world-b"
+        with self.assertRaisesRegex(Exception, "当前世界或回合"):
+            issued_model_request(host, snapshot)
+
+    def test_forged_engine_only_catalog_cannot_execute_state_npcs(self):
+        engine, calls = self._engine()
+        # ``tool_catalog_for_names`` intentionally refuses engine-only names;
+        # the attached name cannot widen the exact issued empty catalog.
+        snapshot = ToolRequestSnapshot.create(
+            step=1,
+            profile="story:test",
+            caller=MODEL_CALLER,
+            tools=[],
+        )
+        issue_model_request(engine, snapshot, [])
+        call = attach_request_snapshot(
+            {
+                "id": "forged-engine-only",
+                "function": {"name": "state_npcs", "arguments": "{}"},
+            },
+            snapshot,
+        )
+        result = _execute_tools({"engine": engine, "tool_round": 0, "tool_calls": [call]})
+        self.assertEqual(calls, [])
+        self.assertEqual(
+            json.loads(result["executed_tools"][0]["output"])["reason"],
+            "model_tool_forbidden",
+        )
+
     def test_unlisted_dsml_or_native_name_is_rejected_without_execution(self):
         secret_path = "private/法伦绝密档案.txt"
         call = model_call(
-            "call-1", "read_file", json.dumps({"path": secret_path}, ensure_ascii=False),
+            "call-1",
+            "read_file",
+            json.dumps({"path": secret_path}, ensure_ascii=False),
             allowed_names=["state_add_item"],
         )
         engine, calls, result = self._run(call)
@@ -103,9 +193,9 @@ class ToolPolicyExecutionTests(unittest.TestCase):
             ("state_set", '{"path":"flags.open","value":"true"}'),
         ):
             with self.subTest(name=name):
-                _engine, calls, result = self._run(model_call(
-                    f"call-{name}", name, arguments, allowed_names=[name]
-                ))
+                _engine, calls, result = self._run(
+                    model_call(f"call-{name}", name, arguments, allowed_names=[name])
+                )
                 self.assertEqual(calls, [])
                 self.assertEqual(
                     json.loads(result["executed_tools"][0]["output"])["reason"],
@@ -119,9 +209,9 @@ class ToolPolicyExecutionTests(unittest.TestCase):
         )
         for arguments, expected_reason in cases:
             with self.subTest(arguments=arguments):
-                _engine, calls, result = self._run(model_call(
-                    "call-args", "state_add_item", arguments
-                ))
+                _engine, calls, result = self._run(
+                    model_call("call-args", "state_add_item", arguments)
+                )
                 self.assertEqual(calls, [])
                 self.assertEqual(
                     json.loads(result["executed_tools"][0]["output"])["reason"],
@@ -139,11 +229,21 @@ class ToolPolicyExecutionTests(unittest.TestCase):
 
     def test_tool_round_limit_is_exactly_maximum_number_of_batches(self):
         self.assertEqual(
-            _route_after_tools({"tool_round": MAX_TOOL_ROUNDS - 1, "engine": SimpleNamespace(_combat_active=lambda: False)}),
+            _route_after_tools(
+                {
+                    "tool_round": MAX_TOOL_ROUNDS - 1,
+                    "engine": SimpleNamespace(_combat_active=lambda: False),
+                }
+            ),
             "call_story_agent",
         )
         self.assertEqual(
-            _route_after_tools({"tool_round": MAX_TOOL_ROUNDS, "engine": SimpleNamespace(_combat_active=lambda: False)}),
+            _route_after_tools(
+                {
+                    "tool_round": MAX_TOOL_ROUNDS,
+                    "engine": SimpleNamespace(_combat_active=lambda: False),
+                }
+            ),
             "finalize",
         )
 
@@ -155,18 +255,22 @@ class ToolPolicyExecutionTests(unittest.TestCase):
         self.assertIn("tier=2", rendered)
 
     def test_direct_execution_cannot_bypass_model_snapshot_or_private_state_policy(self):
-        model_result = json.loads(execute_function(
-            "state_add_item",
-            {"item": "钥匙"},
-            caller=MODEL_CALLER,
-        ))
+        model_result = json.loads(
+            execute_function(
+                "state_add_item",
+                {"item": "钥匙"},
+                caller=MODEL_CALLER,
+            )
+        )
         self.assertEqual(model_result["error"], "model_tool_forbidden")
 
-        private_result = json.loads(execute_function(
-            "state_get",
-            {"path": "npcs.0.secret"},
-            caller=ENGINE_INTERNAL_CALLER,
-        ))
+        private_result = json.loads(
+            execute_function(
+                "state_get",
+                {"path": "npcs.0.secret"},
+                caller=ENGINE_INTERNAL_CALLER,
+            )
+        )
         self.assertEqual(private_result["error"], "engine_state_path_forbidden")
 
 
@@ -204,7 +308,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(
             envelope["context_section_digests"]["tools"],
-            "d0cc668612bff31820ae87df39ecf210da43482f32781af9b84ed359c264ae4d",
+            "4e6d8f31e752a21bc2804216733ed971cb755c4894385409156f9c5dd3b5aa9c",
         )
 
     def test_provider_calls_receive_server_snapshot_and_catalog_digest(self):
@@ -235,9 +339,9 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         snapshot = calls[0][REQUEST_METADATA_KEY]
         self.assertEqual(snapshot["caller"], MODEL_CALLER)
-        self.assertEqual(snapshot["allowed_tool_names"], [
-            tool["function"]["name"] for tool in captured["tools"]
-        ])
+        self.assertEqual(
+            snapshot["allowed_tool_names"], [tool["function"]["name"] for tool in captured["tools"]]
+        )
         self.assertEqual(
             snapshot["tool_catalog_digest"],
             engine._turn_diagnostics[-1]["request_snapshot"]["tool_catalog_digest"],
@@ -251,11 +355,17 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         names = {tool["function"]["name"] for tool in MODEL_TOOLS}
         self.assertTrue({"state_get", "state_set", "read_file", "get_npc_secret"}.isdisjoint(names))
 
+    def test_provider_tool_schemas_close_object_properties(self):
+        for tool in model_tools_for("story"):
+            schema = tool["function"]["parameters"]
+            if schema.get("type") == "object":
+                self.assertIs(schema.get("additionalProperties"), False)
+
     def test_dsml_read_file_is_quarantined_then_rejected_by_same_snapshot_policy(self):
         protocol = (
             '<|DSML|tool_calls><|DSML|invoke name="read_file">'
             '<|DSML|parameter name="path" string="true">skills/core/trpg_master.skill'
-            '</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>'
+            "</|DSML|parameter></|DSML|invoke></|DSML|tool_calls>"
         )
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
@@ -288,7 +398,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         self.assertEqual(executions, [])
         self.assertEqual(
             json.loads(result["executed_tools"][0]["output"])["reason"],
-            "model_tool_forbidden",
+            "request_not_issued",
         )
 
 

@@ -43,7 +43,7 @@ import hashlib
 import json
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import func
@@ -1067,14 +1067,19 @@ class ContextEventStore:
         turn_id: str | None = None,
         step: int | None = None,
         source_kind: str = TURN_KIND,
+        provenance: Mapping[str, dict[str, str]] | None = None,
     ) -> tuple[str, list[int]]:
         """Append only when the current projection is a prefix of ``messages``.
 
         Returns ``("appended", [sequences])`` on success, ``("noop", [])``
         when the projection already covers every message (e.g. re-syncing the
-        same active turn), or ``("mismatch", [])`` when the projection
-        diverges from the actual message list (fail closed; no full-snapshot
-        fallback is written).
+        same active turn), or ``"mismatch"`` when the projection diverges from
+        the actual message list (fail closed; no full-snapshot fallback).
+
+        ``provenance`` maps ``payload_digest(message)`` to
+        ``{"source_kind", "source_id", "source_version"}`` so engine-attributed
+        injections (e.g. Skill activations) keep their origin instead of the
+        generic turn source.
 
         The current turn is explicitly surfaced during the prefix check so a
         repeated sync of the same in-flight turn is a noop.  The projection,
@@ -1112,6 +1117,9 @@ class ContextEventStore:
                 sequences: list[int] = []
                 for message in delta:
                     event_type = infer_event_type(message)
+                    message_provenance = (
+                        provenance.get(payload_digest(message)) if provenance else None
+                    ) or {}
                     sequence = int(locked.head_sequence) + 1
                     session.add(
                         ModelContextEvent(
@@ -1123,9 +1131,13 @@ class ContextEventStore:
                             step=step,
                             sequence=sequence,
                             event_type=event_type,
-                            source_kind=source_kind,
-                            source_id="turn",
-                            source_version="1",
+                            source_kind=str(
+                                message_provenance.get("source_kind") or source_kind
+                            ),
+                            source_id=str(message_provenance.get("source_id") or "turn"),
+                            source_version=str(
+                                message_provenance.get("source_version") or "1"
+                            ),
                             content_digest=payload_digest(message),
                             audience="model_private",
                             sensitivity="private"
@@ -1176,6 +1188,25 @@ class ContextEventStore:
             "message_digest": (envelope or {}).get("message_digest") or "",
             "tool_catalog_digest": (envelope or {}).get("tool_catalog_digest") or "",
             "context_section_digests": (envelope or {}).get("context_section_digests") or {},
+            # Capacity is deliberately counts/configuration only.  Keeping it
+            # on the append-only request trace makes a rejected/failed turn
+            # diagnosable without retaining prompt bodies or tool arguments.
+            "capacity": {
+                key: value
+                for key, value in ((envelope or {}).get("capacity") or {}).items()
+                if key
+                in {
+                    "estimated_input_tokens",
+                    "status",
+                    "utilization",
+                    "window_tokens",
+                    "target_ratio",
+                    "target_tokens",
+                    "hard_tokens",
+                    "max_output_tokens",
+                }
+                and isinstance(value, (str, int, float, bool))
+            },
             "sections": [
                 {
                     "id": str(section.get("id") or ""),

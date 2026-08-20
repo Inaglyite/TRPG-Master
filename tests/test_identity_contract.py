@@ -5,10 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT, SKILL_LOAD_ORDER
+from src.config import PROJECT_ROOT
 from src.engine import GameEngine, _thinking_type_for_request
 from src.persistence import load_system_prompt
 from src.runtime import RuntimeContext
+from src.skill_manifest import load_official_catalog
 from src.tools import MODEL_TOOLS, model_tools_for
 
 
@@ -20,7 +21,8 @@ def stream_chunk(content=None, tool_calls=None, finish_reason=None):
 
 class IdentityContractTests(unittest.TestCase):
     def test_keeper_identity_contract_is_first_in_system_prompt(self):
-        self.assertEqual(SKILL_LOAD_ORDER[0], "core/trpg_master.skill")
+        catalog = load_official_catalog(PROJECT_ROOT)
+        self.assertEqual(catalog.skills[0].id, "core.trpg_master")
         prompt = load_system_prompt()
         self.assertTrue(prompt.startswith("# TRPG Master"))
         self.assertIn("玩家不是守秘人", prompt)

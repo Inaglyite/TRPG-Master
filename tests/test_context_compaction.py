@@ -14,6 +14,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from src import context_shadow as shadow_adapter
 from src.config import PROJECT_ROOT
 from src.context_checkpoint import ContextCheckpoint
@@ -45,9 +47,7 @@ def _coordinator(tmp_path: Path) -> ContextShadowCoordinator:
     Base.metadata.create_all(get_engine(url))
     with session_scope(url) as session:
         session.add(World(id="world-compact", module_name="module-a"))
-    return ContextShadowCoordinator(
-        SimpleNamespace(world_id="world-compact", database_url=url)
-    )
+    return ContextShadowCoordinator(SimpleNamespace(world_id="world-compact", database_url=url))
 
 
 def _game_engine(tmp_path: Path, world_id: str = "engine-compact") -> GameEngine:
@@ -117,9 +117,7 @@ def test_summary_replace_mints_single_checkpoint_and_signs_save(tmp_path: Path) 
     assert compare["match"] is True
 
     engine.save("slot_000")
-    _messages, _snapshot, metadata = load_game_artifacts(
-        "slot_000", context=engine.context
-    )
+    _messages, _snapshot, metadata = load_game_artifacts("slot_000", context=engine.context)
     checkpoint = ContextCheckpoint.from_mapping(metadata["context"])
     assert checkpoint.session_id == session["id"]
     assert checkpoint.surface_digest == messages_digest(engine.messages)
@@ -157,9 +155,7 @@ def test_compaction_boundary_never_splits_tool_call_pairs(tmp_path: Path) -> Non
     cutoff = compactor._compaction_cutoff()
     assert messages[cutoff]["role"] == "user"
     window = messages[1:cutoff]
-    answered = {
-        message["tool_call_id"] for message in window if message.get("role") == "tool"
-    }
+    answered = {message["tool_call_id"] for message in window if message.get("role") == "tool"}
     for message in window:
         if message.get("role") == "assistant" and message.get("tool_calls"):
             for call in message["tool_calls"]:
@@ -171,13 +167,14 @@ def test_compaction_boundary_never_splits_tool_call_pairs(tmp_path: Path) -> Non
     assert shadow.store.project(session["id"]) == engine.messages
 
 
-def test_truncation_fallback_also_uses_replace_checkpoint(tmp_path: Path) -> None:
+def test_summary_failure_keeps_original_surface_and_emits_no_checkpoint(tmp_path: Path) -> None:
     engine = _game_engine(tmp_path)
     engine.messages = _pair_history(15)
     engine.save("slot_000")
     shadow = shadow_adapter.for_engine(engine)
     session = shadow.store.session_for_world(engine.context.world_id)
     raw_before = len(shadow.store.load_event_payloads(session["id"]))
+    surface_before = copy.deepcopy(engine.messages)
 
     with (
         patch("src.llm._get_glm", return_value=None),
@@ -187,16 +184,41 @@ def test_truncation_fallback_also_uses_replace_checkpoint(tmp_path: Path) -> Non
             staticmethod(lambda _client, _model, _text: None),
         ),
     ):
-        assert HistoryCompactor(engine).summarize(silent=True) is True
+        assert HistoryCompactor(engine).summarize(silent=True) is False
 
-    # No history was destroyed: every raw event survives, plus one checkpoint.
+    # The failed summary cannot replace surface history with a fabricated
+    # truncation note. Both the model-visible surface and event stream stay
+    # exactly unchanged.
     events = shadow.store.load_event_payloads(session["id"])
-    assert len(events) == raw_before + 1
-    assert events[-1]["event_type"] == "compaction_checkpoint"
-    assert "已丢弃最早的" in events[-1]["payload"]["replacement"]["content"]
+    assert len(events) == raw_before
+    assert _checkpoint_events(shadow.store, session["id"]) == []
+    assert engine.messages == surface_before
     assert shadow.store.project(session["id"]) == engine.messages
-    # Same session: no epoch churn from a fallback truncation.
+    # Same session: no epoch churn from a failed compaction.
     assert shadow.store.session_for_world(engine.context.world_id)["id"] == session["id"]
+
+
+def test_rebase_failure_never_replaces_live_surface(tmp_path: Path) -> None:
+    """Shadow outage must reject compaction rather than lose raw history."""
+    engine = _game_engine(tmp_path)
+    engine.messages = _pair_history(15)
+    before = copy.deepcopy(engine.messages)
+    compactor = HistoryCompactor(engine)
+    with (
+        patch("src.context_shadow.compact_engine", return_value=False),
+        patch("src.context_shadow.rebase_engine", return_value=False),
+    ):
+        assert (
+            compactor.apply(
+                engine.messages[0],
+                '{"events":["x"]}',
+                engine.messages[-4:],
+                "test summarizer",
+                silent=True,
+            )
+            is False
+        )
+    assert engine.messages == before
 
 
 def test_compact_falls_back_to_rebase_when_projection_diverged(tmp_path: Path) -> None:
@@ -279,9 +301,7 @@ def test_in_turn_compaction_updates_rollback_surface(tmp_path: Path) -> None:
     assert shadow.store.project(session["id"]) == engine.messages
 
     engine.save("slot_000")
-    _messages, _snapshot, metadata = load_game_artifacts(
-        "slot_000", context=engine.context
-    )
+    _messages, _snapshot, metadata = load_game_artifacts("slot_000", context=engine.context)
     checkpoint = ContextCheckpoint.from_mapping(metadata["context"])
     assert checkpoint.surface_digest == messages_digest(engine.messages)
 
@@ -331,9 +351,7 @@ def test_prune_old_tool_results_replaces_in_place_and_keeps_pairing(
             }
         )
         content = big if index in {0, 13} else f"线索 {index}"
-        messages.append(
-            {"role": "tool", "tool_call_id": f"call_{index}", "content": content}
-        )
+        messages.append({"role": "tool", "tool_call_id": f"call_{index}", "content": content})
     engine.messages = messages
     engine.save("slot_000")
 
@@ -370,9 +388,7 @@ class _FailingClient:
     def __init__(self, errors: list[BaseException]) -> None:
         self.errors = errors
         self.calls = 0
-        self.chat = SimpleNamespace(
-            completions=SimpleNamespace(create=self._create)
-        )
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     def _create(self, **_kwargs):
         self.calls += 1
@@ -383,22 +399,26 @@ def _overflow_host(client: _FailingClient, compact_result: bool) -> SimpleNamesp
     summarize_calls: list[dict] = []
 
     def _summarize(*, silent: bool, allow_rebase_fallback: bool) -> bool:
-        summarize_calls.append(
-            {"silent": silent, "allow_rebase_fallback": allow_rebase_fallback}
-        )
+        summarize_calls.append({"silent": silent, "allow_rebase_fallback": allow_rebase_fallback})
         return compact_result
 
     host = SimpleNamespace(
         client=client,
         messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
         context=SimpleNamespace(world_id="w-overflow", database_url=None),
-        cb=SimpleNamespace(on_error=lambda *_a, **_k: None),
+        cb=SimpleNamespace(
+            on_error=lambda *_a, **_k: None,
+            on_narrative=lambda *_a, **_k: None,
+            on_speaker_segment=lambda *_a, **_k: None,
+        ),
         _tool_request_step=0,
         _active_turn_id=None,
         _append_model_diagnostic=lambda _d: None,
         _clear_active_stream=lambda _s: None,
+        _set_active_stream=lambda _s: None,
         turn_cancellation_requested=lambda: False,
         turn_cancelled_error=TurnCancelledError,
+        raise_if_turn_cancelled=lambda: None,
         _ensure_history_compactor=lambda: SimpleNamespace(summarize=_summarize),
     )
     host.summarize_calls = summarize_calls
@@ -440,6 +460,47 @@ def test_overflow_compacts_once_and_retries() -> None:
     assert host.summarize_calls == [{"silent": True, "allow_rebase_fallback": False}]
 
 
+def test_overflow_retry_restores_skill_surface_before_rebuilding_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An overflow retry must not send the compacted-away rule-less surface."""
+
+    class OverflowThenSuccess:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.kwargs: list[dict] = []
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            self.calls += 1
+            self.kwargs.append(kwargs)
+            if self.calls == 1:
+                raise Exception("context_length_exceeded")
+            delta = SimpleNamespace(content="恢复后的叙述。", tool_calls=[])
+            choice = SimpleNamespace(delta=delta, finish_reason="stop")
+            return iter([SimpleNamespace(choices=[choice], usage=None)])
+
+    client = OverflowThenSuccess()
+    host = _overflow_host(client, compact_result=True)
+    restored: list[object] = []
+
+    def restore(engine) -> int:
+        restored.append(engine)
+        engine.messages.append({"role": "user", "content": "[restored deterministic skill]"})
+        return 1
+
+    monkeypatch.setattr("src.skill_activation.refresh_deterministic_skills", restore)
+    assert _streamer(host).stream(
+        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+    ) == ("恢复后的叙述。", [])
+    assert restored == [host]
+    assert client.calls == 2
+    assert any(
+        message.get("content") == "[restored deterministic skill]"
+        for message in client.kwargs[1]["messages"]
+    )
+
+
 def test_overflow_irreducible_context_does_not_retry() -> None:
     client = _FailingClient([Exception("context_length_exceeded")])
     host = _overflow_host(client, compact_result=False)
@@ -467,10 +528,321 @@ def test_overflow_retry_not_attempted_twice() -> None:
     )
     host = _overflow_host(client, compact_result=True)
 
-    _streamer(host).stream(
+    _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False)
+
+    # Second overflow inside the retried call must not compact again.
+    assert client.calls == 2
+    assert len(host.summarize_calls) == 1
+
+
+def test_midstream_overflow_releases_slot_before_compaction_retry() -> None:
+    """Pi runs a one-slot pool, so an iterator failure must not self-deadlock."""
+
+    class Slot:
+        def __init__(self) -> None:
+            self.released = False
+
+        def release(self, **_kwargs) -> None:
+            self.released = True
+
+    slots: list[Slot] = []
+
+    def acquire(**_kwargs):
+        slot = Slot()
+        slots.append(slot)
+        return slot
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+
+                def broken():
+                    raise RuntimeError("context_length_exceeded")
+                    yield None  # pragma: no cover - make this a generator
+
+                return broken()
+            assert slots[0].released is True
+            return iter(
+                [
+                    SimpleNamespace(
+                        choices=[
+                            SimpleNamespace(
+                                delta=SimpleNamespace(content="恢复后的叙述。", tool_calls=[]),
+                                finish_reason="stop",
+                            )
+                        ],
+                        usage=None,
+                    )
+                ]
+            )
+
+    client = Client()
+    host = _overflow_host(client, compact_result=True)
+    with patch("src.model_streamer.acquire_llm_slot", side_effect=acquire):
+        assert _streamer(host).stream(
+            "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+        ) == ("恢复后的叙述。", [])
+    assert client.calls == 2
+    assert len(host.summarize_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# H2 proactive wire-capacity preflight
+# ---------------------------------------------------------------------------
+
+
+class _OneChunkClient:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.kwargs: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.calls += 1
+        self.kwargs.append(kwargs)
+        delta = SimpleNamespace(content="安全的叙述。", tool_calls=[])
+        choice = SimpleNamespace(delta=delta, finish_reason="stop")
+        return iter([SimpleNamespace(choices=[choice], usage=None)])
+
+
+class _CapacityCompactor:
+    def __init__(self, host: SimpleNamespace) -> None:
+        self.host = host
+        self.prune_calls = 0
+        self.summary_calls = 0
+
+    def prune_old_tool_results(self) -> int:
+        self.prune_calls += 1
+        # Simulate a verified old tool-result prune shrinking the actual
+        # model surface.  The streamer must rebuild its request afterwards.
+        self.host.messages[0]["content"] = "short retained context"
+        return 1
+
+    def summarize(self, *, silent: bool, allow_rebase_fallback: bool) -> bool:
+        self.summary_calls += 1
+        assert silent is True
+        assert allow_rebase_fallback is False
+        return False
+
+
+def _capacity_host(client: _OneChunkClient, content: str) -> SimpleNamespace:
+    diagnostics: list[dict] = []
+    errors: list[str] = []
+    host = SimpleNamespace(
+        client=client,
+        messages=[{"role": "system", "content": content}],
+        context=SimpleNamespace(world_id="w-capacity", database_url=None),
+        cb=SimpleNamespace(
+            on_error=errors.append,
+            on_narrative=lambda *_args: None,
+            on_speaker_segment=lambda *_args: None,
+        ),
+        _tool_request_step=0,
+        _active_turn_id=None,
+        _append_model_diagnostic=diagnostics.append,
+        _clear_active_stream=lambda _s: None,
+        _set_active_stream=lambda _s: None,
+        turn_cancellation_requested=lambda: False,
+        turn_cancelled_error=TurnCancelledError,
+        raise_if_turn_cancelled=lambda: None,
+    )
+    host.diagnostics = diagnostics
+    host.errors = errors
+    return host
+
+
+def test_capacity_preflight_compacts_then_rebuilds_wire_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "x" * 18_000)  # ~4500 input tokens: compact, not hard
+    compactor = _CapacityCompactor(host)
+    host._ensure_history_compactor = lambda: compactor
+
+    text, tool_calls = _streamer(host).stream(
         "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
     )
 
-    # Second overflow inside the retried call must not compact again.
+    assert (text, tool_calls) == ("安全的叙述。", [])
+    assert client.calls == 1
+    assert client.kwargs[0]["max_tokens"] == 1000
+    assert compactor.prune_calls == 1
+    assert compactor.summary_calls == 0
+    preflight = next(
+        item for item in host.diagnostics if item.get("event") == "context_capacity_preflight"
+    )
+    assert preflight["before"]["status"] == "compact"
+    assert preflight["after"]["status"] == "within"
+    envelope = next(
+        item["request_envelope"] for item in host.diagnostics if "request_envelope" in item
+    )
+    assert envelope["capacity"]["max_output_tokens"] == 1000
+    assert envelope["capacity"]["status"] == "within"
+    assert "x" * 40 not in str(envelope)
+
+
+def test_capacity_preflight_restores_skill_surface_before_final_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verified preflight compaction restores controls before provider open."""
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "x" * 18_000)
+    host._ensure_history_compactor = lambda: _CapacityCompactor(host)
+    restored: list[object] = []
+
+    def restore(engine) -> int:
+        restored.append(engine)
+        engine.messages.append({"role": "user", "content": "[restored deterministic skill]"})
+        return 1
+
+    monkeypatch.setattr("src.skill_activation.refresh_deterministic_skills", restore)
+    assert _streamer(host).stream(
+        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+    ) == ("安全的叙述。", [])
+    assert restored == [host]
+    assert any(
+        message.get("content") == "[restored deterministic skill]"
+        for message in client.kwargs[0]["messages"]
+    )
+
+
+def test_capacity_hard_limit_never_opens_provider_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "x" * 30_000)  # ~7500 input tokens >= hard 7192
+
+    assert _streamer(host).stream(
+        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=True
+    ) == ("", [])
+    assert client.calls == 0
+    assert host.errors == ["当前规则与历史过长，无法安全继续本轮；请稍后重试。"]
+    diagnostic = next(
+        item for item in host.diagnostics if item.get("status") == "capacity_irreducible"
+    )
+    assert diagnostic["request_envelope"]["capacity"]["status"] == "irreducible"
+    assert "x" * 40 not in str(diagnostic)
+
+
+def test_capacity_hard_limit_first_attempts_verified_prune(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large but replaceable old surface is not intrinsically irreducible."""
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "x" * 30_000)
+    compactor = _CapacityCompactor(host)
+    host._ensure_history_compactor = lambda: compactor
+
+    assert _streamer(host).stream(
+        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+    ) == ("安全的叙述。", [])
+    assert client.calls == 1
+    assert compactor.prune_calls == 1
+    preflight = next(
+        item for item in host.diagnostics if item.get("event") == "context_capacity_preflight"
+    )
+    assert preflight["before"]["status"] == "irreducible"
+    assert preflight["after"]["status"] == "within"
+
+
+def test_capacity_hard_limit_can_use_verified_summary_after_prune(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hard is a final verdict only after safe compaction has been tried."""
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "x" * 30_000)
+
+    class SummaryOnlyCompactor:
+        prune_calls = 0
+        summary_calls = 0
+
+        def prune_old_tool_results(self) -> int:
+            self.prune_calls += 1
+            return 0
+
+        def summarize(self, *, silent: bool, allow_rebase_fallback: bool) -> bool:
+            self.summary_calls += 1
+            assert silent is True
+            assert allow_rebase_fallback is False
+            # This stands in for a verified replace checkpoint: the next
+            # request is rebuilt from the actual reduced model surface.
+            host.messages[0]["content"] = "short retained context"
+            return True
+
+    compactor = SummaryOnlyCompactor()
+    host._ensure_history_compactor = lambda: compactor
+
+    assert _streamer(host).stream(
+        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+    ) == ("安全的叙述。", [])
+    assert client.calls == 1
+    assert compactor.prune_calls == 1
+    assert compactor.summary_calls == 1
+    preflight = next(
+        item for item in host.diagnostics if item.get("event") == "context_capacity_preflight"
+    )
+    assert preflight["before"]["status"] == "irreducible"
+    assert preflight["after"]["status"] == "within"
+
+
+def test_capacity_override_hard_limit_never_opens_provider_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRPG_CONTEXT_WINDOW_TOKENS", "8192")
+    monkeypatch.setenv("TRPG_CONTEXT_TARGET_RATIO", "0.50")
+    monkeypatch.setenv("TRPG_MAX_OUTPUT_TOKENS", "1000")
+    client = _OneChunkClient()
+    host = _capacity_host(client, "short")
+
+    assert _streamer(host).stream(
+        "test-model",
+        policy=_POLICY,
+        enable_tools=False,
+        messages_override=[{"role": "system", "content": "x" * 30_000}],
+        retry_on_empty=True,
+    ) == ("", [])
+    assert client.calls == 0
+    assert host.errors == ["当前规则与历史过长，无法安全继续本轮；请稍后重试。"]
+
+
+def test_overflow_with_default_retry_does_not_fall_through_to_generic_retry() -> None:
+    client = _FailingClient([Exception("context_length_exceeded")])
+    host = _overflow_host(client, compact_result=False)
+
+    assert _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False) == ("", [])
+    assert client.calls == 1
+    assert len(host.summarize_calls) == 1
+
+
+def test_second_overflow_after_safe_retry_is_not_retried_again() -> None:
+    client = _FailingClient(
+        [
+            Exception("context_length_exceeded"),
+            Exception("context_length_exceeded"),
+        ]
+    )
+    host = _overflow_host(client, compact_result=True)
+
+    assert _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False) == ("", [])
     assert client.calls == 2
     assert len(host.summarize_calls) == 1

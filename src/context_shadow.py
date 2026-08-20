@@ -33,6 +33,7 @@ from .context_events import (
     EVENT_REQUEST_PATCH,
     ContextEventStore,
     messages_digest,
+    payload_digest,
     shadow_writes_enabled,
 )
 
@@ -56,6 +57,8 @@ class ContextShadowCoordinator:
         database_url = getattr(context, "database_url", None)
         self.store = ContextEventStore(database_url) if database_url else None
         self.diagnostics: list[dict[str, Any]] = []
+        # payload_digest(message) -> skill 溯源，注入时登记、sync 时透传并消费
+        self.pending_skill_sources: dict[str, dict[str, str]] = {}
 
     # -- state ------------------------------------------------------------
 
@@ -100,10 +103,15 @@ class ContextShadowCoordinator:
                 str(session["id"]),
                 messages,
                 turn_id=turn_id,
+                provenance=self.pending_skill_sources or None,
             )
             if status == "mismatch":
                 self._diagnose("sync_messages", "surface_mismatch")
                 return None
+            if status in {"appended", "noop"} and self.pending_skill_sources:
+                # 投影已覆盖全部消息：登记的溯源要么已消费，要么其消息早已
+                # 在投影中（重复 sync）；无论哪种都不应再滞留。
+                self.pending_skill_sources.clear()
             current = self.store.session_for_world(self.world_id)
             if current is None or str(current["id"]) != str(session["id"]):
                 self._diagnose("sync_messages", "session_changed")
@@ -608,10 +616,56 @@ def forget_engine(engine: Any) -> None:
     engine.__dict__.pop("_context_shadow", None)
 
 
-def rebase_engine(engine: Any) -> None:
+def note_skill_injection(
+    engine: Any,
+    *,
+    message: dict[str, Any],
+    skill_id: str,
+    digest: str,
+    version: str = "",
+) -> None:
+    """Register skill provenance for one just-appended injection message.
+
+    The next ``_sync`` maps the (normalized) message digest to
+    ``source_kind="skill"`` + skill id/digest on the appended event.  Fully
+    fail-open: provenance is diagnostics-grade metadata, never gameplay.
+    """
     shadow = for_engine(engine)
-    if shadow is not None:
-        shadow.bind_legacy(list(engine.messages))
+    if shadow is None:
+        return
+    try:
+        normalized = ContextEventStore._normalize_messages([dict(message)])
+        if not normalized:
+            return
+        shadow.pending_skill_sources[payload_digest(normalized[0])] = {
+            "source_kind": "skill",
+            "source_id": str(skill_id or ""),
+            "source_version": str(digest or version or ""),
+        }
+    except Exception as exc:  # noqa: BLE001 - fail-safe
+        shadow._diagnose("note_skill_injection", exc)
+
+
+def rebase_engine(engine: Any) -> bool:
+    """Persist and verify a fresh context epoch for the current surface.
+
+    Callers that intend to replace model-visible history must be able to tell
+    whether the replacement was durably represented in the context-event
+    timeline.  Returning ``False`` is deliberately fail-closed for context
+    compaction: the authoritative game turn may continue, but its live
+    history must not be truncated when the shadow store is unavailable.
+
+    Existing non-compaction callers may ignore the return value; their
+    historical fail-open behaviour is retained.
+    """
+    shadow = for_engine(engine)
+    if shadow is None:
+        return False
+    try:
+        return bool(shadow.bind_legacy(list(engine.messages)))
+    except Exception as exc:  # noqa: BLE001 - shadow must never break gameplay
+        _remember_outer_failure(engine, "rebase_engine", exc)
+        return False
 
 
 def adopt_engine(engine: Any, checkpoint_data: Any = None) -> None:
@@ -770,12 +824,34 @@ def prune_engine(engine: Any, replacements: dict[int, dict]) -> list[int]:
     shadow = for_engine(engine)
     if shadow is None or not replacements:
         return []
-    if getattr(engine, "_active_turn_id", None) is not None:
-        # Pruning is a post-turn operation; an in-turn prune would desync the
-        # captured rollback surface.  Refuse instead of repairing later.
+    active_turn_id = getattr(engine, "_active_turn_id", None)
+    surface = engine.__dict__.get("_turn_context_surface")
+    if active_turn_id and surface is None:
+        # A turn without its captured pre-turn surface cannot safely compact:
+        # a later rollback would otherwise restore the unpruned variant.
         return []
+    if active_turn_id:
+        # Only prune entries that existed before this turn.  The active
+        # player action / pending tool batch must remain rollback-local.
+        replacements = {
+            index: replacement
+            for index, replacement in replacements.items()
+            if index < len(surface)
+        }
+        if not replacements:
+            return []
     try:
-        return shadow.prune_messages(list(engine.messages), replacements)
+        applied = shadow.prune_messages(
+            list(engine.messages),
+            replacements,
+            include_turn_id=str(active_turn_id) if active_turn_id else None,
+        )
     except Exception as exc:  # noqa: BLE001 - pruning must never break play
         _remember_outer_failure(engine, "prune_engine", exc)
         return []
+    if applied and surface is not None:
+        updated_surface = list(surface)
+        for index in applied:
+            updated_surface[index] = dict(replacements[index])
+        engine.__dict__["_turn_context_surface"] = updated_surface
+    return applied

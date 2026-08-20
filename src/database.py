@@ -36,6 +36,7 @@ from sqlalchemy.types import JSON
 
 JSON_VALUE = JSON().with_variant(JSONB(), "postgresql")
 ACTIVE_TURN_WORLD_INDEX = "uq_turns_one_active_per_world"
+MEMORY_FACT_CURRENT_INDEX = "uq_memory_facts_current_per_subject_type"
 
 
 def utcnow() -> datetime:
@@ -87,6 +88,14 @@ class World(Base):
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    # Denormalized timeline root: the world whose ancestor chain contains this
+    # world.  Root worlds reference themselves; branches point at their tree's
+    # root.  Backfilled from ``metadata_json["branch"]["parent_world_id"]``.
+    # ``server_default`` (not a Python-side default) keeps ORM inserts working
+    # on a fresh create_all schema without naming the column explicitly.
+    root_world_id: Mapped[str] = mapped_column(
+        String(160), nullable=False, server_default="", index=True
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -107,12 +116,8 @@ class WorldInvite(Base):
     __tablename__ = "world_invites"
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    world_id: Mapped[str] = mapped_column(
-        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
-    )
-    invited_by: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    invited_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     role: Mapped[str] = mapped_column(String(20), default="player")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -130,9 +135,7 @@ class WorldInvestigator(Base):
     )
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    world_id: Mapped[str] = mapped_column(
-        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
-    )
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
     character_key: Mapped[str] = mapped_column(String(200))
     character_ref: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     controller_user_id: Mapped[str | None] = mapped_column(
@@ -145,14 +148,10 @@ class WorldInvestigator(Base):
 
 class RoomAction(Base):
     __tablename__ = "room_actions"
-    __table_args__ = (
-        UniqueConstraint("world_id", "action_id", name="uq_room_action_id"),
-    )
+    __table_args__ = (UniqueConstraint("world_id", "action_id", name="uq_room_action_id"),)
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    world_id: Mapped[str] = mapped_column(
-        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
-    )
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
     action_id: Mapped[str] = mapped_column(String(160))
     submitted_by: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
@@ -331,9 +330,7 @@ class ContextSession(Base):
     )
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
-    world_id: Mapped[str] = mapped_column(
-        ForeignKey("worlds.id", ondelete="CASCADE"), index=True
-    )
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
     root_world_id: Mapped[str] = mapped_column(String(160), index=True)
     session_epoch: Mapped[int] = mapped_column(BigInteger)
     parent_session_id: Mapped[str | None] = mapped_column(
@@ -362,9 +359,7 @@ class ModelContextEvent(Base):
     """
 
     __tablename__ = "model_context_events"
-    __table_args__ = (
-        UniqueConstraint("session_id", "sequence", name="uq_context_event_sequence"),
-    )
+    __table_args__ = (UniqueConstraint("session_id", "sequence", name="uq_context_event_sequence"),)
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
     session_id: Mapped[str] = mapped_column(
@@ -386,6 +381,140 @@ class ModelContextEvent(Base):
     source_sequences: Mapped[list[Any]] = mapped_column(JSON_VALUE, default=list)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorldSkillPin(Base):
+    """Frozen per-world Skill content snapshot (H3 world freeze).
+
+    Pins are written exactly once per world (the first time its catalog is
+    resolved) and never updated afterwards: a running world never hot-reloads
+    edited skill files, and ``reset`` does not re-pin.  Branches inherit the
+    source world's pins by copy at branch-creation time.
+    """
+
+    __tablename__ = "world_skill_pins"
+    __table_args__ = (UniqueConstraint("world_id", "skill_id", name="uq_world_skill_pin"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    skill_id: Mapped[str] = mapped_column(String(120))
+    skill_version: Mapped[str] = mapped_column(String(80), default="")
+    content_digest: Mapped[str] = mapped_column(String(80))
+    trust: Mapped[str] = mapped_column(String(32), default="core")
+    residency: Mapped[str] = mapped_column(String(32), default="core")
+    content: Mapped[str] = mapped_column(Text)
+    pinned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorldSkillPinManifest(Base):
+    """Frozen SkillEntry manifest metadata for one pin (1:1 sidecar).
+
+    Kept in its own table so ``world_skill_pins`` (0009) stays immutable.
+    ``entry_snapshot`` holds the full ``SkillEntry.model_dump`` plus an
+    ``"order"`` key (catalog position at pin time); an existing world's
+    core/opening/on_demand/activation behavior is governed by this snapshot
+    only, never by the current on-disk catalog.  Rows are immutable.
+    """
+
+    __tablename__ = "world_skill_pin_manifests"
+
+    pin_id: Mapped[str] = mapped_column(
+        ForeignKey("world_skill_pins.id", ondelete="CASCADE"), primary_key=True
+    )
+    entry_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+
+
+class MemoryFactCandidate(Base):
+    """A proposed structured fact awaiting trusted-engine acceptance.
+
+    The model / engine may only propose here; nothing in this table is
+    authoritative.  Acceptance moves the fact to :class:`MemoryFact` via an
+    explicit ``source_turn_id`` + ``provenance`` handshake.
+    """
+
+    __tablename__ = "memory_fact_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "world_id",
+            "source_turn_id",
+            "subject_id",
+            "fact_type",
+            "digest",
+            name="uq_memory_candidate_dedupe",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    root_world_id: Mapped[str] = mapped_column(String(160), index=True)
+    source_turn_id: Mapped[str] = mapped_column(String(80), index=True)
+    subject_id: Mapped[str] = mapped_column(String(200), index=True)
+    subject_kind: Mapped[str] = mapped_column(String(32), default="npc")
+    fact_type: Mapped[str] = mapped_column(String(64))
+    value: Mapped[Any] = mapped_column(JSON_VALUE, default=dict)
+    digest: Mapped[str] = mapped_column(String(64))
+    audience: Mapped[str] = mapped_column(String(32), default="public")
+    owner_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    tier: Mapped[int | None] = mapped_column(Integer)
+    provenance: Mapped[list[Any]] = mapped_column(JSON_VALUE, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="proposed", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MemoryFact(Base):
+    """An accepted structured fact (authoritative memory).
+
+    Only the trusted engine may write here, via an explicit
+    ``source_turn_id`` + ``provenance`` handshake.  The partial unique index
+    enforces at most one *current* fact per (world, subject, fact_type); a
+    conflicting re-accept supersedes the previous fact (``revision``+1,
+    ``supersedes_id`` chain) rather than silently overwriting.
+    """
+
+    __tablename__ = "memory_facts"
+    __table_args__ = (
+        Index(
+            MEMORY_FACT_CURRENT_INDEX,
+            "world_id",
+            "subject_id",
+            "fact_type",
+            unique=True,
+            sqlite_where=text("status = 'accepted'"),
+            postgresql_where=text("status = 'accepted'"),
+        ),
+        UniqueConstraint(
+            "world_id",
+            "subject_id",
+            "fact_type",
+            "digest",
+            name="uq_memory_fact_digest",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    root_world_id: Mapped[str] = mapped_column(String(160), index=True)
+    source_turn_id: Mapped[str] = mapped_column(String(80), index=True)
+    subject_id: Mapped[str] = mapped_column(String(200), index=True)
+    subject_kind: Mapped[str] = mapped_column(String(32), default="npc")
+    fact_type: Mapped[str] = mapped_column(String(64))
+    value: Mapped[Any] = mapped_column(JSON_VALUE, default=dict)
+    digest: Mapped[str] = mapped_column(String(64))
+    audience: Mapped[str] = mapped_column(String(32), default="public")
+    owner_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    tier: Mapped[int | None] = mapped_column(Integer)
+    provenance: Mapped[list[Any]] = mapped_column(JSON_VALUE, default=list)
+    revision: Mapped[int] = mapped_column(BigInteger, default=1)
+    supersedes_id: Mapped[str | None] = mapped_column(
+        ForeignKey("memory_facts.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="accepted", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 _ENGINES: dict[str, Engine] = {}

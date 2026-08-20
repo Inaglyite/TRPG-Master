@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,6 +94,12 @@ class ToolRequestSnapshot:
     caller: str
     allowed_tool_names: tuple[str, ...]
     tool_catalog_digest: str
+    # Scope is part of the signed request evidence, rather than being inferred
+    # later from whichever engine happens to execute a replayed call.
+    world_id: str = ""
+    turn_id: str | None = None
+    # (skill_id, content_digest) 对：本请求 load_skill 可加载的冻结集合。
+    skill_allowlist: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def create(
@@ -102,19 +109,26 @@ class ToolRequestSnapshot:
         profile: str,
         caller: str,
         tools: list[dict],
+        world_id: str = "",
+        turn_id: str | None = None,
+        skill_allowlist: Iterable[tuple[str, str]] = (),
     ) -> ToolRequestSnapshot:
         names = tuple(
             str(tool.get("function", {}).get("name") or "")
             for tool in tools
             if str(tool.get("function", {}).get("name") or "")
         )
+        frozen_skills = tuple((str(skill_id), str(digest)) for skill_id, digest in skill_allowlist)
         return cls(
             request_id=uuid.uuid4().hex,
             step=step,
             profile=profile,
             caller=caller,
+            world_id=str(world_id or ""),
+            turn_id=str(turn_id) if turn_id else None,
             allowed_tool_names=names,
             tool_catalog_digest=catalog_digest(tools),
+            skill_allowlist=frozen_skills,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -123,8 +137,11 @@ class ToolRequestSnapshot:
             "step": self.step,
             "profile": self.profile,
             "caller": self.caller,
+            "world_id": self.world_id,
+            "turn_id": self.turn_id,
             "allowed_tool_names": list(self.allowed_tool_names),
             "tool_catalog_digest": self.tool_catalog_digest,
+            "skill_allowlist": [list(pair) for pair in self.skill_allowlist],
         }
 
     @classmethod
@@ -134,6 +151,8 @@ class ToolRequestSnapshot:
         request_id = value.get("request_id")
         profile = value.get("profile")
         caller = value.get("caller")
+        world_id = value.get("world_id", "")
+        turn_id = value.get("turn_id")
         digest = value.get("tool_catalog_digest")
         allowed = value.get("allowed_tool_names")
         step = value.get("step")
@@ -142,6 +161,8 @@ class ToolRequestSnapshot:
             or not request_id
             or not isinstance(profile, str)
             or not isinstance(caller, str)
+            or not isinstance(world_id, str)
+            or (turn_id is not None and not isinstance(turn_id, str))
             or not isinstance(digest, str)
             or not isinstance(step, int)
             or isinstance(step, bool)
@@ -149,13 +170,24 @@ class ToolRequestSnapshot:
             or not all(isinstance(name, str) and name for name in allowed)
         ):
             raise ToolPolicyError("invalid_request_snapshot", "工具调用的请求授权快照无效")
+        skill_allowlist = value.get("skill_allowlist") or []
+        if not isinstance(skill_allowlist, list) or not all(
+            isinstance(pair, list)
+            and len(pair) == 2
+            and all(isinstance(item, str) for item in pair)
+            for pair in skill_allowlist
+        ):
+            raise ToolPolicyError("invalid_request_snapshot", "工具调用的请求授权快照无效")
         return cls(
             request_id=request_id,
             step=step,
             profile=profile,
             caller=caller,
+            world_id=world_id,
+            turn_id=turn_id,
             allowed_tool_names=tuple(allowed),
             tool_catalog_digest=digest,
+            skill_allowlist=tuple((pair[0], pair[1]) for pair in skill_allowlist),
         )
 
 
@@ -189,6 +221,25 @@ def _schema_for_name(tool_schemas: dict[str, dict], name: str) -> dict:
     if not isinstance(schema, dict):
         raise ToolPolicyError("unknown_tool", "工具不在当前服务端目录中")
     return schema
+
+
+def schemas_for_catalog(ordered_catalog: list[dict]) -> dict[str, dict]:
+    """Extract schemas from the exact server-issued provider catalog.
+
+    This deliberately does not look up ``TOOLS``.  A replayed snapshot may
+    name a globally registered but never-issued capability; only a function in
+    the immutable catalog sent for this request can reach validation.
+    """
+    result: dict[str, dict] = {}
+    for tool in ordered_catalog:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        parameters = function.get("parameters")
+        if isinstance(name, str) and name and isinstance(parameters, dict):
+            result[name] = parameters
+    return result
 
 
 def _validate_value(value: object, schema: dict, path: str) -> None:
@@ -245,6 +296,7 @@ def authorize_model_tool_call(
     *,
     tool_schemas: dict[str, dict],
     ordered_catalog: list[dict],
+    model_allowed_tool_names: Iterable[str],
 ) -> tuple[ToolRequestSnapshot, str, dict[str, Any]]:
     """Return validated ``(snapshot, name, args)`` or raise ``ToolPolicyError``."""
     snapshot = ToolRequestSnapshot.from_dict(tool_call.get(REQUEST_METADATA_KEY))
@@ -260,6 +312,8 @@ def authorize_model_tool_call(
         raise ToolPolicyError("invalid_tool_name", "工具名称无效")
     if name in MODEL_DENIED_TOOL_NAMES:
         raise ToolPolicyError("model_tool_forbidden", "该工具不能由模型调用")
+    if name not in set(model_allowed_tool_names):
+        raise ToolPolicyError("model_tool_forbidden", "该工具不能由模型调用")
     if name not in snapshot.allowed_tool_names:
         raise ToolPolicyError("tool_not_allowed", "该工具未下发给本次模型请求")
     schema = _schema_for_name(tool_schemas, name)
@@ -271,6 +325,13 @@ def authorize_model_tool_call(
     except json.JSONDecodeError as exc:
         raise ToolPolicyError("invalid_arguments", "工具参数不是合法 JSON") from exc
     _validate_value(args, schema, "arguments")
+    if name == "load_skill":
+        # 语义策略：可加载的 skill_id 集在请求构造时冻结进快照；handler 不得
+        # 只凭工具名放行后去读当前 catalog。
+        requested = args.get("skill_id") if isinstance(args, dict) else None
+        frozen_ids = {skill_id for skill_id, _digest in snapshot.skill_allowlist}
+        if not isinstance(requested, str) or requested not in frozen_ids:
+            raise ToolPolicyError("skill_not_frozen", "该 Skill 不在本次请求的冻结目录中")
     return snapshot, name, args
 
 

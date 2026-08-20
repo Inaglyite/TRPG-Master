@@ -22,8 +22,10 @@ from .tool_policy import (
     authorize_model_tool_call,
     denied_tool_result,
     payload_digest,
+    schemas_for_catalog,
 )
-from .tools import TOOL_SCHEMA_BY_NAME, tool_catalog_for_names
+from .tool_request_authority import execution_snapshot, issued_model_request
+from .tools import MODEL_TOOL_NAMES, TOOL_SCHEMA_BY_NAME
 
 ToolVisibility = Literal["model", "engine_internal"]
 ToolMutationMode = Literal["read_only", "turn_cache"]
@@ -81,6 +83,9 @@ class RequestEnvelope:
     tool_catalog_digest: str
     message_digest: str
     cache_metadata: dict[str, object] = field(default_factory=dict)
+    # H2 metadata-only capacity evidence.  It is intentionally computed from
+    # the provider wire payload and contains no prompt/body text.
+    capacity_metadata: dict[str, object] = field(default_factory=dict)
 
     def audit_dict(self) -> dict[str, object]:
         """Return stable, non-secret metadata suitable for ``ModelCall.details``."""
@@ -94,7 +99,10 @@ class RequestEnvelope:
             "caller": self.caller,
             "provider": self.provider,
             "model": self.model,
-            "capacity": {"max_output_tokens": self.max_output_tokens},
+            "capacity": {
+                "max_output_tokens": self.max_output_tokens,
+                **dict(self.capacity_metadata),
+            },
             "allowed_tool_names": list(self.allowed_tool_names),
             "tool_catalog_digest": self.tool_catalog_digest,
             "message_digest": self.message_digest,
@@ -360,6 +368,8 @@ _TURN_CACHE_TOOLS = frozenset(
 
 
 def tool_descriptor_for(name: str, *, timeout_ms: int) -> ToolDescriptor:
+    if name not in MODEL_TOOL_NAMES:
+        raise ToolPolicyError("model_tool_forbidden", "该工具不能由模型调用")
     schema = TOOL_SCHEMA_BY_NAME.get(name)
     if not isinstance(schema, dict):
         raise ToolPolicyError("unknown_tool", "工具不在当前服务端目录中")
@@ -465,10 +475,15 @@ class ToolPipeline:
             call_id = f"invalid:{payload_digest(raw_call)[:20]}"
         try:
             snapshot = ToolRequestSnapshot.from_dict(raw_call.get(REQUEST_METADATA_KEY))
+            issued = issued_model_request(self.engine, snapshot)
+            ordered_catalog = issued.catalog_copy()
             snapshot, name, args = authorize_model_tool_call(
                 raw_call,
-                tool_schemas=TOOL_SCHEMA_BY_NAME,
-                ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
+                tool_schemas=schemas_for_catalog(ordered_catalog),
+                ordered_catalog=ordered_catalog,
+                model_allowed_tool_names={
+                    str(tool.get("function", {}).get("name") or "") for tool in ordered_catalog
+                },
             )
             descriptor = tool_descriptor_for(name, timeout_ms=self.timeout_ms)
             call = ToolCall(
@@ -538,15 +553,16 @@ class ToolPipeline:
 
         self.unit_of_work.plan.add(call)
         try:
-            execute_model_tool = getattr(self.engine, "_execute_model_tool", None)
-            if execute_model_tool:
-                output = execute_model_tool(
-                    call.descriptor.name,
-                    call.args,
-                    player_action=player_action,
-                )
-            else:
-                output = self.engine._execute_tool(call.descriptor.name, call.args)
+            with execution_snapshot(self.engine, snapshot):
+                execute_model_tool = getattr(self.engine, "_execute_model_tool", None)
+                if execute_model_tool:
+                    output = execute_model_tool(
+                        call.descriptor.name,
+                        call.args,
+                        player_action=player_action,
+                    )
+                else:
+                    output = self.engine._execute_tool(call.descriptor.name, call.args)
             output = self._validate_output(output, call.descriptor)
         except ToolPolicyError as exc:
             return self._remember(
@@ -610,10 +626,15 @@ class ToolPipeline:
         function = function if isinstance(function, dict) else {}
         try:
             snapshot = ToolRequestSnapshot.from_dict(raw_call.get(REQUEST_METADATA_KEY))
+            issued = issued_model_request(self.engine, snapshot)
+            ordered_catalog = issued.catalog_copy()
             snapshot, name, args = authorize_model_tool_call(
                 raw_call,
-                tool_schemas=TOOL_SCHEMA_BY_NAME,
-                ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
+                tool_schemas=schemas_for_catalog(ordered_catalog),
+                ordered_catalog=ordered_catalog,
+                model_allowed_tool_names={
+                    str(tool.get("function", {}).get("name") or "") for tool in ordered_catalog
+                },
             )
             descriptor = tool_descriptor_for(name, timeout_ms=self.timeout_ms)
             return {

@@ -173,9 +173,20 @@ service 下发，小内存 VM 初期保持保守值，按实测成本再调：
 
 ```bash
 TRPG_LLM_MAX_CONCURRENCY=2      # 全局模型调用并发上限，超出排队（60s 超时）
+# 必须按实际 provider/model 的已知总窗口配置；不要把“输入上限”误填进来。
+TRPG_CONTEXT_WINDOW_TOKENS=65536
+# 达到该比例会先安全裁剪旧工具结果/尝试摘要；硬上限仍会拒绝请求而不删规则。
+TRPG_CONTEXT_TARGET_RATIO=0.78
+# 保留给本次模型回复的 token；程序会自动夹紧，确保 target 与 hard 之间留出压缩带。
+TRPG_MAX_OUTPUT_TOKENS=4096
 TRPG_ACTION_RATE_PER_MINUTE=10  # 每账号每分钟行动上限
 TRPG_DAILY_TURN_QUOTA=200       # 每账号每日回合额度（进程内存计数，重启清零）
 ```
+
+这三项共同约束一次模型请求的总容量：`TRPG_CONTEXT_WINDOW_TOKENS` 是 provider 的
+输入加最大输出窗口，不是历史消息的字符数。设置错误不会触发“强行截断”——不可约请求会在
+调用 provider 前返回受控错误；请根据所选模型或兼容网关的正式文档调整它们。树莓派 staging
+的 `TRPG_LLM_MAX_CONCURRENCY=1` 与此兼容：流式溢出重试会先释放槽位，再做一次非破坏性压缩。
 
 模型调用与拒绝事件会带 user_id/world_id 写入应用日志，用于核算成本与封禁滥用账号。
 `TRPG_ALLOW_REGISTRATION=0` 时注册接口关闭，用 `tools/manage_users.py` 人工开户（白名单）。
@@ -300,6 +311,13 @@ systemd 在每次启动前运行
 同一脚本通过 `TRPG_BACKUP_ROOT`、`TRPG_BACKUP_RUNTIME_ROOT` 和 `TRPG_BACKUP_PREFIX` 隔离环境；脚本
 只接受 `/var/backups/trpg-master[-*]` 与 `/var/lib/trpg-master[-*]` 范围内的目标。生产使用默认值，
 staging systemd 单元显式指向 staging 目录。
+
+模型上下文事件（`context_sessions` / `model_context_events`）属于数据库中的**私有运行数据**：普通 API、
+日志与 GC audit 不会输出其 payload，但它们会随 PostgreSQL 加密备份一并保存。备份脚本默认保留
+`TRPG_BACKUP_RETENTION_DAYS=30` 天；逻辑归档世界在此期间仍可恢复。每天的
+`trpg-master-context-gc.timer`（staging 为 `trpg-master-staging-context-gc.timer`）只对已归档世界做
+引用感知清理，绝不在游戏请求中删除上下文。物理删除 World 时数据库外键会级联删除其上下文行；备份中
+的历史副本则按上述保留期自然淘汰。需要提前擦除时必须按备份销毁流程处理，不能仅依赖应用层归档。
 
 1. 解密归档并验证 `SHA256SUMS`；
 2. 创建空数据库，使用 `pg_restore --no-owner --no-acl` 导入；

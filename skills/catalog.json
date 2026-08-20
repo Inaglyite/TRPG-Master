@@ -1,0 +1,320 @@
+{
+  "catalog_version": 1,
+  "skills": [
+    {
+      "id": "core.trpg_master",
+      "path": "skills/core/trpg_master.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "守秘人入口：角色定位、规则执行、状态管理与工具协议",
+      "opening": true,
+      "model_invocable": false,
+      "max_context_tokens": 4900,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "core.no_spoiler",
+      "path": "skills/core/no_spoiler.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "防剧透硬约束与信息边界系统",
+      "opening": true,
+      "model_invocable": false,
+      "max_context_tokens": 2200,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "core.dice_system",
+      "path": "skills/core/dice_system.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "d100 检定系统：三难度、奖励/惩罚骰、孤注一掷与对抗",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 4700,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.core",
+      "path": "skills/keeper/keeper_core.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "守秘人核心守则与方法论",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 5700,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.atmosphere",
+      "path": "skills/keeper/keeper_atmosphere.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "叙事表现与氛围控制",
+      "opening": true,
+      "model_invocable": false,
+      "max_context_tokens": 1700,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.npc",
+      "path": "skills/keeper/keeper_npc.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "NPC 设计与对话技巧",
+      "opening": true,
+      "model_invocable": false,
+      "max_context_tokens": 4100,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.clues",
+      "path": "skills/keeper/keeper_clues.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "线索设计与信息发放",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 4000,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.sanity",
+      "path": "skills/keeper/keeper_sanity.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "理智系统与疯狂叙事规则",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 5400,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.combat",
+      "path": "skills/keeper/keeper_combat.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "deterministic",
+      "description": "战斗、追逐、重伤/濒死完整规则（d100 对抗检定）",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 5000,
+      "activation": {
+        "tools": [
+          "combat_start",
+          "combat_action",
+          "apply_damage",
+          "apply_heal"
+        ],
+        "combat_active": true,
+        "san_below": null,
+        "phases": [],
+        "scenes": [],
+        "module_capabilities": [],
+        "rulesets": []
+      },
+      "diagnostic_keywords": [
+        "开枪",
+        "射击",
+        "攻击",
+        "挥拳",
+        "拔枪",
+        "持枪",
+        "用枪",
+        "枪指",
+        "瞄准",
+        "威胁",
+        "拔刀",
+        "砍",
+        "刺",
+        "砸",
+        "战斗",
+        "搏斗",
+        "斗殴",
+        "反击",
+        "闪避",
+        "伤害",
+        "受伤",
+        "倒地",
+        "武器",
+        "手枪",
+        "左轮",
+        "刀",
+        "棍",
+        "枪",
+        "弹药"
+      ]
+    },
+    {
+      "id": "keeper.items",
+      "path": "skills/keeper/keeper_items.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "deterministic",
+      "description": "道具使用与资源消耗规则",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 700,
+      "activation": {
+        "tools": [
+          "use_item"
+        ],
+        "combat_active": null,
+        "san_below": null,
+        "phases": [],
+        "scenes": [],
+        "module_capabilities": [],
+        "rulesets": []
+      },
+      "diagnostic_keywords": [
+        "鸣枪",
+        "开枪",
+        "射击",
+        "扣动扳机",
+        "子弹",
+        "装弹",
+        "换弹",
+        "喝下",
+        "服用",
+        "点燃",
+        "烧掉",
+        "使用钥匙",
+        "打开手电筒",
+        "急救包",
+        "消耗道具",
+        "使用物品"
+      ]
+    },
+    {
+      "id": "keeper.psychology",
+      "path": "skills/keeper/keeper_psychology.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "deterministic",
+      "description": "心理学应用知识库：按场景索引的叙事模板与心理知识",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 9100,
+      "activation": {
+        "tools": [
+          "sanity_event",
+          "sanity_loss"
+        ],
+        "combat_active": null,
+        "san_below": 40,
+        "phases": [],
+        "scenes": [],
+        "module_capabilities": [],
+        "rulesets": []
+      },
+      "diagnostic_keywords": [
+        "疯狂",
+        "崩溃",
+        "失控",
+        "幻觉",
+        "尖叫",
+        "发疯",
+        "恐惧症",
+        "躁狂"
+      ]
+    },
+    {
+      "id": "investigator.creation",
+      "path": "skills/investigator/investigator_creation.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "deterministic",
+      "description": "调查员角色创建指导",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 2700,
+      "activation": {
+        "tools": [
+          "create_character"
+        ],
+        "combat_active": null,
+        "san_below": null,
+        "phases": [],
+        "scenes": [],
+        "module_capabilities": [],
+        "rulesets": []
+      },
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "investigator.skills",
+      "path": "skills/investigator/investigator_skills.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "deterministic",
+      "description": "技能详解、使用场景与难度范例",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 3700,
+      "activation": {
+        "tools": [
+          "skill_check",
+          "suggest_check"
+        ],
+        "combat_active": null,
+        "san_below": null,
+        "phases": [],
+        "scenes": [],
+        "module_capabilities": [],
+        "rulesets": []
+      },
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.magic",
+      "path": "skills/keeper/keeper_magic.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "on_demand",
+      "description": "魔法、克苏鲁神话与禁忌知识（施法、仪式、神话典籍）",
+      "opening": false,
+      "model_invocable": true,
+      "max_context_tokens": 2100,
+      "activation": {},
+      "diagnostic_keywords": [
+        "魔法",
+        "咒语",
+        "施法",
+        "仪式",
+        "召唤",
+        "神话典籍",
+        "诅咒",
+        "克苏鲁神话"
+      ]
+    },
+    {
+      "id": "investigator.methods",
+      "path": "skills/investigator/investigator_methods.skill",
+      "version": "1.0.0",
+      "trust": "core",
+      "residency": "on_demand",
+      "description": "调查方法论与推理技巧（线索关联、推理框架）",
+      "opening": false,
+      "model_invocable": true,
+      "max_context_tokens": 2500,
+      "activation": {},
+      "diagnostic_keywords": []
+    }
+  ]
+}

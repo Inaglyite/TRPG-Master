@@ -165,47 +165,92 @@ GLM_API_KEY = os.environ.get("GLM_API_KEY", "")
 GLM_BASE_URL = os.environ.get("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
 GLM_MODEL = os.environ.get("GLM_MODEL", "glm-4-flash-250414")
 
-# ---- Skill 加载顺序（常驻 system prompt 的 skill）----
-# 以下 skill 全量塞入 system prompt,贯穿每回合。
-# 场景专用 Skill 不常驻 system prompt；只能由受信引擎从下方固定资源
-# allowlist 注入，模型没有通用文件读取能力。
-SKILL_LOAD_ORDER = [
-    "core/trpg_master.skill",
-    "core/no_spoiler.skill",
-    "core/dice_system.skill",
-    "keeper/keeper_core.skill",
-    "keeper/keeper_atmosphere.skill",
-    "keeper/keeper_npc.skill",
-    "keeper/keeper_clues.skill",
-    "keeper/keeper_sanity.skill",
-]
-
-# 按需加载的 skill：特定工具被调用时，引擎直接把规则内容注入上下文。
-OPTIONAL_SKILL_HINTS = {
-    "apply_damage": "skills/keeper/keeper_combat.skill",
-    "apply_heal": "skills/keeper/keeper_combat.skill",
-    "combat_start": "skills/keeper/keeper_combat.skill",
-    "combat_action": "skills/keeper/keeper_combat.skill",
-    "use_item": "skills/keeper/keeper_items.skill",
-    "sanity_event": "skills/keeper/keeper_psychology.skill",
-    "sanity_loss": "skills/keeper/keeper_psychology.skill",
-    "create_character": "skills/investigator/investigator_creation.skill",
-}
-
-# Engine-only resource allowlist.  Keep this explicit rather than accepting a
-# model-supplied relative path: optional Skill text is executable instruction
-# content from the model's perspective.
-OPTIONAL_SKILL_RESOURCES = frozenset({
-    "skills/keeper/keeper_items.skill",
-    "skills/keeper/keeper_combat.skill",
-    "skills/keeper/keeper_psychology.skill",
-    "skills/keeper/keeper_magic.skill",
-    "skills/investigator/investigator_skills.skill",
-    "skills/investigator/investigator_creation.skill",
-    "skills/investigator/investigator_methods.skill",
-})
+# ---- Skill Catalog（H3）----
+# Skill 元数据唯一来源是 skills/catalog.json（src/skill_manifest.py 解析）；
+# 常驻/确定性/按需三类的内容与 digest 以 world_skill_pins 为世界级冻结快照
+# （src/skill_pins.py），运行时绝不读全局常量表。
 
 MAX_TOOL_ROUNDS = 5
+
+
+# ---- H2 context capacity（提供方窗口 + 主动压缩目标）----
+# 只读容量底座：根据估算的输入 token 数给出 target/hard 阈值与状态，绝不
+# 删除任何内容（压缩决策由调用方在 shadow/诊断模式下落地）。
+
+# Provider context window（输入 + 最大输出的总上限）。默认 65536：现有完整
+# COC 规则 spine 约 25k tokens，32k 会在正常开局时就进入不可约区间。实际
+# 网关容量不同，部署者可用 TRPG_CONTEXT_WINDOW_TOKENS 覆盖；越界或非法值
+# 回退到这个保守运行基线。
+CONTEXT_WINDOW_TOKENS_DEFAULT = 65_536
+CONTEXT_WINDOW_TOKENS_MIN = 8_192
+CONTEXT_WINDOW_TOKENS_MAX = 1_048_576
+
+
+def _bounded_int_env(
+    name: str,
+    default: int,
+    low: int,
+    high: int,
+) -> int:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+def context_window_tokens() -> int:
+    """Provider input window; bounded to avoid accidental tiny/huge values."""
+    return _bounded_int_env(
+        "TRPG_CONTEXT_WINDOW_TOKENS",
+        CONTEXT_WINDOW_TOKENS_DEFAULT,
+        CONTEXT_WINDOW_TOKENS_MIN,
+        CONTEXT_WINDOW_TOKENS_MAX,
+    )
+
+
+# Active-compaction target ratio of the window (0.50..0.90, default 0.78).
+# Estimated input at/above ``window * target`` should compact *before* the
+# provider rejects the request; at/above ``window * hard`` it is irreducible
+# (never delete content to make a request fit).
+CONTEXT_TARGET_RATIO_DEFAULT = 0.78
+CONTEXT_TARGET_RATIO_MIN = 0.50
+CONTEXT_TARGET_RATIO_MAX = 0.90
+
+
+def context_target_ratio() -> float:
+    """Fraction of the window that triggers proactive compaction."""
+    return _bounded_float_env(
+        "TRPG_CONTEXT_TARGET_RATIO",
+        CONTEXT_TARGET_RATIO_DEFAULT,
+        CONTEXT_TARGET_RATIO_MIN,
+        CONTEXT_TARGET_RATIO_MAX,
+    )
+
+
+# Headroom reserved for the model's own output: hard capacity never allows
+# input + max_output to exceed the window, so a maximal reply can still fit.
+MAX_OUTPUT_TOKENS_DEFAULT = 4096
+
+
+def max_output_tokens() -> int:
+    raw = os.environ.get("TRPG_MAX_OUTPUT_TOKENS", str(MAX_OUTPUT_TOKENS_DEFAULT))
+    try:
+        value = int(raw)
+    except ValueError:
+        value = MAX_OUTPUT_TOKENS_DEFAULT
+    value = max(1, min(value, 131_072))
+    # Keep a real compaction band between ``target`` and the hard provider
+    # limit.  Without this cross-setting clamp an accidental tiny context
+    # window plus huge output reservation makes every request irreducible,
+    # even when a safe shorter reply would work.
+    window = context_window_tokens()
+    target = int(window * context_target_ratio())
+    safe_max = max(1, window - target - 1)
+    return min(value, safe_max)
 
 # 旧调用方兼容入口；新业务代码应切换 RuntimeContext，不应调用本函数。
 def set_active_module(name: str):

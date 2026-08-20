@@ -15,6 +15,7 @@ from .combat import (
 )
 from .inventory import InventoryError
 from .inventory import use_item as apply_inventory_use
+from .model_tool_catalog import build_model_catalog_helpers
 from .runtime import RuntimeContext
 from .state_paths import resolve_path as _resolve_state_path
 from .state_paths import set_path as _set_state_path
@@ -25,6 +26,7 @@ from .tool_policy import (
     allows_engine_internal_state_path,
 )
 from .tool_runtime import ToolRuntime, UnknownToolError
+from .tool_schema_defs import LOAD_SKILL_TOOL, READ_FILE_TOOL
 from .world_store import atomic_write_json
 
 
@@ -592,20 +594,8 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "读取项目中的文件内容。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "相对路径，如 rules/rule_schema.json"}
-                },
-                "required": ["path"],
-            },
-        },
-    },
+    READ_FILE_TOOL,
+    LOAD_SKILL_TOOL,
     # ---- 属性检定与核心机制 ----
     {
         "type": "function",
@@ -807,65 +797,18 @@ TOOLS = [
 ]
 
 
-# These remain available to the engine and old save histories, but exposing
-# them to the story model creates redundant read/display/model round trips.
-_ENGINE_ONLY_TOOL_NAMES = {
-    "cache_scene",
-    "read_file",
-    "state_get",
-    "state_set",
-    "state_npcs",
-    "state_clues",
-    "get_npc_secret",
-    "get_private_memory",
-    "show_handout",
-    "sanity_trigger",
-    "sanity_loss",
-    "update_private_memory",
-}
+# The provider receives a policy-owned projection of ``TOOLS``.  It is built
+# in a separate module so the large handler/schema registry remains only the
+# source of truth, not a second request authorization implementation.
+_MODEL_CATALOG = build_model_catalog_helpers(TOOLS)
+TOOL_SCHEMA_BY_NAME = _MODEL_CATALOG.tool_schema_by_name
+MODEL_TOOL_NAMES = _MODEL_CATALOG.model_tool_names
+model_tools_for = _MODEL_CATALOG.model_tools_for
+tool_catalog_for_names = _MODEL_CATALOG.tool_catalog_for_names
 
-MODEL_TOOLS = [
-    tool for tool in TOOLS if tool.get("function", {}).get("name") not in _ENGINE_ONLY_TOOL_NAMES
-]
-
-# The provider receives a subset of ``TOOLS``.  The execution policy uses this
-# server-owned map to validate the exact arguments returned for that subset;
-# never trust a schema or allowlist carried by model output.
-TOOL_SCHEMA_BY_NAME = {
-    str(tool["function"]["name"]): dict(tool["function"].get("parameters") or {})
-    for tool in TOOLS
-    if isinstance(tool.get("function"), dict) and tool["function"].get("name")
-}
-
-_STORY_EXCLUDED_MODEL_TOOLS = {
-    "create_character",
-    "load_character",
-    "combat_status",
-    "combat_action",
-    "combat_end",
-}
-
-_COMBAT_EXCLUDED_MODEL_TOOLS = {
-    "create_character",
-    "load_character",
-    "combat_start",
-    "suggest_check",
-    "link_clues",
-    "set_psychological_trait",
-    "get_npc_secret",
-}
-
-
-def model_tools_for(role: str) -> list[dict]:
-    """Return a stable, role-specific subset without changing tool execution."""
-    excluded = _COMBAT_EXCLUDED_MODEL_TOOLS if role == "combat" else _STORY_EXCLUDED_MODEL_TOOLS
-    return [tool for tool in MODEL_TOOLS if tool.get("function", {}).get("name") not in excluded]
-
-
-def tool_catalog_for_names(names: tuple[str, ...] | list[str] | set[str]) -> list[dict]:
-    """Rebuild a frozen request catalog from server-owned definitions only."""
-    allowed = set(names)
-    return [tool for tool in TOOLS if str(tool.get("function", {}).get("name") or "") in allowed]
+# Compatibility export for callers/tests that need the default static story
+# catalog. Actual requests bind their own frozen Skill allowlist.
+MODEL_TOOLS = model_tools_for("story")
 
 
 # ---------------------------------------------------------------------------
@@ -1458,15 +1401,19 @@ def dice_summary(output: str) -> str | None:
     """从 skill_check.py 或 dice.py 的 JSON 输出中提取摘要"""
     try:
         data = json.loads(output)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
         return None
 
     # skill_check d100 输出
     if "d100_roll" in data:
         skill = data.get("skill_name", data.get("skill", "?"))
-        roll = data["d100_roll"]
-        value = data["skill_value"]
-        level = data["level"]
+        roll = data.get("d100_roll")
+        value = data.get("skill_value")
+        level = data.get("level")
+        if roll is None or value is None or not isinstance(level, str):
+            return None
         bonus = data.get("bonus_dice", 0)
         penalty = data.get("penalty_dice", 0)
         is_push = data.get("is_push", False)
@@ -1492,7 +1439,9 @@ def dice_summary(output: str) -> str | None:
 
     # dice.py 输出
     spec = data.get("spec", "?").upper()
-    total = data["total"]
+    total = data.get("total")
+    if total is None:
+        return None
     rolls = data.get("rolls", [total])
     mod = data.get("modifier", 0)
 

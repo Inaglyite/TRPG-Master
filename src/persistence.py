@@ -24,12 +24,19 @@ from .config import (
     PROJECT_ROOT,
     PROMPT_PROFILE,
     RUNTIME_ROOT,
-    SKILL_LOAD_ORDER,
 )
 from .context_checkpoint import ContextCheckpoint, public_copy, resolve_checkpoint
 from .database import SaveSlot, Snapshot, new_id, session_scope, utcnow
 from .handouts import refresh_static_handout_config
+from .logger import error as log_error
 from .runtime import RuntimeContext, default_world_id
+from .skill_manifest import CatalogError, SkillCatalog, catalog_for
+from .skill_pins import (
+    PinUnavailable,
+    ensure_world_pins,
+    pinned_catalog,
+    read_world_pins,
+)
 from .world_migrations import migrate_world_state
 from .world_store import atomic_write_json
 
@@ -139,12 +146,133 @@ def _module_prompt_content(content: str) -> str:
 
 
 _PROMPT_SPINE_MARKER = "trpg-master:prompt-role=spine"
-_OPENING_SKILL_LOAD_ORDER = (
-    "core/trpg_master.skill",
-    "core/no_spoiler.skill",
-    "keeper/keeper_atmosphere.skill",
-    "keeper/keeper_npc.skill",
-)
+
+
+def _read_disk_skill(path: Path) -> str:
+    """Disk fallback for core prompt building (fail-open; diagnosed by caller)."""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _parts_from_pins(pins: dict, *, opening: bool) -> tuple[list[str], list[str]]:
+    """纯 pin 驱动的 core/module 内容（冻结元数据治理，不读当前 catalog）。"""
+    official_parts: list[str] = []
+    module_parts: list[str] = []
+    for pin in sorted(pins.values(), key=lambda item: item.order):
+        entry = pin.entry
+        if entry.residency != "core":
+            continue
+        if opening and not entry.opening:
+            continue
+        content = pin.content.strip()
+        if not content:
+            continue
+        if entry.trust == "bundled-module":
+            module_parts.append(content)
+        else:
+            official_parts.append(content)
+    return official_parts, module_parts
+
+
+def _catalog_skill_parts(
+    context: RuntimeContext,
+    *,
+    opening: bool,
+) -> tuple[list[str], list[str], SkillCatalog | None]:
+    """Core/module Skill 内容：已有 pin 的世界完全由 pin 治理，无 pin 走磁盘。
+
+    返回 (official_parts, module_parts, catalog)。catalog 仅在无 pin 的遗留
+    路径中有意义；catalog 加载失败时返回 (…, …, None)，调用方退回到旧的
+    全磁盘路径，保证游戏可继续。
+    """
+    try:
+        existing = read_world_pins(context)
+    except PinUnavailable as exc:
+        # 已存在世界的 pin 失效：受控中止，禁止回退可能已漂移的磁盘内容。
+        log_error(f"世界 Skill pin 失效，受控中止: {exc}")
+        raise
+    if existing is not None:
+        official, module = _parts_from_pins(existing, opening=opening)
+        return official, module, pinned_catalog(existing)
+    try:
+        catalog = catalog_for(context)
+    except CatalogError as exc:
+        log_error(f"Skill catalog 不可用，回退磁盘加载: {exc}")
+        return [], [], None
+    try:
+        pins = ensure_world_pins(context, catalog)
+    except PinUnavailable as exc:
+        log_error(f"世界 Skill pin 失效，受控中止: {exc}")
+        raise
+    if pins is None:
+        log_error(
+            "世界 Skill pin 不可用，回退磁盘加载: "
+            f"world={getattr(context, 'world_id', '') or '?'}"
+        )
+    official_parts: list[str] = []
+    module_parts: list[str] = []
+    for entry in catalog.skills:
+        if entry.residency != "core":
+            continue
+        if opening and not entry.opening:
+            continue
+        if pins is not None:
+            pin = pins.get(entry.id)
+            if pin is None:
+                # 活跃世界的目录以 pin 为准：未 pin 的条目不热补。
+                continue
+            content = pin.content.strip()
+        else:
+            content = _read_disk_skill(Path(context.project_root) / entry.path)
+        if not content:
+            continue
+        if entry.trust == "bundled-module":
+            module_parts.append(content)
+        else:
+            official_parts.append(content)
+    return official_parts, module_parts, catalog
+
+
+def _on_demand_catalog_section(
+    catalog: SkillCatalog | None,
+    context: RuntimeContext,
+) -> str:
+    """模型可见的有界按需 Skill 目录（id + description，总量受控）。
+
+    已有 pin 的世界由冻结元数据决定 on_demand/model_invocable/description，
+    不反读当前 catalog。
+    """
+    try:
+        pins = read_world_pins(context)
+    except PinUnavailable:
+        raise
+    if pins is not None:
+        entries = [
+            pin.entry
+            for pin in sorted(pins.values(), key=lambda item: item.order)
+            if pin.entry.residency == "on_demand"
+        ]
+    elif catalog is not None:
+        entries = catalog.on_demand_entries()
+    else:
+        return ""
+    lines = []
+    budget = 600
+    for entry in entries:
+        if not entry.model_invocable:
+            continue
+        line = f"- {entry.id}：{entry.description}"
+        if sum(len(line) for line in lines) + len(line) > budget:
+            break
+        lines.append(line)
+    if not lines:
+        return ""
+    return (
+        "[按需 Skill 目录] 以下非关键规则不在常驻上下文中；确实需要时用 "
+        "load_skill(skill_id) 加载，不要凭印象复述规则细节：\n" + "\n".join(lines)
+    )
 
 
 def load_system_prompt(
@@ -156,27 +284,45 @@ def load_system_prompt(
     profile = (profile or PROMPT_PROFILE).lower()
     if profile not in {"full", "hybrid", "opening"}:
         profile = "full"
-    parts = []
-    # 核心 skill
-    skill_order = _OPENING_SKILL_LOAD_ORDER if profile == "opening" else SKILL_LOAD_ORDER
-    for name in skill_order:
-        path = context.project_root / "skills" / name
-        if path.exists():
-            content = path.read_text(encoding="utf-8").strip()
+    official_parts, mod_skill_contents, catalog = _catalog_skill_parts(
+        context, opening=profile == "opening"
+    )
+    if catalog is None:
+        # catalog 彻底不可用时的最保守兜底：老的磁盘顺序加载。
+        fallback_order = (
+            (
+                "core/trpg_master.skill",
+                "core/no_spoiler.skill",
+                "keeper/keeper_atmosphere.skill",
+                "keeper/keeper_npc.skill",
+            )
+            if profile == "opening"
+            else (
+                "core/trpg_master.skill",
+                "core/no_spoiler.skill",
+                "core/dice_system.skill",
+                "keeper/keeper_core.skill",
+                "keeper/keeper_atmosphere.skill",
+                "keeper/keeper_npc.skill",
+                "keeper/keeper_clues.skill",
+                "keeper/keeper_sanity.skill",
+            )
+        )
+        for name in fallback_order:
+            content = _read_disk_skill(context.project_root / "skills" / name)
             if content:
-                parts.append(content)
+                official_parts.append(content)
+        mod_skills_dir = context.module_dir / "skills"
+        if mod_skills_dir.exists():
+            for mod_skill in sorted(mod_skills_dir.glob("*.skill")):
+                content = _read_disk_skill(mod_skill)
+                if content:
+                    mod_skill_contents.append(content)
+    parts = list(official_parts)
     # 结构化开场的公开剧情由本轮权威快照提供。这里不加载 module.md、
     # 模组 skill 或无关规则，避免私有时间线泄露并缩短首轮输入。
     if profile == "opening":
         return "\n\n---\n\n".join(parts)
-    # hybrid 只在模组明确提供足量剧情脊柱时生效；否则无声回退 full。
-    mod_skills_dir = context.module_dir / "skills"
-    mod_skill_contents: list[str] = []
-    if mod_skills_dir.exists():
-        for mod_skill in sorted(mod_skills_dir.glob("*.skill")):
-            content = mod_skill.read_text(encoding="utf-8").strip()
-            if content:
-                mod_skill_contents.append(content)
     spine_parts = [
         content for content in mod_skill_contents if _PROMPT_SPINE_MARKER in content[:300]
     ]
@@ -190,6 +336,9 @@ def load_system_prompt(
             parts.append(content)
     # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
     parts.extend(spine_parts if use_spine else mod_skill_contents)
+    on_demand_section = _on_demand_catalog_section(catalog, context)
+    if on_demand_section:
+        parts.append(on_demand_section)
     return "\n\n---\n\n".join(parts)
 
 

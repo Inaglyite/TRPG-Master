@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily reference-aware TRPG Master model-context maintenance
+
+[Timer]
+OnCalendar=*-*-* 04:45:00
+Persistent=true
+RandomizedDelaySec=20m
+Unit=trpg-master-context-gc.service
+
+[Install]
+WantedBy=timers.target

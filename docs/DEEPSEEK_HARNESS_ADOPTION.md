@@ -1,8 +1,8 @@
 # DeepSeek Harness 借鉴与采纳决策
 
-状态：H0 安全边界已实施；H1+ 仍为架构提案
+状态：H0/H1/H2 已实施并受本地回归保护；H3 的 Skill Catalog/pin 已实施，结构化记忆仍为未接入模型与公网 API 的 shadow foundation
 
-评审日期：2026-08-18
+评审日期：2026-08-21
 
 上游基线：`deepseek-ai/deepseek-harness` `dsh-v0.1.0-rc.7`，提交
 [`99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`](https://github.com/deepseek-ai/deepseek-harness/tree/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca)
@@ -79,8 +79,9 @@ embedding、冲突消解或遗忘策略。参考
 
 ## 3. 当前项目基线
 
-当前代码没有引入 DeepSeek Harness；运行栈仍是 LangGraph + OpenAI-compatible SDK。工作区最近的
-主要改动集中在云端单人时间线和 UI，并没有建立另一套 Harness 运行时。
+当前代码没有引入 DeepSeek Harness；运行栈仍是 LangGraph + OpenAI-compatible SDK。项目只在
+现有 Python 边界内实现了可审计的 request envelope、工具执行策略、上下文事件投影、容量预检与
+Skill Catalog/pin，不存在另一套 Harness runtime，也不依赖其内部持久协议。
 
 ### 3.1 已有且应保留的基础
 
@@ -104,18 +105,18 @@ embedding、冲突消解或遗忘策略。参考
 
 ### 3.2 现有缺口
 
-1. `ModelSession.messages` 仍是一份可变列表。完成回合会保存快照，但没有一条跨回合、可投影的
-   “模型实际可见事件流”；Skill、Lore、控制指令和摘要也缺少统一来源标识。
-2. [`src/history_compactor.py`](../src/history_compactor.py) 按固定玩家回合数触发，并直接替换消息；两次
-   摘要失败会丢弃最早历史。摘要没有 source turn，也没有验证权威事实或是否真正缩小请求。
-3. 可选 Skill 仍保留关键词作为兼容提示，且版本、依赖图、来源追踪尚未成为 manifest；不过模型已不能
-   通过通用文件工具自行加载规则，受信引擎只会读取固定资源 allowlist。
-4. schema、幂等、超时、输出可见性和 durable 工具审计仍分散在不同模块；H0 已补上严格 JSON、请求级
-   allowlist 与模型/内部 caller 边界，H1 再收口为完整 pipeline。
-5. `npc_conversations` 保存的是模型曾说过的话，不等于经规则确认的事实；它目前又会被放进后续权威
-   上下文。对话记录、事实记忆和叙事摘要需要分层。
-6. Prompt section、权威上下文、Lore、Skill 和控制消息由多个模块直接拼接，缺少统一的 priority、
-   token budget、audience、provenance 和 digest。
+1. `messages` 仍是当前的运行 surface，但 H2 已追加记录其 seed、控制注入、assistant/tool 消息、请求
+   envelope 与 checkpoint，并在 shadow 模式比较投影 digest；它尚未成为唯一读取来源。
+2. 历史压缩现在只使用可验证的 replace/rebase checkpoint，失败不会删历史；摘要是**非权威连续性缓存**，
+   不能证明模型没有杜撰公开事实，所以权威场景、线索、骰值和资源每回合仍从 `WorldState`/Turn 重投影。
+3. Skill 已有 manifest、世界级 content/manifest pin、确定性 resolver 和来源事件；关键词只保留为漏加载
+   诊断。结构化记忆表仍是 shadow foundation，尚未暴露给模型工具、HTTP 或 WebSocket。
+4. H1 已将模型调用收束进 issued request snapshot + V2 pipeline；受信引擎内部兼容调用和跨介质副作用仍
+   需要继续按 principal/outbox 边界扩展，不能把新 handler 直接塞进全局 registry。
+5. `npc_conversations` 仍是叙事 transcript，不是 accepted fact；任何未来记忆接入必须保持 transcript、
+   candidate 与确定性接受的事实三层分离。
+6. Context section 已有 digest、来源、audience、估算 token 和 capacity evidence；更细粒度的 provider
+   adapter、模型专属 tokenizer 与长期 payload 限额属于 H4/运维治理，不在当前游戏热路径偷偷实现。
 
 ### 3.3 必须先修的 P0 工具授权问题
 
@@ -144,9 +145,10 @@ root/path policy 拒绝私密、身份、存档和控制字段；“工具名允
 或遥测。现有 module spine/keeper notes 也可能包含秘密，需按同一 audience 规则盘点，不能宣称仅修
 一个工具就消除了模型对秘密的接触。
 
-H0 已删除 active core/keeper Skill 中要求模型调用 `read_file` 的旧指令，并由受信引擎按固定 resource
-ID 注入内容。native 与 DSML 的模型调用都携带同一请求快照，执行点会拒绝 `read_file`、私密工具和所有
-未下发能力；普通日志只记录元数据。后续 H1 仍要补齐 durable audit、幂等和 timeout。
+H0 已删除 active core/keeper Skill 中要求模型调用 `read_file` 的旧指令，并由受信引擎按 manifest/pin
+注入内容。native 与 DSML 的模型调用都携带同一份**服务端签发、绑定当前 world/turn 的**请求快照；执行点
+只使用该请求的精确 catalog，拒绝旧快照、伪造快照、私密工具和所有未下发能力。普通日志只记录元数据；
+H1 的 pipeline 继续记录去敏 outcome、幂等和 deadline。
 
 ## 4. 目标架构
 
@@ -276,24 +278,23 @@ ToolDescriptor
 把当前压缩器改造成独立 `ContextCompactor`：
 
 1. 计算下一次真实 request envelope：system、tools、history、Lore、Skill 和 provider usage/cache；
-2. 只有 provider/model 容量已知且完整 envelope 能装入时，才以容量约 75%–80% 作为可配置触发线；
-   容量未知时使用保守的部署配置与 provider overflow 信号，不能宣称固定比例；
+2. 对完整 provider wire payload（messages + tools JSON framing）做保守估算，以部署者配置的窗口比例
+   作为预压缩触发线；`TRPG_CONTEXT_WINDOW_TOKENS` 必须由部署者按 provider/model 的已知总窗口配置，
+   估算不是 tokenizer-perfect 的容量证明；
 3. 先确定性裁剪过大的旧工具结果，保留有界 head + marker + tail，原结果仍留在事件日志；
 4. 选择最旧、完整、call/result 配对平衡的 surface 范围；
-5. 摘要必须记录 source sequences/turn ids，并验证输出比被替换范围更小；
+5. 摘要 checkpoint 必须记录 source references，并验证输出比被替换范围更小；
 6. 以 replace checkpoint 遮蔽旧 surface，不删除原始事件；
 7. 摘要失败、超时、取消或不收敛时保持原 surface，不再使用“丢弃最早消息”兜底；
 8. 只有发生了持久、可验证的 surface 缩减后，context-overflow 请求才可重试。
 
-若 system core、工具 schema、最新不可拆消息或其他不可裁剪 section 本身已经超过容量，返回明确的
-`irreducible_context` 诊断（包含各 section token、最大项和配置来源），停止自动重试；不得循环摘要或
-偷偷删除安全规则。压缩性能应使用录制请求和构造的极限 context fixture 测量，不把公网模型延迟算作
-本地 pipeline p95。
+若 system core、工具 schema、最新不可拆消息或其他不可裁剪 section 在一次安全 prune/summary 后仍超过
+容量，返回 metadata-only `irreducible_context` 诊断并停止自动重试；不得循环摘要或偷偷删除安全规则。
+压缩性能应使用录制请求和构造的极限 context fixture 测量，不把公网模型延迟算作本地 pipeline p95。
 
-摘要结构必须是 TRPG 专用的，至少包含：当前场景与世界时间、玩家已知事实、已发现线索、NPC 已公开
-互动、未完成目标、角色资源变化、精确骰值/规则结果、待处理选择和来源 turn_id。精确骰值、资源和
-规则结论不能信任摘要模型复述，应在摘要后从 `WorldState`/权威 TurnEvent 确定性拼回。摘要只帮助连续
-叙事，不能修改 `WorldState`，也不能把私密事实提升为玩家已知事实。
+摘要采用受限 JSON shape，只作为连续叙事的非权威提示。精确骰值、资源、线索、场景和规则结论绝不信任
+摘要模型复述，而是在每个动作前从 `WorldState`/权威 TurnEvent 确定性重投影；摘要不能修改 `WorldState`，
+不能把私密事实提升为玩家已知事实，也不会接收原始 tool result 或控制消息作为输入。
 
 ### 5.4 Skill Catalog，不再赌关键词
 
@@ -419,7 +420,7 @@ Provider 原始流还应先归一化为服务端内部的 `reasoning | public_te
 
 ## 7. 分阶段路线
 
-### H0：安全边界与基线测试（已实施，2026-08-18）
+### H0：安全边界与基线测试（已实施，2026-08-21）
 
 - 每次模型请求冻结 `request_id/step/profile/caller/allowed_tool_names/catalog_digest`，DSML 与 structured
   call 携带同一快照到执行点，禁止按全局 registry 重新推导权限；
@@ -440,11 +441,14 @@ Provider 原始流还应先归一化为服务端内部的 `reasoning | public_te
 现有需要规则 Skill 的玩法由确定性注入维持，不因移除文件工具而退化；公开流、玩家可见历史和普通
 日志无 secret 泄漏。
 
-实现落点：`src/tool_policy.py` 冻结并校验请求快照，`src/model_request.py` 生成可重放的 request envelope，
-`src/agent_graph.py` 对 structured/DSML 走同一拒绝路径，`src/skill_resources.py` 只加载固定资源。相关
-golden、拒绝、泄漏与轮次边界回归在 `tests/test_tool_policy.py`，完整 Python 测试基线为 590 passed、5 skipped。
+实现落点：`src/model_request.py` 在最终 wire request 才生成 snapshot；
+`src/tool_request_authority.py` 签发并绑定 world/turn/exact catalog；`src/tool_pipeline.py` 与
+`src/agent_graph.py` 对 structured/DSML/legacy path 都只使用该已签发 catalog；
+`src/model_tool_catalog.py` 生成递归 closed schema；`src/skill_activation.py` 只加载 pin 中允许的资源。
+相关 golden、拒绝、重放、泄漏与轮次边界回归在 `tests/test_tool_policy.py`、
+`tests/test_tool_pipeline.py` 与 `tests/test_skill_catalog.py`。
 
-### H1：Context Envelope + Tool Pipeline V2（已实施，2026-08-18）
+### H1：Context Envelope + Tool Pipeline V2（已实施，2026-08-21）
 
 - `src/tool_pipeline.py` 定义 `ContextSection`、`RequestEnvelope`、`ToolDescriptor`、`ToolCall`、
   `ToolOutcome`、`ToolUnitOfWork` 和 `MutationPlan`。`RequestEnvelope` 把 H0 请求快照扩展为
@@ -468,26 +472,27 @@ golden、拒绝、泄漏与轮次边界回归在 `tests/test_tool_policy.py`，�
   协作式 handler deadline。默认启用 V2。
 
 验收证据：`tests/test_tool_pipeline.py` 覆盖类型化 envelope、语义幂等、取消、deadline、非法输出、旧路径
-shadow、active/completed TurnJournal audit 以及 `ModelCall.details`；H0 的 native/DSML/重放 fixture 继续由
-`tests/test_tool_policy.py` 覆盖。`PYTHONPATH=. ./venv/bin/python tools/benchmark_tool_pipeline.py --assert-budget`
+shadow、active/completed TurnJournal audit 以及 `ModelCall.details`；H0 的 native/DSML/伪造/跨 world-turn
+重放 fixture 继续由 `tests/test_tool_policy.py` 覆盖。`PYTHONPATH=. ./venv/bin/python tools/benchmark_tool_pipeline.py --assert-budget`
 以固定的本地 recorded-shaped handler fixture 在每次验证时输出 80 次样本的 p95；命令会对 pipeline 自身
 `<10ms`、正常本地编排 `<=5%`（公网 LLM 未计入）两项预算失败关闭。
 
-### H2：追加式 Context Event + 非破坏性压缩（压缩部分已实施，2026-08-19）
+### H2：追加式 Context Event + 非破坏性压缩（已实施，2026-08-21）
 
 - 双写模型上下文事件；
 - 实现纯投影器并比较现有 messages digest；
 - 固化 fork/save/resume 的 lineage、session epoch、checkpoint 范围和引用感知 GC；
-- 上线 tool-result pruning、平衡边界、summary replace 和 context-overflow 受控重试；
-- 原始权威 Turn 按产品存档策略保留；私密 Context Event 遵循第 5.6 节的访问、删除和备份生命周期，
-  旧存档仍可 seed；
-- TRPG 专用摘要对 gold scenes 做事实与可见性验证。
+- 上线 tool-result pruning、平衡边界、summary replace、真实 wire-capacity preflight 和 context-overflow
+  一次性受控重试；Pi 的单 slot 流中断/overflow 重试会先释放 slot；
+- 原始权威 Turn 按产品存档策略保留，旧存档仍可 seed；GC 默认只处理 archived worlds，活跃世界不会因
+  请求时维护被删除；
+- 摘要只接受有界 JSON 与确定性 private-fragment guard；它是非权威连续性缓存，关键事实由权威状态重投影。
 
-验收：重放得到相同模型可见 surface；摘要失败/崩溃不丢历史；call/result 始终配对；压缩后请求稳定在
-配置目标以内；容量已知且 envelope 可压缩时通常维持在 75%–80%，不可约上下文则返回诊断而非删规则；
-摘要不能增加权威事实或跨 TIER 泄密，兄弟时间线不能读取彼此事件。
+验收：同一事件日志投影得到相同模型 surface；摘要失败/崩溃不丢历史；call/result 始终配对；可压缩的
+请求会在 provider 调用前重建并重新评估，只有安全压缩后仍达到 hard 上限才返回诊断而非删规则；摘要不能
+写入权威事实或回显已知私密正文，兄弟时间线不能读取彼此事件。摘要模型文本本身不被当作事实来源。
 
-实施落点（2026-08-19，本批压缩部分）：`src/context_events.py` 新增
+实施落点：`src/context_events.py` 新增
 `project_with_refs`（投影逐条带 `(session_id, sequence)` provenance，replacement 位映射到
 checkpoint 事件自身，支持嵌套引用）；`src/context_shadow.py` 新增 `replace_range` /
 `prune_messages` 与 adapter `compact_engine` / `prune_engine`——压缩先校验投影==权威 messages
@@ -497,23 +502,37 @@ checkpoint 事件自身，支持嵌套引用）；`src/context_shadow.py` 新增
 一次（不可约则诊断，不删规则；`messages_override` 请求不触发；回合内压缩同步更新
 `_turn_context_surface`，rollback 落在压缩后表面）。语义分工：**rebase 换历史**（reset/load 兜底/
 adopt/branch/rewrite），**replace 压历史**（summary/pruning），replace 事件一律不带 turn_id。
-验收证据：`tests/test_context_compaction.py`（replace 签发、边界不拆 call/result、截断兜底不丢
-历史、diverge 回退 rebase、回合内 rollback 一致性、pruning 配对、overflow 重试一次/不可约不
-重试）+ `tests/test_context_events.py` 的 with_refs  golden；全量基线 682 passed、5 skipped。
-尚未做：gold scenes 摘要事实性 LLM 评测、GC 定时/管理面接入（`reference_aware_gc` 仍为手动
-入口）、私密事件备份生命周期的显式确认。
+摘要安全补充：`src/context_summary.py` 在摘要输入侧剔除引擎控制消息，并对候选摘要执行确定性可见性
+检查；私有 memory、未披露线索与 NPC secret 的已知正文不得被回写到摘要。摘要模型不可用、输出不合法
+或未通过可见性检查时，`HistoryCompactor` 只记录去敏诊断并保留原有 model surface——不再以“已丢弃
+最早消息”的伪摘要替换历史。`tests/test_context_summary.py` 固定公开、私有、未披露线索三类 gold
+fixture，且验证检查器不会写入 WorldState。
 
-### H3：Skill Catalog + 结构化记忆
+管理面：`tools/maintain_context_events.py` 是唯一的显式 GC 入口，默认只处理已归档世界；`--all` 才会
+参考引用关系清理活跃世界的关闭 epoch。生产和 staging 分别通过
+`trpg-master[-staging]-context-gc.timer` 每日运行，GC 仅记录计数型 audit，不输出 context payload。
+`tests/test_context_maintenance.py` 覆盖引用保护、幂等、归档范围、审计，以及物理删除 World 时
+`context_sessions` / `model_context_events` 的外键级联清理。
+
+验收证据：`tests/test_context_compaction.py`（replace 签发、边界不拆 call/result、摘要失败不改写
+surface、diverge 回退 rebase、回合内 rollback 一致性、pruning 配对、overflow 重试一次/不可约不
+重试）、`tests/test_context_events.py` 的 with_refs golden、`tests/test_context_summary.py` 和
+`tests/test_context_maintenance.py`。PostgreSQL 迁移/并发检查由 CI 的 `TRPG_TEST_POSTGRES_URL` 运行；
+本地无该数据库时对应集成用例按测试配置跳过，而不是以 SQLite 冒充 PostgreSQL。
+
+### H3：Skill Catalog + 结构化记忆（Skill 已实施；记忆仅 shadow foundation）
 
 - 官方 Skill 先迁移 manifest/catalog；
 - 关键规则由 action/ruleset/state/capability 确定性激活；
 - 模型按需 loader 仅覆盖非关键 Skill；
 - 固定 world 级 Skill version/hash；
-- 将 NPC transcript 与 accepted fact 分开；
-- branch-aware、audience-aware 的记忆召回先运行 shadow mode，只记录候选不注入模型。
+- `MemoryFactCandidate` / `MemoryFact` 将 NPC transcript 与 accepted fact 分开；当前没有模型工具、HTTP 或
+  WebSocket 读取/写入该表；
+- branch-aware、audience-aware 的记忆候选只运行 shadow mode，不注入模型也不能改变权威状态。
 
-验收：安全关键规则加载覆盖率 100%；每条注入都有来源和 audience；跨世界、跨用户、跨分支、跨 TIER
-错误召回为零；gold scenarios 的候选 precision 至少 95%，且误召回永远不能改变权威状态。
+当前验收：安全关键规则的 manifest resolver/pin/branch inheritance、max context budget、load_skill
+冻结 digest 与来源事件受定向回归保护；结构化记忆在它具备独立 principal/API 边界、并发幂等和 gold
+precision 评测前，不能宣称为可用的玩家功能。
 
 ### H4：Provider 与评测收口
 
@@ -556,8 +575,9 @@ Agent 框架。** 若某项“插件化”不能改善权限、重放、上下�
 
 ## 10. 建议的下一步
 
-H0 已作为独立安全改动完成。下一轮为 H1 写最小接口和一条只读工具纵切；不要同时启动长期记忆、Skill
-重做和 Agent loop 替换。
+H0/H1/H2 已作为当前发布基线完成，H3 的 Skill freeze 也已接入。下一轮优先做 H4：录制 provider
+stream fixture、离线 turn replay、模型错误分级和 Pi staging 灰度；不要把尚未有 principal/评测边界的
+结构化记忆接成模型能力，更不要启动长期记忆 MCP 或 Agent loop 替换。
 
 若需要直接复用上游的某段 MIT 代码，应先记录具体文件、固定提交、修改范围和许可证归属；否则默认
 只复用设计思想并在 Python 中独立实现。

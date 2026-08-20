@@ -14,9 +14,12 @@ service_was_enabled=0
 service_was_active=0
 timer_was_enabled=0
 timer_was_active=0
+context_gc_timer_was_enabled=0
+context_gc_timer_was_active=0
 
 service_name=trpg-master-staging.service
 backup_timer=trpg-master-staging-backup.timer
+context_gc_timer=trpg-master-staging-context-gc.timer
 health_url=http://127.0.0.1:8766/api/ready
 unit_dir=/etc/systemd/system
 nginx_available=/etc/nginx/sites-available/trpg-master-staging
@@ -63,6 +66,8 @@ systemctl is-enabled --quiet "$service_name" >/dev/null 2>&1 && service_was_enab
 systemctl is-active --quiet "$service_name" >/dev/null 2>&1 && service_was_active=1
 systemctl is-enabled --quiet "$backup_timer" >/dev/null 2>&1 && timer_was_enabled=1
 systemctl is-active --quiet "$backup_timer" >/dev/null 2>&1 && timer_was_active=1
+systemctl is-enabled --quiet "$context_gc_timer" >/dev/null 2>&1 && context_gc_timer_was_enabled=1
+systemctl is-active --quiet "$context_gc_timer" >/dev/null 2>&1 && context_gc_timer_was_active=1
 
 cleanup_stale_release_artifacts() {
     local entry name
@@ -169,6 +174,8 @@ rollback_release() {
     echo "staging release activation failed; restoring previous configuration" >&2
     restore_managed_path "$nginx_enabled" nginx-enabled || failed=1
     restore_managed_path "$nginx_available" nginx-available || failed=1
+    restore_managed_path "$unit_dir/trpg-master-staging-context-gc.timer" context-gc-timer || failed=1
+    restore_managed_path "$unit_dir/trpg-master-staging-context-gc.service" context-gc-service || failed=1
     restore_managed_path "$unit_dir/trpg-master-staging-backup.timer" backup-timer || failed=1
     restore_managed_path "$unit_dir/trpg-master-staging-backup.service" backup-service || failed=1
     restore_managed_path "$unit_dir/trpg-master-staging.service" app-service || failed=1
@@ -198,6 +205,16 @@ rollback_release() {
         systemctl start "$backup_timer" || failed=1
     elif systemctl cat "$backup_timer" >/dev/null 2>&1; then
         systemctl stop "$backup_timer" || failed=1
+    fi
+    if [[ "$context_gc_timer_was_enabled" -eq 1 ]]; then
+        systemctl enable "$context_gc_timer" || failed=1
+    elif systemctl cat "$context_gc_timer" >/dev/null 2>&1; then
+        systemctl disable "$context_gc_timer" || failed=1
+    fi
+    if [[ "$context_gc_timer_was_active" -eq 1 ]]; then
+        systemctl start "$context_gc_timer" || failed=1
+    elif systemctl cat "$context_gc_timer" >/dev/null 2>&1; then
+        systemctl stop "$context_gc_timer" || failed=1
     fi
     if nginx -t; then
         systemctl reload nginx.service || failed=1
@@ -495,6 +512,8 @@ PY
         deploy/trpg-master-staging.service
         deploy/trpg-master-staging-backup.service
         deploy/trpg-master-staging-backup.timer
+        deploy/trpg-master-staging-context-gc.service
+        deploy/trpg-master-staging-context-gc.timer
         deploy/nginx-trpg-master-staging.conf
     )
     validate_required_release_files() {
@@ -546,6 +565,8 @@ backup_managed_path "$installer_target" installer
 backup_managed_path "$unit_dir/trpg-master-staging.service" app-service
 backup_managed_path "$unit_dir/trpg-master-staging-backup.service" backup-service
 backup_managed_path "$unit_dir/trpg-master-staging-backup.timer" backup-timer
+backup_managed_path "$unit_dir/trpg-master-staging-context-gc.service" context-gc-service
+backup_managed_path "$unit_dir/trpg-master-staging-context-gc.timer" context-gc-timer
 backup_managed_path "$nginx_available" nginx-available
 backup_managed_path "$nginx_enabled" nginx-enabled
 
@@ -558,6 +579,10 @@ install_managed_file "$release/deploy/trpg-master-staging-backup.service" \
     "$unit_dir/trpg-master-staging-backup.service" 0644
 install_managed_file "$release/deploy/trpg-master-staging-backup.timer" \
     "$unit_dir/trpg-master-staging-backup.timer" 0644
+install_managed_file "$release/deploy/trpg-master-staging-context-gc.service" \
+    "$unit_dir/trpg-master-staging-context-gc.service" 0644
+install_managed_file "$release/deploy/trpg-master-staging-context-gc.timer" \
+    "$unit_dir/trpg-master-staging-context-gc.timer" 0644
 nginx_source="$release/deploy/nginx-trpg-master-staging.conf"
 if [[ -f "$staging_nginx_override" && ! -L "$staging_nginx_override" ]]; then
     nginx_source="$staging_nginx_override"
@@ -582,6 +607,7 @@ fi
 systemctl reload nginx.service
 systemctl enable "$service_name"
 systemctl enable --now "$backup_timer"
+systemctl enable --now "$context_gc_timer"
 rollback_needed=0
 
 kept=0

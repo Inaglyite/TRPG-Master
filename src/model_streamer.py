@@ -10,7 +10,9 @@ from . import context_shadow as _context_shadow
 from .context_overflow import is_context_overflow as _is_context_overflow
 from .context_overflow import retry_after_overflow as _retry_after_overflow
 from .llm_concurrency import LlmBusyError, acquire_llm_slot
-from .model_request import StreamPolicy, prepare_model_request
+from .model_request import StreamPolicy
+from .model_stream_capacity import prepare_with_capacity
+from .model_stream_diagnostics import record_model_diagnostic
 from .model_stream_helpers import (
     emit_inferred_speaker_segments,
     flush_speaker_segments,
@@ -21,6 +23,7 @@ from .model_stream_helpers import (
 from .speaker_parser import SpeakerStreamParser
 from .tool_policy import attach_request_snapshot
 from .tool_protocol import ToolProtocolFilter
+from .tool_request_authority import issue_model_request
 
 
 class ModelStreamer:
@@ -52,12 +55,13 @@ class ModelStreamer:
         messages_override: list[dict] | None = None,
         retry_on_empty: bool = True,
         _overflow_retried: bool = False,
+        _capacity_compaction_attempted: bool = False,
     ) -> tuple[str, list]:
         host = self.host
         started_at = time.monotonic()
         first_token_at: float | None = None
-        prepared = prepare_model_request(
-            host,
+        prepared, _capacity_compaction_attempted = prepare_with_capacity(
+            self,
             model,
             policy=policy,
             system_overlay=system_overlay,
@@ -65,8 +69,15 @@ class ModelStreamer:
             enable_tools=enable_tools,
             temperature=temperature,
             messages_override=messages_override,
+            compaction_attempted=_capacity_compaction_attempted,
         )
+        if prepared is None:
+            return "", []
         _context_shadow.record_prepared_request(host, prepared)
+        # Issue authority only after capacity preflight has selected the final
+        # wire request.  Provisional estimates never consume a request step or
+        # become replayable capabilities.
+        issue_model_request(host, prepared.request_snapshot, prepared.request_tools)
         messages = prepared.messages
         request_role = prepared.request_role
         request_snapshot = prepared.request_snapshot
@@ -88,7 +99,7 @@ class ModelStreamer:
                 llm_slot.release(status="failed")
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型请求已取消") from exc
-            self._diagnose(
+            record_model_diagnostic(
                 host,
                 model,
                 request_role,
@@ -109,24 +120,28 @@ class ModelStreamer:
                 self.log_error(f"模型并发已满: {exc}")
                 host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
                 return "", []
-            if (
-                messages_override is None
-                and not _overflow_retried
-                and _is_context_overflow(exc)
-            ):
-                retried = _retry_after_overflow(
-                    self,
-                    model,
-                    policy=policy,
-                    system_overlay=system_overlay,
-                    system_prompt_override=system_prompt_override,
-                    enable_tools=enable_tools,
-                    temperature=temperature,
-                    buffer_if_tools=buffer_if_tools,
-                    retry_on_empty=retry_on_empty,
-                )
-                if retried is not None:
-                    return retried
+            overflow = _is_context_overflow(exc)
+            if messages_override is None and overflow:
+                if not _overflow_retried and not _capacity_compaction_attempted:
+                    retried = _retry_after_overflow(
+                        self,
+                        model,
+                        policy=policy,
+                        system_overlay=system_overlay,
+                        system_prompt_override=system_prompt_override,
+                        enable_tools=enable_tools,
+                        temperature=temperature,
+                        buffer_if_tools=buffer_if_tools,
+                        retry_on_empty=retry_on_empty,
+                    )
+                    if retried is not None:
+                        return retried
+                # Context overflow is not a transient empty response.  It has
+                # either consumed its one safe compaction attempt or proved
+                # irreducible, so never fall through to the generic retry.
+                self.log_error("模型上下文超出容量，已停止本轮请求")
+                host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
+                return "", []
             if retry_on_empty:
                 self.log_error(f"API 建立流失败，正在重试: {type(exc).__name__}")
                 self.sleep(0.4)
@@ -141,6 +156,7 @@ class ModelStreamer:
                     messages_override=messages_override,
                     retry_on_empty=False,
                     _overflow_retried=_overflow_retried,
+                    _capacity_compaction_attempted=_capacity_compaction_attempted,
                 )
             self.log_error(f"API 请求失败: {type(exc).__name__}")
             host.cb.on_error("模型服务暂时不可用，请稍后重试。")
@@ -153,6 +169,11 @@ class ModelStreamer:
         finish_reason = None
         usage_data: dict = {}
         protocol_filter = ToolProtocolFilter()
+        # A provider stream can fail only once iteration has started.  Never
+        # recurse from the ``except`` below: the global LLM slot is still held
+        # until ``finally`` runs, and Pi deliberately sets that capacity to 1.
+        deferred_retry: str | None = None
+        terminal_overflow = False
 
         # ⟦npc:id⟧ 发言标签增量解析：标签剥离后文本照常流出，
         # speech_start 触发 on_speaker_segment，发言文本带 npc_id 上下文。
@@ -229,49 +250,64 @@ class ModelStreamer:
         except Exception as exc:
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型流已取消") from exc
-            if (
-                messages_override is None
-                and not _overflow_retried
-                and not full_text
-                and not tool_calls_acc
-                and _is_context_overflow(exc)
-            ):
-                retried = _retry_after_overflow(
-                    self,
-                    model,
-                    policy=policy,
-                    system_overlay=system_overlay,
-                    system_prompt_override=system_prompt_override,
-                    enable_tools=enable_tools,
-                    temperature=temperature,
-                    buffer_if_tools=buffer_if_tools,
-                    retry_on_empty=retry_on_empty,
-                )
-                if retried is not None:
-                    return retried
+            overflow = _is_context_overflow(exc)
+            if messages_override is None and not full_text and not tool_calls_acc and overflow:
+                if not _overflow_retried and not _capacity_compaction_attempted:
+                    deferred_retry = "overflow"
+                else:
+                    terminal_overflow = True
             if retry_on_empty and not full_text and not tool_calls_acc:
-                self.log_error(f"API 空流中断，正在重试: {type(exc).__name__}")
-                self.sleep(0.4)
-                return self.stream(
-                    model,
-                    policy=policy,
-                    system_overlay=system_overlay,
-                    system_prompt_override=system_prompt_override,
-                    enable_tools=enable_tools,
-                    temperature=temperature,
-                    buffer_if_tools=buffer_if_tools,
-                    messages_override=messages_override,
-                    retry_on_empty=False,
-                    _overflow_retried=_overflow_retried,
-                )
-            finish_reason = "transport_error"
-            self.log_error(f"API 流式响应中断: {type(exc).__name__}")
-            host.cb.on_error("模型连接中断，已保留本轮收到的内容。")
+                # An overflow has a separate retry budget and must never
+                # degrade into the generic empty-stream retry.
+                if not overflow:
+                    deferred_retry = "empty"
+            if deferred_retry is None and not terminal_overflow:
+                finish_reason = "transport_error"
+                self.log_error(f"API 流式响应中断: {type(exc).__name__}")
+                host.cb.on_error("模型连接中断，已保留本轮收到的内容。")
         finally:
             host._clear_active_stream(provider_stream)
             if llm_slot is not None:
                 # Hold the global slot across the whole stream, not just connect.
                 llm_slot.release()
+
+        if deferred_retry == "overflow":
+            retried = _retry_after_overflow(
+                self,
+                model,
+                policy=policy,
+                system_overlay=system_overlay,
+                system_prompt_override=system_prompt_override,
+                enable_tools=enable_tools,
+                temperature=temperature,
+                buffer_if_tools=buffer_if_tools,
+                retry_on_empty=retry_on_empty,
+            )
+            if retried is not None:
+                return retried
+            self.log_error("模型上下文超出容量，已停止本轮请求")
+            host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
+            return "", []
+        if terminal_overflow:
+            self.log_error("模型上下文超出容量，已停止本轮请求")
+            host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
+            return "", []
+        if deferred_retry == "empty":
+            self.log_error("API 空流中断，正在重试")
+            self.sleep(0.4)
+            return self.stream(
+                model,
+                policy=policy,
+                system_overlay=system_overlay,
+                system_prompt_override=system_prompt_override,
+                enable_tools=enable_tools,
+                temperature=temperature,
+                buffer_if_tools=buffer_if_tools,
+                messages_override=messages_override,
+                retry_on_empty=False,
+                _overflow_retried=_overflow_retried,
+                _capacity_compaction_attempted=_capacity_compaction_attempted,
+            )
 
         trailing_public = protocol_filter.flush()
         full_text += trailing_public
@@ -349,7 +385,7 @@ class ModelStreamer:
             prompt_profile=policy.prompt_profile,
             thinking_mode=policy.thinking_type or "provider",
         )
-        self._diagnose(
+        record_model_diagnostic(
             host,
             model,
             request_role,
@@ -379,39 +415,6 @@ class ModelStreamer:
                 messages_override=messages_override,
                 retry_on_empty=False,
                 _overflow_retried=_overflow_retried,
+                _capacity_compaction_attempted=_capacity_compaction_attempted,
             )
         return full_text, tool_calls
-
-    @staticmethod
-    def _diagnose(
-        host: Any,
-        model: str,
-        role: str,
-        status: str,
-        started_at: float,
-        first_token: float | None,
-        finish_reason: str | None,
-        tool_count: int,
-        messages: list[dict],
-        context_sections: dict,
-        usage: dict,
-        policy: StreamPolicy,
-        **extra: Any,
-    ) -> None:
-        host._append_model_diagnostic(
-            {
-                "model": model,
-                "role": role,
-                "status": status,
-                "elapsed_ms": int((time.monotonic() - started_at) * 1000),
-                "first_token_ms": int(first_token * 1000) if first_token is not None else None,
-                "finish_reason": finish_reason,
-                "tool_count": tool_count,
-                "message_count": len(messages),
-                "context_sections": context_sections,
-                "usage": dict(usage),
-                "prompt_profile": policy.prompt_profile,
-                "thinking_mode": policy.thinking_type or "provider",
-                **extra,
-            }
-        )

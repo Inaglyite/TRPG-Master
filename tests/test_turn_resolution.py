@@ -15,6 +15,7 @@ from src.agent_graph import (
     _prepare_turn,
 )
 from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
+from src.tool_request_authority import issue_model_request
 from src.tools import tool_catalog_for_names
 from src.turn_reconciler import (
     apply_turn_commit,
@@ -74,23 +75,38 @@ def resolution_world() -> dict:
     }
 
 
-def model_tool_call(call_id: str, name: str, arguments: str) -> dict:
-    """Build a server-stamped call as ModelStreamer would for graph tests."""
-    catalog = tool_catalog_for_names([name])
+def model_tool_calls(
+    engine: SimpleNamespace,
+    calls: list[tuple[str, str, str]],
+    *,
+    issued_names: list[str] | None = None,
+) -> list[dict]:
+    """Build one server-issued model response for graph tests.
+
+    All calls in one provider response share exactly one frozen request
+    snapshot.  Tests must not manufacture bearer-like request metadata: the
+    execution path accepts it only after the server has issued the catalog to
+    the same engine.
+    """
+    catalog = tool_catalog_for_names(issued_names or [name for _call_id, name, _arguments in calls])
     snapshot = ToolRequestSnapshot.create(
         step=1,
         profile="story:test",
         caller=MODEL_CALLER,
         tools=catalog,
     )
-    return attach_request_snapshot(
-        {
-            "id": call_id,
-            "type": "function",
-            "function": {"name": name, "arguments": arguments},
-        },
-        snapshot,
-    )
+    issue_model_request(engine, snapshot, catalog)
+    return [
+        attach_request_snapshot(
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            },
+            snapshot,
+        )
+        for call_id, name, arguments in calls
+    ]
 
 
 class ActionCheckInferenceTests(unittest.TestCase):
@@ -667,7 +683,10 @@ class ToolExecutionSafetyTests(unittest.TestCase):
                 {
                     "engine": engine,
                     "tool_round": 0,
-                    "tool_calls": [model_tool_call("call_check", "dice_roll", '{"spec":"1d20"}')],
+                    "tool_calls": model_tool_calls(
+                        engine,
+                        [("call_check", "dice_roll", '{"spec":"1d20"}')],
+                    ),
                 }
             )
 
@@ -688,7 +707,14 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             {
                 "engine": engine,
                 "tool_round": 0,
-                "tool_calls": [model_tool_call("call_read", "read_file", '{"path": ""}')],
+                # A model response was legitimately issued a different,
+                # harmless catalog; it must still not smuggle read_file into
+                # that response.
+                "tool_calls": model_tool_calls(
+                    engine,
+                    [("call_read", "read_file", '{"path": ""}')],
+                    issued_names=["dice_roll"],
+                ),
             }
         )
 
@@ -725,15 +751,18 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _maybe_hint_optional_skill=lambda _name: None,
         )
 
-        def call(call_id):
-            return model_tool_call(call_id, "skill_check", '{"skill":"psychology"}')
-
         with patch("src.agent_graph.glm_quick_summary", return_value=None):
             result = _execute_tools(
                 {
                     "engine": engine,
                     "tool_round": 0,
-                    "tool_calls": [call("first"), call("duplicate")],
+                    "tool_calls": model_tool_calls(
+                        engine,
+                        [
+                            ("first", "skill_check", '{"skill":"psychology"}'),
+                            ("duplicate", "skill_check", '{"skill":"psychology"}'),
+                        ],
+                    ),
                 }
             )
 
@@ -758,14 +787,17 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             {
                 "engine": engine,
                 "tool_round": 0,
-                "tool_calls": [
-                    model_tool_call("call_one", "apply_damage", '{"target":"pc","amount":1}'),
-                    model_tool_call(
-                        "call_two",
-                        "use_item",
-                        '{"item":"手电筒","operation":"use","reason":"照明"}',
-                    ),
-                ],
+                "tool_calls": model_tool_calls(
+                    engine,
+                    [
+                        ("call_one", "apply_damage", '{"target":"pc","amount":1}'),
+                        (
+                            "call_two",
+                            "use_item",
+                            '{"item":"手电筒","operation":"use","reason":"照明"}',
+                        ),
+                    ],
+                ),
             }
         )
 

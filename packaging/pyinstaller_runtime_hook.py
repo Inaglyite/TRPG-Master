@@ -26,6 +26,10 @@ LATER_TABLES = {
     "room_actions",
     "context_sessions",
     "model_context_events",
+    "world_skill_pins",
+    "world_skill_pin_manifests",
+    "memory_fact_candidates",
+    "memory_facts",
 }
 
 
@@ -91,7 +95,10 @@ def detect_unversioned_revision(database_url: str) -> str | None:
                 "无法接管未版本化数据库：缺少基础表 " + ", ".join(missing_base)
             )
         for table in sorted(base_tables):
-            _validate_columns(db_inspector, metadata, table)
+            # ``worlds.root_world_id`` is added by 0010; an older unversioned
+            # database legitimately lacks it until ``upgrade head`` runs.
+            omit = {"root_world_id"} if table == "worlds" else set()
+            _validate_columns(db_inspector, metadata, table, omit=omit)
 
         has_invites = "world_invites" in tables
         has_investigators = "world_investigators" in tables

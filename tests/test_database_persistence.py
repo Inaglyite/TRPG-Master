@@ -538,8 +538,15 @@ def test_active_turn_guard_migration_fails_closed_for_legacy_duplicates(tmp_path
         text=True,
     )
     with session_scope(url) as session:
-        session.add(World(id="legacy-duplicate-world", module_name="legacy-module"))
-        session.flush()
+        # Insert the legacy world with raw SQL: the pre-0010 schema lacks the
+        # ``root_world_id`` column, so the ORM model cannot be used here.
+        session.execute(
+            text(
+                "INSERT INTO worlds "
+                "(id, module_name, module_id, module_version, status, metadata_json, created_at, updated_at) "
+                "VALUES ('legacy-duplicate-world', 'legacy-module', '', '', 'active', '{}', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            )
+        )
         session.add_all(
             [
                 Turn(
@@ -610,8 +617,14 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
     )
     owner = create_user(url, "legacy_owner", "legacy password 123")
     with session_scope(url) as session:
-        session.add(
-            World(id="legacy-action-world", module_name="legacy-module")
+        # Insert the legacy world with raw SQL: the pre-0010 schema lacks the
+        # ``root_world_id`` column, so the ORM model cannot be used here.
+        session.execute(
+            text(
+                "INSERT INTO worlds "
+                "(id, module_name, module_id, module_version, status, metadata_json, created_at, updated_at) "
+                "VALUES ('legacy-action-world', 'legacy-module', '', '', 'active', '{}', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            )
         )
         session.add(
             WorldMember(

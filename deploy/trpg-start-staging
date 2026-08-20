@@ -21,6 +21,7 @@ readonly -a required_units=(
     postgresql.service
     nginx.service
     trpg-master-staging-backup.timer
+    trpg-master-staging-context-gc.timer
     trpg-master-staging.service
 )
 

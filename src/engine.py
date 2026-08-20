@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from . import context_shadow as _context_shadow
 from . import investigators as investigator_roster
+from . import skill_activation
 from .action_checks import infer_action_check, infer_scene_transition
 from .action_resolution import ActionResolution, plan_player_action
 from .agent_graph import build_turn_graph
@@ -60,11 +61,6 @@ from .model_streamer import (
 )
 from .npc_conversations import commit_npc_conversations
 from .npc_speaker_aliases import build_npc_speaker_aliases
-from .optional_skills import (
-    hint_optional_skill,
-    inject_optional_skill,
-    inject_skills_for_player_content,
-)
 from .persistence import (
     has_save,
     list_saves,
@@ -181,8 +177,11 @@ class GameEngine:
         self._tier_last_injected = -99  # 首次必定注入
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
-        # 按需 skill 加载追踪：本会话已提示/加载过的 skill 路径，避免重复提示
+        # 本会话已激活的 skill id（防重复注入）；catalog/pin 缓存随 switch_context
+        # 失效，reset 不重 pin（世界 pin 绝不热更新）
         self._loaded_optional_skills: set[str] = set()
+        self._skill_catalog_cache = None
+        self._skill_pins_cache = None
         self._preconfirmed_escalation: dict | None = None
         self._lorebook = None
         self.turn_journal = TurnJournal(
@@ -298,6 +297,7 @@ class GameEngine:
     def switch_context(self, context: RuntimeContext) -> None:
         """切换到另一个世界实例并重建该世界对应的 system prompt。"""
         self.context = context
+        self._skill_catalog_cache = self._skill_pins_cache = None
         self.turn_journal = TurnJournal(
             context.world_dir,
             world_id=context.world_id,
@@ -654,19 +654,18 @@ class GameEngine:
             "narrative_segments": [s.to_dict() for s in rewrite_segments],
         }
 
-    def append_control_instruction(self, content: str) -> None:
+    def append_control_instruction(self, content: str, *, skill_source: dict | None = None) -> None:
         """追加程序控制消息，并与真实玩家发言明确隔离。"""
-        self.messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"{self.CONTROL_MESSAGE_PREFIX}\n"
-                    "静默执行下列指令。不要确认、复述或说明执行过程；"
-                    "不要把这条消息的发出者称为守秘人或 GM。\n"
-                    f"{content}"
-                ),
-            }
-        )
+        message = {
+            "role": "user",
+            "content": (
+                f"{self.CONTROL_MESSAGE_PREFIX}\n静默执行下列指令。不要确认、复述或说明执行过程；"
+                f"不要把这条消息的发出者称为守秘人或 GM。\n{content}"
+            ),
+        }
+        self.messages.append(message)
+        if skill_source:
+            skill_activation.note_injection_provenance(self, message, skill_source)
 
     def _has_pending_control_instruction(self) -> bool:
         if not self.messages:
@@ -1628,6 +1627,8 @@ class GameEngine:
 
     def _execute_tool(self, name: str, args: dict) -> str:
         """执行工具。确认类工具通过回调与玩家交互。"""
+        if name == "load_skill":
+            return skill_activation.execute_load_skill(self, str(args.get("skill_id") or ""))
         if name == "state_set" and args.get("path") == "current_scene.id":
             try:
                 scene_id = json.loads(args.get("value", '""'))
@@ -1816,14 +1817,13 @@ class GameEngine:
         self._handle_tool_handouts(name, args, result)
         return result
 
-    def _load_optional_skill(self, skill_path: str):
-        inject_optional_skill(self, skill_path, log_error=log_error)
+    # ---- Skill 激活（H3；实现见 skill_activation.py）----
 
     def _maybe_hint_optional_skill(self, tool_name: str):
-        hint_optional_skill(self, tool_name, log_error=log_error)
+        skill_activation.hint_tool(self, tool_name)
 
     def _detect_content_skill_hint(self, content: str):
-        inject_skills_for_player_content(self, content, log_error=log_error)
+        skill_activation.sync_world_skills(self, content)
 
     # ---- 记忆管理 ----
 
@@ -1862,7 +1862,8 @@ class GameEngine:
         "1. 绝不主动提及任何 NPC 的 secret 字段内容。\n"
         "2. 叙事仅基于 visible_tags + 已揭示线索 + NPC revealed_entries。\n"
         "3. 不确定某信息是否可透露 → 保守处理，用模糊描述代替。\n"
-        "4. 战斗、疯狂与魔法 Skill 由引擎按玩家行动自动注入，不要为加载规则额外调用 read_file。"
+        "4. 战斗、疯狂等 Skill 由引擎按权威状态自动注入；system prompt 末尾的按需 Skill "
+        "目录可用 load_skill 加载，不要为加载规则额外调用 read_file。"
     )
 
     def _handle_tool_handouts(self, name: str, args: dict, output: str) -> None:

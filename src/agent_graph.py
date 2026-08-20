@@ -27,6 +27,7 @@ from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
+from .skill_activation import note_load_skill_result
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_pipeline import ToolPipeline, record_engine_tool_shadow
 from .tool_policy import (
@@ -36,12 +37,13 @@ from .tool_policy import (
     authorize_model_tool_call,
     denied_tool_result,
     public_tool_call,
+    schemas_for_catalog,
 )
+from .tool_request_authority import execution_snapshot, issued_model_request
 from .tools import (
     COMPLEX_FUNCTIONS,
-    TOOL_SCHEMA_BY_NAME,
+    MODEL_TOOL_NAMES,
     dice_summary,
-    tool_catalog_for_names,
 )
 
 _NON_REPEATABLE_CHECKS = {
@@ -265,11 +267,11 @@ def _call_story_agent(state: TurnState) -> dict:
 
 def _call_combat_agent(state: TurnState) -> dict:
     engine = state["engine"]
-    load_skill = getattr(engine, "_load_optional_skill", None)
-    if load_skill:
-        # Combat state is an authoritative capability, so this does not depend
-        # on a keyword or on the model first attempting an unsafe file read.
-        load_skill("skills/keeper/keeper_combat.skill")
+    sync_skills = getattr(engine, "_detect_content_skill_hint", None)
+    if sync_skills:
+        # 战斗状态是权威能力：由 resolver 的 combat_active 谓词确定性激活
+        # keeper.combat（不依赖关键词，也不要求模型先尝试不安全的文件读取）。
+        sync_skills("")
     _emit_phase(engine, "narrating", "守秘人正在结算战局……")
     with _performance_span(engine, "combat_model"):
         text, tool_calls = engine._stream_llm(
@@ -374,10 +376,17 @@ def _execute_tools(state: TurnState) -> dict:
                 snapshot = ToolRequestSnapshot.from_dict(
                     tc.get(REQUEST_METADATA_KEY) if isinstance(tc, dict) else None
                 )
+                issued = issued_model_request(engine, snapshot)
+                ordered_catalog = issued.catalog_copy()
                 snapshot, name, args = authorize_model_tool_call(
                     tc,
-                    tool_schemas=TOOL_SCHEMA_BY_NAME,
-                    ordered_catalog=tool_catalog_for_names(snapshot.allowed_tool_names),
+                    tool_schemas=schemas_for_catalog(ordered_catalog),
+                    ordered_catalog=ordered_catalog,
+                    model_allowed_tool_names={
+                        str(tool.get("function", {}).get("name") or "")
+                        for tool in ordered_catalog
+                        if str(tool.get("function", {}).get("name") or "") in MODEL_TOOL_NAMES
+                    },
                 )
             except ToolPolicyError as exc:
                 # A rejected call still gets one paired tool result so the next
@@ -413,7 +422,10 @@ def _execute_tools(state: TurnState) -> dict:
                 output = prior_checks[fingerprint]
             else:
                 try:
-                    with _performance_span(engine, "tool_execution"):
+                    with (
+                        _performance_span(engine, "tool_execution"),
+                        execution_snapshot(engine, snapshot),
+                    ):
                         execute_model_tool = getattr(engine, "_execute_model_tool", None)
                         if execute_model_tool:
                             output = execute_model_tool(
@@ -433,6 +445,9 @@ def _execute_tools(state: TurnState) -> dict:
         if ledger is not None and not reused:
             ledger.record_tool(name, args, output)
         engine.messages.append({"role": "tool", "tool_call_id": call_id, "content": output})
+        if name == "load_skill":
+            # load_skill 的工具结果即 Skill 内容注入点，登记 skill 溯源。
+            note_load_skill_result(engine, engine.messages[-1], output)
         log_tool(name, args)
         executed_call_names.append(name)
 

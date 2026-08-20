@@ -15,9 +15,13 @@ from .config import AUTO_SAVE_SLOT
 from .context_checkpoint import public_copy
 from .database import SaveSlot, Turn, World, WorldState, database_url, session_scope, utcnow
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
+from .logger import error as log_error
 from .persistence import save_game
 from .player_notes import PlayerNotesStore
 from .runtime import RuntimeContext
+from .skill_manifest import CatalogError
+from .skill_pins import inherit_pins_for_branch
+from .structured_memory import backfill_world_root_ids
 from .world_store import atomic_write_json
 
 
@@ -27,6 +31,22 @@ class WorldBranch:
     messages: list[dict]
     source_turn_id: str
     label: str
+
+
+def _inherited_root(source_context: RuntimeContext) -> str:
+    """Resolve the tree root a branch must inherit from its source world.
+
+    ``root_world_id`` is normally populated (new roots self-reference via
+    ``RuntimeContext.ensure_initialized``; existing rows are backfilled by
+    migration 0010).  Backfill idempotently first so a legacy source without a
+    denormalized root still yields the correct ancestor.
+    """
+    backfill_world_root_ids(source_context.database_url)
+    with session_scope(source_context.database_url) as session:
+        source_world = session.get(World, source_context.world_id)
+        if source_world is not None and source_world.root_world_id:
+            return source_world.root_world_id
+    return source_context.world_id
 
 
 class WorldBranchService:
@@ -81,10 +101,7 @@ class WorldBranchService:
         with session_scope(database_url(self.runtime_root)) as session:
             if session.query(Turn.id).filter_by(world_id=world_id).first() is not None:
                 return False
-            if (
-                session.query(SaveSlot).filter_by(world_id=world_id).first()
-                is not None
-            ):
+            if session.query(SaveSlot).filter_by(world_id=world_id).first() is not None:
                 return False
         return not (
             self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
@@ -128,6 +145,14 @@ class WorldBranchService:
             )
             source_journal.clone_lineage_to(target_journal, turn_id)
             save_game(messages, "slot_000", context=target_context)
+            # 分支继承源世界的 Skill pin：源已有 pin 时直接复制（不读活
+            # catalog）；catalog 不可读的环境（如合成测试根）只诊断跳过；
+            # 源 pin 失效或复制失败（PinUnavailable）则整个分支创建受控
+            # 失败，进入下方 except 清理——目标绝不独立按磁盘 pin。
+            try:
+                inherit_pins_for_branch(source_context, target_context)
+            except CatalogError as exc:
+                log_error(f"Skill catalog 不可用，分支跳过 pin 继承: {exc}")
             source_notes = PlayerNotesStore(source_context.world_dir, user_id=user_id).load()
             if source_notes.get("text"):
                 PlayerNotesStore(target_context.world_dir, user_id=user_id).save(
@@ -149,6 +174,7 @@ class WorldBranchService:
                     }
                 )
                 world.metadata_json = metadata
+                world.root_world_id = _inherited_root(source_context)
                 world.updated_at = utcnow()
             if os.environ.get("TRPG_WRITE_COMPAT_EXPORTS", "1").lower() in {
                 "1",
@@ -201,12 +227,7 @@ class WorldBranchService:
             raise ValueError("缺少当前 world_id")
 
         with session_scope(database_url(self.runtime_root)) as session:
-            world = (
-                session.query(World)
-                .filter_by(id=world_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
             if world is None or world.status != "active":
                 raise FileNotFoundError(f"时间线不存在或已删除: {world_id}")
 
@@ -218,9 +239,7 @@ class WorldBranchService:
                 raise ValueError("不能删除当前正在使用的时间线")
 
             active_turn = (
-                session.query(Turn.id)
-                .filter_by(world_id=world_id, status="active")
-                .first()
+                session.query(Turn.id).filter_by(world_id=world_id, status="active").first()
             )
             if active_turn is not None:
                 raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
@@ -259,12 +278,7 @@ class WorldBranchService:
             raise ValueError("非法 root_world_id")
 
         with session_scope(database_url(self.runtime_root)) as session:
-            root = (
-                session.query(World)
-                .filter_by(id=root_world_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            root = session.query(World).filter_by(id=root_world_id).with_for_update().one_or_none()
             if root is None or root.status != "active":
                 raise FileNotFoundError(f"存档不存在或已删除: {root_world_id}")
             root_metadata = dict(root.metadata_json or {})
@@ -300,9 +314,7 @@ class WorldBranchService:
                     root_id = parent
                 return root_id
 
-            members = [
-                world for world in candidates if root_of(world.id) == root_world_id
-            ]
+            members = [world for world in candidates if root_of(world.id) == root_world_id]
             member_ids = [world.id for world in members]
             if active_world_id and active_world_id in member_ids:
                 raise ValueError("不能删除当前正在游玩的存档")
@@ -333,12 +345,7 @@ class WorldBranchService:
         if not root_world_id or Path(root_world_id).name != root_world_id:
             raise ValueError("非法 root_world_id")
         with session_scope(database_url(self.runtime_root)) as session:
-            world = (
-                session.query(World)
-                .filter_by(id=root_world_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            world = session.query(World).filter_by(id=root_world_id).with_for_update().one_or_none()
             if world is None or world.status != "active":
                 raise FileNotFoundError(f"存档不存在或已删除: {root_world_id}")
             metadata = dict(world.metadata_json or {})
@@ -365,18 +372,11 @@ class WorldBranchService:
         if not world_id or Path(world_id).name != world_id or world_id in {".", ".."}:
             raise ValueError("非法 world_id")
         with session_scope(database_url(self.runtime_root)) as session:
-            world = (
-                session.query(World)
-                .filter_by(id=world_id)
-                .with_for_update()
-                .one_or_none()
-            )
+            world = session.query(World).filter_by(id=world_id).with_for_update().one_or_none()
             if world is None or world.status != "active":
                 raise FileNotFoundError(f"时间线不存在或已删除: {world_id}")
             metadata = dict(world.metadata_json or {})
-            fallback = (
-                "时间线分支" if isinstance(metadata.get("branch"), dict) else "主时间线"
-            )
+            fallback = "时间线分支" if isinstance(metadata.get("branch"), dict) else "主时间线"
             cleaned = self._clean_label(label, fallback)
             metadata["display_name"] = cleaned
             world.metadata_json = metadata
@@ -408,9 +408,7 @@ class WorldBranchService:
                 return True
         return (self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json").is_file()
 
-    def _tree_world_records(
-        self, module_name: str, active_world_id: str
-    ) -> list[dict]:
+    def _tree_world_records(self, module_name: str, active_world_id: str) -> list[dict]:
         """(world_id, metadata, state) records of the active world's branch tree.
 
         A module can have many unrelated worlds (old local games, regression
@@ -474,9 +472,7 @@ class WorldBranchService:
                 if belongs_to_current_timeline(world.id)
             ]
 
-    def list_tree_saves(
-        self, module_name: str, *, active_world_id: str
-    ) -> list[dict]:
+    def list_tree_saves(self, module_name: str, *, active_world_id: str) -> list[dict]:
         """Saves across the whole branch tree, each tagged with its timeline.
 
         The save panel browses per save: picking a save shows the timeline it
@@ -495,9 +491,7 @@ class WorldBranchService:
             for record in records:
                 world_id = record["world_id"]
                 label = record["metadata"].get("display_name") or "主时间线"
-                slots = (
-                    session.query(SaveSlot).filter_by(world_id=world_id).all()
-                )
+                slots = session.query(SaveSlot).filter_by(world_id=world_id).all()
                 for slot in slots:
                     meta = public_copy(slot.metadata_json or {})
                     meta["id"] = slot.slot_key
@@ -551,11 +545,7 @@ class WorldBranchService:
                         # genuinely empty branch remains visibly non-resumable.
                         "resumable": save is not None
                         or (
-                            self.worlds_dir
-                            / world_id
-                            / "saves"
-                            / AUTO_SAVE_SLOT
-                            / "messages.json"
+                            self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
                         ).is_file(),
                     }
                 )
@@ -624,17 +614,11 @@ class WorldBranchService:
                 groups.setdefault(root_of(world_id), []).append(world_id)
 
             world_ids = list(rows_by_id)
-            save_rows = (
-                session.query(SaveSlot)
-                .filter(SaveSlot.world_id.in_(world_ids))
-                .all()
-            )
+            save_rows = session.query(SaveSlot).filter(SaveSlot.world_id.in_(world_ids)).all()
             played_world_ids = {
                 row[0]
                 for row in (
-                    session.query(Turn.world_id)
-                    .filter(Turn.world_id.in_(world_ids))
-                    .distinct()
+                    session.query(Turn.world_id).filter(Turn.world_id.in_(world_ids)).distinct()
                 )
             }
             completed_turn_rows = (
@@ -646,9 +630,7 @@ class WorldBranchService:
         saves_by_world: dict[str, list[SaveSlot]] = {}
         for save in save_rows:
             saves_by_world.setdefault(save.world_id, []).append(save)
-        completed_turn_counts = {
-            world_id: count for world_id, count in completed_turn_rows
-        }
+        completed_turn_counts = {world_id: count for world_id, count in completed_turn_rows}
 
         def depth_of(world_id: str) -> int:
             depth = 0
@@ -668,7 +650,9 @@ class WorldBranchService:
             metadata = dict(world.metadata_json or {})
             branch = metadata.get("branch") if isinstance(metadata.get("branch"), dict) else {}
             state = dict(state_row.state or {})
-            scene = state.get("current_scene") if isinstance(state.get("current_scene"), dict) else {}
+            scene = (
+                state.get("current_scene") if isinstance(state.get("current_scene"), dict) else {}
+            )
             pc = state.get("pc") if isinstance(state.get("pc"), dict) else {}
             slots = saves_by_world.get(world_id, [])
             auto_save = next((s for s in slots if s.slot_key == AUTO_SAVE_SLOT), None)
@@ -679,8 +663,7 @@ class WorldBranchService:
             )
             return {
                 "world_id": world_id,
-                "label": metadata.get("display_name")
-                or ("时间线分支" if branch else "主时间线"),
+                "label": metadata.get("display_name") or ("时间线分支" if branch else "主时间线"),
                 "is_branch": bool(branch),
                 "parent_world_id": branch.get("parent_world_id"),
                 "depth": depth_of(world_id),
@@ -690,9 +673,7 @@ class WorldBranchService:
                     self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
                 ).is_file(),
                 "scene_name": scene.get("name") or auto_meta.get("scene_name") or "未知场景",
-                "character_name": pc.get("name")
-                or auto_meta.get("character_name")
-                or "未知调查员",
+                "character_name": pc.get("name") or auto_meta.get("character_name") or "未知调查员",
                 "updated_at": updated_at,
                 "save_count": sum(1 for s in slots if s.slot_key != AUTO_SAVE_SLOT),
             }
@@ -708,11 +689,7 @@ class WorldBranchService:
             if not played:
                 played = any(
                     (
-                        self.worlds_dir
-                        / world_id
-                        / "saves"
-                        / AUTO_SAVE_SLOT
-                        / "messages.json"
+                        self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
                     ).is_file()
                     for world_id in member_ids
                 )
@@ -728,7 +705,9 @@ class WorldBranchService:
             root_metadata = dict(root_world[0].metadata_json or {}) if root_world else {}
             active = any(item["active"] for item in timelines)
             resumable = [item for item in timelines if item["resumable"]]
-            resume = next((item for item in timelines if item["active"] and item["resumable"]), None)
+            resume = next(
+                (item for item in timelines if item["active"] and item["resumable"]), None
+            )
             if resume is None and resumable:
                 resume = max(resumable, key=lambda item: str(item.get("updated_at") or ""))
             latest = max(timelines, key=lambda item: str(item.get("updated_at") or ""))

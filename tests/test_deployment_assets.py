@@ -77,6 +77,55 @@ def test_staging_release_contains_isolated_backup_units() -> None:
     assert "Unit=trpg-master-staging-backup.service" in timer
 
 
+def test_context_gc_units_are_scheduled_and_release_managed() -> None:
+    """H2 GC cannot be a forgotten local command after a release rollback."""
+    cases = (
+        (
+            "trpg-master",
+            "install-release.sh",
+            "/opt/trpg-master/current",
+            "/etc/trpg-master/trpg-master.env",
+            "/var/lib/trpg-master",
+        ),
+        (
+            "trpg-master-staging",
+            "install-staging-release.sh",
+            "/opt/trpg-master-staging/current",
+            "/etc/trpg-master/staging.env",
+            "/var/lib/trpg-master-staging",
+        ),
+    )
+    for name, installer_name, release_root, environment_file, runtime_root in cases:
+        service = (PROJECT_ROOT / "deploy" / f"{name}-context-gc.service").read_text(
+            encoding="utf-8"
+        )
+        timer = (PROJECT_ROOT / "deploy" / f"{name}-context-gc.timer").read_text(
+            encoding="utf-8"
+        )
+        installer = (PROJECT_ROOT / "deploy" / installer_name).read_text(encoding="utf-8")
+        timer_name = f"{name}-context-gc.timer"
+
+        assert "Type=oneshot" in service
+        assert "User=trpgdeploy" in service
+        assert f"EnvironmentFile={environment_file}" in service
+        assert f"TRPG_RUNTIME_ROOT={runtime_root}" in service
+        assert (
+            f"ExecStart={release_root}/.venv/bin/python "
+            f"{release_root}/tools/maintain_context_events.py" in service
+        )
+        assert "NoNewPrivileges=true" in service
+        assert "ProtectSystem=strict" in service
+        assert "Persistent=true" in timer
+        assert f"Unit={name}-context-gc.service" in timer
+        assert f"context_gc_timer={timer_name}" in installer
+        assert f'deploy/{name}-context-gc.service"' in installer
+        assert f'deploy/{name}-context-gc.timer"' in installer
+        assert 'systemctl enable --now "$context_gc_timer"' in installer
+
+    launcher = (PROJECT_ROOT / "deploy" / "trpg-start-staging").read_text(encoding="utf-8")
+    assert "trpg-master-staging-context-gc.timer" in launcher
+
+
 def test_production_release_is_same_origin_complete_and_resource_bounded() -> None:
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "deploy-azure.yml").read_text(
         encoding="utf-8"
@@ -311,12 +360,15 @@ previous="$2"
 CALLS="$3"
 service_name=trpg-master.service
 backup_timer=trpg-master-backup.timer
+context_gc_timer=trpg-master-context-gc.timer
 monitor_timer=trpg-master-monitor.timer
 health_url=http://127.0.0.1:8765/api/ready
 service_was_enabled=1
 service_was_active={int(service_was_active)}
 timer_was_enabled=1
 timer_was_active=0
+context_gc_timer_was_enabled=1
+context_gc_timer_was_active=0
 monitor_timer_was_enabled=1
 monitor_timer_was_active=0
 unit_dir=/tmp/unit

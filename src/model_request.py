@@ -6,11 +6,14 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from . import config
+from .context_capacity import CapacityDiagnostic
+from .context_capacity import evaluate as evaluate_capacity
 from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
 from .tool_pipeline import ContextSection, RequestEnvelope
 from .tool_policy import MODEL_CALLER, ToolRequestSnapshot, payload_digest
-from .tools import MODEL_TOOLS, model_tools_for
+from .tools import model_tools_for
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class PreparedModelRequest:
     provider_kwargs: dict[str, Any]
     system_chars: int
     tool_schema_chars: int
+    capacity: CapacityDiagnostic
 
 
 def prepare_model_request(
@@ -47,6 +51,7 @@ def prepare_model_request(
     enable_tools: bool,
     temperature: float,
     messages_override: list[dict] | None,
+    consume_request_step: bool = True,
 ) -> PreparedModelRequest:
     """Normalize messages and freeze the exact catalog visible to this request."""
     if messages_override is None:
@@ -67,20 +72,32 @@ def prepare_model_request(
             messages.insert(0, {"role": "system", "content": system_overlay})
 
     request_role = "combat" if system_overlay else "story"
+    skill_allowlist: tuple[tuple[str, str], ...] = ()
+    if enable_tools:
+        try:
+            from .skill_activation import loadable_skill_allowlist
+
+            skill_allowlist = loadable_skill_allowlist(host)
+        except Exception:
+            # 冻结集合取不到时宁可空集（loader fail-closed），不阻断请求构造。
+            skill_allowlist = ()
     request_tools = (
-        model_tools_for(request_role)
-        if enable_tools and policy.dynamic_tools
-        else MODEL_TOOLS
-        if enable_tools
-        else []
+        model_tools_for(request_role, skill_allowlist=skill_allowlist) if enable_tools else []
     )
     request_step = int(getattr(host, "_tool_request_step", 0)) + 1
-    host._tool_request_step = request_step
+    if consume_request_step:
+        host._tool_request_step = request_step
+    runtime_context = getattr(host, "context", None)
+    world_id = str(getattr(runtime_context, "world_id", "") or "")
+    turn_id = getattr(host, "active_turn_id", None) or getattr(host, "_active_turn_id", None)
     request_snapshot = ToolRequestSnapshot.create(
         step=request_step,
         profile=f"{request_role}:{policy.prompt_profile}",
         caller=MODEL_CALLER,
         tools=request_tools,
+        world_id=world_id,
+        turn_id=str(turn_id) if turn_id else None,
+        skill_allowlist=skill_allowlist,
     )
 
     role_chars: dict[str, int] = {}
@@ -132,22 +149,38 @@ def prepare_model_request(
         }
         for section in sections
     }
-    runtime_context = getattr(host, "context", None)
+    # Estimate the same shape sent to an OpenAI-compatible provider, not just
+    # message ``content``.  Assistant tool-call arguments and JSON framing can
+    # otherwise account for a material part of a long turn.  The small
+    # per-message margin makes this deliberately conservative without claiming
+    # tokenizer-perfect accounting for every gateway.
+    provider_wire = json.dumps(
+        {"messages": messages, "tools": request_tools if enable_tools else []},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    estimated_input_tokens = estimate_text_tokens(provider_wire) + max(2, 4 * len(messages))
+    max_output_tokens = config.max_output_tokens()
+    capacity = evaluate_capacity(
+        estimated_input_tokens,
+        max_output_tokens=max_output_tokens,
+    )
     envelope = RequestEnvelope(
         request_id=request_snapshot.request_id,
-        world_id=str(getattr(runtime_context, "world_id", "") or ""),
-        turn_id=getattr(host, "active_turn_id", None) or getattr(host, "_active_turn_id", None),
+        world_id=world_id,
+        turn_id=turn_id,
         step=request_snapshot.step,
         profile=request_snapshot.profile,
         caller=MODEL_CALLER,
         provider="openai_compatible",
         model=model,
-        max_output_tokens=4096,
+        max_output_tokens=max_output_tokens,
         sections=sections,
         allowed_tool_names=request_snapshot.allowed_tool_names,
         tool_catalog_digest=request_snapshot.tool_catalog_digest,
         message_digest=payload_digest(messages),
         cache_metadata={"stream_usage_requested": bool(policy.stream_usage)},
+        capacity_metadata=capacity.to_dict(),
     )
     # H0's digest-only shape remains for existing diagnostics and its golden
     # fixture.  The typed envelope above is the H1 source of truth.
@@ -166,7 +199,7 @@ def prepare_model_request(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": 4096,
+        "max_tokens": max_output_tokens,
         "stream": True,
     }
     if enable_tools:
@@ -186,4 +219,5 @@ def prepare_model_request(
         provider_kwargs=provider_kwargs,
         system_chars=system_chars,
         tool_schema_chars=tool_schema_chars,
+        capacity=capacity,
     )

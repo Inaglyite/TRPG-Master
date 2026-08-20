@@ -238,7 +238,8 @@ flowchart TD
 - 前置叙事可见后，在第一次模型请求前原子提交线索、`flag_effects`、SAN、NPC 揭示和素材事件。
 - 没有命中发现规则时，`src.action_checks` 仍对明确搜查、聆听、追踪等动作做一次权威检定。
 - 将玩家动作、紧凑世界状态、时代约束、真实检定和已结算发现一并追加为 user 消息。
-- 根据内容关键词按需加载战斗、魔法、心理等 Skill。
+- 根据权威状态、行动 phase、ruleset、模组 capability 与已派发工具确定性加载战斗、魔法、心理等 Skill；
+  内容关键词只留下漏加载诊断，不参与规则注入。
 - 每轮先恢复为 `narrative_model`。默认配置下叙述与判定均为 Pro，也可由设置页或环境变量分别指定。
 
 ### 6.2 模型职责节点路由
@@ -312,11 +313,13 @@ flowchart TD
 
 ### 7.1 常驻上下文
 
-`src.persistence.load_system_prompt()` 按以下顺序组装：
+`src.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin；已有 pin 时，核心与模组
+Skill 的正文、顺序、`opening` 行为均由 pin 中的 manifest 快照决定，绝不反读已变化的磁盘 catalog。
+没有 DB pin 的遗留桌面世界才走受限的磁盘兼容路径。非 opening 请求再按 `full`/`hybrid` 决定使用
+`module.md` 或已声明 spine 的模组 Skill；`module.md` 中的默认 PC 会替换为运行时调查员约束。
 
-1. `src.config.SKILL_LOAD_ORDER` 中的核心 Skill。
-2. 当前模组的 `module.md`，其中模板 PC 会被替换为运行时调查员约束。
-3. 当前模组 `skills/*.skill`。
+按需 Skill 只以有界的 `id + description` 目录出现在 system prompt 中。模型无法调用通用文件工具；它
+只能在本次服务端签发的 `load_skill` schema 中选择被冻结、`on_demand`、`model_invocable` 的 ID。
 
 ### 7.2 回合 Lorebook
 
@@ -330,16 +333,22 @@ flowchart TD
 
 ### 7.3 按需 Skill
 
-战斗、魔法、心理学、调查方法与角色创建等较大 Skill 不全部常驻。引擎根据工具名或玩家消息关键词注入加载提示，并用 `_loaded_optional_skills` 避免同一会话重复提示；故事模型不直接读取项目文件。
+战斗、魔法、心理学、调查方法与角色创建等较大 Skill 不全部常驻。`src.skill_resolver` 只根据
+权威 `WorldState`、ruleset、模组 capability、行动 phase 和已派发工具确定性激活；
+`diagnostic_keywords` 只写漏加载诊断，绝不作为注入条件。`src.skill_activation` 用 pin 正文注入，
+并以当前模型 surface 上受信的 `(skill_id, digest)` 控制标记避免重复；压缩、读档或重试移除了该标记时会
+确定性补回，不能因进程内的“曾加载”标记而丢失规则。模型不直接读取项目文件，也不能热加载未 pin 的规则。
 
 ### 7.4 历史压缩
 
-- 触发单位：玩家回合，而不是内部工具消息数。
-- 周期：每 50 个玩家回合。
-- 保留：最近 24 条消息，并尽量从 user 边界切分。
-- 顺序：GLM -> Pro 模型 -> 简单截断兜底。
-- 时机：`done` 之后静默运行，成功后更新自动存档。
-- 压缩结果作为一条结构化 user 摘要插入 system prompt 之后。
+- 请求前依据完整 wire payload（messages、tool schema 与 JSON framing）计算容量；
+  `TRPG_CONTEXT_WINDOW_TOKENS`、`TRPG_CONTEXT_TARGET_RATIO`、`TRPG_MAX_OUTPUT_TOKENS` 决定预压缩和硬拒绝边界。
+- 先裁剪窗口外过大的 tool result，保留 head + marker + tail；原始结果仍留在 Context Event 日志。
+- 摘要只在完整 user/tool 边界 replace 旧 surface，失败、不可验证或未缩小时保留原 surface；不再有截断兜底。
+- provider context overflow 最多触发一次安全压缩重试；流中失败会先释放全局 LLM slot，避免树莓派单并发自锁。
+- 摘要是受限 JSON 的**非权威连续性缓存**。场景、资源、骰值和线索每回合从 `WorldState`/Turn 重投影，
+  摘要不能写入权威状态或成为事实来源。
+- `done` 后的低频维护仍可尝试压缩；成功才更新自动存档。已归档世界的旧 Context Event 由每日维护任务引用感知 GC。
 
 TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险回合，也会每 10 轮至少注入一次。前 3 轮不重复注入。
 
@@ -736,7 +745,9 @@ reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果
 
 - 服务端已提供 Argon2id 账号、可撤销 Session 和世界成员权限。桌面模式默认允许匿名游戏；公网部署必须设置 `TRPG_REQUIRE_AUTH=1`、通过 TLS 反向代理访问，并关闭或按需开放注册。
 - `.env.json` 含 API Key，禁止打包和提交。
-- 资产路由与 `read_file` 有路径边界检查；新增文件接口时必须保持相同约束。
+- 模型请求使用服务端签发、绑定当前 world/turn 的精确工具目录；结构化调用与 DSML 都必须匹配该目录。
+  `read_file`、`state_get/state_set`、`get_npc_secret`、私密记忆和展示类工具不在模型 catalog 中；受信引擎的
+  兼容读取仅可使用固定 manifest resource/path allowlist。
 - `.trpgmod` 必须经过跨平台路径、符号链接、文件类型、体积、Schema、引擎版本、引用和 checksum 检查后才能安装。
 - 第三方 `custom_skills` 会改变模型行为，导入预览必须显示信任警告。
 - 不要把模组 secret 直接发送到前端。人物线索只使用公开 name、visible tags 与已发放素材。

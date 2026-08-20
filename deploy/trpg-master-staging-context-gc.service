@@ -1,0 +1,17 @@
+[Unit]
+Description=Reference-aware TRPG Master staging model-context maintenance
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=trpgdeploy
+Group=trpgdeploy
+UMask=0077
+EnvironmentFile=/etc/trpg-master/staging.env
+Environment=TRPG_RUNTIME_ROOT=/var/lib/trpg-master-staging
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/trpg-master-staging/current/.venv/bin/python /opt/trpg-master-staging/current/tools/maintain_context_events.py
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true

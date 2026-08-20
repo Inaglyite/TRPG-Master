@@ -14,17 +14,20 @@ from src.engine_primitives import TurnCancelledError
 from src.model_request import StreamPolicy, prepare_model_request
 from src.tool_pipeline import ToolPipeline
 from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
+from src.tool_request_authority import issue_model_request
 from src.tools import tool_catalog_for_names
 
 
-def _model_call(call_id: str, name: str, arguments: str) -> dict:
+def _model_call(engine: _PipelineEngine, call_id: str, name: str, arguments: str) -> dict:
     snapshot = ToolRequestSnapshot.create(
         step=3,
         profile="story:fixture",
         caller=MODEL_CALLER,
         tools=tool_catalog_for_names([name]),
+        world_id=engine.context.world_id,
+        turn_id=engine.active_turn_id,
     )
-    return attach_request_snapshot(
+    call = attach_request_snapshot(
         {
             "id": call_id,
             "type": "function",
@@ -32,6 +35,29 @@ def _model_call(call_id: str, name: str, arguments: str) -> dict:
         },
         snapshot,
     )
+    issue_model_request(engine, snapshot, tool_catalog_for_names([name]))
+    return call
+
+
+def _model_call_for_legacy(engine, call_id: str, name: str, arguments: str) -> dict:
+    """Issue a request for the legacy graph fixture without a RuntimeContext."""
+    catalog = tool_catalog_for_names([name])
+    snapshot = ToolRequestSnapshot.create(
+        step=3,
+        profile="story:fixture",
+        caller=MODEL_CALLER,
+        tools=catalog,
+    )
+    call = attach_request_snapshot(
+        {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": arguments},
+        },
+        snapshot,
+    )
+    issue_model_request(engine, snapshot, catalog)
+    return call
 
 
 class _PipelineEngine:
@@ -62,8 +88,8 @@ def test_pipeline_semantic_idempotency_records_each_call_without_duplicate_write
     engine = _PipelineEngine()
     pipeline = ToolPipeline(engine, timeout_ms=5000)
 
-    first = pipeline.execute(_model_call("call-first", "state_add_item", '{"item":"钥匙"}'))
-    retry = pipeline.execute(_model_call("call-retry", "state_add_item", '{"item":"钥匙"}'))
+    first = pipeline.execute(_model_call(engine, "call-first", "state_add_item", '{"item":"钥匙"}'))
+    retry = pipeline.execute(_model_call(engine, "call-retry", "state_add_item", '{"item":"钥匙"}'))
 
     assert first.status == "ok"
     assert retry.status == "reused"
@@ -80,7 +106,7 @@ def test_pipeline_cancellation_prevents_handler_execution():
     pipeline = ToolPipeline(engine, timeout_ms=5000)
 
     with pytest.raises(TurnCancelledError):
-        pipeline.execute(_model_call("call-cancelled", "state_add_item", '{"item":"钥匙"}'))
+        pipeline.execute(_model_call(engine, "call-cancelled", "state_add_item", '{"item":"钥匙"}'))
 
     assert engine.executions == []
 
@@ -89,7 +115,9 @@ def test_pipeline_deadline_before_execution_is_one_safe_tool_result():
     engine = _PipelineEngine()
     pipeline = ToolPipeline(engine, timeout_ms=1)
     with patch("src.tool_pipeline.time.monotonic", side_effect=[0.0, 0.01, 0.011]):
-        outcome = pipeline.execute(_model_call("call-timeout", "state_add_item", '{"item":"钥匙"}'))
+        outcome = pipeline.execute(
+            _model_call(engine, "call-timeout", "state_add_item", '{"item":"钥匙"}')
+        )
 
     assert outcome.status == "timeout"
     assert engine.executions == []
@@ -101,7 +129,9 @@ def test_pipeline_invalid_output_is_not_passed_back_to_model():
     engine._execute_model_tool = lambda *_args, **_kwargs: object()
     pipeline = ToolPipeline(engine, timeout_ms=5000)
 
-    outcome = pipeline.execute(_model_call("call-bad-output", "dice_roll", '{"spec":"1d6"}'))
+    outcome = pipeline.execute(
+        _model_call(engine, "call-bad-output", "dice_roll", '{"spec":"1d6"}')
+    )
 
     assert outcome.status == "invalid_output"
     assert "object" not in outcome.output
@@ -121,11 +151,12 @@ def test_old_graph_path_can_shadow_v2_without_second_execution(monkeypatch: pyte
         record_tool_pipeline_shadow=lambda record: shadows.append(dict(record)),
     )
 
+    call = _model_call_for_legacy(engine, "call-shadow", "state_add_item", '{"item":"钥匙"}')
     result = _execute_tools(
         {
             "engine": engine,
             "tool_round": 0,
-            "tool_calls": [_model_call("call-shadow", "state_add_item", '{"item":"钥匙"}')],
+            "tool_calls": [call],
         }
     )
 
@@ -174,7 +205,9 @@ def test_typed_request_envelope_freezes_capacity_context_and_turn_identity():
         "turn-envelope",
         1,
     )
-    assert audit["capacity"] == {"max_output_tokens": 4096}
+    assert audit["capacity"]["max_output_tokens"] == 4096
+    assert audit["capacity"]["status"] == "within"
+    assert audit["capacity"]["estimated_input_tokens"] > 0
     assert audit["tool_catalog_digest"] == prepared.request_snapshot.tool_catalog_digest
     assert [section["id"] for section in audit["sections"]] == [
         "system",

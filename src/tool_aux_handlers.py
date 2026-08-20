@@ -125,6 +125,13 @@ def register_auxiliary_handlers(
     def read_file(_args: dict, _context: RuntimeContext) -> str:
         return "[错误] read_file 已停用；规则素材只能由引擎按固定资源目录注入"
 
+    @runtime.handler("load_skill")
+    def load_skill(_args: dict, _context: RuntimeContext) -> str:
+        # execute_function 直调不是模型路径：模型唯一入口是 GameEngine +
+        # frozen ToolPipeline（request snapshot 冻结 skill id/digest）。
+        # 此 handler 固定拒绝，避免绕过快照去读当前 catalog/磁盘。
+        return json_result({"ok": False, "error": "skill_not_loadable"})
+
     @runtime.handler("show_handout")
     def show_handout(args: dict, context: RuntimeContext) -> str:
         result = state_command(

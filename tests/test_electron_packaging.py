@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
@@ -27,6 +28,10 @@ MIGRATION_HOOK = _load_module(
 BUNDLE_VERIFY = _load_module(
     "trpg_bundle_verify",
     PROJECT_ROOT / "packaging" / "verify_backend_bundle.py",
+)
+MIGRATION_0011 = _load_module(
+    "trpg_skill_pin_manifest_migration",
+    PROJECT_ROOT / "migrations" / "versions" / "20260821_0011_skill_pin_manifests.py",
 )
 
 
@@ -115,6 +120,52 @@ def test_packaged_migrations_safely_adopt_create_all_database(
         active_turn_index = indexes[ACTIVE_TURN_WORLD_INDEX]
         assert active_turn_index["unique"] == 1
         assert str(active_turn_index["dialect_options"]["sqlite_where"]) == "status = 'active'"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("case", "definition", "expected"),
+    [
+        (
+            "not_null",
+            "pin_id VARCHAR NOT NULL PRIMARY KEY, entry_snapshot JSON, "
+            "FOREIGN KEY(pin_id) REFERENCES world_skill_pins(id) ON DELETE CASCADE",
+            "entry_snapshot 必须 NOT NULL",
+        ),
+        (
+            "json",
+            "pin_id VARCHAR NOT NULL PRIMARY KEY, entry_snapshot TEXT NOT NULL, "
+            "FOREIGN KEY(pin_id) REFERENCES world_skill_pins(id) ON DELETE CASCADE",
+            "entry_snapshot 必须是 JSON/JSONB",
+        ),
+        (
+            "primary_key",
+            "pin_id VARCHAR NOT NULL, entry_snapshot JSON NOT NULL, "
+            "FOREIGN KEY(pin_id) REFERENCES world_skill_pins(id) ON DELETE CASCADE",
+            "pin_id 必须是唯一主键",
+        ),
+        (
+            "cascade",
+            "pin_id VARCHAR NOT NULL PRIMARY KEY, entry_snapshot JSON NOT NULL, "
+            "FOREIGN KEY(pin_id) REFERENCES world_skill_pins(id)",
+            "ON DELETE CASCADE",
+        ),
+    ],
+)
+def test_skill_pin_manifest_adoption_rejects_weakened_constraints(
+    tmp_path: Path, case: str, definition: str, expected: str
+) -> None:
+    """0011 must not stamp a create_all-like table that weakens pin integrity."""
+    engine = sa.create_engine(_sqlite_url(tmp_path / f"{case}.db"))
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text("CREATE TABLE world_skill_pins (id VARCHAR PRIMARY KEY)"))
+            connection.execute(
+                sa.text(f"CREATE TABLE world_skill_pin_manifests ({definition})")
+            )
+        with pytest.raises(RuntimeError, match=expected):
+            MIGRATION_0011._validate_adopt_shape(engine)
     finally:
         engine.dispose()
 
