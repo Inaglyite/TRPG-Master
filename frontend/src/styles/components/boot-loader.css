@@ -11,6 +11,28 @@
   background:
     radial-gradient(ellipse at 50% 35%, var(--bg2, #1e1812) 0%, var(--bg, #14100c) 70%);
   color: var(--gold, #c8a24e);
+  transition: opacity 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.boot-loader-title,
+.boot-loader-bar,
+.boot-loader-progress {
+  transition:
+    opacity 360ms ease,
+    transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 退场：内容轻轻上浮消散，整层幕布随后淡出，露出下方已就绪的界面 */
+.boot-loader--leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-loader--leaving .boot-loader-title,
+.boot-loader--leaving .boot-loader-bar,
+.boot-loader--leaving .boot-loader-progress {
+  opacity: 0;
+  transform: translateY(-14px);
 }
 
 .boot-loader-title {
