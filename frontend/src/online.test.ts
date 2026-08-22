@@ -267,6 +267,30 @@ describe("上次房间恢复", () => {
     expect(useOnlineStore.getState().activeWorldId).toBeNull();
   });
 
+  it("上次房间是云端单人世界时不从多人入口恢复", async () => {
+    localStorage.setItem("trpg-online-world-id", "world-solo");
+    useOnlineStore.setState({
+      view: "lobby",
+      worldsStatus: "ready",
+      worlds: [
+        {
+          world_id: "world-solo",
+          module: "mansion_of_madness",
+          role: "owner",
+          metadata: { name: "雾中宅邸", play_mode: "solo" },
+        },
+      ],
+    });
+
+    await resumeLastRoom();
+
+    // 不尝试进房（不打听房间信息），清除持久化记录，留在大厅。
+    expect(getRoomInfo).not.toHaveBeenCalled();
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+    expect(useOnlineStore.getState().view).toBe("lobby");
+    expect(useOnlineStore.getState().activeWorldId).toBeNull();
+  });
+
   it("旧房间返回 world_not_found 时按资源错误回大厅，而不是误报接口未实现", async () => {
     localStorage.setItem("trpg-online-world-id", "world-deleted");
     vi.mocked(getRoomInfo).mockRejectedValue(

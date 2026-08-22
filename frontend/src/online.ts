@@ -587,6 +587,19 @@ export async function resumeLastRoom(): Promise<void> {
     return;
   }
   if (!worldId) return;
+  // 云端单人世界不从多人入口自动恢复：solo 的续玩入口在「我的冒险」
+  // （含时间线指针），从这里直接进房会把多人游戏入口穿透成单人流程。
+  const stored = useOnlineStore
+    .getState()
+    .worlds.find((world) => world.world_id === worldId);
+  if (stored?.metadata?.play_mode === "solo") {
+    try {
+      localStorage.removeItem(LAST_ROOM_KEY);
+    } catch {
+      /* localStorage 不可用时忽略 */
+    }
+    return;
+  }
   try {
     await enterRoom(worldId);
     const { membersStatus } = useOnlineStore.getState();

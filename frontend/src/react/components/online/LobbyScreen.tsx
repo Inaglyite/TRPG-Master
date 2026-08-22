@@ -46,6 +46,10 @@ export function LobbyScreen() {
   const moduleTitle = (id: string) =>
     modules.find((module) => module.id === id)?.title ?? id;
   const selectedModule = moduleId || modules[0]?.id || "";
+  // 多人大厅只列多人房间；云端单人世界归「我的冒险」管理，两个入口不混。
+  const multiWorlds = worlds.filter(
+    (world) => world.metadata?.play_mode !== "solo",
+  );
 
   async function backToModeSelect() {
     const bridge = desktopBridge();
@@ -90,7 +94,7 @@ export function LobbyScreen() {
         <div className="online-section-head">
           <div>
             <h2 id="lobby-rooms-title">我的房间</h2>
-            <p className="online-section-desc">你参与的全部调查档案</p>
+            <p className="online-section-desc">你参与的多人调查档案</p>
           </div>
           <button
             type="button"
@@ -121,15 +125,15 @@ export function LobbyScreen() {
             </button>
           </div>
         )}
-        {worldsStatus === "ready" && worlds.length === 0 && (
+        {worldsStatus === "ready" && multiWorlds.length === 0 && (
           <div className="online-empty lobby-empty">
             <p className="lobby-empty-mark" aria-hidden="true" />
             <p>还没有房间。创建一个，或在下方输入邀请码加入。</p>
           </div>
         )}
-        {worlds.length > 0 && (
+        {multiWorlds.length > 0 && (
           <ul className="room-list">
-            {worlds.map((world) => (
+            {multiWorlds.map((world) => (
               <li key={world.world_id}>
                 <button
                   type="button"
@@ -150,11 +154,6 @@ export function LobbyScreen() {
                     {moduleTitle(world.module)}
                   </span>
                   <span className="room-card-meta">
-                    {world.metadata?.play_mode === "solo" && (
-                      <span className="online-badge online-badge--solo">
-                        单人
-                      </span>
-                    )}
                     <span
                       className={
                         world.role === "owner"

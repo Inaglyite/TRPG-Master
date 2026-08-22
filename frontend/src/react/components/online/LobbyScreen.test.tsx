@@ -111,7 +111,7 @@ describe("LobbyScreen 房间列表", () => {
     ).toBeInTheDocument();
   });
 
-  it("solo 世界在多人大厅显示单人徽章", () => {
+  it("solo 世界不出现在多人大厅（归「我的冒险」管理）", () => {
     useOnlineStore.setState({
       worldsStatus: "ready",
       worlds: [
@@ -130,12 +130,12 @@ describe("LobbyScreen 房间列表", () => {
       ],
     });
     render(<LobbyScreen />);
-    expect(screen.getByRole("button", { name: /雾中宅邸/ })).toHaveTextContent(
-      "单人",
-    );
+    expect(
+      screen.queryByRole("button", { name: /雾中宅邸/ }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /周五调查夜/ }),
-    ).not.toHaveTextContent("单人");
+    ).toBeInTheDocument();
   });
 });
 
