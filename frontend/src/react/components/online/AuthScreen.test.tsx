@@ -171,6 +171,7 @@ describe("AuthScreen 服务器地址", () => {
       selectLocalMode: vi.fn(),
       selectOnlineMode: vi.fn(),
       returnToLauncher: vi.fn(),
+      openEditor: vi.fn(),
     };
     render(<AuthScreen />);
     expect(

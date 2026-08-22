@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from src.editor_projects import editor_skill_json_schema
 from src.lorebook import lorebook_json_schema
 from src.module_compiler import compile_payload
 from src.module_format import (
@@ -154,6 +155,11 @@ def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
     @router.get("/api/modules/schema/lorebook-v3")
     async def get_lorebook_schema():
         return lorebook_json_schema()
+
+    @router.get("/api/modules/schema/editor-skill-v1")
+    async def get_editor_skill_schema():
+        # TRPG Mod Editor 的 Skill 草稿表单按此 schema 锁定（H3.1 作者契约）。
+        return editor_skill_json_schema()
 
     @router.post("/api/modules/compile")
     async def compile_module_preview(data: dict):

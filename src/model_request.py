@@ -13,7 +13,37 @@ from .lorebook import estimate_text_tokens
 from .persistence import normalize_tool_message_history
 from .tool_pipeline import ContextSection, RequestEnvelope
 from .tool_policy import MODEL_CALLER, ToolRequestSnapshot, payload_digest
-from .tools import model_tools_for
+from .tools import model_tools_for, tool_catalog_for_names
+
+
+def _apply_skill_tool_policy(
+    request_tools: list[dict],
+    *,
+    required: frozenset[str],
+    allowed: frozenset[str] | None,
+    skill_allowlist: tuple[tuple[str, str], ...],
+) -> list[dict]:
+    """H3.1：把激活 Skill 的 required/allowed_tools 声明落到本次请求目录。
+
+    required 显式声明优先于 role 默认排除（缺什么并什么）；allowed 非空时
+    把目录裁到声明并集。声明合法性已在 catalog 加载期 fail-closed 校验，
+    这里只按名字集合做确定性投影。
+    """
+    present = {str((tool.get("function") or {}).get("name") or "") for tool in request_tools}
+    result = list(request_tools)
+    missing = sorted(name for name in required if name not in present)
+    if missing:
+        result.extend(tool_catalog_for_names(missing, skill_allowlist=skill_allowlist))
+    if allowed is not None:
+        # required 永远不受 allowed 上限裁剪（在这里并集，而不是依赖调用方
+        # 预先合并，投影语义单点收口）。
+        ceiling = allowed | required
+        result = [
+            tool
+            for tool in result
+            if str((tool.get("function") or {}).get("name") or "") in ceiling
+        ]
+    return result
 
 
 @dataclass(frozen=True)
@@ -73,17 +103,28 @@ def prepare_model_request(
 
     request_role = "combat" if system_overlay else "story"
     skill_allowlist: tuple[tuple[str, str], ...] = ()
+    required_tools: frozenset[str] = frozenset()
+    allowed_tools: frozenset[str] | None = None
     if enable_tools:
         try:
-            from .skill_activation import loadable_skill_allowlist
+            from .skill_activation import loadable_skill_allowlist, request_tool_policy
 
             skill_allowlist = loadable_skill_allowlist(host)
+            required_tools, allowed_tools = request_tool_policy(host)
         except Exception:
             # 冻结集合取不到时宁可空集（loader fail-closed），不阻断请求构造。
             skill_allowlist = ()
+            required_tools, allowed_tools = frozenset(), None
     request_tools = (
         model_tools_for(request_role, skill_allowlist=skill_allowlist) if enable_tools else []
     )
+    if enable_tools and (required_tools or allowed_tools is not None):
+        request_tools = _apply_skill_tool_policy(
+            request_tools,
+            required=required_tools,
+            allowed=allowed_tools,
+            skill_allowlist=skill_allowlist,
+        )
     request_step = int(getattr(host, "_tool_request_step", 0)) + 1
     if consume_request_step:
         host._tool_request_step = request_step
@@ -202,6 +243,13 @@ def prepare_model_request(
         "max_tokens": max_output_tokens,
         "stream": True,
     }
+    if policy.thinking_type:
+        from .provider_adapter import apply_reasoning_passback, reasoning_passback_required
+
+        if reasoning_passback_required():
+            # DeepSeek thinking 的 reasoning passback 只写 provider wire 副本；
+            # host.messages（持久面/公开面）永远不携带 reasoning_content。
+            provider_kwargs["messages"] = apply_reasoning_passback(host, messages)
     if enable_tools:
         provider_kwargs.update(tools=request_tools, tool_choice="auto")
     if policy.stream_usage:

@@ -20,6 +20,7 @@ export type DesktopBridge = {
     intent?: "lobby" | "solo",
   ): Promise<DesktopResult>;
   returnToLauncher(): Promise<DesktopResult>;
+  openEditor(): Promise<DesktopResult>;
 };
 
 declare global {

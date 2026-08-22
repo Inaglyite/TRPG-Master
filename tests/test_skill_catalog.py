@@ -19,15 +19,28 @@ import pytest
 
 from src.config import PROJECT_ROOT
 from src.context_events import EVENT_CONTEXT_INJECTION, ContextEventStore
-from src.database import Base, World, WorldSkillPin, get_engine, session_scope
+from src.database import (
+    Base,
+    World,
+    WorldSkillPin,
+    WorldSkillPinManifest,
+    get_engine,
+    session_scope,
+)
 from src.skill_manifest import (
     CatalogError,
     catalog_for,
     load_official_catalog,
     read_skill_content,
     skill_content_digest,
+    validate_catalog,
 )
-from src.skill_pins import copy_world_pins, ensure_world_pins
+from src.skill_pins import (
+    copy_world_pins,
+    ensure_world_pins,
+    pinned_catalog,
+    read_world_pins,
+)
 from src.skill_resolver import keyword_misses, resolve_activations
 from src.tool_pipeline import ToolPipeline
 from src.tool_policy import MODEL_CALLER, REQUEST_METADATA_KEY, ToolRequestSnapshot
@@ -199,8 +212,10 @@ def test_installed_module_skills_use_only_a_trusted_logical_root(tmp_path: Path)
         ),
     )
 
-    entry = next(entry for entry in catalog_for(context).skills if entry.trust == "bundled-module")
+    # H3.1：runtime user_root 的本机安装/作者内容是 local-author 信任域。
+    entry = next(entry for entry in catalog_for(context).skills if entry.trust == "local-author")
     assert entry.path == "module://skills/guide.skill"
+    assert entry.max_context_tokens <= 4_000
     assert str(module_dir) not in entry.path
     assert read_skill_content(project, entry, module_dir=module_dir) == "# frozen module rule"
     assert read_skill_content(project, entry) is None
@@ -215,14 +230,87 @@ def test_installed_module_skills_use_only_a_trusted_logical_root(tmp_path: Path)
         catalog_for(context)
 
 
+def test_local_author_budget_cap_and_v2_pin_roundtrip(tmp_path: Path):
+    """local-author 预算硬顶 + catalog_version=2 新 pin 完整往返。"""
+    from src.skill_manifest import SkillCatalog, SkillEntry
+
+    # local-author 预算超过 4000 → 拒绝
+    entry = SkillEntry(
+        id="module.demo.big",
+        path="module://skills/big.skill",
+        version="1.0.0",
+        trust="local-author",
+        residency="core",
+        max_context_tokens=4_001,
+    )
+    with pytest.raises(CatalogError, match="local-author"):
+        validate_catalog(
+            SkillCatalog(catalog_version=2, skills=[entry]),
+            known_tool_names=frozenset(),
+        )
+
+    # 官方 catalog 已升 v2；新 pin 记录 v2 并完整往返。
+    project = tmp_project(tmp_path)
+    context = tmp_context(tmp_path, "world-v2", project)
+    seed_world(sqlite_url(tmp_path), "world-v2")
+    catalog = load_official_catalog(project)
+    assert catalog.catalog_version == 2
+    pins = ensure_world_pins(context, catalog)
+    assert pins
+    assert {pin.catalog_version for pin in pins.values()} == {2}
+    rebuilt = pinned_catalog(pins)
+    assert rebuilt.catalog_version == 2
+    assert [skill.id for skill in rebuilt.skills] == [skill.id for skill in catalog.skills]
+
+
+def test_v1_snapshot_remains_readable_after_v2_upgrade(tmp_path: Path):
+    """v1 冻结快照（缺 H3.1 声明字段）在新代码下行为不变。"""
+    project = tmp_project(tmp_path)
+    context = tmp_context(tmp_path, "world-v1", project)
+    seed_world(sqlite_url(tmp_path), "world-v1")
+    catalog = load_official_catalog(project)
+    pins = ensure_world_pins(context, catalog)
+
+    # 把 sidecar 快照回写成 v1 形态：catalog_version=1 且删掉 H3.1 声明字段，
+    # 模拟 0011 时代的冻结世界。
+    from src.database import WorldSkillPin
+
+    with session_scope(context.database_url) as session:
+        for row in session.query(WorldSkillPin).filter_by(world_id="world-v1"):
+            manifest = (
+                session.query(WorldSkillPinManifest)
+                .filter_by(pin_id=row.id)
+                .one()
+            )
+            snapshot = dict(manifest.entry_snapshot)
+            snapshot["catalog_version"] = 1
+            for field in ("required_tools", "allowed_tools", "user_invocable"):
+                snapshot.pop(field, None)
+            manifest.entry_snapshot = snapshot
+        session.commit()
+
+    pins = read_world_pins(context)
+    assert {pin.catalog_version for pin in pins.values()} == {1}
+    rebuilt = pinned_catalog(pins)
+    assert rebuilt.catalog_version == 1
+    # 声明字段按缺省规范化：v1 世界没有任何工具/玩家调用权限。
+    assert all(
+        not skill.required_tools and not skill.allowed_tools and not skill.user_invocable
+        for skill in rebuilt.skills
+    )
+
+
 @pytest.mark.parametrize(
     "mutate",
     (
         lambda entry: {**entry, "unknown_permission": True},
         lambda entry: {**entry, "activation": {"typo": ["combat_start"]}},
+        # user_invocable 仅 on_demand；core 声明仍然拒绝。
         lambda entry: {**entry, "user_invocable": True},
-        lambda entry: {**entry, "required_tools": ["skill_check"]},
-        lambda entry: {**entry, "allowed_tools": ["skill_check"]},
+        # 未注册的工具名。
+        lambda entry: {**entry, "required_tools": ["not_a_tool"]},
+        # 引擎专用工具对模型不可见，声明即拒绝。
+        lambda entry: {**entry, "allowed_tools": ["read_file"]},
     ),
 )
 def test_manifest_rejects_unknown_or_unenforceable_permission_fields(
@@ -246,6 +334,251 @@ def test_manifest_rejects_unknown_or_unenforceable_permission_fields(
     )
     with pytest.raises(CatalogError):
         load_official_catalog(root)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        # core/deterministic 可声明 required/allowed_tools（模型可见工具名）。
+        lambda entry: {**entry, "required_tools": ["skill_check"]},
+        lambda entry: {**entry, "allowed_tools": ["skill_check", "dice_roll"]},
+    ),
+)
+def test_manifest_accepts_enforceable_tool_declarations(tmp_path: Path, mutate):
+    """H3.1：可执行的工具声明不再是 fail-closed 拒绝对象。"""
+    root = tmp_path / "proj"
+    skill_dir = root / "skills" / "core"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "a.skill").write_text("# A", encoding="utf-8")
+    base = {
+        "id": "core.a",
+        "path": "skills/core/a.skill",
+        "version": "1.0.0",
+        "trust": "core",
+        "residency": "core",
+    }
+    (root / "skills" / "catalog.json").write_text(
+        json.dumps({"catalog_version": 1, "skills": [mutate(base)]}),
+        encoding="utf-8",
+    )
+    catalog = load_official_catalog(root)
+    assert catalog.skills[0].id == "core.a"
+
+
+def test_on_demand_skill_cannot_declare_tool_policy(tmp_path: Path):
+    """on_demand 的加载时机由模型决定，没有"激活时并入工具"的语义。"""
+    root = tmp_path / "proj"
+    skill_dir = root / "skills" / "keeper"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "a.skill").write_text("# A", encoding="utf-8")
+    base = {
+        "id": "keeper.a",
+        "path": "skills/keeper/a.skill",
+        "version": "1.0.0",
+        "trust": "core",
+        "residency": "on_demand",
+        "model_invocable": True,
+    }
+    for field in ("required_tools", "allowed_tools"):
+        (root / "skills" / "catalog.json").write_text(
+            json.dumps({"catalog_version": 1, "skills": [{**base, field: ["skill_check"]}]}),
+            encoding="utf-8",
+        )
+        with pytest.raises(CatalogError, match="on_demand"):
+            load_official_catalog(root)
+
+
+def _policy_engine_stub(tmp_path: Path, world_id: str, catalog_skills: list[dict]):
+    """带自定义 catalog 的最小 engine duck：tmp project + DB 世界 + pin。"""
+    from src.engine import GameEngine
+
+    project = tmp_project(tmp_path)
+    keeper_dir = project / "skills" / "keeper"
+    (keeper_dir / "test_policy.skill").write_text("# policy test", encoding="utf-8")
+    catalog_path = project / "skills" / "catalog.json"
+    raw = json.loads(catalog_path.read_text(encoding="utf-8"))
+    raw["skills"].extend(catalog_skills)
+    catalog_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    with session_scope(url) as session:
+        session.add(World(id=world_id, module_name="mansion_of_madness"))
+    engine = GameEngine.__new__(GameEngine)
+    engine.context = tmp_context(tmp_path, world_id, project)
+    engine.messages = []
+    engine._loaded_optional_skills = set()
+    engine._skill_catalog_cache = None
+    engine._skill_pins_cache = None
+    engine._action_resolution = None
+    engine._tool_pipeline_ledger = None
+    engine._active_turn_id = None
+    return engine
+
+
+def test_request_tool_policy_collects_active_skill_declarations(tmp_path: Path):
+    """激活的 deterministic Skill 的 required/allowed_tools 进入请求策略。"""
+    from src.skill_activation import request_tool_policy
+
+    engine = _policy_engine_stub(
+        tmp_path,
+        "world-a",
+        [
+            {
+                "id": "keeper.test_policy",
+                "path": "skills/keeper/test_policy.skill",
+                "version": "1.0.0",
+                "trust": "core",
+                "residency": "deterministic",
+                "description": "policy test",
+                "required_tools": ["combat_status"],
+                "allowed_tools": ["dice_roll", "combat_status"],
+                "activation": {"combat_active": False},
+            }
+        ],
+    )
+    engine.context.world_store = SimpleNamespace(load=lambda: {})
+
+    required, allowed = request_tool_policy(engine)
+    assert required == frozenset({"combat_status"})
+    # required 永远并入 allowed 上限，不被自己的声明裁掉。
+    assert allowed == frozenset({"dice_roll", "combat_status"})
+
+    # 谓词不成立（combat 激活中）时该 Skill 不参与策略。
+    engine.context.world_store = SimpleNamespace(
+        load=lambda: {"combat_state": {"active": True}}
+    )
+    engine._skill_catalog_cache = None
+    engine._skill_pins_cache = None
+    required, allowed = request_tool_policy(engine)
+    assert required == frozenset()
+    assert allowed is None
+
+
+def _prepared_request(host, **overrides):
+    from src.model_request import StreamPolicy, prepare_model_request
+
+    kwargs = {
+        "policy": StreamPolicy(
+            dynamic_tools=False,
+            stream_usage=False,
+            prompt_profile="full",
+            thinking_type=None,
+        ),
+        "system_overlay": None,
+        "system_prompt_override": None,
+        "enable_tools": True,
+        "temperature": 0.7,
+        "messages_override": None,
+    }
+    kwargs.update(overrides)
+    return prepare_model_request(host, "test-model", **kwargs)
+
+
+def _tool_names(prepared) -> set[str]:
+    return {
+        str((tool.get("function") or {}).get("name") or "")
+        for tool in prepared.request_tools
+    }
+
+
+def test_prepare_request_merges_required_tools_beyond_role_defaults(monkeypatch):
+    """required_tools 显式声明优先于 role 默认排除表。"""
+    import src.skill_activation as activation
+
+    monkeypatch.setattr(activation, "loadable_skill_allowlist", lambda host: ())
+    monkeypatch.setattr(
+        activation,
+        "request_tool_policy",
+        lambda host: (frozenset({"combat_status"}), None),
+    )
+    host = SimpleNamespace(
+        messages=[],
+        _tool_request_step=0,
+        context=SimpleNamespace(world_id="world-a"),
+        _active_turn_id=None,
+    )
+    prepared = _prepared_request(host)
+    # combat_status 默认被 story 目录排除，但 required 声明必须并入。
+    assert "combat_status" in _tool_names(prepared)
+    # 快照冻结的允许集同步包含（执行期授权不另开通道）。
+    assert "combat_status" in prepared.request_snapshot.allowed_tool_names
+
+
+def test_prepare_request_allowed_tools_intersect_catalog(monkeypatch):
+    """allowed_tools 非空声明把当回合模型目录裁到声明并集。"""
+    import src.skill_activation as activation
+
+    monkeypatch.setattr(activation, "loadable_skill_allowlist", lambda host: ())
+    monkeypatch.setattr(
+        activation,
+        "request_tool_policy",
+        lambda host: (frozenset({"combat_status"}), frozenset({"dice_roll"})),
+    )
+    host = SimpleNamespace(
+        messages=[],
+        _tool_request_step=0,
+        context=SimpleNamespace(world_id="world-a"),
+        _active_turn_id=None,
+    )
+    prepared = _prepared_request(host)
+    # required 并入 allowed 上限后，目录只剩声明并集。
+    assert _tool_names(prepared) == {"dice_roll", "combat_status"}
+    assert set(prepared.request_snapshot.allowed_tool_names) == {
+        "dice_roll",
+        "combat_status",
+    }
+
+
+def test_activate_user_skill_loads_user_invocable_pin(tmp_path: Path):
+    """玩家 /skill：pin 内 user_invocable 条目受信注入，其余一律拒绝。"""
+    from src.skill_activation import activate_user_skill
+
+    engine = _policy_engine_stub(
+        tmp_path,
+        "world-a",
+        [
+            {
+                "id": "keeper.player_booster",
+                "path": "skills/keeper/test_policy.skill",
+                "version": "1.0.0",
+                "trust": "core",
+                "residency": "on_demand",
+                "description": "玩家可调用",
+                "user_invocable": True,
+            },
+            {
+                "id": "keeper.model_only",
+                "path": "skills/keeper/test_policy.skill",
+                "version": "1.0.0",
+                "trust": "core",
+                "residency": "on_demand",
+                "description": "仅模型可调用",
+                "model_invocable": True,
+            },
+        ],
+    )
+    engine.context.world_store = SimpleNamespace(load=lambda: {})
+
+    ok, message = activate_user_skill(engine, "keeper.player_booster")
+    assert ok and "已加载技能" in message
+    assert len(engine.messages) == 1
+    content = str(engine.messages[0]["content"])
+    assert "应玩家请求加载" in content
+    assert "[skill-pin id=keeper.player_booster " in content
+    assert "# policy test" in content
+
+    # 重复调用幂等：不重复注入。
+    ok, message = activate_user_skill(engine, "keeper.player_booster")
+    assert ok and "已在上下文中" in message
+    assert len(engine.messages) == 1
+
+    # 非 user_invocable / 未知 id 一律拒绝，且不改变上下文。
+    ok, message = activate_user_skill(engine, "keeper.model_only")
+    assert not ok and "不接受玩家调用" in message
+    ok, message = activate_user_skill(engine, "keeper.unknown")
+    assert not ok and "没有可调用的技能" in message
+    assert len(engine.messages) == 1
 
 
 # ---- pins -----------------------------------------------------------------
@@ -1163,7 +1496,6 @@ def test_pin_set_integrity_detects_missing_and_mismatched_rows(tmp_path: Path):
     assert ensure_world_pins(context, catalog)
 
     # 1) 删一行 sidecar → 混合集（部分有快照）→ fail-closed
-    from src.database import WorldSkillPinManifest
 
     with session_scope(url) as session:
         row = session.query(WorldSkillPin).filter_by(world_id="world-a").first()
@@ -1226,7 +1558,6 @@ def test_sidecar_snapshot_must_be_full_and_nonempty(
     tmp_path: Path, case: str, mutate
 ) -> None:
     """A present sidecar is a full frozen authority snapshot, never legacy."""
-    from src.database import WorldSkillPinManifest
     from src.skill_pins import PinUnavailable
 
     case_root = tmp_path / case
@@ -1247,7 +1578,6 @@ def test_sidecar_snapshot_must_be_full_and_nonempty(
 
 def test_sidecar_catalog_order_must_match_each_pinned_skill(tmp_path: Path) -> None:
     """A complete but reordered catalog snapshot cannot alter injection order."""
-    from src.database import WorldSkillPinManifest
     from src.skill_pins import PinUnavailable
 
     url = sqlite_url(tmp_path)
@@ -1357,7 +1687,6 @@ def test_load_skill_enforces_frozen_max_context_tokens(tmp_path: Path):
     # This is a frozen-metadata test, rather than a source-catalog test: an
     # invalid source budget must now be rejected before pinning.  Pin a valid
     # catalog first, then simulate a corrupted/overly-small frozen budget.
-    from src.database import WorldSkillPinManifest
 
     assert ensure_world_pins(engine.context, catalog_for(engine.context))
     with session_scope(engine.context.database_url) as session:

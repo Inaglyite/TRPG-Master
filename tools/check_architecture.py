@@ -50,6 +50,7 @@ def imports(path: Path) -> set[str]:
 
 
 def check_generated_schemas(errors: list[str]) -> None:
+    from src.editor_projects import editor_skill_json_schema
     from src.lorebook import lorebook_json_schema
     from src.module_format import (
         manifest_json_schema,
@@ -64,6 +65,7 @@ def check_generated_schemas(errors: list[str]) -> None:
         "module-manifest-v2.schema.json": manifest_v2_json_schema(),
         "module-v2.schema.json": module_v2_json_schema(),
         "lorebook-v3.schema.json": lorebook_json_schema(),
+        "editor-skill-v1.schema.json": editor_skill_json_schema(),
     }
     for filename, generated in expected.items():
         path = ROOT / "schemas" / "trpgmod" / filename

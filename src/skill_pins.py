@@ -58,6 +58,7 @@ class PinnedSkill:
     content: str
     entry: SkillEntry  # 冻结的 manifest 元数据（pin 时重建，行为治理的唯一依据）
     order: int  # pin 时的 catalog 顺序（prompt 拼接顺序）
+    catalog_version: int = 1  # pin 时的 catalog 版本（v1 遗产/旧快照为 1）
 
 
 _PIN_LOCKS: dict[tuple[str, str], threading.RLock] = {}
@@ -114,13 +115,16 @@ def _legacy_entry_from_row(skill_row: WorldSkillPin) -> tuple[SkillEntry, int]:
     return entry, 1 << 30
 
 
-def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[SkillEntry, int]:
+def _strict_snapshot_entry(
+    skill_row: WorldSkillPin, snapshot: object
+) -> tuple[SkillEntry, int, int]:
     """Rebuild one full H3 sidecar snapshot, rejecting any partial shape.
 
     The sidecar is a frozen authorization manifest, not a convenience cache.
     Once a world has any sidecar row, an empty JSON object, default-filled
     field, or mismatched metadata must therefore be a controlled failure — it
     must never silently turn into a legacy row or a live catalog read.
+    Returns ``(entry, order, catalog_version)``.
     """
 
     if not isinstance(snapshot, dict) or not snapshot:
@@ -149,7 +153,9 @@ def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[
     if isinstance(order, bool) or not isinstance(order, int) or order < 0:
         raise ValueError("order 非法")
     catalog_version = normalized["catalog_version"]
-    if isinstance(catalog_version, bool) or catalog_version != 1:
+    # v1：H3/0011 快照；v2：H3.1 起的新 pin。两版快照结构一致，v1 缺失的
+    # H3.1 声明字段已按上面的 optional 缺省规范化。
+    if isinstance(catalog_version, bool) or catalog_version not in (1, 2):
         raise ValueError("catalog_version 非法")
     catalog_ids = normalized["catalog_ids"]
     if (
@@ -179,13 +185,17 @@ def _strict_snapshot_entry(skill_row: WorldSkillPin, snapshot: object) -> tuple[
     activation_values = entry.activation.model_dump(exclude_defaults=True)
     if entry.model_invocable and entry.residency != "on_demand":
         raise ValueError("非 on_demand Skill 不可 model_invocable")
+    if entry.user_invocable and entry.residency != "on_demand":
+        raise ValueError("非 on_demand Skill 不可 user_invocable")
+    if entry.residency == "on_demand" and (entry.required_tools or entry.allowed_tools):
+        raise ValueError("on_demand Skill 不可声明工具策略")
     if entry.residency == "deterministic" and not activation_values:
         raise ValueError("deterministic Skill 缺少 activation")
     if entry.residency == "core" and activation_values:
         raise ValueError("core Skill 不可声明 activation")
     if entry.id != skill_row.skill_id:
         raise ValueError("快照 id 与 pin 行不一致")
-    return entry, order
+    return entry, order, catalog_version
 
 
 def _pin_from_row(
@@ -195,8 +205,10 @@ def _pin_from_row(
     if skill_content_digest(row.content) != row.content_digest:
         raise PinUnavailable(f"pin 内容 digest 不匹配: {row.skill_id}")
     try:
-        entry, order = (
-            _legacy_entry_from_row(row) if legacy else _strict_snapshot_entry(row, snapshot)
+        entry, order, catalog_version = (
+            (*_legacy_entry_from_row(row), 1)
+            if legacy
+            else _strict_snapshot_entry(row, snapshot)
         )
     except Exception as exc:
         raise PinUnavailable(f"pin 快照非法: {row.skill_id} ({type(exc).__name__})") from exc
@@ -218,6 +230,7 @@ def _pin_from_row(
         content=row.content,
         entry=entry,
         order=order,
+        catalog_version=catalog_version,
     )
 
 
@@ -286,6 +299,9 @@ def _validate_pin_set(
     ordered_catalogs = [tuple(snapshots[row.id]["catalog_ids"]) for row in rows]
     if len(set(ordered_catalogs)) != 1:
         raise PinUnavailable(f"world={world_id} Skill pin 快照的 catalog_ids 不一致")
+    catalog_versions = {pins[row.skill_id].catalog_version for row in rows}
+    if len(catalog_versions) != 1:
+        raise PinUnavailable(f"world={world_id} Skill pin 快照的 catalog_version 不一致")
     catalog_ids = ordered_catalogs[0]
     if len(catalog_ids) != len(rows) or set(catalog_ids) != set(pins):
         missing = sorted(set(catalog_ids) - set(pins))
@@ -524,12 +540,17 @@ def ensure_world_pins(context, catalog: SkillCatalog) -> dict[str, PinnedSkill] 
 def pinned_catalog(pins: dict[str, PinnedSkill]) -> SkillCatalog:
     """用冻结快照重建该世界的有效 catalog（行为治理只认它，不认当前磁盘 catalog）。"""
     entries = [pin.entry for pin in sorted(pins.values(), key=lambda pin: pin.order)]
+    versions = {pin.catalog_version for pin in pins.values()}
+    if len(versions) != 1:
+        raise PinUnavailable("冻结 Skill pin 的 catalog_version 不一致")
     try:
         # A frozen sidecar may contain an old absolute ``path`` from a prior
         # runtime release.  It is never used to read the pin's body, so retain
         # it as historical metadata while still enforcing every semantic
         # cross-entry invariant (dependencies, residency and permissions).
-        return validate_catalog(SkillCatalog(catalog_version=1, skills=entries), frozen=True)
+        return validate_catalog(
+            SkillCatalog(catalog_version=versions.pop(), skills=entries), frozen=True
+        )
     except Exception as exc:
         raise PinUnavailable(f"冻结 Skill catalog 语义非法: {type(exc).__name__}") from exc
 

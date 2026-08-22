@@ -1,7 +1,9 @@
 # DeepSeek Harness 借鉴与采纳决策
 
 状态：H0/H1/H2 已实施并受本地回归保护；H3 的 Skill Catalog、世界级内容/manifest pin 与 schema
-integrity guard 已实施。结构化记忆仅为未接入模型、游戏回合、公网 API 或玩家界面的 shadow foundation。
+integrity guard 已实施；H3.1（manifest 执行策略、local-author trust、catalog v2、作者契约与
+编辑器入口）与 H4（provider adapter、离线 replay、观测指标）已实施。结构化记忆仅为未接入模型、
+游戏回合、公网 API 或玩家界面的 shadow foundation。
 
 评审日期：2026-08-21
 
@@ -323,9 +325,26 @@ sidecar `world_skill_pin_manifests.entry_snapshot` 冻结上述完整 `SkillEntr
 读取路径，模型仍不能调用它。`required_tools`、`allowed_tools`、`user_invocable` 也已进入严格 schema，
 但任何非空/`true` 声明会被 catalog fail-closed 拒绝——字段存在不代表权限生效。
 
-以下是**未开始的 H3.1 manifest 扩展**，不能在设计文档中被误写成现有能力：被安全门禁的
-`required_tools`/`allowed_tools`/`user_invocable` 的真实执行策略、`local-author` trust、catalog 版本迁移和
-作者编辑 UI。工具权限目前由服务端签发的 request-scoped model catalog 管理；受信引擎的固定资源路径规则
+H3.1 已把上述被安全门禁的字段变为真实执行策略（2026-08-22）：
+
+- `required_tools`（仅 core/deterministic）：catalog 加载期校验必须指向模型可见工具名
+  （否则 fail-closed）；请求组装时把激活 Skill 的声明并入当次模型目录，显式声明优先于
+  role 默认排除，但永远进不了引擎专用/拒绝名单；
+- `allowed_tools`（仅 core/deterministic）：任一激活 Skill 非空声明时，当回合模型工具
+  上限裁到所有声明的并集（required 永远并入上限）；交集结果照常烘进 request snapshot；
+- `user_invocable`（仅 on_demand）：玩家经 `/skill <id>` 命令受信加载 pin 内条目
+  （多人房间经行动者门禁），注入带 `[skill-pin]` 表面标记与溯源，不产生回合；
+- `local-author` trust：runtime user_root（本机安装/作者目录）模组 Skill 的信任域，
+  预算硬顶 4000（bundled-module 保持 12000）；builtin `mod/` 行为不变；
+- catalog v2：官方 catalog 升 `catalog_version=2`；v1 冻结快照按缺省空值规范化读取，
+  旧世界行为不变；pin 集校验 catalog_version 跨行一致；
+- 作者契约：editor 工程支持受校验的 `skills` 段（`EditorSkillDraft`），
+  `/api/modules/schema/editor-skill-v1` 暴露表单 schema，`POST
+  /api/editor/projects/{id}/export` 把工程编译为可导入 .trpgmod（自动补声明
+  custom_skills capability）；TRPG Mod Editor 浏览器版以 `/editor/` 同源 vendored
+  挂载，游戏本地开始页有「模组工坊」入口（Electron 经系统浏览器打开）。
+
+工具权限仍由服务端签发的 request-scoped model catalog 管理；受信引擎的固定资源路径规则
 不是给模型的任意文件读取能力。
 
 加载分三类：
@@ -566,9 +585,11 @@ surface、diverge 回退 rebase、回合内 rollback 一致性、pruning 配对�
   shadow service 建好；分叉读取同时受 source revision 与 accepted-time cutoff 约束，SQLite 的重复 candidate
   提案会收敛到同一 winner，但没有任何模型工具、HTTP/WS、前端、prompt 或正常回合接线。
 
-**H3.1（未开始）manifest 扩展**：被安全门禁的 `required_tools`、`allowed_tools`、`user_invocable` 的真实
-执行策略、`local-author` trust、catalog version migration 与作者编辑 UI。`dependencies`、scene capability
-解析和受信 `resources` allowlist 已在 H3 落地，不能再列作未实现。
+**H3.1（已实施，2026-08-22）manifest 扩展**：`required_tools`/`allowed_tools`/`user_invocable`
+真实执行策略、`local-author` trust、catalog v2 迁移与作者契约见 §5.4 末段。验收证据：
+`tests/test_skill_catalog.py`（声明校验、请求目录并入/裁剪、玩家调用、v1→v2 兼容）、
+`tests/test_game_application.py`（/skill 命令解析）、`tests/test_editor_projects.py` 与
+`tests/test_editor_api.py`（skills 段校验与 .trpgmod 导出）。
 
 另行规划的结构化记忆产品工作：principal/API、生产写入接受者、自动 candidate 抽取、模型/玩家查询、
 向量检索、导出、管理 UI、并发生产监测与 gold precision 评测。它们完成前，`memory_fact_*` 不拥有世界事实，
@@ -579,12 +600,24 @@ load_skill digest 与来源事件；`tests/test_structured_memory.py` 覆盖 sha
 branch/audience/tier 隔离和幂等约束；`tests/test_electron_packaging.py` 覆盖 fresh/create_all→Alembic 的
 0012 接管与被削弱 schema 的 fail-closed 拒绝。
 
-### H4：Provider 与评测收口
+### H4：Provider 与评测收口（已实施，2026-08-22）
 
-- 把 DeepSeek 特有 stream/tool/reasoning/usage/error 行为封装进 adapter；
-- 增加模型请求/结果离线 replay、固定模组 gold turns 和故障注入；
-- 观测 Skill token、Lore 命中、摘要压缩比、cache hit、工具拒绝、重试、首 token 和完整回合耗时；
-- 本地与 Pi staging 灰度，经过回放一致性和真实游戏验收后才进入生产发布流程。
+- `src/provider_adapter.py` 收口 DeepSeek 特有行为：稳定错误分级
+  （auth/quota/rate_limit/context_window/server/transport/timeout/busy）、reasoning
+  提取与公开文本严格分离、thinking 模式的 reasoning passback（以最终 wire call id
+  为键最小生命周期保管，只写 provider wire 副本，不落 host.messages/公开历史/遥测）、
+  被截断工具调用一律 fail-closed；三个调用点（ModelStreamer 流式、HistoryCompactor
+  摘要、GLM 快摘要）统一经 adapter 分级；
+- 离线 replay：`TRPG_RECORD_MODEL_STREAMS` 开启时录制归一化 chunk 序列为 JSONL
+  fixture；`tests/model_fixtures.py` + `tests/fixtures/model_streams/` 提供 gold
+  turns（开场叙述、含 reasoning 的检定工具调用、战斗回合）与确定性重放；
+  故障注入覆盖 5xx 连接失败、流中段中断、空流重试、context overflow 压缩重试，
+  断言错误类与重试记录（`tests/test_model_replay.py`、`tests/test_provider_adapter.py`）；
+- 观测指标：`TurnPerformance.counters` 新增 model_retry_count、
+  model_tool_rejected_count、skill_injection_tokens、lore_hit_count、
+  context_compactions、context_compaction_ratio_pct；诊断含 error_class 与逐次重试的
+  原因/退避（`tests/test_turn_observability.py`）；
+- 本地全量回归通过后随本次 release 进入 Pi staging 灰度。
 
 ## 8. 测试与不变量
 
@@ -620,9 +653,11 @@ Agent 框架。** 若某项“插件化”不能改善权限、重放、上下�
 
 ## 10. 建议的下一步
 
-H0/H1/H2 已作为当前发布基线完成，H3 的 Skill freeze 与 schema integrity guard 也已接入。下一轮优先
-做 H4：录制 provider stream fixture、离线 turn replay、模型错误分级和 Pi staging 灰度；不要把尚未有
-principal/评测边界的结构化记忆接成模型能力，更不要启动长期记忆 MCP 或 Agent loop 替换。
+H0/H1/H2 为当前发布基线，H3 Skill freeze 与 schema guard、H3.1 manifest 执行策略与作者契约、
+H4 provider adapter/离线 replay/观测指标均已接入。H4 的 Pi staging 灰度完成后，下一轮候选：
+结构化记忆的产品化前提（principal/API、生产写入接受者、gold precision 评测）仍未开始，
+`memory_fact_*` 保持 shadow-only；真实玩家对 H4 灰度版的验收与至少一次真实模组的
+录制回放一致性复核，应在任何生产发布讨论之前完成。
 
 若需要直接复用上游的某段 MIT 代码，应先记录具体文件、固定提交、修改范围和许可证归属；否则默认
 只复用设计思想并在 Python 中独立实现。

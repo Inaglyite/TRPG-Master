@@ -43,6 +43,8 @@ class TurnIntent:
     player_input: str | None = None
     loaded_message_count: int | None = None
     slot_id: str | None = None
+    # kind="user_skill" 时承载 `/skill <id>` 命令的目标；不产生回合。
+    skill_id: str | None = None
 
 
 class StartGame:
@@ -80,6 +82,7 @@ class ResumeGame:
 
 class PerformAction:
     MAX_ACTION_CHARS = 8_000
+    USER_SKILL_PREFIX = "/skill"
 
     def __init__(self, engine: GameEnginePort):
         self.engine = engine
@@ -92,11 +95,42 @@ class PerformAction:
             raise ApplicationUseCaseError(
                 f"行动内容不能超过 {self.MAX_ACTION_CHARS} 个字符"
             )
+        if normalized == self.USER_SKILL_PREFIX or normalized.startswith(
+            f"{self.USER_SKILL_PREFIX} "
+        ):
+            return TurnIntent(
+                kind="user_skill",
+                engine_input=None,
+                skill_id=self._parse_skill_id(normalized),
+            )
         return TurnIntent(
             kind="action",
             engine_input=normalized,
             player_input=normalized,
         )
+
+    def _parse_skill_id(self, normalized: str) -> str:
+        from .skill_manifest import SKILL_ID_RE
+
+        skill_id = normalized[len(self.USER_SKILL_PREFIX) :].strip()
+        if not skill_id:
+            raise ApplicationUseCaseError("用法：/skill <技能ID>")
+        if not SKILL_ID_RE.fullmatch(skill_id):
+            raise ApplicationUseCaseError(f"非法的技能 ID：{skill_id[:40]}")
+        return skill_id
+
+
+class InvokeUserSkill:
+    """玩家 `/skill <id>` 命令：受信加载 user_invocable Skill，不产生回合。"""
+
+    def __init__(self, engine: GameEnginePort):
+        self.engine = engine
+
+    def execute(self, skill_id: object) -> str:
+        from .skill_activation import activate_user_skill
+
+        _ok, message = activate_user_skill(self.engine, str(skill_id or ""))
+        return message
 
 
 class RewriteTurn:
@@ -145,6 +179,7 @@ class GameApplication:
     perform_action: PerformAction
     rewrite_turn: RewriteTurn
     manage_saves: ManageSaves
+    invoke_user_skill: InvokeUserSkill
 
     @classmethod
     def for_engine(
@@ -159,4 +194,5 @@ class GameApplication:
             perform_action=PerformAction(engine),
             rewrite_turn=RewriteTurn(engine),
             manage_saves=ManageSaves(engine, auto_slot=auto_slot),
+            invoke_user_skill=InvokeUserSkill(engine),
         )

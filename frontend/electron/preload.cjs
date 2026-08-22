@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld("trpgDesktop", {
   selectOnlineMode: (origin, intent) =>
     ipcRenderer.invoke("trpg:select-online", origin, intent),
   returnToLauncher: () => ipcRenderer.invoke("trpg:return-launcher"),
+  openEditor: () => ipcRenderer.invoke("trpg:open-editor"),
 });

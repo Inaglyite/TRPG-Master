@@ -392,6 +392,9 @@ def _execute_tools(state: TurnState) -> dict:
                 # A rejected call still gets one paired tool result so the next
                 # provider request sees a valid assistant/tool batch.  Do not log
                 # model-controlled arguments: they may themselves contain secrets.
+                from .turn_performance import increment_counter
+
+                increment_counter(engine, "model_tool_rejected_count")
                 output = denied_tool_result(exc)
                 executed_tools.append(
                     {

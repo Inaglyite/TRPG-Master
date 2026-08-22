@@ -20,12 +20,15 @@ from .lorebook import estimate_text_tokens
 
 SKILL_ID_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)+$")
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
-TRUST_LEVELS = ("core", "bundled-module")
+# H3.1：local-author = 本机安装/作者目录（runtime modules/）的模组 Skill，
+# 信任低于随仓库内置的 bundled-module，预算与声明受更紧的分级约束。
+TRUST_LEVELS = ("core", "bundled-module", "local-author")
 RESIDENCY_LEVELS = ("core", "deterministic", "on_demand")
 _CATALOG_FILE = "skills/catalog.json"
 _MODULE_URI_PREFIX = "module://"
 _MAX_SKILLS_PER_CATALOG = 128
 _DEFAULT_MODULE_SKILL_MAX_CONTEXT_TOKENS = 12_000
+_LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS = 4_000
 
 
 class CatalogError(Exception):
@@ -120,15 +123,16 @@ class SkillEntry(_StrictSkillModel):
     id: str = Field(min_length=3, max_length=120)
     path: str = Field(min_length=1, max_length=240)
     version: str = Field(min_length=1, max_length=80)
-    trust: Literal["core", "bundled-module"]
+    trust: Literal["core", "bundled-module", "local-author"]
     residency: Literal["core", "deterministic", "on_demand"]
     description: str = Field(default="", max_length=120)
     opening: bool = False
     model_invocable: bool = False
-    # These fields are part of the H3 author contract.  Dependency closure is
-    # implemented below; the other capability-declaration fields are rejected
-    # when non-empty/true until a request-scoped tool/UI policy can enforce
-    # them, so authors never receive a silently ignored permission promise.
+    # H3.1：以下能力声明有真实执行策略。required_tools 在请求组装时并入模型
+    # 目录（可突破 role 默认排除，但永远进不了引擎专用/拒绝名单）；
+    # allowed_tools 非空时把当回合模型工具上限裁到声明并集；user_invocable
+    # 允许玩家经 `/skill <id>` 受信加载。三者都只接受模型可见工具名，
+    # 冻结 pin 重放时不再按当前注册表裁决（见 validate_catalog）。
     required_tools: list[str] = Field(default_factory=list, max_length=64)
     allowed_tools: list[str] = Field(default_factory=list, max_length=64)
     dependencies: list[str] = Field(default_factory=list, max_length=32)
@@ -179,7 +183,9 @@ class SkillEntry(_StrictSkillModel):
 
 
 class SkillCatalog(_StrictSkillModel):
-    catalog_version: int = Field(ge=1, le=1)
+    # v1：H3 初版；v2：H3.1 工具/玩家调用声明生效 + local-author trust。
+    # 旧世界的 v1 冻结快照按缺省空值规范化读取，行为不变。
+    catalog_version: int = Field(ge=1, le=2)
     skills: list[SkillEntry] = Field(min_length=1, max_length=_MAX_SKILLS_PER_CATALOG)
 
     @property
@@ -196,12 +202,18 @@ class SkillCatalog(_StrictSkillModel):
         return [s for s in self.skills if s.residency == "on_demand"]
 
 
-def validate_catalog(catalog: SkillCatalog, *, frozen: bool = False) -> SkillCatalog:
+def validate_catalog(
+    catalog: SkillCatalog,
+    *,
+    frozen: bool = False,
+    known_tool_names: frozenset[str] | None = None,
+) -> SkillCatalog:
     """Validate cross-entry H3 semantics and return the same frozen catalog.
 
-    The implementation intentionally has no ambient tool registry dependency:
-    it can prove that declarations are internally safe, while request-specific
-    tool authorization remains the H1 pipeline's responsibility.
+    工具注册表校验是显式注入的（``known_tool_names``）：生产加载路径传入当前
+    模型可见工具名集，声明指向不存在/模型不可见工具的 catalog 在启动期
+    fail-closed。冻结 pin 重放（``frozen=True``）跳过该检查——旧世界的行为
+    由 pin 冻结，不因后来的工具注册表变化而失效。
     """
 
     if not catalog.skills or len(catalog.skills) > _MAX_SKILLS_PER_CATALOG:
@@ -221,23 +233,39 @@ def validate_catalog(catalog: SkillCatalog, *, frozen: bool = False) -> SkillCat
             raise CatalogError(f"{entry.id}: deterministic skill 缺少 activation 谓词")
         if entry.residency == "core" and entry.activation.model_dump(exclude_defaults=True):
             raise CatalogError(f"{entry.id}: core skill 不应声明 activation 谓词")
-        if entry.user_invocable:
-            raise CatalogError(f"{entry.id}: 当前运行时尚不支持 user_invocable Skill")
-        if entry.required_tools or entry.allowed_tools:
-            raise CatalogError(
-                f"{entry.id}: 当前运行时尚不支持 required_tools/allowed_tools 声明"
-            )
+        # H3.1：user_invocable 只接受 on_demand——core/deterministic 本来就会
+        # 在场，玩家调用对它们没有意义。
+        if entry.user_invocable and entry.residency != "on_demand":
+            raise CatalogError(f"{entry.id}: 仅 on_demand skill 可 user_invocable")
+        # required/allowed_tools 的激活时机只对常驻/确定性激活有定义；
+        # on_demand 由模型自主加载，不存在"激活时并入工具"的语义。
+        if entry.required_tools and entry.residency == "on_demand":
+            raise CatalogError(f"{entry.id}: on_demand skill 不可声明 required_tools")
+        if entry.allowed_tools and entry.residency == "on_demand":
+            raise CatalogError(f"{entry.id}: on_demand skill 不可声明 allowed_tools")
+        if not frozen and known_tool_names is not None:
+            for name in (*entry.required_tools, *entry.allowed_tools):
+                if name not in known_tool_names:
+                    raise CatalogError(f"{entry.id}: 声明了模型不可见的工具: {name}")
         if not frozen and entry.trust == "core":
             if not _is_project_skill_path(entry.path):
                 raise CatalogError(f"{entry.id}: core Skill 必须位于 skills/ 安全路径")
             if any(not _is_project_skill_path(resource) for resource in entry.resources):
                 raise CatalogError(f"{entry.id}: core Skill resource 必须位于 skills/ 安全路径")
-        elif not frozen and entry.trust == "bundled-module":
+        elif not frozen and entry.trust in ("bundled-module", "local-author"):
             if not _is_module_skill_uri(entry.path):
-                raise CatalogError(f"{entry.id}: bundled Skill 必须使用 module://skills/ 路径")
+                raise CatalogError(f"{entry.id}: 模组 Skill 必须使用 module://skills/ 路径")
             if any(not _is_module_skill_uri(resource) for resource in entry.resources):
                 raise CatalogError(
-                    f"{entry.id}: bundled Skill resource 必须使用 module://skills/ 路径"
+                    f"{entry.id}: 模组 Skill resource 必须使用 module://skills/ 路径"
+                )
+        if entry.trust == "local-author":
+            # 本机作者内容信任低于随仓库内置模组：预算硬顶更低，防止未审阅的
+            # 长文本直接挤占常驻上下文。
+            if entry.max_context_tokens > _LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS:
+                raise CatalogError(
+                    f"{entry.id}: local-author Skill 预算超过 "
+                    f"{_LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS} 上限"
                 )
 
         if entry.dependencies and entry.residency != "deterministic":
@@ -282,6 +310,13 @@ def validate_catalog(catalog: SkillCatalog, *, frozen: bool = False) -> SkillCat
 _validate_catalog = validate_catalog
 
 
+def _model_visible_tool_names() -> frozenset[str]:
+    """当前模型可见工具名集（延迟导入，避免与工具注册表循环依赖）。"""
+    from .tools import MODEL_TOOL_NAMES
+
+    return frozenset(MODEL_TOOL_NAMES)
+
+
 def load_official_catalog(project_root: Path) -> SkillCatalog:
     """加载并校验官方 catalog；任何不一致都 fail-closed（启动期错误）。"""
     path = Path(project_root) / _CATALOG_FILE
@@ -293,7 +328,7 @@ def load_official_catalog(project_root: Path) -> SkillCatalog:
         catalog = SkillCatalog.model_validate(raw)
     except ValidationError as exc:
         raise CatalogError(f"{_CATALOG_FILE} 校验失败: {exc}") from exc
-    catalog = validate_catalog(catalog)
+    catalog = validate_catalog(catalog, known_tool_names=_model_visible_tool_names())
     for entry in catalog.skills:
         if entry.trust != "core":
             raise CatalogError(f"{entry.id}: 官方 catalog 只允许 trust=core")
@@ -329,6 +364,9 @@ def catalog_for(context) -> SkillCatalog:
                 raise CatalogError(f"模组 Skill 路径越出 skills/ 边界: {path.name}")
             stem = re.sub(r"[^a-z0-9_]+", "_", path.stem.lower()).strip("_") or "skill"
             record = getattr(context, "module_record", None)
+            # H3.1 信任分级：项目 builtin mod/ = bundled-module；runtime
+            # user_root（本机安装/作者目录）= local-author，预算更紧。
+            is_local_author = str(getattr(record, "source", "") or "") == "user"
             entry = SkillEntry(
                 id=f"module.{slug}.{stem}",
                 # Never persist an absolute installed-module path.  The
@@ -336,7 +374,7 @@ def catalog_for(context) -> SkillCatalog:
                 # the engine itself asks to read this logical URI.
                 path=f"{_MODULE_URI_PREFIX}skills/{path.name}",
                 version=str(getattr(record, "version", "") or "0"),
-                trust="bundled-module",
+                trust="local-author" if is_local_author else "bundled-module",
                 residency="core",
                 description=f"模组 {module_name} 自带规则：{path.stem}",
                 opening=False,
@@ -345,7 +383,11 @@ def catalog_for(context) -> SkillCatalog:
                 # ``.skill`` text.  Until module format v2 adds per-Skill
                 # manifests, use a fixed bounded budget instead of letting
                 # arbitrary author text become unbounded core prompt content.
-                max_context_tokens=_DEFAULT_MODULE_SKILL_MAX_CONTEXT_TOKENS,
+                max_context_tokens=(
+                    _LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS
+                    if is_local_author
+                    else _DEFAULT_MODULE_SKILL_MAX_CONTEXT_TOKENS
+                ),
             )
             content = read_skill_content(context.project_root, entry, module_dir=module_dir)
             if content is None:
@@ -353,7 +395,10 @@ def catalog_for(context) -> SkillCatalog:
             if not skill_content_within_budget(content, entry):
                 raise CatalogError(f"{entry.id}: Skill 正文超出 max_context_tokens")
             entries.append(entry)
-    return validate_catalog(catalog.model_copy(update={"skills": entries}))
+    return validate_catalog(
+        catalog.model_copy(update={"skills": entries}),
+        known_tool_names=_model_visible_tool_names(),
+    )
 
 
 def skill_content_digest(content: str) -> str:
@@ -429,7 +474,7 @@ def _resolve_manifest_path(
         path = (root / reference).resolve()
         if not _is_relative_to(base, root):
             return None
-    elif entry.trust == "bundled-module":
+    elif entry.trust in ("bundled-module", "local-author"):
         if module_dir is None or not _is_module_skill_uri(reference):
             return None
         module_root = Path(module_dir).resolve()

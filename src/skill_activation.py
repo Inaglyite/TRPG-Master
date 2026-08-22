@@ -154,8 +154,12 @@ def _module_capabilities(engine: Any) -> set[str]:
     return {str(capability) for capability in capabilities}
 
 
-def inject_skill(engine: Any, entry: Any) -> bool:
-    """注入一个确定性激活的 Skill，内容以世界 pin 为唯一权威。"""
+def inject_skill(engine: Any, entry: Any, *, invoker: str | None = None) -> bool:
+    """注入一个确定性激活的 Skill，内容以世界 pin 为唯一权威。
+
+    ``invoker="user"`` 表示玩家经 `/skill` 命令主动请求加载（H3.1
+    user_invocable），模型可见文案相应区分，溯源仍走同一 skill_source。
+    """
     try:
         pins = skill_pins(engine)
     except PinUnavailable as exc:
@@ -201,9 +205,14 @@ def inject_skill(engine: Any, entry: Any) -> bool:
         engine._loaded_optional_skills.add(entry.id)
         return False
     engine._loaded_optional_skills.add(entry.id)
+    lead = (
+        "以下 Skill 规则已应玩家请求加载，请从本回合开始应用："
+        if invoker == "user"
+        else "以下 Skill 规则已经由引擎加载，请在本回合应用："
+    )
     engine.append_control_instruction(
         f"{_skill_surface_marker(entry.id, digest)}\n"
-        f"以下 Skill 规则已经由引擎加载，请在本回合应用：{entry.id}\n\n{content}",
+        f"{lead}{entry.id}\n\n{content}",
         skill_source={
             "skill_id": entry.id,
             "digest": digest,
@@ -218,6 +227,10 @@ def inject_skill(engine: Any, entry: Any) -> bool:
         controls = engine.__dict__.setdefault("_skill_control_messages", {})
         if isinstance(controls, dict):
             controls[_skill_surface_marker(entry.id, digest)] = latest
+    from .lorebook import estimate_text_tokens
+    from .turn_performance import increment_counter
+
+    increment_counter(engine, "skill_injection_tokens", estimate_text_tokens(content))
     return True
 
 
@@ -358,6 +371,37 @@ def loadable_skill_allowlist(engine: Any) -> tuple[tuple[str, str], ...]:
     )
 
 
+def request_tool_policy(engine: Any) -> tuple[frozenset, frozenset | None]:
+    """当次模型请求的工具策略：(required 并入集, allowed 上限并集或 None)。
+
+    core 常驻 Skill 与本回合确定性激活的 Skill 参与；on_demand 不可声明
+    （validate_catalog 已 fail-closed）。required_tools 是显式声明，优先于
+    role 的默认排除表；allowed_tools 有任一非空声明时，当回合模型工具上限
+    裁到所有声明的并集（required 永远并入上限，不会被声明自己裁掉）。
+    pin 失效时返回空策略——冻结证据缺失时不得施加任何作者声明的限制。
+    """
+    try:
+        catalog = effective_skill_catalog(engine)
+    except PinUnavailable:
+        return frozenset(), None
+    if catalog is None:
+        return frozenset(), None
+    active_ids = {entry.id for entry in resolve_for_engine(engine)}
+    required: set[str] = set()
+    allowed_union: set[str] = set()
+    any_allowed = False
+    for entry in catalog.skills:
+        if entry.residency != "core" and entry.id not in active_ids:
+            continue
+        required.update(entry.required_tools)
+        if entry.allowed_tools:
+            any_allowed = True
+            allowed_union.update(entry.allowed_tools)
+    if any_allowed:
+        allowed_union.update(required)
+    return frozenset(required), (frozenset(allowed_union) if any_allowed else None)
+
+
 def note_injection_provenance(engine: Any, message: dict, skill_source: dict[str, Any]) -> None:
     """把 skill 溯源登记到 H2 context shadow（fail-open）。"""
     _context_shadow.note_skill_injection(
@@ -467,3 +511,34 @@ def execute_load_skill(engine: Any, skill_id: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def activate_user_skill(engine: Any, skill_id: str) -> tuple[bool, str]:
+    """玩家 `/skill <id>` 受信加载：仅世界 pin 内的 user_invocable on_demand 条目。
+
+    内容与 digest 以 pin 为唯一权威，绝不读活 catalog；多人房间的行动者门禁
+    在传输层（房间 action 只接受当前行动者提交），本函数不再重复校验身份。
+    返回 (是否加载成功, 面向玩家的消息)。
+    """
+    try:
+        pins = skill_pins(engine)
+    except PinUnavailable:
+        return False, "技能目录暂时不可用，请稍后再试。"
+    if pins is None:
+        return False, "当前世界没有可调用的技能。"
+    pin = pins.get(skill_id)
+    if pin is None:
+        return False, f"没有可调用的技能「{skill_id}」。"
+    entry = pin.entry
+    if entry.residency != "on_demand" or not entry.user_invocable:
+        return False, f"技能「{skill_id}」不接受玩家调用。"
+    from .lorebook import estimate_text_tokens
+
+    if estimate_text_tokens(pin.content) > entry.max_context_tokens:
+        # 与 execute_load_skill 同一预算边界：声明的冻结预算被内容超出时拒绝。
+        return False, f"技能「{skill_id}」超出冻结上下文预算，无法加载。"
+    if inject_skill(engine, entry, invoker="user"):
+        return True, f"已加载技能「{skill_id}」，守秘人从下一回合开始应用。"
+    if _has_deterministic_skill_on_surface(engine, entry.id, pin.digest):
+        return True, f"技能「{skill_id}」已在上下文中。"
+    return False, f"技能「{skill_id}」加载失败，请稍后再试。"

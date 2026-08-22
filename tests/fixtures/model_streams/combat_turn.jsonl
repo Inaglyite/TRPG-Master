@@ -1,0 +1,3 @@
+{"content": "管家的影子扑了过来！"}
+{"tool_deltas": [{"index": 0, "id": "call_fight", "name": "combat_action", "arguments": "{\"action\": \"闪避\"}"}]}
+{"finish_reason": "tool_calls", "usage": {"prompt_tokens": 2000, "completion_tokens": 25, "total_tokens": 2025}}

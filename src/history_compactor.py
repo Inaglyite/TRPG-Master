@@ -349,6 +349,16 @@ class HistoryCompactor:
         ):
             return False
         self.estimate_tokens()
+        from .turn_performance import increment_counter
+
+        increment_counter(self.engine, "context_compactions")
+        if replaced_messages:
+            # 压缩比（%）：替换后字符数 / 被替换范围字符数，只记比率不落摘要文本。
+            increment_counter(
+                self.engine,
+                "context_compaction_ratio_pct",
+                max(0, min(100, replacement_chars * 100 // max(1, original_chars))),
+            )
         log_summary(model_name, "成功")
         if not silent:
             self.engine.cb.on_glm_summary(f"📋 上下文已压缩（{model_name}）。")
@@ -375,9 +385,13 @@ class HistoryCompactor:
                         max_tokens=3000,
                     )
                 raw = response.choices[0].message.content.strip()
-            except Exception:
+            except Exception as exc:
                 if attempt == 0:
                     continue
+                # H4：摘要调用的失败也归_adapter 稳定错误类，便于离线诊断。
+                from .provider_adapter import classify_provider_error
+
+                log_summary(model, f"失败: {classify_provider_error(exc)}")
                 return None
             parsed = parse_summary_json(raw)
             if parsed is not None:

@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import shutil
+import tempfile
+from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from .editor_projects import (
     EditorProjectConflict,
     EditorProjectError,
     EditorProjectNotFound,
     EditorProjectStore,
+    export_project_package,
 )
+from .module_registry import ModulePackageError
 
 
 def _error_response(exc: EditorProjectError) -> JSONResponse:
@@ -73,5 +80,43 @@ def create_editor_router(store: EditorProjectStore) -> APIRouter:
             return {"ok": True}
         except EditorProjectError as exc:
             return _error_response(exc)
+
+    @router.post("/{session_id}/export")
+    async def export_project(session_id: str):
+        """把工程编译为 .trpgmod 下载；校验失败返回与打包器一致的受控错误。"""
+        try:
+            record = await asyncio.to_thread(store.get, session_id)
+        except EditorProjectError as exc:
+            return _error_response(exc)
+        work_dir = Path(
+            tempfile.mkdtemp(prefix=".export-", dir=store.root)
+        )
+        try:
+            package_path, _inspection = await asyncio.to_thread(
+                export_project_package, record["project"], work_dir
+            )
+        except ModulePackageError as exc:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error_code": exc.code,
+                    "error": exc.message,
+                    "details": exc.details,
+                },
+                status_code=400,
+            )
+        except EditorProjectError as exc:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            return _error_response(exc)
+        manifest = record["project"].get("manifest") or {}
+        package_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(manifest.get("id") or "module"))
+        version = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(manifest.get("version") or "0"))
+        return FileResponse(
+            package_path,
+            filename=f"{package_id}-{version}.trpgmod",
+            media_type="application/zip",
+            background=BackgroundTask(shutil.rmtree, work_dir, True),
+        )
 
     return router

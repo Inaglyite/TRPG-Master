@@ -120,5 +120,10 @@ def glm_quick_summary(tool_outputs: list[tuple[str, str]], model_context: str) -
                 max_tokens=80,
             )
         return resp.choices[0].message.content
-    except Exception:
+    except Exception as exc:
+        # H4：快摘要失败归入 adapter 稳定错误类（metadata-only）。
+        from .logger import error as log_error
+        from .provider_adapter import classify_provider_error
+
+        log_error(f"GLM 快摘要失败: {classify_provider_error(exc)}")
         return None

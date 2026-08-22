@@ -77,7 +77,7 @@ from .tools import (
     execute_function,
 )
 from .turn_mutations import TurnMutationLedger
-from .turn_performance import TurnPerformance
+from .turn_performance import TurnPerformance, increment_counter
 from .turn_reconciler import (
     narrative_body,
     reconcile_narrative_entities,
@@ -282,6 +282,7 @@ class GameEngine:
                 "scan_depth": lorebook.data.scan_depth,
                 "token_budget": lorebook.data.token_budget,
             }
+            increment_counter(self, "lore_hit_count", len(selection.entries))
             return selection
         except (OSError, TypeError, ValueError) as exc:
             self._turn_lore_diagnostics = {"error": str(exc)}

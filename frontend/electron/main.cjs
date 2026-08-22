@@ -5,6 +5,7 @@ const {
   dialog,
   ipcMain,
   session,
+  shell,
 } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
@@ -535,6 +536,21 @@ function registerIpcHandlers() {
   });
 
   // 云端页面只能请求返回内置启动器，不能直接调用 select-local 启动本机服务。
+  ipcMain.handle("trpg:open-editor", async (event) => {
+    // 模组工坊入口：本地后端的 vendored 编辑器走系统浏览器打开
+    // （渲染进程 window.open 一律被拒绝，shell.openExternal 是唯一出口）。
+    if (!trustedSender(event.senderFrame?.url ?? "")) {
+      log("拒绝来自不可信页面的 open-editor:", event.senderFrame?.url);
+      return { ok: false, error: "untrusted-sender" };
+    }
+    try {
+      await shell.openExternal(`${backendUrl}/editor/`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
+
   ipcMain.handle("trpg:return-launcher", async (event) => {
     const senderUrl = event.senderFrame?.url ?? "";
     if (!isApprovedCloudSenderUrl(senderUrl, approvedCloudOrigin)) {

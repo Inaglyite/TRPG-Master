@@ -121,7 +121,7 @@ from src.editor_api import create_editor_router
 from src.editor_projects import EditorProjectStore
 from src.engine import EngineCallbacks, GameEngine
 from src.event_stream import OrderedTurnEventStream
-from src.frontend_http import FrontendStaticFiles
+from src.frontend_http import FrontendStaticFiles, mount_editor_bundle
 from src.frontend_payload import enrich_clues_for_frontend
 from src.game_application import (
     ApplicationUseCaseError,
@@ -1431,6 +1431,13 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         except Exception:
             release_turn()
             raise
+        if intent.kind == "user_skill":
+            # 玩家 /skill 命令：在回合锁内完成受信注入（避免与进行中的回合
+            # 竞写 messages），但不产生回合、不进公开叙事。
+            message = game_app.invoke_user_skill.execute(intent.skill_id)
+            release_turn()
+            await outbound.send({"type": "system_notice", "message": message})
+            return
         await launch_reserved_turn(
             engine.handle_action,
             intent.engine_input,
@@ -1665,6 +1672,8 @@ async def serve_asset(module_name: str, filename: str):
 
 # ---- 静态文件 ----
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
+# /editor 必须先于 "/" 注册（前端 SPA 兜底会吞掉未匹配路径）。
+mount_editor_bundle(app, PROJECT_ROOT)
 if FRONTEND_DIR.exists():
     app.mount("/", FrontendStaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 else:

@@ -47,3 +47,15 @@ class TurnPerformance:
             "phases_ms": dict(self.phases_ms),
             "counters": dict(self.counters),
         }
+
+
+def increment_counter(host: object, name: str, amount: int = 1) -> None:
+    """Best-effort turn-local counter bump; no-op without an active turn.
+
+    H4 观测指标（model_retry_count / model_tool_rejected_count /
+    skill_injection_tokens / lore_hit_count / context_compactions 等）统一
+    经此进入 TurnPerformance.counters，host 不带回合计数器时静默跳过。
+    """
+    perf = getattr(host, "_turn_performance", None)
+    if perf is not None:
+        perf.increment(name, amount)

@@ -72,6 +72,29 @@ def emit_inferred_speaker_segments(host: Any, raw: str) -> bool:
     return True
 
 
+def make_visible_emitter(host: Any, speaker_parser: Any):
+    """Build the streamer's visible-text emitter bound to one speaker parser."""
+
+    def emit_visible(raw: str) -> None:
+        if emit_inferred_speaker_segments(host, raw):
+            return
+        for kind, text, npc_id in speaker_parser.feed(raw):
+            if kind == "text":
+                visible = sanitize_visible_narrative(text)
+                if visible:
+                    # 旁白保持单参数调用（兼容既有回调签名），
+                    # 发言文本才附带 npc_id 上下文。
+                    if npc_id:
+                        host.cb.on_narrative(visible, npc_id)
+                    else:
+                        host.cb.on_narrative(visible)
+            elif kind == "speech_start":
+                # speech_start Piece = (kind, npc_id, None)：人物 id 在 text 槽。
+                host.cb.on_speaker_segment(text)
+
+    return emit_visible
+
+
 def flush_speaker_segments(host: Any, speaker_parser: Any) -> None:
     """Drain the incremental speaker parser, emitting its remaining pieces."""
     for kind, text, npc_id in speaker_parser.flush():

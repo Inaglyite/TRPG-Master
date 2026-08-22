@@ -497,6 +497,9 @@ class ToolPipeline:
                 args=args,
             )
         except ToolPolicyError as exc:
+            from .turn_performance import increment_counter
+
+            increment_counter(self.engine, "model_tool_rejected_count")
             return self._record_outcome(
                 self._outcome(
                     call_id=call_id,

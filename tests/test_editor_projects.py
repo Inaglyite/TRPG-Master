@@ -49,3 +49,40 @@ class EditorProjectStoreTests(unittest.TestCase):
             oversized["module"]["payload"] = "x" * (8 * 1024 * 1024)
             with self.assertRaises(EditorProjectError):
                 store.create(oversized)
+
+    def test_skills_section_roundtrip_and_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = EditorProjectStore(Path(temp))
+            with_skills = project()
+            with_skills["skills"] = [
+                {
+                    "name": "house_rules",
+                    "body": "# 房规\n\n测试正文",
+                    "version": "1.0.0",
+                    "description": "测试房规",
+                    "required_tools": ["skill_check"],
+                }
+            ]
+            created = store.create(with_skills)
+            stored = store.get(created["session_id"])["project"]["skills"][0]
+            self.assertEqual("house_rules", stored["name"])
+            self.assertEqual(["skill_check"], stored["required_tools"])
+
+            for bad_skill in (
+                {"name": "Bad Name!", "body": "x"},  # 非法文件名
+                {"name": "ok_name", "body": "x", "script": "rm -rf"},  # 未知字段
+                {"name": "ok_name", "body": ""},  # 空正文
+                {"name": "ok_name", "body": "x", "required_tools": ["Not A Tool"]},
+            ):
+                bad = project()
+                bad["skills"] = [bad_skill]
+                with self.assertRaises(EditorProjectError, msg=str(bad_skill)):
+                    store.create(bad)
+
+            duplicate = project()
+            duplicate["skills"] = [
+                {"name": "dup", "body": "a"},
+                {"name": "dup", "body": "b"},
+            ]
+            with self.assertRaisesRegex(EditorProjectError, "重名"):
+                store.create(duplicate)

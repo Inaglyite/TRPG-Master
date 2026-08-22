@@ -15,6 +15,7 @@ const bridge = {
   selectLocalMode: vi.fn(),
   selectOnlineMode: vi.fn(),
   returnToLauncher: vi.fn(),
+  openEditor: vi.fn(),
 };
 
 beforeEach(() => {

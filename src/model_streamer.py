@@ -14,14 +14,20 @@ from .model_request import StreamPolicy
 from .model_stream_capacity import prepare_with_capacity
 from .model_stream_diagnostics import record_model_diagnostic
 from .model_stream_helpers import (
-    emit_inferred_speaker_segments,
     flush_speaker_segments,
+    make_visible_emitter,
     sanitize_visible_narrative,
     stream_usage_dict,
     take_complete_sentences,
 )
+from .provider_adapter import (
+    classify_provider_error,
+    extract_reasoning_text,
+    finalize_stream_tool_calls,
+    maybe_record_stream,
+    note_model_retry,
+)
 from .speaker_parser import SpeakerStreamParser
-from .tool_policy import attach_request_snapshot
 from .tool_protocol import ToolProtocolFilter
 from .tool_request_authority import issue_model_request
 
@@ -94,11 +100,16 @@ class ModelStreamer:
                 world_id=str(getattr(getattr(host, "context", None), "world_id", "") or ""),
             )
             provider_stream = host.client.chat.completions.create(**kwargs)
+            # H4 录制（默认关）：归一化 chunk 序列落本地 fixture 目录。
+            provider_stream = maybe_record_stream(
+                host, provider_stream, request_snapshot.request_id
+            )
         except Exception as exc:
             if llm_slot is not None:
                 llm_slot.release(status="failed")
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型请求已取消") from exc
+            error_class = classify_provider_error(exc)
             record_model_diagnostic(
                 host,
                 model,
@@ -113,6 +124,7 @@ class ModelStreamer:
                 {},
                 policy,
                 error_type=type(exc).__name__,
+                error_class=error_class,
                 request_snapshot=request_snapshot.to_dict(),
                 request_envelope=request_envelope,
             )
@@ -123,6 +135,7 @@ class ModelStreamer:
             overflow = _is_context_overflow(exc)
             if messages_override is None and overflow:
                 if not _overflow_retried and not _capacity_compaction_attempted:
+                    note_model_retry(host, "context_overflow", error_class, 0)
                     retried = _retry_after_overflow(
                         self,
                         model,
@@ -144,6 +157,7 @@ class ModelStreamer:
                 return "", []
             if retry_on_empty:
                 self.log_error(f"API 建立流失败，正在重试: {type(exc).__name__}")
+                note_model_retry(host, "connect_failed", error_class, 400)
                 self.sleep(0.4)
                 return self.stream(
                     model,
@@ -168,6 +182,8 @@ class ModelStreamer:
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
         usage_data: dict = {}
+        reasoning_text = ""
+        stream_error_class: str | None = None
         protocol_filter = ToolProtocolFilter()
         # A provider stream can fail only once iteration has started.  Never
         # recurse from the ``except`` below: the global LLM slot is still held
@@ -182,28 +198,14 @@ class ModelStreamer:
             on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
         )
 
-        def emit_visible(raw: str) -> None:
-            if emit_inferred_speaker_segments(host, raw):
-                return
-            for kind, text, npc_id in speaker_parser.feed(raw):
-                if kind == "text":
-                    visible = sanitize_visible_narrative(text)
-                    if visible:
-                        # 旁白保持单参数调用（兼容既有回调签名），
-                        # 发言文本才附带 npc_id 上下文。
-                        if npc_id:
-                            host.cb.on_narrative(visible, npc_id)
-                        else:
-                            host.cb.on_narrative(visible)
-                elif kind == "speech_start":
-                    # speech_start Piece = (kind, npc_id, None)：人物 id 在 text 槽。
-                    host.cb.on_speaker_segment(text)
+        emit_visible = make_visible_emitter(host, speaker_parser)
 
         host._set_active_stream(provider_stream)
         try:
             host.raise_if_turn_cancelled()
             for chunk in provider_stream:
                 host.raise_if_turn_cancelled()
+                reasoning_text += extract_reasoning_text(chunk)
                 chunk_usage = stream_usage_dict(getattr(chunk, "usage", None))
                 if chunk_usage:
                     usage_data = chunk_usage
@@ -250,6 +252,7 @@ class ModelStreamer:
         except Exception as exc:
             if host.turn_cancellation_requested():
                 raise host.turn_cancelled_error("客户端已离开，模型流已取消") from exc
+            stream_error_class = classify_provider_error(exc)
             overflow = _is_context_overflow(exc)
             if messages_override is None and not full_text and not tool_calls_acc and overflow:
                 if not _overflow_retried and not _capacity_compaction_attempted:
@@ -272,6 +275,7 @@ class ModelStreamer:
                 llm_slot.release()
 
         if deferred_retry == "overflow":
+            note_model_retry(host, "context_overflow", stream_error_class or "context_window", 0)
             retried = _retry_after_overflow(
                 self,
                 model,
@@ -294,6 +298,7 @@ class ModelStreamer:
             return "", []
         if deferred_retry == "empty":
             self.log_error("API 空流中断，正在重试")
+            note_model_retry(host, "empty_stream", stream_error_class or "unknown", 400)
             self.sleep(0.4)
             return self.stream(
                 model,
@@ -331,16 +336,16 @@ class ModelStreamer:
             if pending_visible:
                 emit_visible(pending_visible)
             flush_speaker_segments(host, speaker_parser)
-        if finish_reason == "length" and not tool_calls_acc and not text_tool_calls:
-            host.cb.on_error("（叙述过长被截断，请重试或继续）")
-        raw_tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
-        tool_calls: list[dict] = []
-        for index, raw_call in enumerate(raw_tool_calls):
-            call = dict(raw_call)
-            call_id = str(call.get("id") or "")
-            if not call_id or call_id.startswith("dsml_"):
-                call["id"] = f"{request_snapshot.request_id}:{request_snapshot.step}:{index}"
-            tool_calls.append(attach_request_snapshot(call, request_snapshot))
+        tool_calls = finalize_stream_tool_calls(
+            host,
+            tool_calls_acc=tool_calls_acc,
+            text_tool_calls=text_tool_calls,
+            finish_reason=finish_reason,
+            request_snapshot=request_snapshot,
+            reasoning_text=reasoning_text,
+            log_error=self.log_error,
+            on_error=host.cb.on_error,
+        )
         if buffer_if_tools:
             if tool_calls:
                 full_text = ""
@@ -398,11 +403,13 @@ class ModelStreamer:
             context_sections,
             usage_data,
             policy,
+            error_class=stream_error_class,
             request_snapshot=request_snapshot.to_dict(),
             request_envelope=request_envelope,
         )
         if not full_text and not tool_calls and retry_on_empty:
             self.log_error("API 返回空响应，正在重试一次")
+            note_model_retry(host, "empty_response", "unknown", 400)
             self.sleep(0.4)
             return self.stream(
                 model,

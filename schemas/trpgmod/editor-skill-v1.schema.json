@@ -1,0 +1,53 @@
+{
+  "additionalProperties": false,
+  "description": "模组工程里的自定义 Skill 草稿（H3.1 作者契约）。\n\n导出时写为包内 ``skills/<name>.skill``，安装后以 local-author trust、\n固定预算进入运行时 catalog。声明字段（required/allowed_tools）随工程\n保存并做形状校验；模组格式 v2 的 per-Skill manifest 落地前，它们不\n参与运行时行为——编辑器不得把它们宣传为已生效权限。",
+  "properties": {
+    "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "body": {
+      "minLength": 1,
+      "title": "Body",
+      "type": "string"
+    },
+    "version": {
+      "default": "0",
+      "maxLength": 80,
+      "title": "Version",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 120,
+      "title": "Description",
+      "type": "string"
+    },
+    "required_tools": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Required Tools",
+      "type": "array"
+    },
+    "allowed_tools": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Allowed Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "body"
+  ],
+  "title": "EditorSkillDraft",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpggame.xyz/schemas/trpgmod/editor-skill-v1.schema.json"
+}

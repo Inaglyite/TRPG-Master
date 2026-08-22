@@ -1,0 +1,5 @@
+{"reasoning": "玩家要搜查书桌，需要一次侦查检定。"}
+{"tool_deltas": [{"index": 0, "id": "call_", "name": "skill_", "arguments": null}]}
+{"tool_deltas": [{"index": 0, "id": "search", "name": "check", "arguments": "{\"skill\":"}]}
+{"tool_deltas": [{"index": 0, "id": null, "name": null, "arguments": "\"侦查\"}"}]}
+{"finish_reason": "tool_calls"}

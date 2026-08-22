@@ -653,6 +653,10 @@ export function handleServerPayload(raw: unknown) {
   switch (data.type) {
     case "pong":
       break;
+    case "system_notice":
+      // 服务端系统提示（如玩家 /skill 命令结果）：不进叙事，仅聊天区可见。
+      addMsg("system", String(data.message || ""), true);
+      break;
     case "gm_turn_start":
       gmTurnActive = true;
       activeTurnKind = String(data.turn_kind || "gameplay");

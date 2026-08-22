@@ -6,6 +6,7 @@ export const serverMessageTypes = [
   "narrative_segments",
   "chat_events",
   "connected",
+  "system_notice",
   "tension",
   "dice_result",
   "glm_summary",

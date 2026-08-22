@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { desktopBridge } from "../../desktop";
 import { continueGame, startGame, switchModule } from "../../start";
 import { useAppStore } from "../../state/app-store";
 import { useStartStore } from "../../state/start-store";
@@ -9,6 +10,13 @@ import { ModuleImporter } from "./ModuleImporter";
 import { ModuleSelect } from "./ModuleSelect";
 import { useModuleTransition } from "./module-transition";
 import { useDelayedClose } from "./transitions";
+
+/** 打开模组工坊（vendored TRPG Mod Editor）：Electron 走系统浏览器，浏览器新标签。 */
+function openModWorkshop() {
+  const bridge = desktopBridge();
+  if (bridge) void bridge.openEditor();
+  else window.open("/editor/", "_blank", "noopener");
+}
 
 async function startCommand(
   command: "startGame" | "continueGame" | "switchModule",
@@ -138,6 +146,14 @@ export function StartScreen() {
                 onSelect={(id) => void startCommand("switchModule", id)}
               />
               <ModuleImporter />
+              <button
+                type="button"
+                className="btn-ghost module-workshop-link"
+                title="打开 TRPG Mod Editor 创作/编辑模组"
+                onClick={openModWorkshop}
+              >
+                模组工坊
+              </button>
             </div>
           </div>
           <nav className="start-menu-actions">

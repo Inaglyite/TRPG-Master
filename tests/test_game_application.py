@@ -85,6 +85,26 @@ class GameApplicationTests(unittest.TestCase):
         with self.assertRaises(ApplicationUseCaseError):
             self.app.rewrite_turn.execute("")
 
+    def test_skill_command_parses_to_user_skill_intent(self):
+        intent = self.app.perform_action.execute("/skill keeper.magic")
+
+        self.assertEqual("user_skill", intent.kind)
+        self.assertEqual("keeper.magic", intent.skill_id)
+        self.assertIsNone(intent.engine_input)
+        self.assertIsNone(intent.player_input)
+
+    def test_skill_command_rejects_missing_or_illegal_id(self):
+        with self.assertRaisesRegex(ApplicationUseCaseError, "用法"):
+            self.app.perform_action.execute("/skill")
+        with self.assertRaisesRegex(ApplicationUseCaseError, "非法的技能 ID"):
+            self.app.perform_action.execute("/skill 不合法!")
+        with self.assertRaisesRegex(ApplicationUseCaseError, "非法的技能 ID"):
+            self.app.perform_action.execute("/skill ../../etc")
+
+    def test_skill_like_action_text_is_not_intercepted(self):
+        intent = self.app.perform_action.execute("/skillsmith 打铁")
+        self.assertEqual("action", intent.kind)
+
     def test_save_slot_allocation_fills_first_gap_and_skips_auto_slot(self):
         self.engine.saves = [
             {"id": "slot_000"},

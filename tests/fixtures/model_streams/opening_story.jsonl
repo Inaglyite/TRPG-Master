@@ -1,0 +1,5 @@
+{"content": "雾气从档案馆的窗缝"}
+{"content": "里渗进来，"}
+{"content": "你手中的信件还带着墨香。\n\n"}
+{"content": "书桌上的台灯忽明忽暗。"}
+{"finish_reason": "stop", "usage": {"prompt_tokens": 1200, "completion_tokens": 40, "total_tokens": 1240, "prompt_cache_hit_tokens": 800, "prompt_cache_miss_tokens": 400}}
