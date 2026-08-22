@@ -488,13 +488,15 @@
   gap: 8px;
   align-items: stretch;
 }
-#btn-import-module {
+#btn-import-module,
+.module-workshop-link {
   flex: 0 0 auto;
   min-height: 0;
   padding: 0 13px;
   font-family: var(--font);
   font-size: 13px;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 #btn-import-module:disabled {
   cursor: wait;
