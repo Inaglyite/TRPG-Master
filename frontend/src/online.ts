@@ -324,7 +324,7 @@ export async function createRoom(
 
 /**
  * 新建云端私密单人冒险：play_mode=solo，服务端固定 max_players=1。
- * 创建成功后直接进房（solo 房间流由 OnlineShell 自动开局）。
+ * 创建成功后直接进房，落在角色选择页由玩家确认开局。
  */
 export async function createSoloWorld(
   module: string,

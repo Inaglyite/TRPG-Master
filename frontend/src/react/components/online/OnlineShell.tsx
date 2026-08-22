@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 import {
   checkSession,
@@ -6,7 +6,6 @@ import {
   enterSoloLobby,
   initOnlineSession,
   resumeLastRoom,
-  startGame,
 } from "../../../online";
 import { connectRoom, disconnectRoom } from "../../../room-ws";
 import { useOnlineStore } from "../../../state/online-store";
@@ -25,7 +24,10 @@ import { SoloLobbyScreen } from "./SoloLobbyScreen";
  * 面板内）承载进行中房间状态；这里只在 roomOpen 时显示完整管理页。
  *
  * 云端单人（play_mode=solo）走同一 /ws/room 房间引擎，但不经过多人等待页：
- * 连接后自动开局（免 ready/claim），RoomScreen 永不用于 solo 房间。
+ * lobby 状态（从未成功开局）一律落在角色选择页，已认领的卡保持选中，由玩家
+ * 显式点“以此调查员开始”；不做进房自动开局——认领记录可能是上次点卡预览
+ * 留下的，自动开局会让“返回 → 继续冒险”跳过角色确认直接开局。
+ * RoomScreen 永不用于 solo 房间。
  */
 export function OnlineShell() {
   const view = useOnlineStore((state) => state.view);
@@ -36,14 +38,8 @@ export function OnlineShell() {
   const roomOpen = useOnlineStore((state) => state.roomOpen);
   const roomConnection = useOnlineStore((state) => state.roomConnection);
   const roomMetadata = useOnlineStore((state) => state.roomMetadata);
-  const user = useOnlineStore((state) => state.user);
-  const members = useOnlineStore((state) => state.members);
   const pendingIntent = useOnlineStore((state) => state.pendingIntent);
   const roomError = useOnlineStore((state) => state.roomError);
-  const membersStatus = useOnlineStore((state) => state.membersStatus);
-
-  // solo 房间每个世界只自动开局一次，避免 room_state 重放导致重复 start。
-  const soloAutoStartRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = initOnlineSession();
@@ -88,40 +84,6 @@ export function OnlineShell() {
   const soloRoomFlow =
     view === "room" &&
     (isSoloRoom || (pendingIntent === "solo" && roomMetadata === null));
-  const currentMember = members.find((member) => member.user_id === user?.id);
-  const soloHasInvestigator = Boolean(currentMember?.investigator);
-
-  // 自动开局只服务“进房时存档已有角色卡”的续玩场景：进房后玩家在角色选择页
-  // 里新认领不算——否则点卡预览会立即开局，“以此调查员开始”确认形同虚设。
-  // 以成员列表就绪（membersStatus==="ready"）后的首次评估为进房快照。
-  const soloEntryRef = useRef<{
-    worldId: string;
-    hadInvestigator: boolean;
-  } | null>(null);
-  const membersReady = membersStatus === "ready";
-  useEffect(() => {
-    if (!isSoloRoom || view !== "room" || !activeWorldId) return;
-    if (roomConnection !== "connected" || roomStatus !== "lobby") return;
-    if (!membersReady) return;
-    if (soloEntryRef.current?.worldId !== activeWorldId) {
-      soloEntryRef.current = {
-        worldId: activeWorldId,
-        hadInvestigator: soloHasInvestigator,
-      };
-    }
-    if (!soloEntryRef.current.hadInvestigator || !soloHasInvestigator) return;
-    if (soloAutoStartRef.current === activeWorldId) return;
-    soloAutoStartRef.current = activeWorldId;
-    void startGame();
-  }, [
-    activeWorldId,
-    isSoloRoom,
-    membersReady,
-    roomConnection,
-    roomStatus,
-    soloHasInvestigator,
-    view,
-  ]);
 
   // solo 房间没有多人管理页（邀请/移交均不可用）；兜底关掉，永不渲染 RoomScreen。
   useEffect(() => {

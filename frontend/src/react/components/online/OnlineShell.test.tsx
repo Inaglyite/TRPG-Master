@@ -197,7 +197,7 @@ describe("OnlineShell 云端单人", () => {
     expect(screen.queryByTestId("room-screen")).not.toBeInTheDocument();
   });
 
-  it("solo 房间连接且 lobby 时自动开局（进房已有角色卡，每个世界一次）", async () => {
+  it("solo 房间 lobby 且进房已有角色卡：仍落角色选择页，不自动开局", async () => {
     const { startGame } = await import("../../../online");
     setupOnline({
       roomStatus: "lobby",
@@ -216,11 +216,12 @@ describe("OnlineShell 云端单人", () => {
       ],
     });
     render(<OnlineShell />);
-    expect(startGame).toHaveBeenCalledTimes(1);
-
-    // room_state 重放 lobby 不重复发送 start。
-    act(() => useOnlineStore.setState({ readyUserIds: ["u1"] }));
-    expect(startGame).toHaveBeenCalledTimes(1);
+    // 认领记录可能是上次点卡预览留下的；继续冒险必须回到角色选择页，
+    // 由玩家显式确认开局，不得直接 start。
+    expect(startGame).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("solo-character-select-screen"),
+    ).toBeInTheDocument();
   });
 
   it("进房后才认领角色卡不自动开局（确认按钮由玩家显式点击）", async () => {
