@@ -89,3 +89,16 @@ describe("prefers-reduced-motion 弹层动效", () => {
     );
   });
 });
+
+describe("开始新冒险换场容器布局", () => {
+  it("solo-lobby-create-swap 是 flex column（CTA 的 align-self:center 才不失效）", () => {
+    const online = readStyle("components/online.css");
+    const block = /\.solo-lobby-create-swap \{([\s\S]*?)\}/.exec(online);
+    expect(
+      block,
+      "online.css 缺少 .solo-lobby-create-swap 规则",
+    ).not.toBeNull();
+    expect(block![1]).toContain("display: flex");
+    expect(block![1]).toContain("flex-direction: column");
+  });
+});

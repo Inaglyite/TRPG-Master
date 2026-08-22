@@ -81,4 +81,12 @@ describe("云端单人时间线切换提示", () => {
       text: "已切换到时间线「分支A」。",
     });
   });
+
+  it("branch_created 提示已创建新时间线且原时间线保留", () => {
+    announceSoloWorldSwitch("分支B", "branch_created");
+    expect(lastMessage()).toMatchObject({
+      kind: "system",
+      text: "已创建并进入新时间线「分支B」，原时间线保持不变。",
+    });
+  });
 });

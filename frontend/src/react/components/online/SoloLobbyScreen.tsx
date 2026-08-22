@@ -11,6 +11,7 @@ import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 import { ModuleSelect } from "../ModuleSelect";
+import { usePhaseTransition } from "../transitions";
 import { roomStatusLabel } from "./room-status";
 import { SoloTimelinePanel } from "./SoloTimelinePanel";
 
@@ -42,6 +43,13 @@ export function SoloLobbyScreen() {
   const [moduleId, setModuleId] = useState("");
   const [worldName, setWorldName] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  // 「开始新冒险」CTA ↔ 创建卡成对换场：CTA 淡出下沉后创建卡弹入，
+  // 「收起」反向播回；reduced-motion 由钩子直接落定。
+  const createSwap = usePhaseTransition(
+    createOpen ? ("form" as const) : ("cta" as const),
+    (view) => view,
+    { exitMs: 160, enterMs: 260 },
+  );
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   // 删除报错内联挂在被删除的冒险卡上（worldId + 消息），不进创建卡。
@@ -216,15 +224,13 @@ export function SoloLobbyScreen() {
                         </>
                       ) : (
                         <>
-                          {world.metadata?.room_status === "playing" && (
-                            <button
-                              type="button"
-                              className="adventure-manage"
-                              onClick={() => setTimelineWorld(world)}
-                            >
-                              管理时间线
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="adventure-manage"
+                            onClick={() => setTimelineWorld(world)}
+                          >
+                            管理时间线
+                          </button>
                           <button
                             type="button"
                             className="adventure-delete"
@@ -256,64 +262,68 @@ export function SoloLobbyScreen() {
         className="solo-lobby-section"
         aria-labelledby="solo-create-title"
       >
-        {!createOpen ? (
-          <button
-            type="button"
-            className="start-art-button art-plaque solo-lobby-create-cta"
-            onClick={() => setCreateOpen(true)}
-          >
-            <span className="start-art-label">开始新冒险</span>
-          </button>
-        ) : (
-          <div className="solo-lobby-create">
-            <h2 id="solo-create-title">开始新冒险</h2>
-            <p className="online-section-desc">
-              选择模组，开一份只属于你的调查
-            </p>
-            <div className="online-inline-form lobby-form">
-              <input
-                value={worldName}
-                onChange={(event) => setWorldName(event.target.value)}
-                placeholder="冒险名称（可选）"
-                aria-label="冒险名称"
-                disabled={createBusy}
-                maxLength={60}
-              />
-              <span id="solo-create-module-label" hidden>
-                选择模组
-              </span>
-              <ModuleSelect
-                options={modules}
-                value={selectedModule}
-                disabled={createBusy || modulesStatus !== "ready"}
-                labelledBy="solo-create-module-label"
-                listLabel="选择模组"
-                onSelect={(id) => setModuleId(id)}
-              />
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={createBusy || !selectedModule}
-                onClick={() => void createSoloWorld(selectedModule, worldName)}
-              >
-                {createBusy ? "创建中……" : "创建冒险"}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={createBusy}
-                onClick={() => setCreateOpen(false)}
-              >
-                收起
-              </button>
-            </div>
-            {createError && (
-              <p className="online-notice online-notice--error" role="alert">
-                {createError}
+        <div className="solo-lobby-create-swap" data-phase={createSwap.phase}>
+          {createSwap.displayed === "cta" ? (
+            <button
+              type="button"
+              className="start-art-button art-plaque solo-lobby-create-cta"
+              onClick={() => setCreateOpen(true)}
+            >
+              <span className="start-art-label">开始新冒险</span>
+            </button>
+          ) : (
+            <div className="solo-lobby-create">
+              <h2 id="solo-create-title">开始新冒险</h2>
+              <p className="online-section-desc">
+                选择模组，开一份只属于你的调查
               </p>
-            )}
-          </div>
-        )}
+              <div className="online-inline-form lobby-form">
+                <input
+                  value={worldName}
+                  onChange={(event) => setWorldName(event.target.value)}
+                  placeholder="冒险名称（可选）"
+                  aria-label="冒险名称"
+                  disabled={createBusy}
+                  maxLength={60}
+                />
+                <span id="solo-create-module-label" hidden>
+                  选择模组
+                </span>
+                <ModuleSelect
+                  options={modules}
+                  value={selectedModule}
+                  disabled={createBusy || modulesStatus !== "ready"}
+                  labelledBy="solo-create-module-label"
+                  listLabel="选择模组"
+                  onSelect={(id) => setModuleId(id)}
+                />
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={createBusy || !selectedModule}
+                  onClick={() =>
+                    void createSoloWorld(selectedModule, worldName)
+                  }
+                >
+                  {createBusy ? "创建中……" : "创建冒险"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={createBusy}
+                  onClick={() => setCreateOpen(false)}
+                >
+                  收起
+                </button>
+              </div>
+              {createError && (
+                <p className="online-notice online-notice--error" role="alert">
+                  {createError}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       <button

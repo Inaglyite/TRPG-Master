@@ -565,6 +565,46 @@
   width: min(320px, 92%);
   min-height: 54px;
 }
+/* 「开始新冒险」CTA ↔ 创建卡换场：只动 transform/opacity，与全局
+   fade/pop 约定一致；相位由 usePhaseTransition 的 data-phase 驱动。
+   容器必须是 flex column，CTA 的 align-self:center 才继续生效。 */
+.solo-lobby-create-swap {
+  display: flex;
+  flex-direction: column;
+}
+@keyframes solo-lobby-swap-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes solo-lobby-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.solo-lobby-create-swap[data-phase="leaving"] > * {
+  animation: solo-lobby-swap-out 160ms ease-in forwards;
+  pointer-events: none;
+}
+.solo-lobby-create-swap[data-phase="entering"] > * {
+  animation: solo-lobby-swap-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .solo-lobby-create-swap[data-phase="leaving"] > *,
+  .solo-lobby-create-swap[data-phase="entering"] > * {
+    animation: none;
+  }
+}
 .solo-lobby-create-cta .start-art-label {
   font-size: 15px;
   letter-spacing: 0.18em;

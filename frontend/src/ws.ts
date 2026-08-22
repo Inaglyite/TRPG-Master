@@ -83,7 +83,7 @@ import {
   onPlayerNotesError,
 } from "./utility";
 import { parseServerMessage } from "./protocol/server-message";
-import { useOnlineStore } from "./state/online-store";
+import { useOnlineStore, timelineCapabilities } from "./state/online-store";
 
 // ---- 后端地址 ----
 const WS_BASE_URL = backendWebSocketUrl();
@@ -313,6 +313,14 @@ function requestTurnRewrite(turnId: string) {
 }
 
 function requestTurnBranch(turnId: string) {
+  // 云端单人房间走 solo_branch_create（服务端把通用 turn_branch_create 当作
+  // 不支持的多人消息拒绝）；门禁与 createBranchFromCurrentTurn 一致：仅
+  // solo 房主可发，多人房间直接不发。失败反馈由 room_action_rejected 承载。
+  if (useAppStore.getState().mode === "online") {
+    if (!timelineCapabilities().canCreateBranch) return;
+    safeSend(JSON.stringify({ type: "solo_branch_create", turn_id: turnId }));
+    return;
+  }
   safeSend(JSON.stringify({ type: "turn_branch_create", turn_id: turnId }));
 }
 
@@ -355,6 +363,14 @@ export function displayWorldHistory(rawHistory: unknown) {
  */
 export function announceSoloWorldSwitch(label: string, reason: string): void {
   if (reason === "redirect") return;
+  if (reason === "branch_created") {
+    addMsg(
+      "system",
+      `已创建并进入新时间线「${label || "未命名"}」，原时间线保持不变。`,
+      true,
+    );
+    return;
+  }
   addMsg("system", `已切换到时间线「${label || "未命名"}」。`, true);
 }
 

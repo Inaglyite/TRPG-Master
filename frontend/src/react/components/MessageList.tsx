@@ -23,7 +23,10 @@ import {
 import { useMessageStore, type ChatMessage } from "../../state/message-store";
 import type { NarrativeSegment } from "../../state/message-store";
 import { useAppStore } from "../../state/app-store";
-import { useOnlineStore } from "../../state/online-store";
+import {
+  useOnlineStore,
+  useTimelineCapabilities,
+} from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
 
 /**
@@ -218,8 +221,9 @@ function Message({
   const html = useMemo(() => renderMarkdown(message.text), [message.text]);
   const character = useAppStore((state) => state.character);
   const mode = useAppStore((state) => state.mode);
-  // 联机：时间线分支后端不支持，按钮直接隐藏；回合改写仅房主可用
-  // （服务端仍按 Session 再校验），单机行为不变。
+  // 联机：时间线分支仅云端单人房主可用（多人房间服务端结构性拒绝，
+  // 按钮直接隐藏）；回合改写仅房主可用（服务端仍按 Session 再校验），
+  // 单机行为不变。
   const isRoomOwner = useOnlineStore((state) => {
     const uid = state.user?.id;
     return (
@@ -230,7 +234,8 @@ function Message({
     );
   });
   const rewriteVisible = mode !== "online" || isRoomOwner;
-  const branchVisible = mode !== "online";
+  const timelineCaps = useTimelineCapabilities();
+  const branchVisible = mode !== "online" || timelineCaps.canCreateBranch;
   // 仅流式呈现中的守秘人叙述区域响应长按加速；单击不做任何播放操作。
   const longPress = useNarrationLongPress(
     message.kind === "gm" && Boolean(message.streaming),

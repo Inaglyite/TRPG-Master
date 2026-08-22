@@ -292,7 +292,11 @@ describe("MessageList 联机回合操作按钮门禁", () => {
     useAppStore.setState({ mode: "local", character: null });
   });
 
-  async function setupRoom(role: "owner" | "player", mode: "online" | "local") {
+  async function setupRoom(
+    role: "owner" | "player",
+    mode: "online" | "local",
+    playMode: string | null = null,
+  ) {
     const { initialOnlineState, useOnlineStore } =
       await import("../../state/online-store");
     useOnlineStore.setState({
@@ -300,6 +304,7 @@ describe("MessageList 联机回合操作按钮门禁", () => {
       authStatus: "authenticated",
       user: { id: "u1", username: "alice" },
       members: [{ user_id: "u1", username: "alice", role }],
+      playMode,
     });
     useAppStore.setState({ mode });
     act(() => {
@@ -341,12 +346,31 @@ describe("MessageList 联机回合操作按钮门禁", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("联机房主：显示 rewrite，branch 仍隐藏", async () => {
-    await setupRoom("owner", "online");
+  it("联机多人房主：显示 rewrite，branch 仍隐藏（多人不支持时间线）", async () => {
+    await setupRoom("owner", "online", "multiplayer");
     render(<MessageList />);
     expect(
       screen.getByRole("button", { name: REWRITE_NAME }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: BRANCH_NAME }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("云端单人房主：rewrite 与 branch 都显示", async () => {
+    await setupRoom("owner", "online", "solo");
+    render(<MessageList />);
+    expect(
+      screen.getByRole("button", { name: REWRITE_NAME }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: BRANCH_NAME }),
+    ).toBeInTheDocument();
+  });
+
+  it("云端单人非房主（旁观者视角）：branch 隐藏", async () => {
+    await setupRoom("player", "online", "solo");
+    render(<MessageList />);
     expect(
       screen.queryByRole("button", { name: BRANCH_NAME }),
     ).not.toBeInTheDocument();

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -153,7 +159,7 @@ describe("SoloLobbyScreen 操作", () => {
     ).toBeInTheDocument();
   });
 
-  it("非 playing 的存档位不显示“管理时间线”", () => {
+  it("非 playing 的存档位同样显示“管理时间线”（纯 HTTP 控制面，不进房）", async () => {
     setupOnline({
       worlds: [
         {
@@ -164,17 +170,20 @@ describe("SoloLobbyScreen 操作", () => {
       ],
     });
     render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "管理时间线" }));
+    expect(enterRoom).not.toHaveBeenCalled();
+    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
     expect(
-      screen.queryByRole("button", { name: "管理时间线" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("dialog", { name: "雾中宅邸" }),
+    ).toBeInTheDocument();
   });
 
-  it("新建冒险：展开表单后使用选中的模组与名字", () => {
+  it("新建冒险：展开表单后使用选中的模组与名字", async () => {
     render(<SoloLobbyScreen />);
-    // 新建表单默认收起，由木牌次级 CTA 展开
+    // 新建表单默认收起，由木牌次级 CTA 经换场动画展开
     expect(screen.queryByLabelText("冒险名称")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
-    fireEvent.change(screen.getByLabelText("冒险名称"), {
+    fireEvent.change(await screen.findByLabelText("冒险名称"), {
       target: { value: "新的调查" },
     });
     // 模组选择是自绘 listbox（ModuleSelect），不是原生 select
@@ -182,6 +191,38 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查");
+  });
+
+  it("开始新冒险换场：CTA 先播 leaving，创建卡再播 entering，收起反向播回", () => {
+    vi.useFakeTimers();
+    try {
+      render(<SoloLobbyScreen />);
+      const swap = () => document.querySelector(".solo-lobby-create-swap");
+      expect(swap()).toHaveAttribute("data-phase", "idle");
+
+      fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
+      // leaving 阶段仍展示旧 CTA
+      expect(swap()).toHaveAttribute("data-phase", "leaving");
+      expect(
+        screen.getByRole("button", { name: "开始新冒险" }),
+      ).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(160));
+      expect(swap()).toHaveAttribute("data-phase", "entering");
+      expect(screen.getByLabelText("冒险名称")).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(260));
+      expect(swap()).toHaveAttribute("data-phase", "idle");
+
+      fireEvent.click(screen.getByRole("button", { name: "收起" }));
+      expect(swap()).toHaveAttribute("data-phase", "leaving");
+      act(() => vi.advanceTimersByTime(160));
+      expect(
+        screen.getByRole("button", { name: "开始新冒险" }),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("删除存档需要行内二次确认", async () => {
