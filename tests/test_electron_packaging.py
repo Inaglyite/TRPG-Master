@@ -373,6 +373,7 @@ def _fake_bundle(tmp_path: Path) -> Path:
         "_internal/migrations/versions/20260722_0004_room_action_idempotency.py",
         "_internal/migrations/versions/20260821_0012_h3_schema_integrity.py",
         "_internal/mod/.keep",
+        "_internal/editor/dist/.keep",
         "_internal/rules/.keep",
         "_internal/skills/.keep",
         "_internal/tools/.keep",
@@ -403,6 +404,7 @@ def test_pyinstaller_spec_uses_tracked_read_only_manifest_and_runtime_hook() -> 
     assert "git" in text and "ls-files" in text
     assert "--others" in text and "--exclude-standard" in text
     assert '"characters/default"' in text
+    assert '"editor/dist"' in text
     assert '"migrations"' in text
     assert '"schemas"' in text
     assert '"saves"' not in text

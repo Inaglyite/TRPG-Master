@@ -167,6 +167,8 @@ app.add_middleware(
     allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Module-Filename"],
+    # 编辑器 dev（:4173）跨域打本地后端时需要带 cookie session；生产同源不受影响。
+    allow_credentials=True,
 )
 MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
 WORLD_BRANCHES = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)

@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
@@ -18,7 +18,9 @@ from .editor_projects import (
     EditorProjectNotFound,
     EditorProjectStore,
     export_project_package,
+    project_from_package,
 )
+from .module_http import _module_error_response, _receive_module_upload
 from .module_registry import ModulePackageError
 
 
@@ -80,6 +82,24 @@ def create_editor_router(store: EditorProjectStore) -> APIRouter:
             return {"ok": True}
         except EditorProjectError as exc:
             return _error_response(exc)
+
+    @router.post("/import")
+    async def import_project(request: Request):
+        """把 .trpgmod 反向解包为新工程（E3 反向导入）；复用模组上传/校验链路。"""
+        try:
+            package_path = await _receive_module_upload(request, store.root.parent)
+        except ModulePackageError as exc:
+            return _module_error_response(exc)
+        try:
+            project = await asyncio.to_thread(project_from_package, package_path)
+            record = await asyncio.to_thread(store.create, project)
+        except ModulePackageError as exc:
+            return _module_error_response(exc)
+        except EditorProjectError as exc:
+            return _error_response(exc)
+        finally:
+            package_path.unlink(missing_ok=True)
+        return JSONResponse({"ok": True, **record}, status_code=201)
 
     @router.post("/{session_id}/export")
     async def export_project(session_id: str):

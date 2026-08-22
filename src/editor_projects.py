@@ -6,8 +6,9 @@ import copy
 import json
 import re
 import secrets
+import zipfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -121,6 +122,48 @@ def export_project_package(project: object, work_dir: Path) -> tuple[Path, Any]:
     package_path = work_dir / "package.trpgmod"
     inspection = build_package(source, package_path)
     return package_path, inspection
+
+
+def project_from_package(package_path: Path) -> dict:
+    """把 .trpgmod 反向映射为 editor 工程（E3 反向导入）。
+
+    inspect_package 先做权威包校验（fail closed）；随后只按已验证的条目名
+    读取原始文件，保留 authoring 形态的 JSON——不在导入时隐式做
+    format_version 迁移，迁移由编辑器侧的 v1→v2 功能显式触发。包内不含
+    editor 专属元数据，skills 只有正文：name 取自文件名，其余字段由
+    EditorSkillDraft 默认值补齐。assets/ 等二进制不进入工程模型。
+    """
+    from .module_registry import inspect_package
+
+    inspection = inspect_package(package_path)
+    names = set(inspection.files)
+    with zipfile.ZipFile(package_path) as archive:
+        def read_text(name: str) -> str:
+            return archive.read(name).decode("utf-8")
+
+        project: dict[str, Any] = {
+            "editor_version": 2,
+            "manifest": json.loads(read_text("manifest.json")),
+            "module": json.loads(read_text("module.json")),
+            "keeperDocument": read_text("keeper.md") if "keeper.md" in names else "",
+            "theme": json.loads(read_text("theme.json")) if "theme.json" in names else {},
+        }
+        if "lorebook.json" in names:
+            project["lorebook"] = json.loads(read_text("lorebook.json"))
+        skills = []
+        for name in sorted(names):
+            if name.startswith("skills/") and name.endswith(".skill"):
+                skills.append({
+                    "name": PurePosixPath(name).stem,
+                    "body": read_text(name),
+                    "version": "0",
+                    "description": "",
+                    "required_tools": [],
+                    "allowed_tools": [],
+                })
+        if skills:
+            project["skills"] = skills
+    return project
 
 
 class EditorProjectError(RuntimeError):

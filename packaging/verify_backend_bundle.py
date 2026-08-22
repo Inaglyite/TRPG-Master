@@ -21,6 +21,7 @@ def bundle_violations(bundle: Path, *, windows: bool = True) -> list[str]:
         # backend without it could stamp a weakened create_all schema.
         internal / "migrations" / "versions" / "20260821_0012_h3_schema_integrity.py",
         internal / "mod",
+        internal / "editor" / "dist",
         internal / "rules",
         internal / "skills",
         internal / "tools",

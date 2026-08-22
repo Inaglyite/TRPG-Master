@@ -70,6 +70,7 @@ def tracked_data(*paths):
 datas = tracked_data(
     "alembic.ini",
     "characters/default",
+    "editor/dist",
     "migrations",
     "mod",
     "rules",

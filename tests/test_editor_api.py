@@ -110,3 +110,47 @@ class EditorApiTests(unittest.TestCase):
             self.assertEqual(400, response.status_code)
             self.assertFalse(response.json()["ok"])
             self.assertTrue(response.json()["error_code"])
+
+    def test_import_package_roundtrips_exported_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = FastAPI()
+            app.include_router(create_editor_router(EditorProjectStore(Path(temp))))
+            client = TestClient(app)
+
+            source = template_project(
+                skills=[{"name": "house_rules", "body": "# 房规\n\n测试正文"}]
+            )
+            source["keeperDocument"] = "# Keeper\n\n线索安排。"
+            created = client.post("/api/editor/projects", json={"project": source})
+            session_id = created.json()["session_id"]
+            exported = client.post(f"/api/editor/projects/{session_id}/export")
+            self.assertEqual(200, exported.status_code)
+
+            imported = client.post(
+                "/api/editor/projects/import",
+                content=exported.content,
+                headers={"X-Module-Filename": "roundtrip.trpgmod"},
+            )
+            self.assertEqual(201, imported.status_code)
+            project = imported.json()["project"]
+            self.assertEqual(2, project["editor_version"])
+            self.assertEqual(source["manifest"]["id"], project["manifest"]["id"])
+            self.assertEqual(source["module"], project["module"])
+            self.assertEqual("# Keeper\n\n线索安排。", project["keeperDocument"])
+            self.assertEqual("house_rules", project["skills"][0]["name"])
+            self.assertEqual("# 房规\n\n测试正文", project["skills"][0]["body"])
+            self.assertEqual("0", project["skills"][0]["version"])
+
+    def test_import_package_rejects_invalid_archive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = FastAPI()
+            app.include_router(create_editor_router(EditorProjectStore(Path(temp))))
+            client = TestClient(app)
+
+            response = client.post(
+                "/api/editor/projects/import",
+                content=b"not a zip at all",
+                headers={"X-Module-Filename": "broken.trpgmod"},
+            )
+            self.assertEqual(400, response.status_code)
+            self.assertEqual("invalid_archive", response.json()["error_code"])
