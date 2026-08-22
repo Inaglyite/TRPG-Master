@@ -148,7 +148,10 @@ export function applyTheme(theme: any) {
     isSafeText(theme.startButtonText, 40) ? theme.startButtonText : "",
   );
 
-  if (isSafeAssetPath(theme.backgroundImage)) {
+  // 联机（托管）模式下 /api/assets 一律 404（防剧透设计），模组背景 URL
+  // 注入后必然加载失败，overlay 会只剩暗色渐变；此时保持 --ui-start-bg
+  // 默认背景。本地模式不受限，照常注入模组背景。
+  if (store.mode !== "online" && isSafeAssetPath(theme.backgroundImage)) {
     const url = moduleAssetUrl(theme.backgroundImage);
     if (url) root.style.setProperty(BG_IMAGE_VAR, `url("${url}")`);
   }

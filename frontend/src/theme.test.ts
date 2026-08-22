@@ -40,6 +40,7 @@ describe("applyTheme", () => {
   beforeEach(() => {
     clearManagedVars();
     useAppStore.setState({
+      mode: "local",
       activeWorldId: null,
       activeModule: null,
       title: DEFAULT_TITLE,
@@ -162,5 +163,15 @@ describe("applyTheme", () => {
     // 合法路径但没有活动模组时同样不注入
     applyTheme({ backgroundImage: "bg.png" });
     expect(style.getPropertyValue("--module-bg-image")).toBe("");
+  });
+
+  it("skips the module background in online mode (hosted /api/assets is 404 by design)", () => {
+    useAppStore.setState({ mode: "online" });
+    useAppStore.getState().setWorld("world-1", "猩红文档");
+    applyTheme({ backgroundImage: "莱特的小屋.png" });
+    expect(
+      document.documentElement.style.getPropertyValue("--module-bg-image"),
+    ).toBe("");
+    useAppStore.setState({ mode: "local" });
   });
 });
