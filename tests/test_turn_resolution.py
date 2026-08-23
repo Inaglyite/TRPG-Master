@@ -156,6 +156,24 @@ class ActionCheckInferenceTests(unittest.TestCase):
         self.assertIsNone(infer_scene_transition("我不去莱特的办公室。", world))
         self.assertIsNone(infer_scene_transition("我问法伦怎么去莱特的办公室。", world))
 
+    def test_travel_after_connector_adverb_is_resolved_locally(self):
+        """「打电话，然后前往停尸房」这类复合句也必须触发权威场景切换。"""
+        world = resolution_world()
+        world["scene_catalog"]["medical"] = {
+            "id": "medical",
+            "name": "密斯卡托尼克大学医学院",
+            "description": "医学院地下的冰冷停尸房。",
+            "npcs_present": [],
+        }
+
+        self.assertEqual(
+            infer_scene_transition(
+                "请法伦现在给惠特克罗夫特医生打电话，然后前往校医院地下停尸房",
+                world,
+            ),
+            "medical",
+        )
+
 
 class StoryStreamingTests(unittest.TestCase):
     def test_prepare_turn_uses_narrative_model_without_marking_routine_turn_risky(self):

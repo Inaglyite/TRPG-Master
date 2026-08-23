@@ -205,6 +205,14 @@ class DiscoveryMatchingTests(unittest.TestCase):
         self.assertEqual([match.clue_id for match in matches], ["body"])
         self.assertEqual(preferred_check_skill(matches, world), "spot_hidden")
 
+    def test_target_matching_ignores_structural_particle(self):
+        """玩家说「教授的遗体」必须命中声明目标「教授遗体」（的 不参与匹配）。"""
+        world = discovery_world()
+
+        matches = match_discovery_rules("请惠特克罗夫特揭开白布，仔细查看教授的遗体", world)
+
+        self.assertEqual([match.clue_id for match in matches], ["body"])
+
     def test_discovery_can_declare_luck_instead_of_a_skill(self):
         world = discovery_world()
         rule = world["clue_catalog"]["body"]["discovery_rules"][0]

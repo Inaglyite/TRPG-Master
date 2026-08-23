@@ -51,6 +51,11 @@ def _known_clue_ids(world: dict) -> set[str]:
     return known
 
 
+def _fold_target_text(text: object) -> str:
+    """目标匹配忽略结构助词：玩家说「莱特的遗体」应命中声明的「莱特遗体」。"""
+    return str(text).strip().casefold().replace("的", "")
+
+
 def _rule_matches(text: str, rule: dict) -> bool:
     intent = str(rule.get("intent") or "")
     pattern = _INTENT_PATTERNS.get(intent)
@@ -59,11 +64,11 @@ def _rule_matches(text: str, rule: dict) -> bool:
     targets = rule.get("targets", [])
     if not isinstance(targets, list):
         return False
-    folded = text.casefold()
+    folded = _fold_target_text(text)
     return any(
-        str(target).strip().casefold() in folded
+        _fold_target_text(target) in folded
         for target in targets
-        if str(target).strip()
+        if _fold_target_text(target)
     )
 
 
