@@ -79,10 +79,10 @@ from .tools import (
 from .turn_mutations import TurnMutationLedger
 from .turn_performance import TurnPerformance, increment_counter
 from .turn_reconciler import (
+    engine_turn_needs_model_audit,
     narrative_body,
     reconcile_narrative_entities,
     reconcile_turn,
-    turn_needs_model_audit,
 )
 
 _OPENING_SYSTEM_CONTRACT = """# 新游戏公开开场模式
@@ -1480,11 +1480,11 @@ class GameEngine:
         player_action: str = "",
         narrative: str | None = None,
     ) -> bool:
-        return turn_needs_model_audit(
+        return engine_turn_needs_model_audit(
+            self,
             executed_tools,
             player_action=player_action,
             narrative=narrative,
-            has_authoritative_mutation=self._turn_mutations.has_authoritative_mutation,
         )
 
     def _resume_pending_combat_decision(self) -> None:

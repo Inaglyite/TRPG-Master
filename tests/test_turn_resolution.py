@@ -479,6 +479,87 @@ class TurnCommitTests(unittest.TestCase):
             )
         )
 
+    def test_body_examination_prose_keeps_second_model_audit_as_fallback(self):
+        """验尸叙事（揭开白布/遗体显露）必须触发审计兜底——检定回合模型无工具。"""
+        narrative = (
+            "他没说完，只是又擦了擦额角，最终叹了口气，走到台边，缓缓揭开了白布。\n\n"
+            "莱特的遗体露了出来。第一眼看上去——你几乎觉得那不是一具普通的尸体。"
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [],
+                player_action="请惠特克罗夫特揭开白布，仔细查看莱特的遗体",
+                narrative=narrative,
+            )
+        )
+
+    @staticmethod
+    def _keyword_gate_world() -> dict:
+        return {
+            "current_scene": {"id": "hall", "name": "大厅"},
+            "scene_catalog": {
+                "hall": {"id": "hall", "name": "大厅"},
+                "morgue": {"id": "morgue", "name": "校医院", "description": "地下停尸房。"},
+            },
+            "npcs": [
+                {
+                    "id": "doctor",
+                    "name": "约翰·惠特克罗夫特医生",
+                    "revealed": {"level": 0, "entries": []},
+                },
+                {
+                    "id": "host",
+                    "name": "布莱斯·法伦",
+                    "revealed": {"level": 1, "entries": []},
+                },
+            ],
+            "clues_found": {"investigation": []},
+            "clue_catalog": {
+                "body": {
+                    "id": "body",
+                    "discovery_rules": [
+                        {"intent": "examine", "targets": ["莱特的尸体"]}
+                    ],
+                }
+            },
+        }
+
+    def test_module_keyword_mentions_keep_audit_as_fallback(self):
+        """模组关键词表命中即审计：未揭示 NPC（含称谓简写）、其他场景别名、
+        未发现线索的 discovery target——全程数据驱动，无领域词。"""
+        world = self._keyword_gate_world()
+
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="惠特克罗夫特站在几步之外。", world=world
+            )
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="停尸房里的冷气裹住你的后背。", world=world
+            )
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="他推开冷柜，莱特的尸体静静躺着。", world=world
+            )
+        )
+
+    def test_settled_entities_do_not_trigger_audit(self):
+        """实体都已进入权威状态后，提及它们的普通叙事不触发审计。"""
+        world = self._keyword_gate_world()
+        world["current_scene"] = {"id": "morgue", "name": "校医院"}
+        world["npcs"][0]["revealed"] = {"level": 1, "entries": []}
+        world["clues_found"]["investigation"].append({"catalog_id": "body"})
+
+        self.assertFalse(
+            turn_needs_model_audit(
+                [],
+                narrative="惠特克罗夫特站在你身边，停尸房里一片安静。",
+                world=world,
+            )
+        )
+
     def test_scene_sync_requires_explicit_transition(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
@@ -634,10 +715,49 @@ class FinalizeTurnTests(unittest.TestCase):
 
         self.assertEqual(result["narrative"], "第一段叙述。\n\n第二段叙述。")
         self.assertEqual(engine.messages[-1]["content"], result["narrative"])
+        # 审计默认开启后，stub 宣告需要审计时 reconcile 在 handouts 之前运行。
         self.assertEqual(
             events,
-            ["entities", "handouts", "done", "summary"],
+            ["entities", "reconcile", "handouts", "done", "summary"],
         )
+
+    def test_capacity_rejected_turn_rolls_back_appended_messages(self):
+        """容量熔断（未发起 provider 请求）的空回合必须回滚本回合追加的消息，
+        否则每次重试都叠加一份玩家输入与注入，历史越来越超。"""
+        events: list[str] = []
+        engine = SimpleNamespace(
+            messages=[
+                {"role": "system", "content": "keeper"},
+                {"role": "user", "content": "[玩家行动] 上一轮"},
+                {"role": "assistant", "content": "上一段叙事"},
+                {"role": "user", "content": "[玩家行动] 本回合输入"},
+            ],
+            cb=SimpleNamespace(
+                on_error=lambda _message: events.append("error"),
+                on_done=lambda: events.append("done"),
+            ),
+            _capacity_rejected_turn=True,
+            _last_turn_high_risk=False,
+            _round_count=0,
+            _maybe_summarize_after_turn=lambda: None,
+        )
+
+        _finalize_turn(
+            {
+                "engine": engine,
+                "user_content": "本回合输入",
+                "narrative": "",
+                "text": "",
+                "tool_calls": [],
+                "executed_tools": [],
+                "turn_had_check": False,
+                "pre_turn_message_len": 3,
+            }
+        )
+
+        self.assertEqual(events, ["error", "done"])
+        self.assertEqual(len(engine.messages), 3)
+        self.assertEqual(engine.messages[-1]["content"], "上一段叙事")
 
     def test_opening_prose_never_runs_the_state_auditor(self):
         events: list[str] = []

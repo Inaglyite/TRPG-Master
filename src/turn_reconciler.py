@@ -7,7 +7,9 @@ import re
 import time
 from typing import Any
 
+from .action_checks import _scene_aliases
 from .config import JUDGEMENT_MODEL
+from .discovery import _known_clue_ids
 from .llm_concurrency import llm_call_slot
 from .logger import error as log_error
 from .logger import game_event as log_game
@@ -118,10 +120,91 @@ _STATEFUL_NARRATIVE_PATTERN = re.compile(
     r"你(?:发现|找到|取得|获得|捡起|收下|交出|失去|消耗)"
     r"|(?:承认|坦白|透露|供认|证实|交给你|递给你)"
     r"|(?:看见|看到|目睹|检视|检查).{0,24}(?:尸体|遗体|怪物|非人|超自然)"
+    # 验尸/揭示类完成态：覆盖「揭开白布」「遗体显露」等不出现「发现/检查」的写法
+    r"|(?:揭开|掀开|揭起|拉开|移开).{0,12}(?:白布|遮盖|覆盖|罩布|裹尸布)"
+    r"|(?:遗体|尸体|证物|遗物).{0,8}(?:露出|显露|呈现|暴露|展现)"
     r"|你(?:受伤|中弹|流血|昏迷|死亡|理智崩溃)"
     r"|(?:案件|调查|故事).{0,12}(?:结束|告终)"
     r")"
 )
+
+
+# 人名中可剥离的称谓后缀：「惠特克罗夫特医生」在叙事里常被简写为「惠特克罗夫特」。
+_NPC_TITLE_SUFFIXES = (
+    "医生", "教授", "主任", "警官", "警长", "先生", "女士", "小姐",
+    "船长", "博士", "护士", "神父", "牧师", "老师",
+)
+
+
+def _npc_name_aliases(name: str) -> set[str]:
+    aliases = {name}
+    parts = [part for part in name.replace("・", "·").split("·") if len(part) >= 2]
+    aliases.update(parts)
+    for part in parts:
+        for suffix in _NPC_TITLE_SUFFIXES:
+            stripped = part[: -len(suffix)] if part.endswith(suffix) else ""
+            if len(stripped) >= 2:
+                aliases.add(stripped)
+    return {alias for alias in aliases if alias}
+
+
+def _module_keyword_index(world: dict) -> dict[str, str]:
+    """收割模组自己声明的关键词：场景别名、未揭示 NPC 名、未发现线索的发现目标。
+
+    等价于「导入模组时提取关键词表」，但运行时从 world state 现算——catalog
+    会随 refresh 同步，老存档自动受益，不需要迁移或额外存储。全程数据驱动，
+    不含领域词，对任意题材（僵尸、科幻）的模组同样有效。
+    """
+    index: dict[str, str] = {}
+    current_scene_id = str((world.get("current_scene") or {}).get("id") or "")
+    scenes = world.get("scene_catalog", {})
+    if isinstance(scenes, dict):
+        for scene_id, scene in scenes.items():
+            if str(scene_id) == current_scene_id or not isinstance(scene, dict):
+                continue
+            for alias in _scene_aliases(scene):
+                index.setdefault(alias, "scene")
+    for npc in world.get("npcs", []):
+        if not isinstance(npc, dict):
+            continue
+        revealed = npc.get("revealed")
+        level = 0
+        if isinstance(revealed, dict):
+            try:
+                level = int(revealed.get("level") or 0)
+            except (TypeError, ValueError):
+                level = 0
+        if level > 0:
+            continue
+        name = str(npc.get("name") or "").strip()
+        for alias in _npc_name_aliases(name):
+            if len(alias) >= 2:
+                index.setdefault(alias, "npc")
+    known_clues = _known_clue_ids(world)
+    catalog = world.get("clue_catalog", {})
+    if isinstance(catalog, dict):
+        for clue_id, clue in catalog.items():
+            if str(clue_id) in known_clues or not isinstance(clue, dict):
+                continue
+            rules = clue.get("discovery_rules")
+            if not isinstance(rules, list):
+                continue
+            for rule in rules:
+                targets = rule.get("targets") if isinstance(rule, dict) else None
+                if not isinstance(targets, list):
+                    continue
+                for target in targets:
+                    keyword = str(target).strip()
+                    if len(keyword) >= 2:
+                        index.setdefault(keyword, "clue_target")
+    return index
+
+
+def _entity_mention_signal(world: dict, body: str) -> bool:
+    """叙事提及了模组关键词表中、尚未进入权威状态的实体。"""
+    if not body or not isinstance(world, dict):
+        return False
+    return any(keyword in body for keyword in _module_keyword_index(world))
 
 
 def narrative_body(text: str) -> str:
@@ -344,6 +427,7 @@ def turn_needs_model_audit(
     player_action: str = "",
     narrative: str | None = None,
     has_authoritative_mutation: bool = False,
+    world: dict | None = None,
 ) -> bool:
     """Audit only stateful prose that reached no authoritative transaction."""
     if has_authoritative_mutation:
@@ -358,7 +442,14 @@ def turn_needs_model_audit(
     if narrative is None:
         return True
     del player_action  # Intent alone must not be mistaken for a completed event.
-    return bool(_STATEFUL_NARRATIVE_PATTERN.search(narrative_body(narrative)))
+    body = narrative_body(narrative)
+    if _STATEFUL_NARRATIVE_PATTERN.search(body):
+        return True
+    # 数据驱动的通用信号：叙事提及未揭示 NPC / 非当前场景。关键词网覆盖不了
+    # 所有模组（没有遗体/白布的模组），实体提及才是主阀门。
+    if world is not None and _entity_mention_signal(world, body):
+        return True
+    return False
 
 
 def _parse_json_scalar(raw: str) -> Any:
@@ -366,6 +457,27 @@ def _parse_json_scalar(raw: str) -> Any:
     if isinstance(value, (dict, list)):
         raise ValueError("flags only accept scalar values")
     return value
+
+
+def engine_turn_needs_model_audit(
+    engine: Any,
+    executed_tools: list[dict] | None,
+    *,
+    player_action: str = "",
+    narrative: str | None = None,
+) -> bool:
+    """Engine-facing gate: enrich the audit decision with the live world state."""
+    try:
+        world = engine.context.world_store.load()
+    except Exception:
+        world = None
+    return turn_needs_model_audit(
+        executed_tools,
+        player_action=player_action,
+        narrative=narrative,
+        has_authoritative_mutation=engine._turn_mutations.has_authoritative_mutation,
+        world=world,
+    )
 
 
 def apply_turn_commit(
