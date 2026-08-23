@@ -110,6 +110,10 @@ def run_game():
     if cfg.get("glm_api_key"):
         env.setdefault("GLM_API_KEY", cfg["glm_api_key"])
     env.setdefault("GLM_MODEL", cfg.get("glm_model", "glm-4-flash-250414"))
+    if cfg.get("context_window_tokens"):
+        env.setdefault("TRPG_CONTEXT_WINDOW_TOKENS", str(cfg["context_window_tokens"]))
+    if cfg.get("max_output_tokens"):
+        env.setdefault("TRPG_MAX_OUTPUT_TOKENS", str(cfg["max_output_tokens"]))
 
     if not env["OPENAI_API_KEY"]:
         print("\n错误: 未配置 API Key")

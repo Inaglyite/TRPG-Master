@@ -72,11 +72,13 @@ if _ENV_FILE.exists():
             "glm_api_key": "GLM_API_KEY",
             "glm_base_url": "GLM_BASE_URL",
             "glm_model": "GLM_MODEL",
+            "context_window_tokens": "TRPG_CONTEXT_WINDOW_TOKENS",
+            "max_output_tokens": "TRPG_MAX_OUTPUT_TOKENS",
         }
         for cfg_key, env_key in _mapping.items():
             val = _cfg.get(cfg_key)
             if val and env_key not in os_environ:
-                os_environ[env_key] = val
+                os_environ[env_key] = str(val)
     except Exception as e:
         print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
 
