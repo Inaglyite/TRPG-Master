@@ -372,6 +372,126 @@ def test_prune_old_tool_results_replaces_in_place_and_keeps_pairing(
     )
 
 
+def test_prune_stale_authority_blocks_keeps_only_latest_snapshot(tmp_path: Path) -> None:
+    """过期权威状态快照（每条玩家行动内嵌的当轮 JSON）被原地修剪，最新一条保留。"""
+    engine = _game_engine(tmp_path)
+    authority = (
+        "[引擎权威状态｜仅供守秘人，不得复述]\n"
+        '{"pc":{"hp":10},"flags":{}}\n约束：随身物品仅以上述 inventory 为准。'
+    )
+    messages = [{"role": "system", "content": "keeper"}]
+    for index in range(4):
+        messages.append(
+            {
+                "role": "user",
+                "content": f"[玩家行动] 行动 {index}\n\n{authority}",
+            }
+        )
+        messages.append({"role": "assistant", "content": f"结果 {index}"})
+    engine.messages = messages
+    engine.save("slot_000")
+
+    pruned = HistoryCompactor(engine).prune_stale_authority_blocks()
+
+    assert pruned == 3
+    for index in (1, 3, 5):
+        content = engine.messages[index]["content"]
+        assert "权威状态快照已过期" in content
+        assert f"行动 {(index - 1) // 2}" in content
+        assert "约束" not in content
+    # 最新一条玩家消息保留完整权威块
+    assert "约束" in engine.messages[7]["content"]
+    # 投影与影子一致；原文仍在追加日志里
+    shadow = shadow_adapter.for_engine(engine)
+    session = shadow.store.session_for_world(engine.context.world_id)
+    assert shadow.store.project(session["id"]) == engine.messages
+    assert any(
+        "约束" in str(event["payload"].get("content") or "")
+        for event in shadow.store.load_event_payloads(session["id"])
+    )
+
+
+def test_strip_asset_payloads_removes_only_data_uri() -> None:
+    """投递载荷剥离：仅移除 asset_data_uri，保留 asset_url 等模型可用字段。"""
+    import json
+
+    from src.tool_aux_handlers import strip_asset_payloads
+
+    payload = {
+        "found": True,
+        "entity_type": "npc",
+        "entity_id": "whitroft",
+        "asset_data_uri": "data:image/png;base64," + "A" * 5000,
+        "asset_url": "/api/assets/mod/x.png",
+    }
+    stripped = strip_asset_payloads(json.dumps(payload, ensure_ascii=False))
+    result = json.loads(stripped)
+    assert "asset_data_uri" not in result
+    assert result["asset_url"] == "/api/assets/mod/x.png"
+    assert result["asset_delivered"] is True
+    # 非 JSON / 无载荷输出原样返回
+    assert strip_asset_payloads("plain text") == "plain text"
+    no_asset = json.dumps({"found": True}, ensure_ascii=False)
+    assert strip_asset_payloads(no_asset) == no_asset
+
+
+def test_prune_asset_payloads_strips_history_regardless_of_recency(
+    tmp_path: Path,
+) -> None:
+    """asset_data_uri 是投递载荷而非叙事上下文：不受 keep-recent 窗口保护。"""
+    import json
+
+    engine = _game_engine(tmp_path)
+    data_uri = "data:image/png;base64," + "B" * 2048
+    messages = [{"role": "system", "content": "keeper"}]
+    for index in range(6):
+        messages.append({"role": "user", "content": f"行动 {index}"})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"call_{index}",
+                        "type": "function",
+                        "function": {"name": "show_handout", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        content = json.dumps(
+            {
+                "found": True,
+                "entity_id": f"npc_{index}",
+                "asset_data_uri": data_uri,
+                "asset_url": f"/api/assets/mod/npc_{index}.png",
+            },
+            ensure_ascii=False,
+        )
+        messages.append({"role": "tool", "tool_call_id": f"call_{index}", "content": content})
+    engine.messages = messages
+    engine.save("slot_000")
+
+    pruned = HistoryCompactor(engine).prune_asset_payloads()
+
+    # 6 条全部剥离——包括 keep-recent 窗口内的最新一条（投递早已完成）。
+    assert pruned == 6
+    for message in engine.messages:
+        content = str(message.get("content") or "")
+        assert "asset_data_uri" not in content
+    latest = json.loads(engine.messages[-1]["content"])
+    assert latest["asset_url"] == "/api/assets/mod/npc_5.png"
+    assert latest["asset_delivered"] is True
+    # 投影与影子一致；原文仍在追加日志里
+    shadow = shadow_adapter.for_engine(engine)
+    session = shadow.store.session_for_world(engine.context.world_id)
+    assert shadow.store.project(session["id"]) == engine.messages
+    assert any(
+        "asset_data_uri" in str(event["payload"].get("content") or "")
+        for event in shadow.store.load_event_payloads(session["id"])
+    )
+
+
 # ---------------------------------------------------------------------------
 # Context-overflow controlled retry
 # ---------------------------------------------------------------------------

@@ -134,6 +134,10 @@ def _prepare_turn_inner(
     resolved_discoveries: list[dict] = []
     lore_selection = None
     prelude = ""
+    # 记录回合前的消息数：容量熔断（未发起任何 provider 请求）时 finalize
+    # 用它回滚本回合追加，避免重试叠加毒化历史。
+    state["pre_turn_message_len"] = len(getattr(engine, "messages", None) or [])
+    engine.__dict__["_capacity_rejected_turn"] = False
     if user_content:
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
@@ -447,7 +451,13 @@ def _execute_tools(state: TurnState) -> dict:
         ledger = getattr(engine, "_turn_mutations", None)
         if ledger is not None and not reused:
             ledger.record_tool(name, args, output)
-        engine.messages.append({"role": "tool", "tool_call_id": call_id, "content": output})
+        # 存入历史前剥离 base64 图片投递载荷：WS 投递在工具执行期间已完成，
+        # 模型读不了图片，data URI 留在历史里只是每轮重复发送的死重。
+        from .tool_aux_handlers import strip_asset_payloads
+
+        engine.messages.append(
+            {"role": "tool", "tool_call_id": call_id, "content": strip_asset_payloads(output)}
+        )
         if name == "load_skill":
             # load_skill 的工具结果即 Skill 内容注入点，登记 skill 溯源。
             note_load_skill_result(engine, engine.messages[-1], output)
@@ -624,6 +634,10 @@ def _finalize_turn(state: TurnState) -> dict:
     else:
         log_error("空回合：模型未生成任何叙述或工具调用")
         engine.cb.on_error("守秘人陷入了沉思……")
+        if getattr(engine, "_capacity_rejected_turn", False):
+            pre_len = state.get("pre_turn_message_len")
+            if isinstance(pre_len, int) and 0 <= pre_len < len(engine.messages):
+                del engine.messages[pre_len:]
 
     if narrative.strip():
         with _performance_span(engine, "entity_reconcile"):

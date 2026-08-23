@@ -17,6 +17,26 @@ from .runtime import RuntimeContext
 from .tool_runtime import ToolRuntime
 
 
+def strip_asset_payloads(output: str) -> str:
+    """剥离工具结果里的 asset_data_uri（base64 图片投递载荷）。
+
+    data URI 只服务于当次 WS 投递（engine 在工具执行期间已 on_handout），
+    模型读不了图片，留在消息历史里只是每轮重复发送数百 KB 死重。
+    非 JSON 或不含载荷的输出原样返回。
+    """
+    if "asset_data_uri" not in output:
+        return output
+    try:
+        payload = json.loads(output)
+    except (json.JSONDecodeError, TypeError):
+        return output
+    if not isinstance(payload, dict) or "asset_data_uri" not in payload:
+        return output
+    payload.pop("asset_data_uri", None)
+    payload["asset_delivered"] = True
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def register_auxiliary_handlers(
     runtime: ToolRuntime,
     *,

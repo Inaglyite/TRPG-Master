@@ -14,6 +14,9 @@ from .logger import summary_event as log_summary
 # they exceed this size (raw events stay in the context event log).
 TOOL_RESULT_PRUNE_MIN_CHARS = 500
 
+# 每轮玩家行动/控制消息内嵌的当轮权威状态块起始标记；过期后可整体移除。
+AUTHORITY_MARKER = "[引擎权威状态｜仅供守秘人，不得复述]"
+
 
 def build_summary_input(messages: list[dict]) -> str:
     parts = []
@@ -50,7 +53,9 @@ def build_summary_input(messages: list[dict]) -> str:
             # authoritative WorldState/Turn records rebuilt each turn.
             call_id = str(message.get("tool_call_id") or "")
             name = tool_names.get(call_id, "tool")
-            parts.append(f"[tool_result]: {name} (id={call_id or 'unknown'}), authoritative result recorded")
+            parts.append(
+                f"[tool_result]: {name} (id={call_id or 'unknown'}), authoritative result recorded"
+            )
             continue
         elif role == "user":
             if not content.strip():
@@ -243,6 +248,75 @@ class HistoryCompactor:
             if message.get("tool_call_id"):
                 placeholder["tool_call_id"] = message["tool_call_id"]
             replacements[index] = placeholder
+        applied = prune_engine(engine, replacements)
+        for index in applied:
+            messages[index] = replacements[index]
+        if applied:
+            self.estimate_tokens()
+        return len(applied)
+
+    def prune_stale_authority_blocks(self) -> int:
+        """Strip stale authority snapshots from all but the latest user message.
+
+        每条玩家行动/控制消息都内嵌一份当轮的引擎权威状态 JSON（数千字符），
+        它只对当轮有效；留在历史里既是死重也是过期状态。keep-recent 下限按
+        消息条数计算，够不到这种「条数少但单条大」的历史，必须按内容修剪。
+        非破坏：每处修剪都是一条 shadow replace checkpoint，原文留在事件日志。
+        """
+        from .context_shadow import prune_engine
+
+        engine = self.engine
+        messages = engine.messages
+        last_user_index = -1
+        for index, message in enumerate(messages):
+            if message.get("role") == "user":
+                last_user_index = index
+        replacements: dict[int, dict] = {}
+        for index, message in enumerate(messages):
+            if index >= last_user_index or message.get("role") != "user":
+                continue
+            content = str(message.get("content") or "")
+            marker_at = content.find(AUTHORITY_MARKER)
+            if marker_at < 0:
+                continue
+            kept = content[:marker_at].rstrip()
+            placeholder = {
+                **message,
+                "content": kept + "\n\n（该轮权威状态快照已过期并移除）",
+            }
+            replacements[index] = placeholder
+        applied = prune_engine(engine, replacements)
+        for index in applied:
+            messages[index] = replacements[index]
+        if applied:
+            self.estimate_tokens()
+        return len(applied)
+
+    def prune_asset_payloads(self) -> int:
+        """Strip historical asset_data_uri payloads from tool results.
+
+        base64 图片载荷只在当次 WS 投递时有意义（投递在工具执行期间已完成），
+        留在历史里每条都是数百 KB 死重，且单条即可超过整个上下文窗口。
+        它不属于叙事上下文，因此不受 keep-recent 窗口保护——全部历史都剥。
+        非破坏：每处剥离都是一条 shadow replace checkpoint，原文留在事件日志。
+        """
+        from .context_shadow import prune_engine
+        from .tool_aux_handlers import strip_asset_payloads
+
+        engine = self.engine
+        messages = engine.messages
+        replacements: dict[int, dict] = {}
+        for index in range(1, len(messages)):
+            message = messages[index]
+            if message.get("role") != "tool":
+                continue
+            content = str(message.get("content") or "")
+            if "asset_data_uri" not in content:
+                continue
+            stripped = strip_asset_payloads(content)
+            if stripped == content:
+                continue
+            replacements[index] = {**message, "content": stripped}
         applied = prune_engine(engine, replacements)
         for index in applied:
             messages[index] = replacements[index]

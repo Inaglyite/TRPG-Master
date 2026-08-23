@@ -37,6 +37,9 @@ def _restore_deterministic_skill_surface(streamer: Any) -> int:
 def _reject_irreducible_capacity(streamer: Any, prepared: Any, policy: StreamPolicy) -> None:
     """Emit metadata-only diagnostics for a request that cannot be sent."""
     streamer.log_error("模型上下文达到硬容量上限；未发起 provider 请求")
+    # 标记本回合发生了容量熔断：finalize 据此回滚未应答的追加消息，
+    # 否则每次重试都会再叠加一份玩家输入与注入，让历史越来越超。
+    streamer.host.__dict__["_capacity_rejected_turn"] = True
     record_model_diagnostic(
         streamer.host,
         str(prepared.provider_kwargs.get("model") or ""),
@@ -116,6 +119,16 @@ def prepare_with_capacity(
             prune = getattr(compactor, "prune_old_tool_results", None)
             if callable(prune):
                 pruned = int(prune())
+            # 过期权威状态块（每条玩家行动内嵌的当轮 JSON 快照）是「条数少、
+            # 单条大」历史的主要体积来源，keep-recent 按条数永远够不到它们。
+            prune_authority = getattr(compactor, "prune_stale_authority_blocks", None)
+            if callable(prune_authority):
+                pruned += int(prune_authority())
+            # 历史工具结果里的 base64 图片投递载荷同理：单条即可占满整个窗口，
+            # 且不属于叙事上下文，不受 keep-recent 保护。
+            prune_assets = getattr(compactor, "prune_asset_payloads", None)
+            if callable(prune_assets):
+                pruned += int(prune_assets())
             if pruned:
                 prepared = prepare()
             # A hard estimate is not automatically irreducible: it may still
