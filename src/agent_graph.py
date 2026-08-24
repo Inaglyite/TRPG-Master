@@ -23,6 +23,7 @@ from .config import (
     tool_pipeline_shadow_enabled,
     tool_pipeline_v2_enabled,
 )
+from .crisis import maybe_fire_crisis
 from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error
@@ -144,12 +145,17 @@ def _prepare_turn_inner(
     if user_content:
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
+        # 模组声明的危机触发（伏击/显形）：条件按上一回合末状态判定，
+        # 由引擎确定性落地；文本进 prelude，战斗状态本回合即被战斗 agent 接管。
+        crisis_text = "" if opening_turn else maybe_fire_crisis(engine)
         action_resolution = engine._plan_player_action(user_content)
         engine._action_resolution = action_resolution
         transition_id = action_resolution.destination_scene_id
         discovery_matches = list(action_resolution.discovery_matches)
         discovery_skill = action_resolution.preferred_skill
         prelude = engine._turn_prelude(transition_id, discovery_matches)
+        if crisis_text:
+            prelude = f"{crisis_text}\n\n{prelude}" if prelude else crisis_text
         if prelude:
             engine.cb.on_narrative(f"{prelude}\n\n")
         if transition_id:

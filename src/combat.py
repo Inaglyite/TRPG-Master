@@ -212,7 +212,11 @@ def _participant(world: dict, spec: dict) -> dict:
         "max_hp": max_hp,
         "conditions": list(entity.get("conditions", [])) if isinstance(entity.get("conditions", []), list) else [],
         "disposition": str(entity.get("disposition") or "unknown"),
-        "hostile_to_pc": bool(entity.get("hostile_to_pc", False) or entity.get("disposition") == "hostile"),
+        "hostile_to_pc": bool(
+            spec.get("hostile_to_pc")
+            or entity.get("hostile_to_pc", False)
+            or entity.get("disposition") == "hostile"
+        ),
         "assumed_fields": assumed,
     }
 

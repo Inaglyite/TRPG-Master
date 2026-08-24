@@ -125,9 +125,7 @@ class CombatStateMachineTests(unittest.TestCase):
         )
 
         self.assertIsNone(preview_player_escalation(world, dialogue))
-        self.assertIsNone(
-            preview_player_escalation(world, "我问法伦：莱特教授是被人杀死的吗？")
-        )
+        self.assertIsNone(preview_player_escalation(world, "我问法伦：莱特教授是被人杀死的吗？"))
         self.assertIsNotNone(preview_player_escalation(world, "我决定杀死法伦"))
 
     def test_preflight_does_not_interrupt_attack_on_hostile_target(self):
@@ -218,12 +216,8 @@ class CombatStateMachineTests(unittest.TestCase):
 
     def test_multiplayer_violence_confirmation_uses_the_acting_investigator_profile(self):
         world = make_multiplayer_world(active_id="inv-bob")
-        world["investigators"]["inv-alice"]["backstory"] = {
-            "violence_stance": "avoidant"
-        }
-        world["investigators"]["inv-bob"]["backstory"] = {
-            "violence_stance": "unrestrained"
-        }
+        world["investigators"]["inv-alice"]["backstory"] = {"violence_stance": "avoidant"}
+        world["investigators"]["inv-bob"]["backstory"] = {"violence_stance": "unrestrained"}
         world["pc"] = copy.deepcopy(world["investigators"]["inv-bob"])
         world["pc"]["attributes"]["DEX"] = 95
         world["npcs"][0]["attributes"]["DEX"] = 60
@@ -304,13 +298,10 @@ class CombatStateMachineTests(unittest.TestCase):
         world["npcs"][0]["attributes"]["DEX"] = 90
         start_combat(world, [{"id": "cultist"}], "旧存档")
         combat = world["combat_state"]
-        participant = next(
-            item for item in combat["participants"] if item["id"] == "inv-alice"
-        )
+        participant = next(item for item in combat["participants"] if item["id"] == "inv-alice")
         participant["id"] = "pc"
         combat["turn_order"] = [
-            "pc" if value == "inv-alice" else value
-            for value in combat["turn_order"]
+            "pc" if value == "inv-alice" else value for value in combat["turn_order"]
         ]
         combat["pending_decision"] = {
             "id": "legacy-decision",
@@ -406,10 +397,14 @@ class CombatStateMachineTests(unittest.TestCase):
     def test_pc_stats_cannot_be_overridden_by_model(self):
         world = make_world()
 
-        start_combat(world, [
-            {"id": "pc", "dex": 999, "fighting_brawl": 999},
-            {"id": "cultist"},
-        ], "伏击")
+        start_combat(
+            world,
+            [
+                {"id": "pc", "dex": 999, "fighting_brawl": 999},
+                {"id": "cultist"},
+            ],
+            "伏击",
+        )
 
         pc = next(item for item in world["combat_state"]["participants"] if item["id"] == "pc")
         self.assertEqual(pc["dex"], 60)
@@ -685,6 +680,49 @@ class CombatStateMachineTests(unittest.TestCase):
         self.assertEqual(world["case_clocks"]["human_pressure"], 1)
         self.assertEqual(world["violence_log"][-1]["target"], "cultist")
         self.assertEqual(world["combat_state"]["current_actor"], "cultist")
+
+
+class HostileSpecOverrideTests(unittest.TestCase):
+    def test_spec_hostile_override_skips_violence_confirmation(self):
+        """危机战斗参战者可经 spec 声明 hostile_to_pc——否则暴力确认门把危机
+        伏击当成「攻击非敌对者」，真机里 12 回合射击全被 action_cancelled。"""
+        world = make_world()
+        world["npcs"][0]["disposition"] = "submissive"
+        world["pc"]["attributes"]["DEX"] = 90  # PC 先动
+
+        # 无覆盖：攻击非敌对 NPC → 暴力确认门
+        start_combat(world, [{"id": "cultist", "damage_spec": "1d3"}], "伏击")
+        pending = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="firearm",
+            description="朝教徒开枪",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+        )
+        self.assertTrue(pending.get("requires_decision"))
+
+        # spec 声明 hostile_to_pc → 直接结算，无确认门
+        world = make_world()
+        world["npcs"][0]["disposition"] = "submissive"
+        world["pc"]["attributes"]["DEX"] = 90  # PC 先动
+        start_combat(
+            world,
+            [{"id": "cultist", "damage_spec": "1d3", "hostile_to_pc": True}],
+            "伏击",
+        )
+        result = combat_action(
+            world,
+            actor_id="pc",
+            target_id="cultist",
+            action_type="firearm",
+            description="朝教徒开枪",
+            weapon="左轮手枪",
+            damage_spec="1d8",
+        )
+        self.assertFalse(result.get("requires_decision", False))
+        self.assertNotEqual(result.get("event"), "decision_required")
 
 
 if __name__ == "__main__":
