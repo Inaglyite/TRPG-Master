@@ -37,9 +37,9 @@ class IdentityContractTests(unittest.TestCase):
         self.assertNotIn("地下室的封印正在减弱", prompt)
         self.assertNotIn("一只深潜者从水中浮现", prompt)
 
-        atmosphere = (
-            PROJECT_ROOT / "skills" / "keeper" / "keeper_atmosphere.skill"
-        ).read_text(encoding="utf-8")
+        atmosphere = (PROJECT_ROOT / "skills" / "keeper" / "keeper_atmosphere.skill").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("事实不可以增殖", atmosphere)
         self.assertNotIn("指纹残留在血迹最薄处", atmosphere)
         self.assertNotIn("腐烂的甜腻气息扑面而来", atmosphere)
@@ -54,9 +54,13 @@ class IdentityContractTests(unittest.TestCase):
         hybrid = load_system_prompt(context, profile="hybrid")
 
         self.assertIn("守秘人私有时间线", hybrid)
-        self.assertNotIn("# 猩红文档调查压力与解谜节奏 Skill", hybrid)
+        # 节奏/案件时钟是守秘人核心机制而非可选扩展：非 spine 时 hybrid 档永远
+        # 加载不到它，案件时钟会全程停在 0（见 scarlet-playthrough-check 事故案例）。
+        self.assertIn("# 猩红文档调查压力与解谜节奏 Skill", hybrid)
         self.assertIn("# 猩红文档调查压力与解谜节奏 Skill", full)
-        self.assertLess(len(hybrid), len(full) * 0.8)
+        # hybrid 与 full 的差值必须仍是整个 module.md（约 12K 字符）；上界 0.85
+        # 防止 module.md 被误并进 hybrid，同时不再按特定 spine 集合校准。
+        self.assertLess(len(hybrid), len(full) * 0.85)
 
     def test_opening_prompt_profile_excludes_private_module_material(self):
         context = SimpleNamespace(
@@ -107,27 +111,23 @@ class IdentityContractTests(unittest.TestCase):
             )
             engine = GameEngine.__new__(GameEngine)
             engine.context = context
-            engine.messages = [{
-                "role": "user",
-                "content": f"{engine.CONTROL_MESSAGE_PREFIX}\n开始新游戏。",
-            }]
+            engine.messages = [
+                {
+                    "role": "user",
+                    "content": f"{engine.CONTROL_MESSAGE_PREFIX}\n开始新游戏。",
+                }
+            ]
 
             self.assertTrue(engine._has_pending_new_game_opening())
 
             authority = engine._authoritative_turn_context()
-            payload = json.loads(
-                authority.split("\n", 1)[1].split("\n约束：", 1)[0]
-            )
+            payload = json.loads(authority.split("\n", 1)[1].split("\n约束：", 1)[0])
 
             self.assertGreater(len(payload["module_opening"]), 400)
             self.assertIn("不要压缩为任务摘要", payload["module_opening"])
             self.assertIn("**你可以——**", payload["module_opening"])
             self.assertIn("不得把它们记录成线索", payload["module_opening"])
-            self.assertTrue(
-                payload["narrative_fact_scope"][
-                    "closed_world_for_this_action"
-                ]
-            )
+            self.assertTrue(payload["narrative_fact_scope"]["closed_world_for_this_action"])
             self.assertEqual(
                 payload["narrative_fact_scope"]["mode"],
                 "module_opening",
@@ -136,15 +136,11 @@ class IdentityContractTests(unittest.TestCase):
                 len(payload["narrative_fact_scope"]["opening_public_facts"]),
                 3,
             )
-            opening_facts = " ".join(
-                payload["narrative_fact_scope"]["opening_public_facts"]
-            )
+            opening_facts = " ".join(payload["narrative_fact_scope"]["opening_public_facts"])
             self.assertNotIn("哈兰德·洛奇", opening_facts)
             self.assertNotIn("艾米莉亚·考特", opening_facts)
             self.assertEqual(
-                payload["narrative_fact_scope"][
-                    "uncatalogued_opening_details"
-                ],
+                payload["narrative_fact_scope"]["uncatalogued_opening_details"],
                 "flavor_only_never_persist_as_clue_or_state",
             )
             self.assertEqual(
@@ -156,9 +152,7 @@ class IdentityContractTests(unittest.TestCase):
             engine.messages[-1]["content"] = "[玩家行动] 我继续追问法伦。"
             self.assertFalse(engine._has_pending_new_game_opening())
             normal_payload = json.loads(
-                engine._authoritative_turn_context()
-                .split("\n", 1)[1]
-                .split("\n约束：", 1)[0]
+                engine._authoritative_turn_context().split("\n", 1)[1].split("\n约束：", 1)[0]
             )
             self.assertEqual(normal_payload["module_opening"], "")
             self.assertEqual(
@@ -258,10 +252,7 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(tool_calls, [])
 
     def test_story_model_only_receives_non_redundant_tools(self):
-        names = {
-            tool["function"]["name"]
-            for tool in MODEL_TOOLS
-        }
+        names = {tool["function"]["name"] for tool in MODEL_TOOLS}
 
         self.assertIn("sanity_event", names)
         self.assertNotIn("read_file", names)
@@ -314,9 +305,7 @@ class IdentityContractTests(unittest.TestCase):
             engine._stream_llm("test-model")
 
         names = {tool["function"]["name"] for tool in captured["tools"]}
-        self.assertEqual(names, {
-            tool["function"]["name"] for tool in model_tools_for("story")
-        })
+        self.assertEqual(names, {tool["function"]["name"] for tool in model_tools_for("story")})
 
     def test_opening_request_replaces_system_and_omits_tools_without_mutation(self):
         captured = {}
@@ -369,17 +358,11 @@ class IdentityContractTests(unittest.TestCase):
                 _thinking_type_for_request("deepseek-v4-flash", "story"),
                 "disabled",
             )
-            self.assertIsNone(
-                _thinking_type_for_request("deepseek-v4-flash", "combat")
-            )
-            self.assertIsNone(
-                _thinking_type_for_request("deepseek-v4-pro", "story")
-            )
+            self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "combat"))
+            self.assertIsNone(_thinking_type_for_request("deepseek-v4-pro", "story"))
 
         with patch("src.engine.BASE_URL", "https://example.test/v1"):
-            self.assertIsNone(
-                _thinking_type_for_request("deepseek-v4-flash", "story")
-            )
+            self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "story"))
 
     def test_story_request_sends_selected_thinking_override(self):
         captured = {}
@@ -413,13 +396,15 @@ class IdentityContractTests(unittest.TestCase):
         )
 
     def test_stream_usage_is_forwarded_to_model_log(self):
-        usage = SimpleNamespace(model_dump=lambda: {
-            "prompt_tokens": 1200,
-            "completion_tokens": 20,
-            "total_tokens": 1220,
-            "prompt_cache_hit_tokens": 1100,
-            "prompt_cache_miss_tokens": 100,
-        })
+        usage = SimpleNamespace(
+            model_dump=lambda: {
+                "prompt_tokens": 1200,
+                "completion_tokens": 20,
+                "total_tokens": 1220,
+                "prompt_cache_hit_tokens": 1100,
+                "prompt_cache_miss_tokens": 100,
+            }
+        )
         chunks = [
             stream_chunk(content="缓存测试。"),
             stream_chunk(finish_reason="stop"),
@@ -478,37 +463,37 @@ class IdentityContractTests(unittest.TestCase):
                 "name": "房间",
                 "npcs_present": ["witness"],
             },
-            "npcs": [{
-                "id": "witness",
-                "name": "目击者",
-                "secret": "绝不能进入最近一条模型消息的幕后秘密",
-                "disposition": "guarded",
-                "revealed": {"level": 0, "entries": []},
-            }],
+            "npcs": [
+                {
+                    "id": "witness",
+                    "name": "目击者",
+                    "secret": "绝不能进入最近一条模型消息的幕后秘密",
+                    "disposition": "guarded",
+                    "revealed": {"level": 0, "entries": []},
+                }
+            ],
             "clues_found": {},
             "clue_catalog": {},
             "module_rules": {},
             "flags": {},
         }
         engine = GameEngine.__new__(GameEngine)
-        engine.context = SimpleNamespace(
-            world_store=SimpleNamespace(load=lambda: world)
-        )
+        engine.context = SimpleNamespace(world_store=SimpleNamespace(load=lambda: world))
         engine.messages = []
 
         context = engine._authoritative_turn_context(
             check_result={"skill": "spot_hidden", "success": True},
-            resolved_discoveries=[{
-                "discovered": True,
-                "text": "窗框上有一道已确认的擦痕。",
-            }],
+            resolved_discoveries=[
+                {
+                    "discovered": True,
+                    "text": "窗框上有一道已确认的擦痕。",
+                }
+            ],
         )
         raw_payload = context.split("\n", 1)[1].split("\n约束：", 1)[0]
         payload = json.loads(raw_payload)
 
-        self.assertTrue(
-            payload["narrative_fact_scope"]["closed_world_for_this_action"]
-        )
+        self.assertTrue(payload["narrative_fact_scope"]["closed_world_for_this_action"])
         self.assertEqual(
             payload["narrative_fact_scope"]["newly_confirmed_facts"],
             ["窗框上有一道已确认的擦痕。"],
@@ -522,6 +507,7 @@ class IdentityContractTests(unittest.TestCase):
         def create(**_kwargs):
             calls.append(True)
             if len(calls) == 1:
+
                 def broken_stream():
                     raise ConnectionError("stream closed")
                     yield
@@ -586,9 +572,7 @@ class IdentityContractTests(unittest.TestCase):
         self.assertTrue(any("RuntimeError" in entry for entry in server_logs))
 
     def test_multiplayer_websocket_close_reason_never_echoes_exception(self):
-        source = (
-            PROJECT_ROOT / "src" / "multiplayer_ws.py"
-        ).read_text(encoding="utf-8")
+        source = (PROJECT_ROOT / "src" / "multiplayer_ws.py").read_text(encoding="utf-8")
 
         self.assertNotIn("reason=str(exc)", source)
         self.assertIn('reason="房间连接发生内部错误"', source)
@@ -717,9 +701,7 @@ class IdentityContractTests(unittest.TestCase):
         ]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -745,9 +727,7 @@ class IdentityContractTests(unittest.TestCase):
         ]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -770,20 +750,20 @@ class IdentityContractTests(unittest.TestCase):
             '<｜DSML｜parameter name="npc_id" string="true">bryce_fallon'
             '</｜DSML｜parameter><｜DSML｜parameter name="tier" integer="1">1'
             '</｜DSML｜parameter><｜DSML｜parameter name="entry_text" string="true">'
-            f'{secret}</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>'
+            f"{secret}</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>"
         )
         # Every boundary is deliberately hostile, including a split start marker.
         chunks = [stream_chunk(content="门外仍在下雨。<｜DS")]
-        chunks.extend(stream_chunk(content=char) for char in protocol[len("<｜DS"):])
-        chunks.extend([
-            stream_chunk(content="你听见走廊尽头传来脚步声。"),
-            stream_chunk(finish_reason="stop"),
-        ])
+        chunks.extend(stream_chunk(content=char) for char in protocol[len("<｜DS") :])
+        chunks.extend(
+            [
+                stream_chunk(content="你听见走廊尽头传来脚步声。"),
+                stream_chunk(finish_reason="stop"),
+            ]
+        )
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -814,9 +794,7 @@ class IdentityContractTests(unittest.TestCase):
         ]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -840,16 +818,14 @@ class IdentityContractTests(unittest.TestCase):
             '<｜｜DSML｜｜parameter name="npc_id" string="true">bryce_fallon'
             '</｜｜DSML｜｜parameter><｜｜DSML｜｜parameter name="tier" integer="true">2'
             '</｜｜DSML｜｜parameter><｜｜DSML｜｜parameter name="entry_text" string="true">'
-            f'{secret}</｜｜DSML｜｜parameter></｜｜DSML｜｜invoke>'
-            '</｜｜DSML｜｜tool_calls>'
+            f"{secret}</｜｜DSML｜｜parameter></｜｜DSML｜｜invoke>"
+            "</｜｜DSML｜｜tool_calls>"
         )
         chunks = [stream_chunk(content=char) for char in "公开叙事。" + protocol]
         chunks.append(stream_chunk(finish_reason="stop"))
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -876,9 +852,7 @@ class IdentityContractTests(unittest.TestCase):
         ]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         visible = []
@@ -899,17 +873,11 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(tool_calls, [])
 
     def test_untagged_large_delta_streams_inferred_npc_bubbles_before_finalize(self):
-        prose = (
-            "法伦把档案推到桌边。"
-            "法伦说：“黄先生，请坐。这件事不能声张。”"
-            "窗外的雨仍在下。"
-        )
+        prose = "法伦把档案推到桌边。法伦说：“黄先生，请坐。这件事不能声张。”窗外的雨仍在下。"
         chunks = [stream_chunk(content=prose), stream_chunk(finish_reason="stop")]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         events = []
@@ -936,9 +904,7 @@ class IdentityContractTests(unittest.TestCase):
         chunks = [stream_chunk(content=prose), stream_chunk(finish_reason="stop")]
         engine = GameEngine.__new__(GameEngine)
         engine.client = SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(create=lambda **_kwargs: chunks)
-            )
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: chunks))
         )
         engine.messages = []
         events = []
@@ -959,9 +925,7 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual("".join(part for part, npc_id in events if npc_id is None), prose)
 
     def test_cli_kernel_banner_uses_product_name_not_module_name(self):
-        source = (
-            PROJECT_ROOT / "src" / "game_loop.py"
-        ).read_text(encoding="utf-8")
+        source = (PROJECT_ROOT / "src" / "game_loop.py").read_text(encoding="utf-8")
 
         self.assertIn('print("  🎲  TRPG Game 内核")', source)
         self.assertNotIn("疯狂宅邸", source)

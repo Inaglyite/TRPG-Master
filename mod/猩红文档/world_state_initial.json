@@ -428,6 +428,7 @@
     "wright_office": {
       "id": "wright_office",
       "name": "莱特的办公室",
+      "aliases": ["莱特教授的办公室", "莱特教授办公室"],
       "description": "狭小的教职办公室，书桌、文件柜、壁炉和一面部分熔化的裂镜构成了主要现场。",
       "exits": ["miskatonic_university", "miskatonic_history"],
       "npcs_present": []
@@ -580,6 +581,33 @@
       "related_scenes": ["arkham_sanatorium"],
       "discovered_at": null,
       "asset": null,
+      "discovery_rules": [
+        {
+          "intent": "examine",
+          "targets": ["亨特的复制件", "审判文档复制件", "文档复制件", "复制件", "副本", "抄本", "墨迹"],
+          "approach_text": "亨特迟疑着从枕头底下摸出一叠复制件。烛光下，纸上的深黑墨迹似乎在缓缓蠕动。",
+          "requires_success": false,
+          "sanity_severity": "minor"
+        },
+        {
+          "intent": "read",
+          "targets": ["亨特的复制件", "审判文档复制件", "文档复制件", "复制件", "副本", "抄本"],
+          "approach_text": "你翻开亨特的复制件。烛光下，那些深黑墨迹仿佛活了过来，在纸面上缓缓蠕动。",
+          "requires_success": false,
+          "sanity_severity": "minor"
+        },
+        {
+          "intent": "take",
+          "targets": ["亨特的复制件", "审判文档复制件", "文档复制件", "复制件", "副本", "抄本"],
+          "approach_text": "亨特没有阻拦。你收起那叠复制件，纸面上的深黑墨迹在烛光下隐隐蠕动。",
+          "requires_success": false
+        },
+        {
+          "intent": "talk",
+          "targets": ["复制件", "副本", "抄本", "审判文档"],
+          "requires_success": false
+        }
+      ],
       "discovery_notes": "只有实际取得或检查亨特的复制件后才记录。"
     },
     "witch_trial_documents": {
