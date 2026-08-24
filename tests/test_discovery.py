@@ -408,3 +408,97 @@ class DiscoveryResolutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def antique_shop_world() -> dict:
+    """古董店三步推进链：店面搜查 → 活板门 → 审判文档，全靠 requires_flags 门控。"""
+    return {
+        "flags": {"wicks_shop_searched": False, "deep_basement_found": False},
+        "current_scene": {"id": "trivial_pursuits"},
+        "clues_found": {"investigation": []},
+        "clue_catalog": {
+            "wick_shop_secrets": {
+                "id": "wick_shop_secrets",
+                "source": "trivial_pursuits",
+                "related_scenes": ["trivial_pursuits"],
+                "flag_effects": {"wicks_shop_searched": True},
+                "discovery_rules": [
+                    {
+                        "intent": "search",
+                        "targets": ["隔断", "储藏室", "店面后面", "厨房"],
+                    },
+                    {
+                        "intent": "examine",
+                        "targets": ["隔断", "暗门", "储藏室"],
+                    },
+                ],
+            },
+            "wick_trapdoor": {
+                "id": "wick_trapdoor",
+                "source": "trivial_pursuits",
+                "related_scenes": ["trivial_pursuits"],
+                "flag_effects": {"deep_basement_found": True},
+                "discovery_rules": [{
+                    "intent": "search",
+                    "targets": ["活板门", "地下室"],
+                    "requires_flags": ["wicks_shop_searched"],
+                }],
+            },
+            "witch_trial_documents": {
+                "id": "witch_trial_documents",
+                "source": "trivial_pursuits",
+                "related_scenes": ["trivial_pursuits"],
+                "flag_effects": {"documents_recovered": True},
+                "discovery_rules": [{
+                    "intent": "take",
+                    "targets": ["女巫审判文档", "审判文档原件"],
+                    "requires_flags": ["deep_basement_found"],
+                }],
+            },
+        },
+    }
+
+
+class RequiresFlagsGateTests(unittest.TestCase):
+    def test_requires_flags_blocks_premature_match(self):
+        world = antique_shop_world()
+        self.assertEqual(match_discovery_rules("搜查店面后面的隔断", world)[0].clue_id,
+                         "wick_shop_secrets")
+        # 终局线索不能跳过推进链直接命中
+        self.assertEqual(match_discovery_rules("我要拿走女巫审判文档", world), [])
+        self.assertEqual(match_discovery_rules("搜查地下室", world), [])
+
+    def test_chain_unlocks_step_by_step(self):
+        world = antique_shop_world()
+        world["flags"]["wicks_shop_searched"] = True
+        self.assertEqual(match_discovery_rules("搜查地下室", world)[0].clue_id,
+                         "wick_trapdoor")
+        self.assertEqual(match_discovery_rules("我要拿走女巫审判文档", world), [])
+        world["flags"]["deep_basement_found"] = True
+        self.assertEqual(
+            match_discovery_rules("我要拿走女巫审判文档", world)[0].clue_id,
+            "witch_trial_documents",
+        )
+
+    def test_missing_flags_mapping_blocks_gated_rules(self):
+        world = antique_shop_world()
+        del world["flags"]
+        self.assertEqual(match_discovery_rules("搜查地下室", world), [])
+
+
+class NegationGuardTests(unittest.TestCase):
+    def test_negation_does_not_cross_punctuation(self):
+        """「趁店员不注意，检查隔断」不是否定检查——真机里被误判导致
+        wick_shop_secrets 漏匹配，推进链差点断在第一步。"""
+        world = antique_shop_world()
+        self.assertEqual(
+            match_discovery_rules(
+                "趁店员不注意，检查大厅北端那堵不起眼的木质隔断", world
+            )[0].clue_id,
+            "wick_shop_secrets",
+        )
+
+    def test_true_negation_still_blocked(self):
+        world = antique_shop_world()
+        self.assertEqual(match_discovery_rules("先不要检查隔断", world), [])
+        self.assertEqual(match_discovery_rules("我没有搜查隔断", world), [])

@@ -23,7 +23,7 @@ _INTENT_PATTERNS = {
     "use": re.compile(r"(?:使用|启动|打开|操作|尝试|用)"),
 }
 _NEGATED = re.compile(
-    r"(?:不|别|不要|并未|没有|拒绝|暂时不).{0,8}"
+    r"(?:不|别|不要|并未|没有|拒绝|暂时不)[^，。；、]{0,8}"
     r"(?:检查|检视|查看|观察|搜查|搜索|阅读|拿起|询问|进入|使用|打开)"
 )
 _DISCUSSED = re.compile(
@@ -72,6 +72,21 @@ def _rule_matches(text: str, rule: dict) -> bool:
     )
 
 
+def _rule_flags_met(rule: dict, world: dict) -> bool:
+    """rule 声明的 requires_flags 须全部 truthy 才允许匹配。
+
+    通用推进阀门：模组可要求「先搜过店面」才允许「发现活板门」，防止
+    玩家一句「我找女巫审判文档」在店门口就直接命中终局线索。
+    """
+    required = rule.get("requires_flags")
+    if not isinstance(required, list) or not required:
+        return True
+    flags = world.get("flags", {})
+    if not isinstance(flags, dict):
+        return False
+    return all(bool(flags.get(str(flag))) for flag in required)
+
+
 def match_discovery_rules(content: str, world: dict) -> list[DiscoveryMatch]:
     """Match undiscovered clues in the current scene against one player action."""
     text = " ".join(str(content).strip().split())
@@ -94,7 +109,11 @@ def match_discovery_rules(content: str, world: dict) -> list[DiscoveryMatch]:
         if not isinstance(rules, list):
             continue
         for rule in rules:
-            if isinstance(rule, dict) and _rule_matches(text, rule):
+            if (
+                isinstance(rule, dict)
+                and _rule_flags_met(rule, world)
+                and _rule_matches(text, rule)
+            ):
                 matches.append(DiscoveryMatch(str(clue_id), clue, rule))
                 break
     return matches

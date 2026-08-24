@@ -351,6 +351,12 @@ class DiscoveryRuleDefinition(StrictModel):
     sanity_severity: Literal["minor", "moderate", "major"] | None = None
     npc_reveals: list[NpcRevealEffectDefinition] = Field(default_factory=list)
     fallback: DiscoveryFallbackDefinition | None = None
+    requires_flags: list[str] = Field(default_factory=list)
+
+    @field_validator("requires_flags")
+    @classmethod
+    def validate_requires_flags(cls, values: list[str]) -> list[str]:
+        return [_validate_entity_id(value) for value in values]
 
     @field_validator("targets")
     @classmethod
@@ -623,6 +629,19 @@ class ModuleDefinition(StrictModel):
             if missing_flags:
                 raise ValueError(
                     f"线索 {clue_id} 的 flag_effects 不存在: {missing_flags}"
+                )
+            missing_rule_flags = sorted(
+                {
+                    str(flag)
+                    for rule in clue.discovery_rules
+                    for flag in rule.requires_flags
+                }
+                - flag_ids
+            )
+            if missing_rule_flags:
+                raise ValueError(
+                    f"线索 {clue_id} 的 discovery_rules.requires_flags 不存在: "
+                    f"{missing_rule_flags}"
                 )
         for ending_id, ending in self.endings.items():
             missing_flags = sorted(set(ending.required_flags) - flag_ids)

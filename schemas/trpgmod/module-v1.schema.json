@@ -437,6 +437,13 @@
             }
           ],
           "default": null
+        },
+        "requires_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requires Flags",
+          "type": "array"
         }
       },
       "required": [
