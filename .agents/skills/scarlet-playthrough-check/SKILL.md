@@ -81,6 +81,12 @@ world_id 在报告头部，可用 WorldBranchService.open 复查），再定位�
   case_clocks，时钟双通道都不可达。修复：keeper_pressure 加 spine 标记 +
   commit_turn 加 clocks_set（审计可见、只增不减）。**改提示装配/审计 schema
   后必须跑本验收**。
+- 2026-08 时钟表进审计负载后仍然不记账：审计的工具契约是「只提交正文中
+  已完成的事实」，时钟推进作为推断被它自己的保守契约否决（探针：同一段
+  含征兆叙事，授权前 clocks_set 恒空，授权后立刻 0→1）。凡是让审计做
+  推断类记账，必须在系统提示里显式授权「这是你的固定职责，不算虚构」。
+  配套：时钟表数据化（case_clock_definitions）、每轮状态注入 next_level、
+  clue_clarity 由 cmd_add_clue 确定性推进。
 - 2026-08 B8 结局断言误读字段：on_game_over 回调给的是
   ending_type(good/neutral/bad/secret)+标题，不是结局 id；断言 id 永远 fail。
 - 2026-08「拿着便签前往停尸房」场景漏匹配：移动动词前出现携行短语导致
