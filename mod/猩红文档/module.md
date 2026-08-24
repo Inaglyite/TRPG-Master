@@ -423,6 +423,9 @@ double_life_exposed: false
 sanatorium_visited: false
 hobhouse_explored: false
 wicks_shop_searched: false
+deep_basement_found: false
+feldman_ambushed: false
+seal_obtained: false
 monster_manifested: false
 gangsters_dealt_with: false
 monster_defeated: false

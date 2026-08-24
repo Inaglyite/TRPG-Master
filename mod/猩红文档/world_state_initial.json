@@ -393,6 +393,9 @@
     "sanatorium_visited": false,
     "hobhouse_explored": false,
     "wicks_shop_searched": false,
+    "deep_basement_found": false,
+    "feldman_ambushed": false,
+    "seal_obtained": false,
     "monster_manifested": false,
     "gangsters_dealt_with": false,
     "monster_defeated": false,
@@ -455,6 +458,30 @@
       ]
     }
   },
+  "crisis_triggers": [
+    {
+      "id": "feldman_ambush",
+      "scene": "trivial_pursuits",
+      "required_flags": {"deep_basement_found": true},
+      "forbidden_flags": {"feldman_ambushed": true, "monster_defeated": true},
+      "narrative": "楼上突然传来维克的声音，温和却冰冷：「赫克托，卡拉——处理了。」货架的阴影里，那对沉默的兄妹动了——赫克托第一个扑上来，骨白色的手指直取你的咽喉，动作快得完全不像人类；卡拉从另一侧包抄，封死了你退向楼梯的路线。楼梯口，维克脸上那副殷勤的笑容终于彻底消失了。",
+      "combat": {
+        "reason": "费德曼兄妹奉维克之命伏击入侵地下室的调查员",
+        "participants": [
+          {"id": "hector_kara_feldman", "dex": 45, "fighting_brawl": 55, "dodge": 30}
+        ]
+      },
+      "flags_set": {"feldman_ambushed": true}
+    },
+    {
+      "id": "ink_manifestation",
+      "required_flags": {"documents_recovered": true},
+      "forbidden_flags": {"monster_manifested": true, "monster_defeated": true, "documents_given_to_wick": true},
+      "narrative": "你怀中的文档突然变得滚烫。泛黄的纸页无风自动，深黑的墨迹从字缝里渗出、汇聚、隆起，凝成一团不断流动的暗影——暗影中央，一枚幽绿的独眼缓缓睁开，笔直地落在你身上。被囚禁了三百多年的东西，出来讨它的自由了。",
+      "flags_set": {"monster_manifested": true},
+      "clocks_set": {"monster_manifestation": 5}
+    }
+  ],
   "scene_cache": {
     "miskatonic_university": "新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。校园中充斥着学术氛围，但近来因查尔斯·莱特教授的离奇死亡而笼罩在不安的谣言之中。法伦主任的办公室位于行政楼二层，铺着深色地毯，书架上整齐排列着皮革装订的典籍。",
     "wright_office": "一间狭小的教职办公室，只有一张书桌、几个文件柜和一个壁炉。墙上挂着一面裂开的镜子——仔细观察会发现它有一部分熔化了。这就是莱特死亡当晚凝视的那面镜子，他看到了恐怖的怪物，怪物燃尽了他的灵魂。隔壁有一间小房间，是艾米莉亚·考特作为助手工作的地方。壁炉里有很多匆忙焚烧的文件残骸。",
@@ -661,6 +688,66 @@
       ],
       "discovery_notes": "只有实际取得或检查亨特的复制件后才记录。"
     },
+    "wick_shop_secrets": {
+      "id": "wick_shop_secrets",
+      "text": "古董店店面后方隐藏着储藏室与装卸区，其中一扇门通向堆满包装箱和一台破旧锅炉的宽敞地下室。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 2,
+      "source": "trivial_pursuits",
+      "related_npcs": ["abner_wick", "hector_kara_feldman"],
+      "related_scenes": ["trivial_pursuits"],
+      "flag_effects": {"wicks_shop_searched": true},
+      "discovery_rules": [
+        {
+          "intent": "search",
+          "targets": ["隔断", "假墙", "货架后面", "储藏室", "装卸区", "店面后面", "店后面", "店铺后面", "厨房"],
+          "approach_text": "你绕过货架，在店面后方找到储藏室与装卸区。角落里一扇不起眼的门虚掩着，门后是通往更下方空间的楼梯。",
+          "requires_success": false
+        },
+        {
+          "intent": "examine",
+          "targets": ["隔断", "假墙", "暗门", "碗柜", "货架后面", "储藏室"],
+          "approach_text": "你绕过货架，在店面后方找到储藏室与装卸区。角落里一扇不起眼的门虚掩着，门后是通往更下方空间的楼梯。",
+          "requires_success": false
+        }
+      ],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "调查员实际搜查店面后方区域后记录。"
+    },
+    "wick_trapdoor": {
+      "id": "wick_trapdoor",
+      "text": "地下室隐藏着一扇半掩的活板门，通往迷宫般的深层地下室——破棺材、成堆人骨与骨制工具之间，中央房间有一口砖砌井。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 2,
+      "source": "trivial_pursuits",
+      "related_npcs": ["abner_wick", "hector_kara_feldman"],
+      "related_scenes": ["trivial_pursuits"],
+      "flag_effects": {"deep_basement_found": true},
+      "discovery_rules": [
+        {
+          "intent": "search",
+          "targets": ["活板门", "地下室", "地窖", "砖井", "深层地下室"],
+          "requires_flags": ["wicks_shop_searched"],
+          "approach_text": "你穿过地下室成堆的包装箱，掀开那扇半掩的活板门，沿阶梯下到迷宫般的深层地下室——破棺材、成堆的人骨、被制成工具的骨头映入眼帘，中央房间的砖砌井深不见底。",
+          "requires_success": false,
+          "sanity_severity": "major"
+        },
+        {
+          "intent": "examine",
+          "targets": ["活板门", "地下室", "地窖", "砖井", "深层地下室"],
+          "requires_flags": ["wicks_shop_searched"],
+          "approach_text": "你仔细检查地下室，发现包装箱后那扇半掩的活板门。门下的深层地下室里堆着破棺材与成堆人骨，有些骨头被制成了工具，中央是一口砖砌井。",
+          "requires_success": false,
+          "sanity_severity": "major"
+        }
+      ],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "只有调查员实际进入深层地下室后才记录。"
+    },
     "witch_trial_documents": {
       "id": "witch_trial_documents",
       "text": "失踪的阿卡姆女巫审判文档已经被调查员找回。",
@@ -669,7 +756,25 @@
       "tier": 2,
       "source": "module_objective",
       "related_npcs": [],
-      "related_scenes": [],
+      "related_scenes": ["trivial_pursuits"],
+      "flag_effects": {"documents_recovered": true},
+      "discovery_rules": [
+        {
+          "intent": "take",
+          "targets": ["女巫审判文档", "审判文档原件", "原始文档", "审判文档"],
+          "requires_flags": ["deep_basement_found"],
+          "approach_text": "你在深层地下室的箱底找到了那叠失踪的阿卡姆女巫审判文档——泛黄纸页上的几何图示让你的指尖一阵发凉。",
+          "requires_success": false
+        },
+        {
+          "intent": "search",
+          "targets": ["女巫审判文档", "审判文档原件", "原始文档"],
+          "requires_flags": ["deep_basement_found"],
+          "approach_text": "你在深层地下室翻找，终于在箱底找到了那叠失踪的阿卡姆女巫审判文档——泛黄纸页上的几何图示让你的指尖一阵发凉。",
+          "requires_success": false
+        }
+      ],
+      "granted_item": "阿卡姆女巫审判文档",
       "discovered_at": null,
       "asset": null,
       "discovery_notes": "仅在调查员实际取得原始文档时记录，并同步 documents_recovered。"
@@ -683,9 +788,50 @@
       "source": "trivial_pursuits",
       "related_npcs": ["abner_wick"],
       "related_scenes": ["trivial_pursuits"],
+      "flag_effects": {"seal_obtained": true},
+      "discovery_rules": [
+        {
+          "intent": "search",
+          "targets": ["锁箱", "银质徽章", "银徽章", "徽章", "楼上办公室", "办公室"],
+          "requires_flags": ["feldman_ambushed"],
+          "approach_text": "在维克楼上的办公室里，你撬开一只上锁的锡盒——里面是一枚沉甸甸的银质徽章，徽章表面刻着与文档上如出一辙的几何纹路。你立刻明白了它的用途：这是能关闭那道墨中通道的封印之物。",
+          "requires_success": false
+        },
+        {
+          "intent": "examine",
+          "targets": ["银质徽章", "银徽章", "徽章"],
+          "requires_flags": ["feldman_ambushed"],
+          "approach_text": "你仔细端详那枚银质徽章——表面的几何纹路与女巫审判文档上的图示严丝合缝。维克把它锁在办公室里不是没有原因的：它能关上那道通道。",
+          "requires_success": false
+        }
+      ],
+      "granted_item": "阿伯那·维克的银质徽章",
       "discovered_at": null,
       "asset": null,
       "discovery_notes": "只有实际发现徽章或得知其用途后记录。"
+    },
+    "monster_sealed": {
+      "id": "monster_sealed",
+      "text": "银质徽章覆上几何图示，墨中怪物的通道被永久关闭。",
+      "category": "event",
+      "type": "hidden",
+      "tier": 2,
+      "source": "module_objective",
+      "related_npcs": [],
+      "related_scenes": ["miskatonic_university", "wright_office", "wright_cottage", "miskatonic_medical", "miskatonic_history", "miskatonic_lodge_office", "miskatonic_student_commons", "sheb_tavern", "trivial_pursuits", "hobhouse_mansion", "arkham_sanatorium"],
+      "flag_effects": {"monster_defeated": true},
+      "discovery_rules": [
+        {
+          "intent": "use",
+          "targets": ["银质徽章", "徽章封印", "徽章覆", "封印文档", "封印仪式", "封印"],
+          "requires_flags": ["documents_recovered", "seal_obtained"],
+          "approach_text": "你将银质徽章覆上文档中央的几何图示。纹路相接的一瞬，纸页下的黑暗发出最后一声无声的嘶嚎——随即彻底沉寂。通道关闭了，这一次是永远的。",
+          "requires_success": false
+        }
+      ],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "玩家用银质徽章完成封印时记录，同步 monster_defeated——end_game(good) 的前置 flag 由此先于结局落地。"
     }
   },
   "endings": [
