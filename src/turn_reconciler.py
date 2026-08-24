@@ -65,6 +65,17 @@ COMMIT_TURN_TOOL = {
                         "required": ["key", "value_json"],
                     },
                 },
+                "clocks_set": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string"},
+                            "value_json": {"type": "string"},
+                        },
+                        "required": ["key", "value_json"],
+                    },
+                },
                 "sanity_events": {
                     "type": "array",
                     "items": {
@@ -89,6 +100,7 @@ COMMIT_TURN_TOOL = {
                 "clues",
                 "npc_reveals",
                 "flags_set",
+                "clocks_set",
                 "sanity_events",
                 "ending_id",
             ],
@@ -131,8 +143,20 @@ _STATEFUL_NARRATIVE_PATTERN = re.compile(
 
 # 人名中可剥离的称谓后缀：「惠特克罗夫特医生」在叙事里常被简写为「惠特克罗夫特」。
 _NPC_TITLE_SUFFIXES = (
-    "医生", "教授", "主任", "警官", "警长", "先生", "女士", "小姐",
-    "船长", "博士", "护士", "神父", "牧师", "老师",
+    "医生",
+    "教授",
+    "主任",
+    "警官",
+    "警长",
+    "先生",
+    "女士",
+    "小姐",
+    "船长",
+    "博士",
+    "护士",
+    "神父",
+    "牧师",
+    "老师",
 )
 
 
@@ -234,11 +258,13 @@ def _compact_world(state: dict) -> dict:
             continue
         for clue in entries[-20:]:
             if isinstance(clue, dict):
-                clues.append({
-                    "id": clue.get("catalog_id") or clue.get("id"),
-                    "category": category,
-                    "text": _clip(clue.get("text"), 240),
-                })
+                clues.append(
+                    {
+                        "id": clue.get("catalog_id") or clue.get("id"),
+                        "category": category,
+                        "text": _clip(clue.get("text"), 240),
+                    }
+                )
 
     clue_catalog = {}
     for clue_id, clue in state.get("clue_catalog", {}).items():
@@ -265,17 +291,19 @@ def _compact_world(state: dict) -> dict:
         if not isinstance(npc, dict):
             continue
         revealed = npc.get("revealed") or {}
-        npcs.append({
-            "id": npc.get("id"),
-            "name": npc.get("name"),
-            "location": npc.get("current_location"),
-            "revealed_level": revealed.get("level", 0),
-            "revealed_entries": [
-                _clip(entry.get("text"), 180)
-                for entry in revealed.get("entries", [])[-8:]
-                if isinstance(entry, dict)
-            ],
-        })
+        npcs.append(
+            {
+                "id": npc.get("id"),
+                "name": npc.get("name"),
+                "location": npc.get("current_location"),
+                "revealed_level": revealed.get("level", 0),
+                "revealed_entries": [
+                    _clip(entry.get("text"), 180)
+                    for entry in revealed.get("entries", [])[-8:]
+                    if isinstance(entry, dict)
+                ],
+            }
+        )
 
     pc = state.get("pc", {})
     return {
@@ -290,6 +318,7 @@ def _compact_world(state: dict) -> dict:
             "conditions": pc.get("conditions", []),
         },
         "flags": state.get("flags", {}),
+        "case_clocks": state.get("case_clocks", {}),
         "known_clues": clues[-30:],
         "clue_catalog": clue_catalog,
         "npcs": npcs,
@@ -353,7 +382,7 @@ def _scene_transition_position(name: str, text: str) -> int:
         r"[^。！？\n]{0,18}$"
     )
     for match in re.finditer(re.escape(name), text):
-        prefix = text[max(0, match.start() - 28):match.start()]
+        prefix = text[max(0, match.start() - 28) : match.start()]
         if transition.search(prefix):
             positions.append(match.start())
     return max(positions, default=-1)
@@ -371,29 +400,31 @@ def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
         for scene_id, scene in scenes.items():
             if not isinstance(scene, dict):
                 continue
-            position = _scene_transition_position(
-                str(scene.get("name") or ""), body
-            )
+            position = _scene_transition_position(str(scene.get("name") or ""), body)
             if position >= 0:
-                candidates.append((
-                    position,
-                    len(str(scene.get("name") or "")),
-                    str(scene_id),
-                ))
+                candidates.append(
+                    (
+                        position,
+                        len(str(scene.get("name") or "")),
+                        str(scene_id),
+                    )
+                )
 
     applied: list[str] = []
     if candidates:
         scene_id = max(candidates)[2]
         current_scene = state.get("current_scene", {})
         target_scene = scenes[scene_id]
-        if (
-            current_scene.get("id") != scene_id
-            or current_scene.get("name") != target_scene.get("name")
+        if current_scene.get("id") != scene_id or current_scene.get("name") != target_scene.get(
+            "name"
         ):
-            engine._execute_tool("state_set", {
-                "path": "current_scene.id",
-                "value": json.dumps(scene_id, ensure_ascii=False),
-            })
+            engine._execute_tool(
+                "state_set",
+                {
+                    "path": "current_scene.id",
+                    "value": json.dumps(scene_id, ensure_ascii=False),
+                },
+            )
             applied.append(f"scene:{scene_id}")
             state = engine.context.world_store.load()
 
@@ -410,11 +441,14 @@ def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
             continue
         tags = "、".join(str(tag) for tag in npc.get("visible_tags", [])[:6])
         entry = f"{name}：{tags}" if tags else f"调查员已见到{name}。"
-        engine._execute_tool("npc_reveal", {
-            "npc_id": npc["id"],
-            "tier": 1,
-            "entry_text": entry,
-        })
+        engine._execute_tool(
+            "npc_reveal",
+            {
+                "npc_id": npc["id"],
+                "tier": 1,
+                "entry_text": entry,
+            },
+        )
         applied.append(f"npc:{npc['id']}")
     if applied:
         log_game("确定性叙事同步 | " + ", ".join(applied))
@@ -514,10 +548,13 @@ def apply_turn_commit(
             and _name_mentioned(str(scene.get("name", "")), combined_text)
         ):
             scene_value = {key: value for key, value in scene.items() if key != "document"}
-            engine._execute_tool("state_set", {
-                "path": "current_scene",
-                "value": json.dumps(scene_value, ensure_ascii=False),
-            })
+            engine._execute_tool(
+                "state_set",
+                {
+                    "path": "current_scene",
+                    "value": json.dumps(scene_value, ensure_ascii=False),
+                },
+            )
             applied.append(f"scene:{scene_id}")
         elif needs_sync:
             skipped.append(f"scene:{scene_id}")
@@ -587,17 +624,15 @@ def apply_turn_commit(
         npc = npcs.get(npc_id)
         entry = _clip(reveal.get("text"), 400).strip()
         tier = int(reveal.get("tier") or 1)
-        if (
-            npc
-            and entry
-            and 1 <= tier <= 3
-            and _name_mentioned(str(npc.get("name", "")), body)
-        ):
-            output = engine._execute_tool("npc_reveal", {
-                "npc_id": npc_id,
-                "tier": tier,
-                "entry_text": entry,
-            })
+        if npc and entry and 1 <= tier <= 3 and _name_mentioned(str(npc.get("name", "")), body):
+            output = engine._execute_tool(
+                "npc_reveal",
+                {
+                    "npc_id": npc_id,
+                    "tier": tier,
+                    "entry_text": entry,
+                },
+            )
             try:
                 duplicate = bool(json.loads(output).get("duplicate"))
             except (TypeError, json.JSONDecodeError, AttributeError):
@@ -639,6 +674,48 @@ def apply_turn_commit(
                 skipped.append(f"flag:{key}")
             else:
                 applied.append(f"flag:{key}={value!r}")
+
+    # 案件时钟：末日钟只增不减，键必须已在 case_clocks 中声明。
+    # 叙事模型无工具，时钟记账只能由本审计完成——keeper 叙述了征兆，
+    # 审计负责把它记成数值，否则模组压力机制永远不启动。
+    clocks = state.get("case_clocks", {})
+    for change in commit.get("clocks_set", [])[:8]:
+        if not isinstance(change, dict):
+            continue
+        key = str(change.get("key") or "").strip()
+        if key not in clocks:
+            skipped.append(f"clock:{key}")
+            continue
+        try:
+            value = _parse_json_scalar(str(change.get("value_json", "")))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            skipped.append(f"clock:{key}")
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            skipped.append(f"clock:{key}")
+            continue
+        current = clocks.get(key)
+        if not isinstance(current, (int, float)) or value <= current:
+            skipped.append(f"clock:{key}")
+            continue
+        args = {
+            "path": f"case_clocks.{key}",
+            "value": json.dumps(int(value), ensure_ascii=False),
+        }
+        execute_model_tool = getattr(engine, "_execute_model_tool", None)
+        output = (
+            execute_model_tool("state_set", args, player_action=player_action)
+            if execute_model_tool
+            else engine._execute_tool("state_set", args)
+        )
+        try:
+            clock_result = json.loads(output)
+        except (TypeError, json.JSONDecodeError, AttributeError):
+            clock_result = {}
+        if clock_result.get("ok") is False:
+            skipped.append(f"clock:{key}")
+        else:
+            applied.append(f"clock:{key}={int(value)}")
 
     if not ({"sanity_event", "sanity_trigger", "sanity_loss"} & already_executed):
         events = commit.get("sanity_events", [])
@@ -693,12 +770,15 @@ def apply_turn_commit(
         }
         ending = endings.get(ending_id)
         if ending:
-            output = engine._execute_tool("end_game", {
-                "ending_id": ending_id,
-                "ending_type": ending.get("ending_type", "neutral"),
-                "title": ending.get("title", "故事结束"),
-                "summary": ending.get("description", ""),
-            })
+            output = engine._execute_tool(
+                "end_game",
+                {
+                    "ending_id": ending_id,
+                    "ending_type": ending.get("ending_type", "neutral"),
+                    "title": ending.get("title", "故事结束"),
+                    "summary": ending.get("description", ""),
+                },
+            )
             try:
                 end_data = json.loads(output)
             except json.JSONDecodeError:
@@ -749,8 +829,10 @@ def reconcile_turn(
         "只有明确拿在身上/收进口袋的物品才加入背包；留在现场的证物不加入。\n"
         "只有正文明确遭遇了 module_rules 所列恐怖源时才提交一次 sanity_event。\n"
         "结局必须已在正文中真正完成，而且配置的 required_flags 已满足；否则 ending_id 为空。\n"
-        "没有变化时所有数组与 ID 均为空。\n\n"
-        + json.dumps(payload, ensure_ascii=False)
+        "case_clocks 是模组的末日时钟：正文实际经历了对应等级的征兆、压力或真相逼近事件时，"
+        "用 clocks_set 把该时钟+1（只增不减，键必须是 authoritative_world 已有的时钟）；"
+        "正文没有相应事件时不要推进。\n"
+        "没有变化时所有数组与 ID 均为空。\n\n" + json.dumps(payload, ensure_ascii=False)
     )
     started_at = time.monotonic()
     audit_model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
@@ -769,9 +851,12 @@ def reconcile_turn(
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=1400,
+                # v4 默认 thinking：推理 token 会吃掉 max_tokens 预算，导致
+                # commit_turn 参数被截断而无法解析。审计是结构化任务，关思考。
+                max_tokens=4000,
                 tools=[COMMIT_TURN_TOOL],
                 tool_choice="auto",
+                extra_body={"thinking": {"type": "disabled"}},
             )
     except Exception as exc:
         log_error(f"回合审计调用失败: {exc}")

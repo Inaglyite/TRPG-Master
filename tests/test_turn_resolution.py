@@ -18,6 +18,7 @@ from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_sn
 from src.tool_request_authority import issue_model_request
 from src.tools import tool_catalog_for_names
 from src.turn_reconciler import (
+    _compact_world,
     apply_turn_commit,
     narrative_body,
     reconcile_narrative_entities,
@@ -173,6 +174,38 @@ class ActionCheckInferenceTests(unittest.TestCase):
             ),
             "medical",
         )
+
+    def test_travel_with_carry_phrase_is_resolved_locally(self):
+        """「拿着便签前往停尸房」这类携行短语开头也必须触发场景切换。"""
+        world = resolution_world()
+        world["scene_catalog"]["medical"] = {
+            "id": "medical",
+            "name": "密斯卡托尼克大学医学院",
+            "description": "医学院地下的冰冷停尸房。",
+            "npcs_present": [],
+        }
+
+        self.assertEqual(
+            infer_scene_transition("拿着便签前往停尸房，先找医生说明来意", world),
+            "medical",
+        )
+        self.assertEqual(
+            infer_scene_transition("带上钥匙前往医学院", world),
+            "medical",
+        )
+
+    def test_carry_like_non_move_phrases_do_not_change_scene(self):
+        """「活着回去」这类含 着 的非移动句绝不能误判为场景切换。"""
+        world = resolution_world()
+        world["scene_catalog"]["medical"] = {
+            "id": "medical",
+            "name": "密斯卡托尼克大学医学院",
+            "description": "医学院地下的冰冷停尸房。",
+            "npcs_present": [],
+        }
+
+        self.assertIsNone(infer_scene_transition("我不想死，要活着回去", world))
+        self.assertIsNone(infer_scene_transition("我们商量着去停尸房的事", world))
 
 
 class StoryStreamingTests(unittest.TestCase):
@@ -370,6 +403,54 @@ class TurnCommitTests(unittest.TestCase):
             self.assertEqual(world["npcs"][0]["revealed"]["level"], 1)
             self.assertIn("flag:invented_flag", result["skipped"])
 
+    def test_commit_advances_only_declared_clocks_and_never_decreases(self):
+        """案件时钟：只接受已声明的键、数值、且严格递增；其余一律 skipped。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = WorldStore(Path(temp_dir) / "world")
+            world = resolution_world()
+            world["case_clocks"] = {"monster_manifestation": 1, "human_pressure": 0}
+            store.initialize(world)
+            engine = FakeCommitEngine(store)
+            commit = {
+                "scene_id": "",
+                "items_add": [],
+                "items_remove": [],
+                "clues": [],
+                "npc_reveals": [],
+                "flags_set": [],
+                "clocks_set": [
+                    {"key": "monster_manifestation", "value_json": "2"},
+                    {"key": "human_pressure", "value_json": "0"},
+                    {"key": "invented_clock", "value_json": "3"},
+                    {"key": "monster_manifestation", "value_json": '"high"'},
+                ],
+                "sanity_events": [],
+                "ending_id": "",
+            }
+
+            result = apply_turn_commit(
+                engine,
+                commit,
+                player_action="我在旅馆里又守了一天。",
+                narrative="第四天夜里，你听见楼下传来低语声，电灯忽明忽暗。",
+            )
+
+            clocks = store.load()["case_clocks"]
+            self.assertEqual(clocks["monster_manifestation"], 2)
+            self.assertEqual(clocks["human_pressure"], 0)
+            self.assertNotIn("invented_clock", clocks)
+            self.assertIn("clock:monster_manifestation=2", result["applied"])
+            self.assertIn("clock:human_pressure", result["skipped"])
+            self.assertIn("clock:invented_clock", result["skipped"])
+            self.assertIn("clock:monster_manifestation", result["skipped"])
+
+    def test_audit_payload_exposes_case_clocks(self):
+        """审计负载必须携带 case_clocks：叙事模型无工具，时钟记账只有审计能做。"""
+        state = resolution_world()
+        state["case_clocks"] = {"monster_manifestation": 2}
+        compact = _compact_world(state)
+        self.assertEqual(compact["case_clocks"], {"monster_manifestation": 2})
+
     def test_option_menu_is_not_part_of_completed_narrative(self):
         text = "你仍站在大厅里。\n\n**你可以——**\n1. 前往莱特的办公室查看尸体"
         self.assertEqual(narrative_body(text), "你仍站在大厅里。")
@@ -517,9 +598,7 @@ class TurnCommitTests(unittest.TestCase):
             "clue_catalog": {
                 "body": {
                     "id": "body",
-                    "discovery_rules": [
-                        {"intent": "examine", "targets": ["莱特的尸体"]}
-                    ],
+                    "discovery_rules": [{"intent": "examine", "targets": ["莱特的尸体"]}],
                 }
             },
         }
@@ -530,19 +609,13 @@ class TurnCommitTests(unittest.TestCase):
         world = self._keyword_gate_world()
 
         self.assertTrue(
-            turn_needs_model_audit(
-                [], narrative="惠特克罗夫特站在几步之外。", world=world
-            )
+            turn_needs_model_audit([], narrative="惠特克罗夫特站在几步之外。", world=world)
         )
         self.assertTrue(
-            turn_needs_model_audit(
-                [], narrative="停尸房里的冷气裹住你的后背。", world=world
-            )
+            turn_needs_model_audit([], narrative="停尸房里的冷气裹住你的后背。", world=world)
         )
         self.assertTrue(
-            turn_needs_model_audit(
-                [], narrative="他推开冷柜，莱特的尸体静静躺着。", world=world
-            )
+            turn_needs_model_audit([], narrative="他推开冷柜，莱特的尸体静静躺着。", world=world)
         )
 
     def test_settled_entities_do_not_trigger_audit(self):
