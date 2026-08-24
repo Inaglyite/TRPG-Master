@@ -94,12 +94,13 @@ _DISCUSSED_ACTION = re.compile(
 )
 
 _MOVE_ACTION = re.compile(
-    r"(?:^|[，。；！？\s])(?:我)?(?:立刻|马上|直接|先|现在|接下来|随后|然后|接着|之后)?"
+    r"(?:^|[，。；！？\s])"
+    # 携行短语的动词白名单是闭集：防止「活着回去」这类含 着 的非移动句误判。
+    r"(?:(?:拿着|拿上|带上|带着|揣着|提着|背着|抱起|抓起|拿起|收好|收拾好)[一-龥]{0,6}[，,]?)?"
+    r"(?:我)?(?:立刻|马上|直接|先|现在|接下来|随后|然后|接着|之后)?"
     r"(?:前往|去往|去|来到|进入|走进|赶到|返回|回到)"
 )
-_NEGATED_MOVE = re.compile(
-    r"(?:不|别|不要|拒绝|暂时不).{0,6}(?:前往|去往|去|进入|走进|返回|回到)"
-)
+_NEGATED_MOVE = re.compile(r"(?:不|别|不要|拒绝|暂时不).{0,6}(?:前往|去往|去|进入|走进|返回|回到)")
 _DISCUSSED_MOVE = re.compile(
     r"(?:问|询问|请问|想知道).{0,24}(?:怎么|如何|能否|能不能|可不可以|是否可以)"
     r".{0,16}(?:前往|去往|去|进入|走进|返回|回到)"
@@ -163,7 +164,7 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
     move = _MOVE_ACTION.search(text)
     if move is None:
         return None
-    destination_text = text[move.end():]
+    destination_text = text[move.end() :]
     scenes = world.get("scene_catalog", {})
     if not isinstance(scenes, dict):
         return None
@@ -172,9 +173,7 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
     for scene_id, scene in scenes.items():
         if not isinstance(scene, dict):
             continue
-        matched_aliases = [
-            alias for alias in _scene_aliases(scene) if alias in destination_text
-        ]
+        matched_aliases = [alias for alias in _scene_aliases(scene) if alias in destination_text]
         if matched_aliases:
             matches.append((max(map(len, matched_aliases)), str(scene_id)))
     # "去找考特/洛奇" is also an explicit destination when the module gives
@@ -185,18 +184,14 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
             continue
         name = str(npc.get("name") or "").strip()
         aliases = {name}
-        aliases.update(
-            part for part in name.replace("・", "·").split("·")
-            if len(part) >= 2
-        )
+        aliases.update(part for part in name.replace("・", "·").split("·") if len(part) >= 2)
         matched_aliases = [alias for alias in aliases if alias in destination_text]
         if matched_aliases:
             npc_id = str(npc.get("id") or "")
             authored_locations = [
                 str(scene_id)
                 for scene_id, scene in scenes.items()
-                if isinstance(scene, dict)
-                and npc_id in scene.get("npcs_present", [])
+                if isinstance(scene, dict) and npc_id in scene.get("npcs_present", [])
             ]
             location = (
                 authored_locations[0]
@@ -208,9 +203,7 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
     if not matches:
         return None
     best_length = max(length for length, _scene_id in matches)
-    best_ids = {
-        scene_id for length, scene_id in matches if length == best_length
-    }
+    best_ids = {scene_id for length, scene_id in matches if length == best_length}
     if len(best_ids) != 1:
         return None
     scene_id = best_ids.pop()
