@@ -7,6 +7,21 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def current_scene_npc_ids(engine) -> set[str] | None:
+    """当前场景在场 NPC id 集（读不到世界状态时返回 None，调用方按无提示处理）。"""
+    try:
+        world = engine.context.world_store.load()
+    except Exception:  # noqa: BLE001 - 提示失败不得影响叙事
+        return None
+    scene = world.get("current_scene")
+    if not isinstance(scene, dict):
+        return None
+    present = scene.get("npcs_present")
+    if not isinstance(present, list):
+        return None
+    return {str(npc_id) for npc_id in present if npc_id}
+
+
 def build_npc_speaker_aliases(
     world: dict,
     initial_state_file: Path,

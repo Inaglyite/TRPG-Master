@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .npc_speaker_aliases import current_scene_npc_ids
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_protocol import strip_tool_protocol
 
@@ -53,6 +54,8 @@ def emit_inferred_speaker_segments(host: Any, raw: str) -> bool:
         is_valid_npc=getattr(host, "is_valid_npc_id", None) or (lambda _npc_id: False),
         on_unknown_npc=getattr(host, "log_unknown_npc_speaker", None),
         speaker_aliases=aliases,
+        player_text=getattr(host, "_turn_user_content", None),
+        present_npc_ids=current_scene_npc_ids(host),
     )
     if not any(segment.kind == "speech" and segment.npc_id for segment in segments):
         return False

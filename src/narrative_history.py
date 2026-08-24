@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from .asset_payload import SpeakerPayloadResolver, enrich_narrative_segments
+from .npc_speaker_aliases import current_scene_npc_ids
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_protocol import strip_tool_protocol
 
@@ -46,6 +47,8 @@ def enrich_public_history_record(
             is_valid_npc=engine.is_valid_npc_id,
             on_unknown_npc=engine.log_unknown_npc_speaker,
             speaker_aliases=engine.npc_speaker_aliases(),
+            player_text=str(public.get("player_input") or "") or None,
+            present_npc_ids=current_scene_npc_ids(engine),
         )
         if any(segment.kind == "speech" for segment in reparsed):
             clean_segments = [segment.to_dict() for segment in reparsed]

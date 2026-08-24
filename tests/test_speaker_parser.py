@@ -28,7 +28,9 @@ class SpeakerParserTests(unittest.TestCase):
             speaker_aliases={"法伦": "bryce_fallon"},
         )
 
-        self.assertEqual(clean, "冷风掠过窗沿。\n法伦：黄先生，我需要你查明真相。\n他把文件推过桌面。")
+        self.assertEqual(
+            clean, "冷风掠过窗沿。\n法伦：黄先生，我需要你查明真相。\n他把文件推过桌面。"
+        )
         self.assertEqual(
             [(segment.kind, segment.npc_id) for segment in segments],
             [("narration", None), ("speech", "bryce_fallon"), ("narration", None)],
@@ -41,7 +43,9 @@ class SpeakerParserTests(unittest.TestCase):
             speaker_aliases={"法伦": "bryce_fallon"},
         )
 
-        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments], [("narration", None)]
+        )
 
     def test_novel_dialogue_with_trailing_known_speaker_is_recovered(self):
         text = (
@@ -97,9 +101,12 @@ class SpeakerParserTests(unittest.TestCase):
             speaker_aliases={"法伦": "bryce_fallon"},
         )
 
-        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments], [("narration", None)]
+        )
 
-    def test_unattributed_quotes_do_not_inherit_active_speaker(self):
+    def test_single_interlocutor_monologue_recovers_npc_speech(self):
+        """整段只有一名具名带言语线索的 NPC 时，其连续无标签台词恢复为气泡。"""
         text = (
             "布莱斯·法伦站在窗边，直到门关上才转过身。\n\n"
             "“黄先生，请坐。”他示意你坐进扶手椅。\n\n"
@@ -117,10 +124,20 @@ class SpeakerParserTests(unittest.TestCase):
 
         self.assertEqual(
             [(segment.kind, segment.npc_id) for segment in segments],
-            [("narration", None)],
+            [
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+            ],
         )
+        # 短于兜底阈值的引语（“黄先生，请坐。”）不吹成气泡，留在旁白里
+        self.assertIn("黄先生，请坐", segments[0].text)
 
-    def test_unattributed_quotes_do_not_inherit_previous_npc(self):
+    def test_cross_line_speaker_cue_attributes_following_quotes(self):
+        """前一行「姓名 + 言语线索」可归属后续引语；谈论其他 NPC 不误判。"""
         text = (
             "法伦听到你的追问，没有立刻回答。\n\n"
             "“惠特克罗夫特医生……是校医，也是阿卡姆镇上多年的执业医生，口碑不坏。”\n\n"
@@ -138,7 +155,12 @@ class SpeakerParserTests(unittest.TestCase):
 
         self.assertEqual(
             [(segment.kind, segment.npc_id) for segment in segments],
-            [("narration", None)],
+            [
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+                ("narration", None),
+                ("speech", "bryce_fallon"),
+            ],
         )
 
     def test_player_addressing_known_npc_never_becomes_npc_speech(self):
@@ -158,9 +180,14 @@ class SpeakerParserTests(unittest.TestCase):
                     [("narration", None, text)],
                 )
 
-    def test_cross_line_quote_never_inherits_prior_npc_speaker(self):
+    def test_cross_line_quote_matching_player_input_stays_narration(self):
+        """跨行归属绝不能把玩家自己的话归给 NPC（生产路径一定带 player_text）。"""
         text = "法伦说：“请坐。”\n“我是正义的警察。”"
-        segments, _ = parse_segments(text, speaker_aliases={"法伦": "bryce_fallon"})
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases={"法伦": "bryce_fallon"},
+            player_text="我是正义的警察",
+        )
 
         self.assertEqual(
             [(segment.kind, segment.npc_id) for segment in segments],
@@ -171,6 +198,46 @@ class SpeakerParserTests(unittest.TestCase):
             ],
         )
         self.assertIn("我是正义的警察", segments[-1].text)
+
+    def test_player_led_prose_quote_never_falls_back_to_npc(self):
+        """玩家主导散文（你掏出笔记本，"……"）里的引语是玩家台词的写实，
+        跨行/唯一对话者兜底绝不能把它塞进在场 NPC 嘴里；同段里真正的
+        NPC 台词仍应正常恢复。"""
+        aliases = {"惠特克罗夫特": "whitmore", "惠特克罗夫特医生": "whitmore"}
+        text = (
+            '"那个学生，"你从口袋里掏出笔记本，"你还记得他长什么样吗？"\n'
+            "惠特克罗夫特沉默了一会儿，像是在脑海里翻找一段不愿深究的记忆。\n"
+            '"挺年轻，二十出头的样子。长得……"他斟酌着措辞。'
+        )
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases=aliases,
+            player_text='追问那个"学生"的长相和外貌特征，记下来',
+            present_npc_ids=["whitmore"],
+        )
+
+        kinds = [(segment.kind, segment.npc_id) for segment in segments]
+        self.assertEqual(kinds[0], ("narration", None))
+        self.assertIn("你还记得他长什么样吗", segments[0].text)
+        # 合法兜底不受影响：唯一具名对话者的台词仍恢复为气泡。
+        self.assertIn(("speech", "whitmore"), kinds)
+        speech_texts = [s.text for s in segments if s.kind == "speech"]
+        self.assertTrue(any("挺年轻" in text for text in speech_texts))
+        self.assertFalse(any("你还记得他长什么样吗" in text for text in speech_texts))
+
+    def test_explicit_npc_owner_survives_player_led_prose(self):
+        """同一行有玩家主导散文时，行内显式 NPC 归属仍然优先。"""
+        text = '你把笔记本收好。"别弄丢了。"惠特克罗夫特提醒道。'
+        segments, _ = parse_segments(text, speaker_aliases={"惠特克罗夫特": "whitmore"})
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id, segment.text) for segment in segments],
+            [
+                ("narration", None, "你把笔记本收好。"),
+                ("speech", "whitmore", '"别弄丢了。"'),
+                ("narration", None, "惠特克罗夫特提醒道。"),
+            ],
+        )
 
     def test_targeted_speech_inference_rejects_continuing_clauses(self):
         aliases = {"法伦": "bryce_fallon"}
@@ -266,7 +333,9 @@ class SpeakerParserTests(unittest.TestCase):
             speaker_aliases={"布莱斯·法伦": "bryce_fallon", "法伦": "bryce_fallon"},
         )
 
-        self.assertEqual([(segment.kind, segment.npc_id) for segment in segments], [("narration", None)])
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments], [("narration", None)]
+        )
 
     def test_speech_tag_produces_speech_segment(self):
         text = '雨还在下。【npc:bryce_fallon】"莱特生前一直在隐瞒什么。"【/npc】他说完看向抽屉。'
@@ -285,17 +354,12 @@ class SpeakerParserTests(unittest.TestCase):
         self.assertNotIn("[/npc]", clean)
 
     def test_ascii_tag_split_across_deltas(self):
-        pieces = self.feed_all(
-            ["[n", "pc:bryce_fa", "llon]", "\"台词\"", "[/n", "pc]"]
-        )
+        pieces = self.feed_all(["[n", "pc:bryce_fa", "llon]", '"台词"', "[/n", "pc]"])
         self.assertEqual(pieces[0][0], "speech_start")
         self.assertIn("speech_end", [kind for kind, _, _ in pieces])
 
     def test_multiple_speakers_split_into_units(self):
-        text = (
-            "【npc:bryce_fallon】「第一句。」【/npc】"
-            "【npc:butler_gregory】「第二句。」【/npc】"
-        )
+        text = "【npc:bryce_fallon】「第一句。」【/npc】【npc:butler_gregory】「第二句。」【/npc】"
         segments, _ = parse_segments(text, is_valid_npc=npc_ok)
         self.assertEqual([s.npc_id for s in segments], ["bryce_fallon", "butler_gregory"])
 
@@ -311,7 +375,9 @@ class SpeakerParserTests(unittest.TestCase):
         self.assertNotIn("【npc:", clean)
 
     def test_unclosed_speech_is_closed_at_end_of_stream(self):
-        segments, clean = parse_segments('开场。【npc:bryce_fallon】"没说完的话。', is_valid_npc=npc_ok)
+        segments, clean = parse_segments(
+            '开场。【npc:bryce_fallon】"没说完的话。', is_valid_npc=npc_ok
+        )
         self.assertEqual([s.kind for s in segments], ["narration", "speech"])
         self.assertEqual(segments[1].npc_id, "bryce_fallon")
         self.assertNotIn("【npc:", clean)
@@ -319,7 +385,9 @@ class SpeakerParserTests(unittest.TestCase):
 
     def test_close_tag_with_id_is_accepted_and_stripped(self):
         # 生产实测：模型会写 【/npc:butler_gregory】 作为闭标签
-        text = '开场。【npc:butler_gregory】"请您把它收起来吧。"【/npc:butler_gregory】他紧了紧双手。'
+        text = (
+            '开场。【npc:butler_gregory】"请您把它收起来吧。"【/npc:butler_gregory】他紧了紧双手。'
+        )
         segments, clean = parse_segments(text, is_valid_npc=npc_ok)
         self.assertNotIn("/npc", clean)
         self.assertEqual([s.kind for s in segments], ["narration", "speech", "narration"])
@@ -381,7 +449,7 @@ class SpeakerParserTests(unittest.TestCase):
             )
 
     def test_tag_split_across_many_deltas(self):
-        chunks = ["【n", "pc:bryce_fa", "llon】", "\"台词\"", "【/n", "pc】"]
+        chunks = ["【n", "pc:bryce_fa", "llon】", '"台词"', "【/n", "pc】"]
         pieces = self.feed_all(chunks)
         kinds = [k for k, _, _ in pieces]
         self.assertEqual(kinds[0], "speech_start")

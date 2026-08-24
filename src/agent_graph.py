@@ -28,6 +28,7 @@ from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
 from .skill_activation import note_load_skill_result
+from .npc_speaker_aliases import current_scene_npc_ids
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_pipeline import ToolPipeline, record_engine_tool_shadow
 from .tool_policy import (
@@ -138,6 +139,8 @@ def _prepare_turn_inner(
     # 用它回滚本回合追加，避免重试叠加毒化历史。
     state["pre_turn_message_len"] = len(getattr(engine, "messages", None) or [])
     engine.__dict__["_capacity_rejected_turn"] = False
+    # 供流式发言归属（model_stream_helpers）做玩家台词守卫。
+    engine.__dict__["_turn_user_content"] = user_content
     if user_content:
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
@@ -620,6 +623,8 @@ def _finalize_turn(state: TurnState) -> dict:
         is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
         speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
+        player_text=state.get("user_content"),
+        present_npc_ids=current_scene_npc_ids(engine),
     )
     segment_dicts = [s.to_dict() for s in narrative_segments]
     if state.get("opening_turn") and not narrative.strip():
@@ -680,6 +685,7 @@ def _finalize_turn(state: TurnState) -> dict:
         engine.cb.on_narrative_segments(segment_dicts)
     engine._last_turn_high_risk = state.get("turn_had_check", False)
     engine._round_count += 1
+    engine.__dict__.pop("_turn_user_content", None)
     engine.cb.on_done()
     engine._maybe_summarize_after_turn()
     return {"narrative": narrative}
