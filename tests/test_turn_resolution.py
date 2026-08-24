@@ -409,6 +409,9 @@ class TurnCommitTests(unittest.TestCase):
             store = WorldStore(Path(temp_dir) / "world")
             world = resolution_world()
             world["case_clocks"] = {"monster_manifestation": 1, "human_pressure": 0}
+            world["case_clock_definitions"] = {
+                "monster_manifestation": {"max": 6, "levels": {"1": "寒意"}}
+            }
             store.initialize(world)
             engine = FakeCommitEngine(store)
             commit = {
@@ -444,12 +447,104 @@ class TurnCommitTests(unittest.TestCase):
             self.assertIn("clock:invented_clock", result["skipped"])
             self.assertIn("clock:monster_manifestation", result["skipped"])
 
+    def test_commit_clock_value_is_clamped_to_declared_max(self):
+        """审计越界报数时按模组声明的 max 收拢，不允许跳级爆表。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = WorldStore(Path(temp_dir) / "world")
+            world = resolution_world()
+            world["case_clocks"] = {"monster_manifestation": 4}
+            world["case_clock_definitions"] = {
+                "monster_manifestation": {"max": 6, "levels": {"6": "完全显形"}}
+            }
+            store.initialize(world)
+            engine = FakeCommitEngine(store)
+            commit = {
+                "scene_id": "",
+                "items_add": [],
+                "items_remove": [],
+                "clues": [],
+                "npc_reveals": [],
+                "flags_set": [],
+                "clocks_set": [{"key": "monster_manifestation", "value_json": "99"}],
+                "sanity_events": [],
+                "ending_id": "",
+            }
+
+            result = apply_turn_commit(
+                engine,
+                commit,
+                player_action="我撕开了那卷文档。",
+                narrative="墨迹从纸面挣脱，怪物的轮廓在字里行间凝聚。",
+            )
+
+            self.assertEqual(store.load()["case_clocks"]["monster_manifestation"], 6)
+            self.assertIn("clock:monster_manifestation=6", result["applied"])
+
     def test_audit_payload_exposes_case_clocks(self):
-        """审计负载必须携带 case_clocks：叙事模型无工具，时钟记账只有审计能做。"""
+        """审计负载必须携带时钟与等级表：叙事模型无工具，记账只有审计能做。"""
         state = resolution_world()
         state["case_clocks"] = {"monster_manifestation": 2}
+        state["case_clock_definitions"] = {
+            "monster_manifestation": {"max": 6, "levels": {"2": "鬼火"}}
+        }
         compact = _compact_world(state)
         self.assertEqual(compact["case_clocks"], {"monster_manifestation": 2})
+        self.assertEqual(
+            compact["case_clock_definitions"],
+            {"monster_manifestation": {"max": 6, "levels": {"2": "鬼火"}}},
+        )
+
+
+class ClueClarityClockTests(unittest.TestCase):
+    """clue_clarity 时钟由引擎在每次真实线索入册后确定性推进（按 max 封顶）。"""
+
+    @staticmethod
+    def _add_clue(world: dict, text: str = "新的物证"):
+        from tools import state_manager
+
+        previous = state_manager._TRANSACTION_STATE
+        had_print = "print" in state_manager.__dict__
+        previous_print = state_manager.__dict__.get("print")
+        state_manager._TRANSACTION_STATE = world
+        state_manager.print = lambda *_args, **_kwargs: None
+        try:
+            return state_manager.cmd_add_clue(text, "investigation")
+        finally:
+            state_manager._TRANSACTION_STATE = previous
+            if had_print:
+                state_manager.print = previous_print
+            else:
+                state_manager.__dict__.pop("print", None)
+
+    @staticmethod
+    def _world(clocks, definitions=None):
+        return {
+            "pc": {"inventory": []},
+            "clues_found": {"investigation": [], "event": [], "task": [], "npc": []},
+            "clue_catalog": {},
+            "case_clocks": clocks,
+            "case_clock_definitions": definitions or {},
+        }
+
+    def test_add_clue_bumps_declared_clue_clarity_clock(self):
+        world = self._world({"clue_clarity": 0})
+        result = self._add_clue(world)
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(world["case_clocks"]["clue_clarity"], 1)
+
+    def test_add_clue_respects_declared_max(self):
+        definitions = {"clue_clarity": {"max": 5, "levels": {"5": "真相拼合"}}}
+        world = self._world({"clue_clarity": 5}, definitions)
+        self._add_clue(world)
+        self.assertEqual(world["case_clocks"]["clue_clarity"], 5)
+        world = self._world({"clue_clarity": 4}, definitions)
+        self._add_clue(world)
+        self.assertEqual(world["case_clocks"]["clue_clarity"], 5)
+
+    def test_add_clue_without_clock_declaration_is_a_noop(self):
+        world = self._world({"monster_manifestation": 0})
+        self._add_clue(world)
+        self.assertEqual(world["case_clocks"], {"monster_manifestation": 0})
 
     def test_option_menu_is_not_part_of_completed_narrative(self):
         text = "你仍站在大厅里。\n\n**你可以——**\n1. 前往莱特的办公室查看尸体"

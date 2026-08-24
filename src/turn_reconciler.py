@@ -319,6 +319,7 @@ def _compact_world(state: dict) -> dict:
         },
         "flags": state.get("flags", {}),
         "case_clocks": state.get("case_clocks", {}),
+        "case_clock_definitions": state.get("case_clock_definitions", {}),
         "known_clues": clues[-30:],
         "clue_catalog": clue_catalog,
         "npcs": npcs,
@@ -679,6 +680,7 @@ def apply_turn_commit(
     # 叙事模型无工具，时钟记账只能由本审计完成——keeper 叙述了征兆，
     # 审计负责把它记成数值，否则模组压力机制永远不启动。
     clocks = state.get("case_clocks", {})
+    clock_definitions = state.get("case_clock_definitions", {})
     for change in commit.get("clocks_set", [])[:8]:
         if not isinstance(change, dict):
             continue
@@ -698,6 +700,11 @@ def apply_turn_commit(
         if not isinstance(current, (int, float)) or value <= current:
             skipped.append(f"clock:{key}")
             continue
+        # 模组声明了 max 时越界值收拢到 max（审计保守，不允许跳级爆表）。
+        definition = clock_definitions.get(key)
+        max_value = definition.get("max") if isinstance(definition, dict) else None
+        if isinstance(max_value, int) and not isinstance(max_value, bool):
+            value = min(value, max_value)
         args = {
             "path": f"case_clocks.{key}",
             "value": json.dumps(int(value), ensure_ascii=False),
@@ -829,9 +836,10 @@ def reconcile_turn(
         "只有明确拿在身上/收进口袋的物品才加入背包；留在现场的证物不加入。\n"
         "只有正文明确遭遇了 module_rules 所列恐怖源时才提交一次 sanity_event。\n"
         "结局必须已在正文中真正完成，而且配置的 required_flags 已满足；否则 ending_id 为空。\n"
-        "case_clocks 是模组的末日时钟：正文实际经历了对应等级的征兆、压力或真相逼近事件时，"
-        "用 clocks_set 把该时钟+1（只增不减，键必须是 authoritative_world 已有的时钟）；"
-        "正文没有相应事件时不要推进。\n"
+        "case_clocks 时钟推进是你的固定职责而非推测：正文出现 case_clock_definitions 里"
+        "更高等级 levels 描述的事件（征兆、异象、势力动作），或玩家行动/正文情形命中 "
+        "advance_when（如拖延、夜间独处、公开指控）时，必须用 clocks_set 把该时钟设为"
+        "对应等级（只增不减，键必须是已有的时钟）；两者都不沾时才留空。\n"
         "没有变化时所有数组与 ID 均为空。\n\n" + json.dumps(payload, ensure_ascii=False)
     )
     started_at = time.monotonic()
@@ -846,7 +854,11 @@ def reconcile_turn(
                 messages=[
                     {
                         "role": "system",
-                        "content": "只做保守的结构化状态审计，宁可漏记也不虚构。",
+                        "content": (
+                            "只做保守的结构化状态审计，宁可漏记也不虚构。"
+                            "唯一的例外是案件时钟：按用户消息中的时钟规则推进时钟"
+                            "是你的固定职责，命中即记录，不视为虚构。"
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],

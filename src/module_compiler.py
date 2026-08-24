@@ -227,6 +227,7 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
         "clues_found": clues_found,
         "flags": copy.deepcopy(module.initial_state.flags),
         "case_clocks": copy.deepcopy(module.initial_state.case_clocks),
+        "case_clock_definitions": copy.deepcopy(module.initial_state.case_clock_definitions),
         "scene_cache": {module.entry_scene_id: entry.description},
         "scene_catalog": scene_catalog,
         "clue_catalog": clue_catalog,
@@ -325,6 +326,11 @@ def _build_trace(
         ),
         TraceEntry("world_state.flags", "module.initial_state.flags", "deep copy"),
         TraceEntry("world_state.case_clocks", "module.initial_state.case_clocks", "deep copy"),
+        TraceEntry(
+            "world_state.case_clock_definitions",
+            "module.initial_state.case_clock_definitions",
+            "deep copy",
+        ),
         TraceEntry(
             "world_state.private_memory",
             "module.initial_state.private_memory",

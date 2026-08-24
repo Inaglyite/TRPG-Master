@@ -33,11 +33,8 @@ from .config import (
     model_timeout_seconds,
 )
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
-from .discovery import (
-    DiscoveryMatch,
-    match_discovery_rules,
-    preferred_check_skill,
-)
+from .case_clocks import clock_status
+from .discovery import DiscoveryMatch, match_discovery_rules, preferred_check_skill
 from .encounters import SceneEncounterResolution, resolve_scene_encounters
 from .engine_primitives import EngineCallbacks, TurnCancelledError
 from .handouts import matching_handouts
@@ -1371,7 +1368,9 @@ class GameEngine:
                 "npc_public_state": present_npcs,
             },
             "flags": world.get("flags", {}),
-            "case_clocks": world.get("case_clocks", {}),
+            "case_clocks": clock_status(
+                world.get("case_clocks"), world.get("case_clock_definitions")
+            ),
             "recent_known_clues": known_clues[-20:],
             "recent_npc_conversations": {
                 npc_id: list(entries[-6:])
@@ -2109,12 +2108,8 @@ class GameEngine:
                 user_content = self._preflight_player_escalation(user_content)
                 if user_content is None:
                     self.finish_turn_record(status="cancelled", error="玩家在行动发生前取消")
-                    cancel_note = (
-                        f"[玩家在行动发生前取消，场景状态不变] 原提议：{proposed_content}"
-                    )
-                    self.messages.append(
-                        {"role": "user", "content": cancel_note}
-                    )
+                    cancel_note = f"[玩家在行动发生前取消，场景状态不变] 原提议：{proposed_content}"
+                    self.messages.append({"role": "user", "content": cancel_note})
                     self.save("slot_000")
                     self.cb.on_done()
                     return

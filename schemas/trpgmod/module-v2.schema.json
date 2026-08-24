@@ -627,6 +627,11 @@
           "title": "Case Clocks",
           "type": "object"
         },
+        "case_clock_definitions": {
+          "additionalProperties": true,
+          "title": "Case Clock Definitions",
+          "type": "object"
+        },
         "private_memory": {
           "$ref": "#/$defs/PrivateMemoryDefinition"
         },

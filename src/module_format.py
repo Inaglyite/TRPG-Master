@@ -457,6 +457,9 @@ class InitialStateDefinition(StrictModel):
     known_clue_ids: list[str] = Field(default_factory=list)
     flags: dict[str, Any] = Field(default_factory=dict)
     case_clocks: dict[str, int] = Field(default_factory=dict)
+    # 时钟等级表（键必须与 case_clocks 一致）：审计按此把叙事事件记成时钟
+    # 数值，引擎按 max 封顶确定性推进。缺省为空表示该模组无时钟机制。
+    case_clock_definitions: dict[str, Any] = Field(default_factory=dict)
     private_memory: PrivateMemoryDefinition = Field(default_factory=PrivateMemoryDefinition)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
@@ -464,6 +467,24 @@ class InitialStateDefinition(StrictModel):
     @classmethod
     def validate_known_clues(cls, values: list[str]) -> list[str]:
         return [_validate_entity_id(value, "线索 ID") for value in values]
+
+    @model_validator(mode="after")
+    def validate_clock_definitions(self) -> InitialStateDefinition:
+        unknown = sorted(set(self.case_clock_definitions) - set(self.case_clocks))
+        if unknown:
+            raise ValueError(f"case_clock_definitions 引用了未声明的时钟: {unknown}")
+        for clock_id, definition in self.case_clock_definitions.items():
+            if not isinstance(definition, dict):
+                raise ValueError(f"时钟 {clock_id} 的定义必须是对象")
+            levels = definition.get("levels")
+            if not isinstance(levels, dict) or not levels:
+                raise ValueError(f"时钟 {clock_id} 缺少 levels 等级表")
+            max_value = definition.get("max")
+            if max_value is not None and (
+                isinstance(max_value, bool) or not isinstance(max_value, int) or max_value < 1
+            ):
+                raise ValueError(f"时钟 {clock_id} 的 max 必须是正整数")
+        return self
 
 
 class ProgressionDefinition(StrictModel):

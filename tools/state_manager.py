@@ -357,6 +357,18 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
     if clue_id:
         clue["catalog_id"] = clue_id
     data["clues_found"][category].append(clue)
+    # 线索清晰度时钟由引擎确定性推进：模组声明了 clue_clarity 时钟时，每次
+    # 真实入册（非重复）+1 并按 case_clock_definitions 的 max 封顶。叙事/审计
+    # 模型都不需要再为此时钟记账。
+    clocks = data.get("case_clocks")
+    if isinstance(clocks, dict) and isinstance(clocks.get("clue_clarity"), (int, float)):
+        definitions = data.get("case_clock_definitions")
+        definition = definitions.get("clue_clarity") if isinstance(definitions, dict) else None
+        max_value = definition.get("max") if isinstance(definition, dict) else None
+        bumped = clocks["clue_clarity"] + 1
+        if isinstance(max_value, int) and not isinstance(max_value, bool):
+            bumped = min(bumped, max_value)
+        clocks["clue_clarity"] = bumped
     granted_item = (
         catalog_entry.get("granted_item")
         if isinstance(catalog_entry, dict)
