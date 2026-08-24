@@ -231,6 +231,62 @@ def _entity_mention_signal(world: dict, body: str) -> bool:
     return any(keyword in body for keyword in _module_keyword_index(world))
 
 
+_CLOCK_TERM_SPLIT = re.compile(r"[、，。；：！？/\s]+")
+_CLOCK_TERM_CAP_PER_CLOCK = 16
+_CLOCK_TERM_CAP_TOTAL = 64
+
+
+def _clock_keywords(world: dict) -> list[str]:
+    """从 case_clock_definitions 收割时钟征兆/推进词段（数据驱动，无领域词）。
+
+    守秘人被要求按 next_level 原文叙述征兆，因此 levels 词段是可靠信号；
+    advance_when 词段（如「枪战」「非法闯入」）覆盖玩家行动侧。词段切分
+    只按标点与空白，对任意题材的模组同样有效。每个时钟单独配额——真机
+    事故：全局共享配额被第一个时钟的 levels 占满，human_pressure 的
+    「枪战」等词段从未进入信号表，审计整局未运行。
+    """
+    definitions = world.get("case_clock_definitions")
+    if not isinstance(definitions, dict):
+        return []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for definition in definitions.values():
+        if not isinstance(definition, dict):
+            continue
+        texts: list[str] = []
+        # advance_when 优先：行动侧触发词（枪战/闯入/拖延）是时钟记账的主信号；
+        # levels 征兆词数量多，先收割会把配额吃光让行动词永远进不了表。
+        advance_when = definition.get("advance_when")
+        if isinstance(advance_when, list):
+            texts.extend(str(text) for text in advance_when)
+        levels = definition.get("levels")
+        if isinstance(levels, dict):
+            texts.extend(str(text) for text in levels.values())
+        per_clock = 0
+        for text in texts:
+            for term in _CLOCK_TERM_SPLIT.split(text):
+                term = term.strip()
+                if len(term) < 2 or term in seen:
+                    continue
+                seen.add(term)
+                terms.append(term)
+                per_clock += 1
+                if len(terms) >= _CLOCK_TERM_CAP_TOTAL:
+                    return terms
+                if per_clock >= _CLOCK_TERM_CAP_PER_CLOCK:
+                    break
+            if per_clock >= _CLOCK_TERM_CAP_PER_CLOCK:
+                break
+    return terms
+
+
+def _clock_signal(world: dict, body: str) -> bool:
+    """叙事出现了案件时钟的征兆或推进情形——审计必须运行以记账。"""
+    if not body or not isinstance(world, dict):
+        return False
+    return any(term in body for term in _clock_keywords(world))
+
+
 def narrative_body(text: str) -> str:
     """Remove the final option menu before auditing completed events."""
     markers = (
@@ -484,6 +540,9 @@ def turn_needs_model_audit(
     # 所有模组（没有遗体/白布的模组），实体提及才是主阀门。
     if world is not None and _entity_mention_signal(world, body):
         return True
+    # 案件时钟阀门：征兆/推进情形出现时必须审计，否则时钟永远不记账。
+    if world is not None and _clock_signal(world, body):
+        return True
     return False
 
 
@@ -506,13 +565,27 @@ def engine_turn_needs_model_audit(
         world = engine.context.world_store.load()
     except Exception:
         world = None
-    return turn_needs_model_audit(
+    if turn_needs_model_audit(
         executed_tools,
         player_action=player_action,
         narrative=narrative,
         has_authoritative_mutation=engine._turn_mutations.has_authoritative_mutation,
         world=world,
-    )
+    ):
+        return True
+    # 末日钟周期审计：时钟是随时间发酵的机制（拖延本身推进显形），不能只靠
+    # 关键词信号——真机里 1/3 回合有征兆叙事但一次都没命中信号，时钟全程为 0。
+    # 声明了时钟表的模组每 3 回合强制对账一次；审计契约保守，无事可记就空提交。
+    if world is not None and _has_clock_definitions(world):
+        round_count = int(getattr(engine, "_round_count", 0) or 0)
+        if round_count % 3 == 0:
+            return True
+    return False
+
+
+def _has_clock_definitions(world: dict) -> bool:
+    definitions = world.get("case_clock_definitions")
+    return isinstance(definitions, dict) and bool(definitions)
 
 
 def apply_turn_commit(

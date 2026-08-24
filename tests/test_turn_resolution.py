@@ -728,6 +728,113 @@ class ClueClarityClockTests(unittest.TestCase):
             )
         )
 
+    @staticmethod
+    def _clock_gate_world() -> dict:
+        return {
+            "current_scene": {"id": "hall", "name": "大厅"},
+            "scene_catalog": {"hall": {"id": "hall", "name": "大厅"}},
+            "npcs": [],
+            "clues_found": {"investigation": []},
+            "clue_catalog": {},
+            "case_clock_definitions": {
+                "monster_manifestation": {
+                    "max": 6,
+                    "levels": {
+                        "0": "只存在幕后。",
+                        "1": "局部寒意、电灯闪烁、收音机噪声、电话短暂失真。",
+                    },
+                    "advance_when": ["调查员长时间拖延、夜间独处。"],
+                },
+                "human_pressure": {
+                    "max": 5,
+                    "levels": {"0": "低声议论。"},
+                    "advance_when": ["公开指控、粗暴威胁、枪战、非法闯入被看见。"],
+                },
+            },
+        }
+
+    def test_clock_symptom_narrative_triggers_audit(self):
+        """时钟征兆/推进情形出现时必须审计，否则时钟永远不记账（真机事故：
+        玩家深夜潜入、叙事写了开锁成功，审计未运行，human_pressure 恒 0）。"""
+        world = self._clock_gate_world()
+
+        # levels 征兆词段（守秘人按 next_level 原文叙述 → 可靠命中）
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="走廊尽头只剩下局部寒意，你裹紧了外套。", world=world
+            )
+        )
+        # advance_when 推进词段（玩家行动侧）
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="深夜的巷子里爆发了枪战，子弹击碎了橱窗。", world=world
+            )
+        )
+        self.assertTrue(
+            turn_needs_model_audit(
+                [], narrative="你夜间独处在这间旧宅里，只有蜡烛为伴。", world=world
+            )
+        )
+        # 无时钟信号的平淡叙事不触发
+        self.assertFalse(
+            turn_needs_model_audit([], narrative="你在大厅里踱步，思考下一步。", world=world)
+        )
+
+    def test_no_clock_definitions_keeps_old_behavior(self):
+        """模组未声明 case_clock_definitions 时时钟阀门不参与判定。"""
+        world = self._clock_gate_world()
+        del world["case_clock_definitions"]
+
+        self.assertFalse(
+            turn_needs_model_audit(
+                [], narrative="走廊尽头只剩下局部寒意，你裹紧了外套。", world=world
+            )
+        )
+
+    def test_clock_keywords_quota_never_starves_action_terms(self):
+        """levels 征兆词再多也不得挤掉 advance_when 行动词——真机事故：
+        全局/单时钟配额被 levels 占满，「枪战」从未进入信号表，审计整局未跑。"""
+        world = self._clock_gate_world()
+        monster = world["case_clock_definitions"]["monster_manifestation"]
+        monster["levels"] = {
+            str(i): f"第{i}级征兆、很长很长的征兆描述{i}、还有补充。" for i in range(20)
+        }
+        world["case_clock_definitions"]["human_pressure"]["levels"] = {
+            str(i): f"第{i}级人类压力征兆、冗长描述{i}。" for i in range(20)
+        }
+        from src.turn_reconciler import _clock_keywords
+
+        keywords = _clock_keywords(world)
+        self.assertIn("枪战", keywords)
+        self.assertIn("粗暴威胁", keywords)
+
+    def test_periodic_doom_clock_audit(self):
+        """声明时钟表的模组每 3 回合强制对账一次（拖延本身推进显形，
+        不能只靠关键词信号）；无定义时不参与。"""
+        from src.turn_reconciler import engine_turn_needs_model_audit
+
+        class _Store:
+            def __init__(self, world):
+                self._world = world
+
+            def load(self):
+                return self._world
+
+        class _Engine:
+            def __init__(self, world, round_count):
+                self.context = type("Ctx", (), {"world_store": _Store(world)})()
+                self._round_count = round_count
+                self._turn_mutations = type("M", (), {"has_authoritative_mutation": False})()
+
+        world = self._clock_gate_world()
+        quiet = "你在大厅里踱步，思考下一步。"
+        self.assertTrue(engine_turn_needs_model_audit(_Engine(world, 0), [], narrative=quiet))
+        self.assertTrue(engine_turn_needs_model_audit(_Engine(world, 3), [], narrative=quiet))
+        self.assertFalse(engine_turn_needs_model_audit(_Engine(world, 1), [], narrative=quiet))
+        no_clocks = self._clock_gate_world()
+        del no_clocks["case_clock_definitions"]
+        self.assertFalse(engine_turn_needs_model_audit(_Engine(no_clocks, 0), [], narrative=quiet))
+
     def test_scene_sync_requires_explicit_transition(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
