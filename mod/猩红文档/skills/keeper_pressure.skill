@@ -207,7 +207,8 @@
 
 - 让关键 NPC 短暂离开阿卡姆，或因害怕拒绝见面。
 - 让真凶销毁一部分证据，但留下新的反制痕迹。
-- 提升 `human_pressure` 或 `monster_manifestation`，用风险换取速度。
+- 在叙事中给出 human_pressure 或 monster_manifestation 下一级的征兆
+  （审计会据此记账），用风险换取速度。
 
 ### 玩家太暴力
 
@@ -220,6 +221,8 @@
 ## 工具调用约束
 
 - 关键线索被确认后，用 `state_add_clue(text, category, asset_id?)` 记录；没有实际看到图片对应物时不要填 `asset_id`。
-- 每次压力显著上升时，用 `state_set("case_clocks.monster_manifestation", "...")`、`state_set("case_clocks.human_pressure", "...")` 或 `state_set("case_clocks.clue_clarity", "...")` 写回。
-- 重要幕后选择，例如“当前真凶是谁”“哪个 NPC 已经开始反制”，用 `update_private_memory("inference_notes", "...")` 记录，避免后续叙事自相矛盾。
-- NPC 秘密只能通过 `get_private_memory` / `get_npc_secret` 自查，不能原样告诉玩家；玩家只能得到其行动可观察到的部分。
+- 时钟数值（case_clocks）由回合审计与引擎记账，只增不减；你只负责按每轮状态里的
+  `next_level` 叙述征兆，不要尝试用任何工具直接写时钟或世界状态。
+- 重要幕后选择（当前真凶是谁、哪个 NPC 已开始反制）一旦在叙事中确立，后续必须
+  保持前后一致，不得自相矛盾。
+- NPC 秘密不能原样告诉玩家；玩家只能得到其行动可观察到的部分。

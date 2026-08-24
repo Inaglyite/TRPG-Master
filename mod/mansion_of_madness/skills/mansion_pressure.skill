@@ -16,7 +16,8 @@
 
 ## 案件时钟
 
-世界状态中有 `case_clocks`。关键回合前先 `state_get("case_clocks")`，必要时用 `state_set` 写回。
+世界状态中有 `case_clocks`。每轮权威状态会附带各时钟的当前值；数值由回合审计与
+引擎记账（只增不减），你负责按当前等级叙述征兆、不要尝试用工具直接读写时钟。
 
 ### house_instability 宅邸失稳时钟 (0-6)
 
@@ -207,6 +208,6 @@
 ## 工具调用约束
 
 - 每次确认关键发现后，用 `state_add_clue(text, category)` 记录；这个模组当前没有线索图片资产，不要填不存在的 `asset_id`。
-- 压力明显变化时，用 `state_set("case_clocks.house_instability", "...")`、`state_set("case_clocks.shadow_hunger", "...")` 或 `state_set("case_clocks.truth_clarity", "...")` 写回。
+- 压力明显变化时，在叙事中给出对应时钟下一级的征兆，回合审计会据此记账。
 - 找到银质徽章、打开保险箱、进入地下室、修复封印时，更新对应 `flags`。
 - NPC 幕后真相只能作为守秘人判断依据；玩家必须通过场景、证据、NPC 片段和推理得到。

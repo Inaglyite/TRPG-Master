@@ -171,8 +171,8 @@
 
 ## 关键工具调用提示
 
-- 每次进入新场景 → `cache_scene(scene_id, description)` 缓存
+- 场景描述由引擎自动缓存，无需手动调用工具
 - 每次技能检定成功 → `state_add_clue(text, category)` 记录
-- 遭遇暗影生物 → `sanity_loss(severity="moderate")`
-- 发现火灾真相 → `sanity_loss(severity="major")`
+- 遭遇暗影生物 → `sanity_event(severity="moderate")`
+- 发现火灾真相 → `sanity_event(severity="major")`
 - 最终结局 → `end_game(ending_type, title, summary)`

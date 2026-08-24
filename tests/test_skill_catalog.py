@@ -1812,3 +1812,32 @@ def test_load_skill_checks_current_surface_and_never_bypasses_frozen_digest(tmp_
     assert restored["digest"] == first["digest"]
     assert restored["content"] == first["content"]
     assert "already_loaded" not in restored
+
+
+def test_skill_files_never_reference_engine_only_tools():
+    """skill 文案不得引导模型调用引擎专属工具（H0 已从模型目录移除）。
+
+    历史事故：keeper_pressure 等 skill 让模型调 state_set/update_private_memory/
+    get_npc_secret，这些调用必然失败还污染叙事。匹配反引号或调用语境，
+    避免散文提及误报。
+    """
+    import re
+
+    from src.model_tool_catalog import _ENGINE_ONLY_TOOL_NAMES
+
+    skill_dirs = [PROJECT_ROOT / "skills"]
+    skill_dirs += [
+        path / "skills"
+        for path in (PROJECT_ROOT / "mod").iterdir()
+        if (path / "skills").is_dir()
+    ]
+    offenders: list[str] = []
+    for base in skill_dirs:
+        for skill_file in base.rglob("*.skill"):
+            text = skill_file.read_text(encoding="utf-8")
+            for name in sorted(_ENGINE_ONLY_TOOL_NAMES):
+                if re.search(rf"`{re.escape(name)}`|{re.escape(name)}\s*\(", text):
+                    offenders.append(
+                        f"{skill_file.relative_to(PROJECT_ROOT)}: {name}"
+                    )
+    assert offenders == []

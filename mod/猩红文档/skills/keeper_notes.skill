@@ -439,11 +439,11 @@
 
 ## 关键工具调用提示
 
-- 每次进入新场景 → `cache_scene(scene_id, description)` 缓存
+- 场景描述由引擎自动缓存，无需手动调用工具
 - 每次技能检定成功 → `state_add_clue(text, category)` 记录
-- 遭遇怪物显形 → `sanity_loss(severity)` 根据显形等级调整
-- 检查莱特尸体 → `sanity_loss(severity="moderate")` 0/1D4
-- 直视墨中怪物眼睛 → `sanity_loss(severity="major")` 1D6/1D10
-- 目睹怪物完全显形 → `sanity_loss(severity="extreme")` 1D4/1D8
-- NPC被怪物附身 → `sanity_loss(severity="moderate")` 0/1D4
+- 遭遇怪物显形 → `sanity_event(severity)` 根据显形等级调整
+- 检查莱特尸体 → `sanity_event(severity="moderate")` 0/1D4
+- 直视墨中怪物眼睛 → `sanity_event(severity="major")` 1D6/1D10
+- 目睹怪物完全显形 → `sanity_event(severity="major")` 1D4/1D8
+- NPC被怪物附身 → `sanity_event(severity="moderate")` 0/1D4
 - 最终结局 → `end_game(ending_type, title, summary)`
