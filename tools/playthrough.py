@@ -459,7 +459,10 @@ def scarlet_beats() -> list[Beat]:
                 "继续开枪射击那个非人生物，直到它不再动弹",
                 "掩护自己继续开枪，别让它近身",
             ],
-            goal=lambda w, c: bool((w.get("flags") or {}).get("monster_defeated")),
+            goal=lambda w, c: bool(
+                any(s.get("combat_active") for s in c.turn_snapshots)
+                and not (w.get("combat_state") or {}).get("active")
+            ),
             max_turns=12,
             checks=[
                 # 模组有战斗与徽章封印两条危机解决路径；模型选了哪条都算危机成立，
@@ -493,10 +496,27 @@ def scarlet_beats() -> list[Beat]:
             ],
         ),
         Beat(
+            key="B6d_seal",
+            title="封印怪物：银质徽章关闭通道",
+            inputs=[
+                "我用银质徽章覆上文档中央的几何图示，完成封印",
+            ],
+            goal=lambda w, c: bool((w.get("flags") or {}).get("monster_defeated")),
+            max_turns=3,
+            checks=[
+                Check(
+                    5,
+                    "银质徽章封印落定（monster_defeated）",
+                    lambda w, c: bool((w.get("flags") or {}).get("monster_defeated")),
+                ),
+            ],
+        ),
+        Beat(
             key="B8_ending",
             title="结局：truth_and_seal",
             inputs=[
                 "文档已经找回、怪物已被消灭。我去找法伦，完成封印仪式，了结这个案子",
+                "我用银质徽章覆上文档中央的几何图示，完成封印",
                 "完成封印，结案",
             ],
             goal=lambda w, c: bool(c.game_over),
