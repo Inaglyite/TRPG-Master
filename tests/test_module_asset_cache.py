@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.module_http import ModuleHttpDependencies, create_module_http_router
-from src.module_registry import ModuleRegistry
+from src.modules.module_registry import ModuleRegistry
+from src.web.module_http import ModuleHttpDependencies, create_module_http_router
 
 
 def _asset_client(tmp_path):
@@ -69,7 +69,7 @@ def test_legacy_module_asset_version_tracks_assets_mtime(tmp_path):
 
 
 def test_installed_module_asset_version_defaults_to_manifest_version(tmp_path):
-    from src.module_registry import ModuleRecord
+    from src.modules.module_registry import ModuleRecord
 
     record = ModuleRecord(
         key="demo@2.3.0",

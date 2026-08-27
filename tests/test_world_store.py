@@ -7,14 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT
-from src.engine import GameEngine
-from src.runtime import RuntimeContext, default_world_id
-from src.world_migrations import (
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.app.runtime import RuntimeContext, default_world_id
+from src.storage.world_migrations import (
     CURRENT_WORLD_SCHEMA_VERSION,
     UnsupportedWorldSchemaError,
 )
-from src.world_store import StaleRevisionError, WorldStore
+from src.storage.world_store import StaleRevisionError, WorldStore
 
 
 def increment_world_in_process(world_dir: str, count: int) -> None:
@@ -159,7 +159,7 @@ class WorldStoreTests(unittest.TestCase):
             store = WorldStore(Path(temp_dir) / "world")
             store.initialize(base_world())
 
-            with patch("src.world_store.os.replace", side_effect=OSError("simulated crash")):
+            with patch("src.storage.world_store.os.replace", side_effect=OSError("simulated crash")):
                 with self.assertRaises(OSError):
                     store.update(lambda state: state["pc"].update({"hp": 1}))
 

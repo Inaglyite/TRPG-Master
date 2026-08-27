@@ -1,6 +1,6 @@
 import unittest
 
-from src.personality import investigator_roleplay_profile, normalize_violence_stance
+from src.gameplay.personality import investigator_roleplay_profile, normalize_violence_stance
 from tools.character import create_character
 
 

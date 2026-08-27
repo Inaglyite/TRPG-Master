@@ -1,6 +1,6 @@
 import unittest
 
-from src.case_clocks import clock_status
+from src.gameplay.case_clocks import clock_status
 
 
 class ClockStatusTests(unittest.TestCase):

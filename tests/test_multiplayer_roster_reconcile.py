@@ -5,9 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.auth import create_user
-from src.combat import combat_action, start_combat
-from src.database import (
+from src.app.engine import GameEngine
+from src.auth.service import create_user
+from src.gameplay.combat import combat_action, start_combat
+from src.gameplay.investigators import reconcile_investigator_roster
+from src.multiplayer.private_state import reconcile_world_investigator_roster
+from src.multiplayer.service import release_investigator, remove_member, update_member_role
+from src.storage.database import (
     Base,
     World,
     WorldInvestigator,
@@ -16,11 +20,7 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.database_store import DatabaseWorldStore
-from src.engine import GameEngine
-from src.investigators import reconcile_investigator_roster
-from src.multiplayer import release_investigator, remove_member, update_member_role
-from src.multiplayer_private_state import reconcile_world_investigator_roster
+from src.storage.database_store import DatabaseWorldStore
 
 
 class MemoryStore:

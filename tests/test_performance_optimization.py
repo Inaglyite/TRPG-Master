@@ -8,7 +8,12 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import event
 
-from src.database import (
+from src.ai.tools.registry import execute_function
+from src.app.runtime import RuntimeContext
+from src.gameplay.turn_mutations import TurnMutationLedger
+from src.gameplay.turn_performance import TurnPerformance
+from src.gameplay.turn_reconciler import turn_needs_model_audit
+from src.storage.database import (
     Base,
     SaveSlot,
     Snapshot,
@@ -18,14 +23,9 @@ from src.database import (
     get_engine,
     session_scope,
 )
-from src.database_store import DatabaseWorldStore
-from src.database_turn_journal import DatabaseTurnJournal
-from src.runtime import RuntimeContext
-from src.tools import execute_function
-from src.turn_mutations import TurnMutationLedger
-from src.turn_performance import TurnPerformance
-from src.turn_reconciler import turn_needs_model_audit
-from src.world_store import StaleRevisionError
+from src.storage.database_store import DatabaseWorldStore
+from src.storage.database_turn_journal import DatabaseTurnJournal
+from src.storage.world_store import StaleRevisionError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -177,7 +177,7 @@ def test_quick_save_can_replace_snapshot_created_by_completed_turn(tmp_path: Pat
             narrative="你观察四周。",
             choices=[],
         )
-        from src.persistence import save_game
+        from src.storage.persistence import save_game
 
         context = RuntimeContext.create(
             "perf-world",

@@ -19,7 +19,17 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.database import (
+from src.ai.context.structured_memory import (
+    MAX_RETRIEVAL_LIMIT,
+    MAX_RETRIEVAL_RESPONSE_BYTES,
+    MODEL_PRIVATE_AUDIENCE,
+    OWNER_AUDIENCE,
+    PUBLIC_AUDIENCE,
+    StructuredMemoryService,
+    backfill_world_root_ids,
+    fact_digest,
+)
+from src.storage.database import (
     MEMORY_FACT_CURRENT_INDEX,
     Base,
     MemoryFact,
@@ -31,16 +41,6 @@ from src.database import (
     get_engine,
     new_id,
     session_scope,
-)
-from src.structured_memory import (
-    MAX_RETRIEVAL_LIMIT,
-    MAX_RETRIEVAL_RESPONSE_BYTES,
-    MODEL_PRIVATE_AUDIENCE,
-    OWNER_AUDIENCE,
-    PUBLIC_AUDIENCE,
-    StructuredMemoryService,
-    backfill_world_root_ids,
-    fact_digest,
 )
 
 
@@ -1202,11 +1202,11 @@ def test_structured_memory_is_not_wired_to_model_or_network_surfaces() -> None:
     root = Path(__file__).resolve().parents[1]
     for relative in (
         "server.py",
-        "src/engine.py",
-        "src/model_streamer.py",
-        "src/tools.py",
-        "src/multiplayer_http.py",
-        "src/multiplayer_ws.py",
+        "src/app/engine.py",
+        "src/ai/model/model_streamer.py",
+        "src/ai/tools/registry.py",
+        "src/multiplayer/http.py",
+        "src/multiplayer/ws.py",
     ):
         source = (root / relative).read_text(encoding="utf-8")
         assert "StructuredMemoryService" not in source

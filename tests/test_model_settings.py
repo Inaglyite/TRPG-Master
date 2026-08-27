@@ -6,12 +6,12 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.engine import GameEngine
-from src.model_settings import (
+from src.ai.model.model_settings import (
     ModelSettings,
     persist_model_settings,
     validate_model_id,
 )
+from src.app.engine import GameEngine
 
 
 class ModelSettingsTests(unittest.TestCase):
@@ -68,7 +68,7 @@ class ModelSettingsTests(unittest.TestCase):
             with (
                 patch.object(server, "_ENV_FILE", env_path),
                 patch.object(server, "_active_model_settings", initial),
-                patch("src.engine.API_KEY", "test-api-key"),
+                patch("src.app.engine.API_KEY", "test-api-key"),
             ):
                 with TestClient(server.app) as client:
                     with client.websocket_connect("/ws") as ws:

@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.database import database_url
-from src.engine import GameEngine
+from src.app.engine import GameEngine
+from src.storage.database import database_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,7 +31,7 @@ def test_default_server_runtime_and_database_are_test_isolated(
     with TestClient(server.app) as client:
         assert client.get("/api/health").status_code == 200
 
-    with patch("src.engine.OpenAI", return_value=object()):
+    with patch("src.app.engine.OpenAI", return_value=object()):
         engine = GameEngine()
     assert engine.context.runtime_root == isolated_test_runtime_root
     assert engine.turn_journal.database_url == expected_database_url

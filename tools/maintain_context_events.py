@@ -42,8 +42,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     sys.path.insert(0, str(_project_root()))
-    from src.context_maintenance import collect_context_events
-    from src.database import database_url
+    from src.ai.context.context_maintenance import collect_context_events
+    from src.storage.database import database_url
 
     configured = str(args.database_url or os.environ.get("TRPG_DATABASE_URL") or "").strip()
     root = Path(args.runtime_root).resolve() if args.runtime_root else None

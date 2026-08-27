@@ -17,17 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.config import PROJECT_ROOT
-from src.context_events import EVENT_CONTEXT_INJECTION, ContextEventStore
-from src.database import (
-    Base,
-    World,
-    WorldSkillPin,
-    WorldSkillPinManifest,
-    get_engine,
-    session_scope,
-)
-from src.skill_manifest import (
+from src.ai.context.context_events import EVENT_CONTEXT_INJECTION, ContextEventStore
+from src.ai.skills.skill_manifest import (
     CatalogError,
     catalog_for,
     load_official_catalog,
@@ -35,17 +26,26 @@ from src.skill_manifest import (
     skill_content_digest,
     validate_catalog,
 )
-from src.skill_pins import (
+from src.ai.skills.skill_pins import (
     copy_world_pins,
     ensure_world_pins,
     pinned_catalog,
     read_world_pins,
 )
-from src.skill_resolver import keyword_misses, resolve_activations
-from src.tool_pipeline import ToolPipeline
-from src.tool_policy import MODEL_CALLER, REQUEST_METADATA_KEY, ToolRequestSnapshot
-from src.tool_request_authority import issue_model_request
-from src.tools import MODEL_TOOLS, TOOL_SCHEMA_BY_NAME, tool_catalog_for_names
+from src.ai.skills.skill_resolver import keyword_misses, resolve_activations
+from src.ai.tools.registry import MODEL_TOOLS, TOOL_SCHEMA_BY_NAME, tool_catalog_for_names
+from src.ai.tools.tool_pipeline import ToolPipeline
+from src.ai.tools.tool_policy import MODEL_CALLER, REQUEST_METADATA_KEY, ToolRequestSnapshot
+from src.ai.tools.tool_request_authority import issue_model_request
+from src.app.config import PROJECT_ROOT
+from src.storage.database import (
+    Base,
+    World,
+    WorldSkillPin,
+    WorldSkillPinManifest,
+    get_engine,
+    session_scope,
+)
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -116,7 +116,7 @@ def test_official_catalog_loads_and_covers_all_skill_files():
 
 def test_catalog_budgets_fit_content():
     """每个 catalog 条目的 max_context_tokens 必须装得下当前正文（防回归）。"""
-    from src.lorebook import estimate_text_tokens
+    from src.ai.context.lorebook import estimate_text_tokens
 
     catalog = load_official_catalog(PROJECT_ROOT)
     for entry in catalog.skills:
@@ -232,7 +232,7 @@ def test_installed_module_skills_use_only_a_trusted_logical_root(tmp_path: Path)
 
 def test_local_author_budget_cap_and_v2_pin_roundtrip(tmp_path: Path):
     """local-author 预算硬顶 + catalog_version=2 新 pin 完整往返。"""
-    from src.skill_manifest import SkillCatalog, SkillEntry
+    from src.ai.skills.skill_manifest import SkillCatalog, SkillEntry
 
     # local-author 预算超过 4000 → 拒绝
     entry = SkillEntry(
@@ -273,7 +273,7 @@ def test_v1_snapshot_remains_readable_after_v2_upgrade(tmp_path: Path):
 
     # 把 sidecar 快照回写成 v1 形态：catalog_version=1 且删掉 H3.1 声明字段，
     # 模拟 0011 时代的冻结世界。
-    from src.database import WorldSkillPin
+    from src.storage.database import WorldSkillPin
 
     with session_scope(context.database_url) as session:
         for row in session.query(WorldSkillPin).filter_by(world_id="world-v1"):
@@ -390,7 +390,7 @@ def test_on_demand_skill_cannot_declare_tool_policy(tmp_path: Path):
 
 def _policy_engine_stub(tmp_path: Path, world_id: str, catalog_skills: list[dict]):
     """带自定义 catalog 的最小 engine duck：tmp project + DB 世界 + pin。"""
-    from src.engine import GameEngine
+    from src.app.engine import GameEngine
 
     project = tmp_project(tmp_path)
     keeper_dir = project / "skills" / "keeper"
@@ -418,7 +418,7 @@ def _policy_engine_stub(tmp_path: Path, world_id: str, catalog_skills: list[dict
 
 def test_request_tool_policy_collects_active_skill_declarations(tmp_path: Path):
     """激活的 deterministic Skill 的 required/allowed_tools 进入请求策略。"""
-    from src.skill_activation import request_tool_policy
+    from src.ai.skills.skill_activation import request_tool_policy
 
     engine = _policy_engine_stub(
         tmp_path,
@@ -456,7 +456,7 @@ def test_request_tool_policy_collects_active_skill_declarations(tmp_path: Path):
 
 
 def _prepared_request(host, **overrides):
-    from src.model_request import StreamPolicy, prepare_model_request
+    from src.ai.model.model_request import StreamPolicy, prepare_model_request
 
     kwargs = {
         "policy": StreamPolicy(
@@ -484,7 +484,7 @@ def _tool_names(prepared) -> set[str]:
 
 def test_prepare_request_merges_required_tools_beyond_role_defaults(monkeypatch):
     """required_tools 显式声明优先于 role 默认排除表。"""
-    import src.skill_activation as activation
+    import src.ai.skills.skill_activation as activation
 
     monkeypatch.setattr(activation, "loadable_skill_allowlist", lambda host: ())
     monkeypatch.setattr(
@@ -507,7 +507,7 @@ def test_prepare_request_merges_required_tools_beyond_role_defaults(monkeypatch)
 
 def test_prepare_request_allowed_tools_intersect_catalog(monkeypatch):
     """allowed_tools 非空声明把当回合模型目录裁到声明并集。"""
-    import src.skill_activation as activation
+    import src.ai.skills.skill_activation as activation
 
     monkeypatch.setattr(activation, "loadable_skill_allowlist", lambda host: ())
     monkeypatch.setattr(
@@ -532,7 +532,7 @@ def test_prepare_request_allowed_tools_intersect_catalog(monkeypatch):
 
 def test_activate_user_skill_loads_user_invocable_pin(tmp_path: Path):
     """玩家 /skill：pin 内 user_invocable 条目受信注入，其余一律拒绝。"""
-    from src.skill_activation import activate_user_skill
+    from src.ai.skills.skill_activation import activate_user_skill
 
     engine = _policy_engine_stub(
         tmp_path,
@@ -665,7 +665,7 @@ def test_resolver_phase_scene_capability_ruleset_predicates():
     catalog = _catalog()
     world = {"combat_state": {}, "pc": {"san": 80}, "current_scene": {"id": "hall"}}
     # 官方 catalog 没有 phase/scene/capability/ruleset 谓词——构造合成条目验证语义
-    from src.skill_manifest import SkillEntry
+    from src.ai.skills.skill_manifest import SkillEntry
 
     synthetic = SkillEntry(
         id="keeper.synthetic",
@@ -716,7 +716,7 @@ def test_resolver_respects_available_ids_and_keywords_only_diagnose():
 
 def test_deterministic_dependencies_are_validated_and_loaded_first():
     """Dependency closure is deterministic and never relies on prompt ordering luck."""
-    from src.skill_manifest import SkillCatalog, SkillEntry, validate_catalog
+    from src.ai.skills.skill_manifest import SkillCatalog, SkillEntry, validate_catalog
 
     prerequisite = SkillEntry(
         id="keeper.prerequisite",
@@ -757,7 +757,7 @@ def test_deterministic_dependencies_are_validated_and_loaded_first():
 
 def _engine_stub(tmp_path: Path, world_id: str, *, seed: bool = True):
     """Minimal engine duck for ToolPipeline: context + ledger + execute."""
-    from src.engine import GameEngine
+    from src.app.engine import GameEngine
 
     if seed:
         seed_world(sqlite_url(tmp_path), world_id)
@@ -801,7 +801,7 @@ def _authorized_call(
 
 
 def _frozen_skills(engine) -> tuple[tuple[str, str], ...]:
-    from src.skill_activation import loadable_skill_allowlist
+    from src.ai.skills.skill_activation import loadable_skill_allowlist
 
     return loadable_skill_allowlist(engine)
 
@@ -890,8 +890,8 @@ def test_load_skill_dsml_shape_call_denied_for_non_frozen_id(tmp_path: Path):
 
 def _execution_window(engine, skill_allowlist=None):
     """模拟一次已签发模型请求的执行窗口（H1 执行期证据）。"""
-    from src.skill_activation import loadable_skill_allowlist
-    from src.tool_request_authority import execution_snapshot
+    from src.ai.skills.skill_activation import loadable_skill_allowlist
+    from src.ai.tools.tool_request_authority import execution_snapshot
 
     if skill_allowlist is None:
         skill_allowlist = loadable_skill_allowlist(engine)
@@ -910,7 +910,7 @@ def _execution_window(engine, skill_allowlist=None):
 def test_load_skill_without_pins_fails_closed(tmp_path: Path):
     # 无 world 行 → 无 pin → 模型路径拒绝（不做磁盘回退）
     Base.metadata.create_all(get_engine(sqlite_url(tmp_path)))
-    from src.engine import GameEngine
+    from src.app.engine import GameEngine
 
     engine = GameEngine.__new__(GameEngine)
     engine.context = fake_context(tmp_path, "ghost")
@@ -918,7 +918,7 @@ def test_load_skill_without_pins_fails_closed(tmp_path: Path):
     engine._loaded_optional_skills = set()
     engine._skill_catalog_cache = None
     engine._skill_pins_cache = None
-    from src.skill_activation import execute_load_skill
+    from src.ai.skills.skill_activation import execute_load_skill
 
     with _execution_window(engine, skill_allowlist=()):
         result = json.loads(execute_load_skill(engine, "keeper.magic"))
@@ -927,7 +927,7 @@ def test_load_skill_without_pins_fails_closed(tmp_path: Path):
 
 def test_load_skill_requires_issued_snapshot_and_exact_digest(tmp_path: Path):
     """无执行期快照、或冻结 digest 与 pin 不一致，都必须拒绝。"""
-    from src.skill_activation import execute_load_skill, loadable_skill_allowlist
+    from src.ai.skills.skill_activation import execute_load_skill, loadable_skill_allowlist
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(load=lambda: {})
@@ -969,7 +969,7 @@ def test_deterministic_injection_uses_pin_and_records_provenance(tmp_path: Path)
     assert len(engine.messages) == 1
     content = engine.messages[0]["content"]
     assert "keeper.combat" in content
-    from src.skill_activation import skill_catalog as engine_skill_catalog
+    from src.ai.skills.skill_activation import skill_catalog as engine_skill_catalog
 
     pin = ensure_world_pins(engine.context, engine_skill_catalog(engine))["keeper.combat"]
     assert pin.content in content
@@ -979,7 +979,7 @@ def test_deterministic_injection_uses_pin_and_records_provenance(tmp_path: Path)
     assert len(engine.messages) == 1
 
     # 溯源：注入事件落 context events 时带 source_kind=skill + digest
-    from src.context_shadow import note_skill_injection
+    from src.ai.context.context_shadow import note_skill_injection
 
     store = ContextEventStore(engine.context.database_url)
     store.ensure_session("world-a")
@@ -996,7 +996,7 @@ def test_deterministic_injection_uses_pin_and_records_provenance(tmp_path: Path)
         engine.messages,
         provenance={
             # 与 context_shadow 相同的消息摘要键
-            __import__("src.context_events", fromlist=["payload_digest"]).payload_digest(
+            __import__("src.ai.context.context_events", fromlist=["payload_digest"]).payload_digest(
                 store._normalize_messages([dict(message)])[0]
             ): {
                 "source_kind": "skill",
@@ -1007,7 +1007,7 @@ def test_deterministic_injection_uses_pin_and_records_provenance(tmp_path: Path)
     )
     assert status == "appended"
     with session_scope(engine.context.database_url) as db:
-        from src.database import ModelContextEvent
+        from src.storage.database import ModelContextEvent
 
         event = db.query(ModelContextEvent).filter_by(session_id=session["id"]).one()
         assert event.event_type == EVENT_CONTEXT_INJECTION
@@ -1022,7 +1022,7 @@ def test_keyword_hit_does_not_inject(tmp_path: Path):
         load=lambda: {"combat_state": {"active": False}, "pc": {"san": 90}}
     )
     logged = []
-    import src.skill_activation as skill_activation_module
+    import src.ai.skills.skill_activation as skill_activation_module
 
     original = skill_activation_module.log_game
     skill_activation_module.log_game = logged.append
@@ -1038,7 +1038,7 @@ def test_keyword_hit_does_not_inject(tmp_path: Path):
 
 def test_deterministic_skill_refresh_uses_current_surface_not_lifetime_set(tmp_path: Path):
     """A compacted-away rule returns before a same-session retry, without duplicates."""
-    from src.skill_activation import refresh_deterministic_skills
+    from src.ai.skills.skill_activation import refresh_deterministic_skills
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(
@@ -1076,7 +1076,7 @@ def test_deterministic_skill_refresh_uses_current_surface_not_lifetime_set(tmp_p
 
 def test_tool_triggered_skill_restores_after_same_turn_compaction(tmp_path: Path):
     """A transient tool predicate survives H2 surface replacement for its live turn."""
-    from src.skill_activation import refresh_deterministic_skills
+    from src.ai.skills.skill_activation import refresh_deterministic_skills
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(
@@ -1104,7 +1104,7 @@ def test_tool_triggered_skill_restores_after_same_turn_compaction(tmp_path: Path
 
 def test_player_control_lookalike_cannot_suppress_skill_refresh(tmp_path: Path):
     """Only the engine-registered current control object can count as loaded."""
-    from src.skill_activation import refresh_deterministic_skills
+    from src.ai.skills.skill_activation import refresh_deterministic_skills
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(
@@ -1150,7 +1150,7 @@ def test_partial_existing_pins_never_topped_up(tmp_path: Path):
 
 def test_corrupted_pin_digest_fails_closed(tmp_path: Path):
     """pin 内容被篡改（digest 不匹配）→ PinUnavailable，不信任、不回退。"""
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
 
     url = sqlite_url(tmp_path)
     seed_world(url, "world-a")
@@ -1178,12 +1178,12 @@ def test_catalog_metadata_change_does_not_affect_pinned_world(tmp_path: Path):
     context_a = tmp_context(tmp_path, "world-a", project)
     context_b = tmp_context(tmp_path, "world-b", project)
 
-    from src.persistence import load_system_prompt
-    from src.skill_activation import (
+    from src.ai.skills.skill_activation import (
         execute_load_skill,
         loadable_skill_allowlist,
         resolve_for_engine,
     )
+    from src.storage.persistence import load_system_prompt
 
     engine_a = _engine_stub(tmp_path, "world-a", seed=False)
     engine_a.context = context_a
@@ -1248,8 +1248,8 @@ def test_pinned_world_immune_to_catalog_deletion(tmp_path: Path):
     seed_world(sqlite_url(tmp_path), "world-a")
     context = tmp_context(tmp_path, "world-a", project)
 
-    from src.persistence import load_system_prompt
-    from src.skill_activation import resolve_for_engine
+    from src.ai.skills.skill_activation import resolve_for_engine
+    from src.storage.persistence import load_system_prompt
 
     prompt_before = load_system_prompt(context)
     (project / "skills" / "catalog.json").unlink()
@@ -1297,9 +1297,9 @@ def test_existing_world_pin_failure_fails_closed(tmp_path: Path):
     """已存在世界的 pin 读取失败：禁止磁盘回退，全链路受控失败。"""
     import sqlalchemy as sa
 
-    from src.database import get_engine
-    from src.persistence import load_system_prompt
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
+    from src.storage.database import get_engine
+    from src.storage.persistence import load_system_prompt
 
     url = sqlite_url(tmp_path)
     seed_world(url, "world-a")
@@ -1324,7 +1324,7 @@ def test_existing_world_pin_failure_fails_closed(tmp_path: Path):
     engine._maybe_hint_optional_skill("combat_start")
     assert engine.messages == []
     assert engine._loaded_optional_skills == set()
-    from src.skill_activation import execute_load_skill
+    from src.ai.skills.skill_activation import execute_load_skill
 
     with _execution_window(engine, skill_allowlist=()):
         result = json.loads(execute_load_skill(engine, "keeper.magic"))
@@ -1335,8 +1335,8 @@ def test_zero_pin_db_world_with_broken_catalog_never_falls_back_to_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A persisted but not-yet-pinned world has no mutable-disk escape hatch."""
-    from src.persistence import load_system_prompt
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
+    from src.storage.persistence import load_system_prompt
 
     project = tmp_project(tmp_path)
     seed_world(sqlite_url(tmp_path), "world-a")
@@ -1344,7 +1344,7 @@ def test_zero_pin_db_world_with_broken_catalog_never_falls_back_to_disk(
     # The fallback helper is deliberately booby-trapped: the controlled error
     # must happen before any legacy disk reader gets a chance to run.
     monkeypatch.setattr(
-        "src.persistence._read_disk_skill",
+        "src.storage.persistence._read_disk_skill",
         lambda _path: pytest.fail("zero-pin DB world read a live disk Skill"),
     )
     (project / "skills" / "catalog.json").unlink()
@@ -1356,8 +1356,8 @@ def test_zero_pin_db_world_with_broken_catalog_never_falls_back_to_disk(
 
 def test_legacy_content_only_pins_stay_playable_without_current_catalog(tmp_path: Path):
     """Pre-0011 rows become bounded core text solely from frozen content."""
-    from src.persistence import load_system_prompt
-    from src.skill_pins import pinned_catalog, read_world_pins
+    from src.ai.skills.skill_pins import pinned_catalog, read_world_pins
+    from src.storage.persistence import load_system_prompt
 
     project = tmp_project(tmp_path)
     url = sqlite_url(tmp_path)
@@ -1423,7 +1423,7 @@ def test_request_snapshot_freezes_loadable_skill_ids_and_digests(tmp_path: Path)
     engine = _engine_stub(tmp_path, "world-a")
     engine.messages = [{"role": "system", "content": "sys"}]
 
-    from src.model_request import StreamPolicy, prepare_model_request
+    from src.ai.model.model_request import StreamPolicy, prepare_model_request
 
     prepared = prepare_model_request(
         engine,
@@ -1455,7 +1455,7 @@ def test_request_snapshot_freezes_loadable_skill_ids_and_digests(tmp_path: Path)
 
 
 def test_probe_distinguishes_db_states(tmp_path: Path):
-    from src.skill_pins import probe_world_pins
+    from src.ai.skills.skill_pins import probe_world_pins
 
     url = sqlite_url(tmp_path)
     Base.metadata.create_all(get_engine(url))
@@ -1474,7 +1474,7 @@ def test_probe_distinguishes_db_states(tmp_path: Path):
 
 def test_unreadable_pin_database_never_falls_back_to_live_catalog(tmp_path: Path):
     """存在 DB 配置但表不可读不是 legacy：必须受控失败，不能热读磁盘。"""
-    from src.skill_pins import PinUnavailable, probe_world_pins, read_world_pins
+    from src.ai.skills.skill_pins import PinUnavailable, probe_world_pins, read_world_pins
 
     # 空 SQLite 文件有 URL，但没有任何表；这与真正的 duck/no-world context
     # 不同。若把它当作 ``None`` 回退磁盘，已运行世界会绕过 pin 冻结。
@@ -1487,7 +1487,7 @@ def test_unreadable_pin_database_never_falls_back_to_live_catalog(tmp_path: Path
 
 
 def test_pin_set_integrity_detects_missing_and_mismatched_rows(tmp_path: Path):
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
 
     url = sqlite_url(tmp_path)
     seed_world(url, "world-a")
@@ -1558,7 +1558,7 @@ def test_sidecar_snapshot_must_be_full_and_nonempty(
     tmp_path: Path, case: str, mutate
 ) -> None:
     """A present sidecar is a full frozen authority snapshot, never legacy."""
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
 
     case_root = tmp_path / case
     case_root.mkdir()
@@ -1578,7 +1578,7 @@ def test_sidecar_snapshot_must_be_full_and_nonempty(
 
 def test_sidecar_catalog_order_must_match_each_pinned_skill(tmp_path: Path) -> None:
     """A complete but reordered catalog snapshot cannot alter injection order."""
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
 
     url = sqlite_url(tmp_path)
     seed_world(url, "world-a")
@@ -1599,7 +1599,7 @@ def test_branch_pin_lineage_corruption_never_falls_back_to_live_catalog(
     tmp_path: Path, kind: str
 ) -> None:
     """Branch metadata errors must fail before any child can independently pin."""
-    from src.skill_pins import PinUnavailable
+    from src.ai.skills.skill_pins import PinUnavailable
 
     case_root = tmp_path / kind
     case_root.mkdir()
@@ -1643,7 +1643,7 @@ def test_branch_pin_lineage_corruption_never_falls_back_to_live_catalog(
 
 def test_branch_inherit_without_live_catalog_and_copy_fail_closed(tmp_path: Path):
     """源已 pin 后继承不读活 catalog；复制路径 DB 失败受控上抛。"""
-    from src.skill_pins import PinUnavailable, inherit_pins_for_branch
+    from src.ai.skills.skill_pins import PinUnavailable, inherit_pins_for_branch
 
     project = tmp_project(tmp_path)
     url = sqlite_url(tmp_path)
@@ -1657,7 +1657,7 @@ def test_branch_inherit_without_live_catalog_and_copy_fail_closed(tmp_path: Path
     # 删掉 catalog.json 后继承仍成功（不读活 catalog）
     (project / "skills" / "catalog.json").unlink()
     assert inherit_pins_for_branch(parent, child) == len(parent_pins)
-    from src.skill_pins import read_world_pins
+    from src.ai.skills.skill_pins import read_world_pins
 
     assert read_world_pins(child) == parent_pins
 
@@ -1701,7 +1701,7 @@ def test_load_skill_enforces_frozen_max_context_tokens(tmp_path: Path):
     engine._skill_catalog_cache = None
     engine._skill_pins_cache = None
 
-    from src.skill_activation import execute_load_skill
+    from src.ai.skills.skill_activation import execute_load_skill
 
     with _execution_window(engine):
         result = json.loads(execute_load_skill(engine, "keeper.magic"))
@@ -1715,7 +1715,7 @@ def test_load_skill_enforces_frozen_max_context_tokens(tmp_path: Path):
 
 def test_load_skill_result_event_carries_skill_provenance(tmp_path: Path):
     """load_skill 成功结果落 context events 时带 source_kind=skill + digest。"""
-    from src.skill_activation import execute_load_skill, note_load_skill_result
+    from src.ai.skills.skill_activation import execute_load_skill, note_load_skill_result
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(load=lambda: {})
@@ -1739,7 +1739,7 @@ def test_load_skill_result_event_carries_skill_provenance(tmp_path: Path):
     )
     assert status == "appended"
     with session_scope(engine.context.database_url) as db:
-        from src.database import ModelContextEvent
+        from src.storage.database import ModelContextEvent
 
         event = (
             db.query(ModelContextEvent)
@@ -1767,7 +1767,7 @@ def test_load_skill_result_event_carries_skill_provenance(tmp_path: Path):
 
 def test_load_skill_checks_current_surface_and_never_bypasses_frozen_digest(tmp_path: Path):
     """Current-surface acknowledgement may not bypass frozen id/digest checks."""
-    from src.skill_activation import execute_load_skill, loadable_skill_allowlist
+    from src.ai.skills.skill_activation import execute_load_skill, loadable_skill_allowlist
 
     engine = _engine_stub(tmp_path, "world-a")
     engine.context.world_store = SimpleNamespace(load=lambda: {})
@@ -1823,7 +1823,7 @@ def test_skill_files_never_reference_engine_only_tools():
     """
     import re
 
-    from src.model_tool_catalog import _ENGINE_ONLY_TOOL_NAMES
+    from src.ai.model.model_tool_catalog import _ENGINE_ONLY_TOOL_NAMES
 
     skill_dirs = [PROJECT_ROOT / "skills"]
     skill_dirs += [

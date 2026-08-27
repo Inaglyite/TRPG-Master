@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from src.database import (
+from src.storage.database import (
     AuditEvent,
     Base,
     Snapshot,
@@ -18,8 +18,8 @@ from src.database import (
     get_engine,
     session_scope,
 )
-from src.database_turn_journal import DatabaseTurnJournal
-from src.turn_journal import TurnJournalError
+from src.storage.database_turn_journal import DatabaseTurnJournal
+from src.storage.turn_journal import TurnJournalError
 from tools.recover_active_turn import main
 
 
@@ -255,8 +255,8 @@ def test_local_cli_is_read_only_until_explicit_fenced_force(
     _make_remote_owner(url, world_id, turn_id)
 
     with (
-        patch("src.database.initialize_database") as database_initialize,
-        patch("src.runtime.initialize_database") as runtime_initialize,
+        patch("src.storage.database.initialize_database") as database_initialize,
+        patch("src.app.runtime.initialize_database") as runtime_initialize,
         patch.object(Base.metadata, "create_all") as create_all,
     ):
         assert main(["--world-id", world_id, "--runtime-root", str(tmp_path)]) == 0

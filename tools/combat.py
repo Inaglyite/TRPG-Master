@@ -12,7 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.combat import (
+from src.app.runtime import RuntimeContext
+from src.gameplay.combat import (
     CombatError,
     combat_action,
     combat_decide,
@@ -20,7 +21,6 @@ from src.combat import (
     end_combat,
     start_combat,
 )
-from src.runtime import RuntimeContext
 
 CONTEXT = RuntimeContext.from_env()
 

@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.npc_conversations import commit_npc_conversations
-from src.world_store import WorldStore
+from src.gameplay.npc_conversations import commit_npc_conversations
+from src.storage.world_store import WorldStore
 
 
 class NarrativeMemoryTests(unittest.TestCase):

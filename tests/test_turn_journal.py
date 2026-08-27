@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT
-from src.engine import GameEngine
-from src.runtime import RuntimeContext
-from src.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.app.runtime import RuntimeContext
+from src.storage.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
 
 
 class TurnJournalTests(unittest.TestCase):
@@ -58,7 +58,7 @@ class TurnJournalTests(unittest.TestCase):
             project_root=root,
             runtime_root=root,
         )
-        with patch("src.engine.OpenAI", return_value=object()):
+        with patch("src.app.engine.OpenAI", return_value=object()):
             engine = GameEngine(context)
         engine.prepare_session()
         return engine
@@ -211,7 +211,7 @@ class TurnJournalTests(unittest.TestCase):
 
             # If status polling still called recovery, this simulated dead PID
             # would turn the row into interrupted.  It must remain a read.
-            with patch("src.turn_journal._owner_liveness", return_value=False):
+            with patch("src.storage.turn_journal._owner_liveness", return_value=False):
                 status = observer.recovery_status(turn_id)
             self.assertEqual("active", status["requested"]["status"])
             self.assertEqual(turn_id, status["active"]["turn_id"])
@@ -222,7 +222,7 @@ class TurnJournalTests(unittest.TestCase):
             first = self.make_journal(root, "process-a")
             turn_id = first.begin(kind="opening", player_input=None)
 
-            with patch("src.turn_journal._owner_liveness", return_value=False):
+            with patch("src.storage.turn_journal._owner_liveness", return_value=False):
                 second = self.make_journal(root, "process-b")
             status = second.recovery_status(turn_id)
             self.assertEqual("interrupted", status["requested"]["status"])

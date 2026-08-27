@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.context_events import ContextEventStore
-from src.context_maintenance import collect_context_events
-from src.database import (
+from src.ai.context.context_events import ContextEventStore
+from src.ai.context.context_maintenance import collect_context_events
+from src.storage.database import (
     AuditEvent,
     Base,
     ContextSession,

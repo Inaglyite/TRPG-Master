@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.config import PROJECT_ROOT
-from src.runtime import RuntimeContext
-from src.tool_runtime import DuplicateToolError, ToolRuntime, UnknownToolError
+from src.ai.tools.tool_runtime import DuplicateToolError, ToolRuntime, UnknownToolError
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
 
 
 class ToolRuntimeTests(unittest.TestCase):
@@ -58,14 +58,14 @@ class ToolRuntimeTests(unittest.TestCase):
 
 class BuiltinToolContractTests(unittest.TestCase):
     def test_every_declared_model_tool_has_exactly_one_runtime_handler(self):
-        from src.tools import TOOL_RUNTIME, TOOLS
+        from src.ai.tools.registry import TOOL_RUNTIME, TOOLS
 
         declared = {tool["function"]["name"] for tool in TOOLS}
 
         self.assertEqual(set(), declared - TOOL_RUNTIME.names)
 
     def test_public_execute_function_preserves_unknown_tool_error_protocol(self):
-        from src.tools import execute_function
+        from src.ai.tools.registry import execute_function
 
         with tempfile.TemporaryDirectory() as temp_dir:
             context = RuntimeContext(

@@ -148,8 +148,16 @@ venv/bin/python tools/module_packager.py validate /tmp/my-module.trpgmod
 
 ```text
 trpg-master/
-├── server.py        # FastAPI HTTP / WebSocket 入口
-├── src/             # 游戏引擎、回合工作流、规则、持久化与权限
+├── server.py        # FastAPI HTTP / WebSocket 组合入口
+├── src/
+│   ├── app/         # 应用编排、GameEngine、配置与运行时
+│   ├── gameplay/    # 不依赖传输层的确定性玩法规则
+│   ├── ai/          # 模型、上下文、Skill 与工具执行边界
+│   ├── storage/     # 数据库、世界状态、存档与时间线
+│   ├── modules/     # 模组格式、编译、诊断与注册表
+│   ├── auth/        # 账号、Session 与权限
+│   ├── multiplayer/ # 房间、多人协议与协作状态
+│   └── web/         # HTTP 适配器与前端安全载荷
 ├── tools/           # 模组、账号、备份与验收工具
 ├── skills/          # 受控的守秘人规则与能力目录
 ├── rules/           # 结构化规则数据

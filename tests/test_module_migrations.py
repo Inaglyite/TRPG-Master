@@ -1,9 +1,9 @@
 import json
 import unittest
 
-from src.config import PROJECT_ROOT
-from src.module_format import ModuleDefinitionV2, parse_module
-from src.module_migrations import migrate_v1_to_v2
+from src.app.config import PROJECT_ROOT
+from src.modules.module_format import ModuleDefinitionV2, parse_module
+from src.modules.module_migrations import migrate_v1_to_v2
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

@@ -12,30 +12,30 @@ import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from src.config import PROJECT_ROOT
-from src.lorebook import lorebook_json_schema
-from src.module_compiler import (
+from src.ai.context.lorebook import lorebook_json_schema
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.modules.module_compiler import (
     compile_module,
     compile_payload,
     compile_world_state,
     render_keeper_prompt,
 )
-from src.module_format import (
+from src.modules.module_format import (
     ModuleDefinition,
     ModuleManifest,
     manifest_json_schema,
     module_json_schema,
 )
-from src.module_format import (
+from src.modules.module_format import (
     compile_world_state as legacy_compile_world_state,
 )
-from src.module_registry import (
+from src.modules.module_registry import (
     ModulePackageError,
     ModuleRegistry,
     build_package,
     inspect_package,
 )
-from src.runtime import RuntimeContext
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

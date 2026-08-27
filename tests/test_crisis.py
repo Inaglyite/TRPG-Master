@@ -6,8 +6,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from src.config import PROJECT_ROOT
-from src.crisis import maybe_fire_crisis, select_crisis_trigger
+from src.app.config import PROJECT_ROOT
+from src.gameplay.crisis import maybe_fire_crisis, select_crisis_trigger
 
 
 def crisis_world() -> dict:

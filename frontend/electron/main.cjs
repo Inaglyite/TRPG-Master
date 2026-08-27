@@ -247,7 +247,7 @@ async function startPackagedBackend(exePath, runtimeRoot) {
     env: {
       ...process.env,
       // server.py 从这里读取 userData/runtime/.env.json；只读模组资源仍由
-      // src.config 在 PyInstaller 的 _internal/ 中自动定位。
+      // src.app.config 在 PyInstaller 的 _internal/ 中自动定位。
       TRPG_PROJECT_ROOT: runtimeRoot,
       TRPG_RUNTIME_ROOT: runtimeRoot,
     },

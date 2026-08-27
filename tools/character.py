@@ -11,9 +11,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.personality import normalize_violence_stance
-from src.runtime import RuntimeContext
-from src.world_store import atomic_write_json
+from src.app.runtime import RuntimeContext
+from src.gameplay.personality import normalize_violence_stance
+from src.storage.world_store import atomic_write_json
 
 CONTEXT = RuntimeContext.from_env()
 CHARS_DIR = CONTEXT.custom_characters_dir

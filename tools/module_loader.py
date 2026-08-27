@@ -16,9 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MOD_DIR = PROJECT_ROOT / "mod"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.runtime import RuntimeContext  # noqa: E402
-from src.world_migrations import migrate_world_state  # noqa: E402
-from src.world_store import atomic_write_json  # noqa: E402
+from src.app.runtime import RuntimeContext  # noqa: E402
+from src.storage.world_migrations import migrate_world_state  # noqa: E402
+from src.storage.world_store import atomic_write_json  # noqa: E402
 
 
 def _extract_yaml_blocks(text: str) -> list[dict]:

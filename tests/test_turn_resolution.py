@@ -5,8 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.action_checks import infer_action_check, infer_scene_transition
-from src.agent_graph import (
+from src.ai.tools.registry import tool_catalog_for_names
+from src.ai.tools.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
+from src.ai.tools.tool_request_authority import issue_model_request
+from src.app.agent_graph import (
     _call_combat_agent,
     _call_story_agent,
     _emit_sanity_dice,
@@ -14,10 +16,8 @@ from src.agent_graph import (
     _finalize_turn,
     _prepare_turn,
 )
-from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
-from src.tool_request_authority import issue_model_request
-from src.tools import tool_catalog_for_names
-from src.turn_reconciler import (
+from src.gameplay.action_checks import infer_action_check, infer_scene_transition
+from src.gameplay.turn_reconciler import (
     _compact_world,
     apply_turn_commit,
     narrative_body,
@@ -25,7 +25,7 @@ from src.turn_reconciler import (
     reconcile_turn,
     turn_needs_model_audit,
 )
-from src.world_store import WorldStore
+from src.storage.world_store import WorldStore
 
 
 def resolution_world() -> dict:
@@ -216,7 +216,7 @@ class StoryStreamingTests(unittest.TestCase):
             _has_pending_new_game_opening=lambda: False,
         )
 
-        with patch("src.agent_graph.NARRATIVE_MODEL", "story-model"):
+        with patch("src.app.agent_graph.NARRATIVE_MODEL", "story-model"):
             result = _prepare_turn({"engine": engine, "user_content": None})
 
         self.assertEqual(engine.current_model, "story-model")
@@ -584,7 +584,7 @@ class ClueClarityClockTests(unittest.TestCase):
                 chat=SimpleNamespace(completions=SimpleNamespace(create=create))
             )
 
-            with patch("src.turn_reconciler.JUDGEMENT_MODEL", "judge-model"):
+            with patch("src.gameplay.turn_reconciler.JUDGEMENT_MODEL", "judge-model"):
                 result = reconcile_turn(
                     engine,
                     player_action="我环顾大厅。",
@@ -802,7 +802,7 @@ class ClueClarityClockTests(unittest.TestCase):
         world["case_clock_definitions"]["human_pressure"]["levels"] = {
             str(i): f"第{i}级人类压力征兆、冗长描述{i}。" for i in range(20)
         }
-        from src.turn_reconciler import _clock_keywords
+        from src.gameplay.turn_reconciler import _clock_keywords
 
         keywords = _clock_keywords(world)
         self.assertIn("枪战", keywords)
@@ -811,7 +811,7 @@ class ClueClarityClockTests(unittest.TestCase):
     def test_periodic_doom_clock_audit(self):
         """声明时钟表的模组每 3 回合强制对账一次（拖延本身推进显形，
         不能只靠关键词信号）；无定义时不参与。"""
-        from src.turn_reconciler import engine_turn_needs_model_audit
+        from src.gameplay.turn_reconciler import engine_turn_needs_model_audit
 
         class _Store:
             def __init__(self, world):
@@ -1052,7 +1052,7 @@ class FinalizeTurnTests(unittest.TestCase):
             _maybe_summarize_after_turn=lambda: events.append("summary"),
         )
 
-        with patch("src.agent_graph.ENABLE_TURN_AUDIT", True):
+        with patch("src.app.agent_graph.ENABLE_TURN_AUDIT", True):
             _finalize_turn(
                 {
                     "engine": engine,
@@ -1091,7 +1091,7 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _maybe_hint_optional_skill=lambda _name: None,
         )
 
-        with patch("src.agent_graph.glm_quick_summary", return_value=None):
+        with patch("src.app.agent_graph.glm_quick_summary", return_value=None):
             _execute_tools(
                 {
                     "engine": engine,
@@ -1164,7 +1164,7 @@ class ToolExecutionSafetyTests(unittest.TestCase):
             _maybe_hint_optional_skill=lambda _name: None,
         )
 
-        with patch("src.agent_graph.glm_quick_summary", return_value=None):
+        with patch("src.app.agent_graph.glm_quick_summary", return_value=None):
             result = _execute_tools(
                 {
                     "engine": engine,

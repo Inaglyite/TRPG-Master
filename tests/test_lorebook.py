@@ -7,16 +7,16 @@ from types import SimpleNamespace
 
 from pydantic import ValidationError
 
-from src.config import PROJECT_ROOT
-from src.engine import GameEngine
-from src.lorebook import (
+from src.ai.context.lorebook import (
     LorebookEnvelope,
     record_lore_usage,
     select_lore,
     validate_lorebook_references,
 )
-from src.world_migrations import migrate_world_state
-from src.world_store import WorldStore
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.storage.world_migrations import migrate_world_state
+from src.storage.world_store import WorldStore
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

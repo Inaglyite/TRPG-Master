@@ -4,19 +4,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.combat import combat_action, start_combat
-from src.config import PROJECT_ROOT
-from src.engine import EngineCallbacks, GameEngine
-from src.persistence import (
+from src.ai.tools.registry import execute_function
+from src.app.config import PROJECT_ROOT
+from src.app.engine import EngineCallbacks, GameEngine
+from src.app.runtime import RuntimeContext
+from src.gameplay.combat import combat_action, start_combat
+from src.storage.persistence import (
     load_game,
     normalize_tool_message_history,
     restore_snapshot,
     save_game,
 )
-from src.runtime import RuntimeContext
-from src.tools import execute_function
-from src.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
-from src.world_store import StaleRevisionError
+from src.storage.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
+from src.storage.world_store import StaleRevisionError
 
 
 def combat_world() -> dict:
@@ -229,7 +229,7 @@ class SaveRestoreIntegrationTests(unittest.TestCase):
                 )
                 return ([{"role": "system", "content": "old"}], old_snapshot, {})
 
-            with patch("src.engine.load_game_artifacts", side_effect=racing_load):
+            with patch("src.app.engine.load_game_artifacts", side_effect=racing_load):
                 with self.assertRaises(StaleRevisionError):
                     engine.load("slot_001")
 

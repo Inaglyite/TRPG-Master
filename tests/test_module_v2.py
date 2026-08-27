@@ -4,18 +4,18 @@ from types import SimpleNamespace
 
 from pydantic import ValidationError
 
-from src.config import PROJECT_ROOT
-from src.discovery import DiscoveryMatch
-from src.engine import GameEngine
-from src.module_compiler import compile_payload
-from src.module_format import (
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.gameplay.discovery import DiscoveryMatch
+from src.modules.module_compiler import compile_payload
+from src.modules.module_format import (
     MANIFEST_V2_SCHEMA_URI,
     MODULE_V2_SCHEMA_URI,
     ModuleDefinitionV2,
     module_v2_json_schema,
     parse_module,
 )
-from src.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
+from src.storage.world_migrations import CURRENT_WORLD_SCHEMA_VERSION
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

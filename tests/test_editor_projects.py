@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.editor_projects import (
+from src.modules.editor_projects import (
     EditorProjectConflict,
     EditorProjectError,
     EditorProjectNotFound,

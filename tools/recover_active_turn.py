@@ -21,9 +21,9 @@ from sqlalchemy.engine import make_url
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.database import World, session_scope  # noqa: E402
-from src.database_turn_journal import DatabaseTurnJournal  # noqa: E402
-from src.turn_journal import TurnJournalError  # noqa: E402
+from src.storage.database import World, session_scope  # noqa: E402
+from src.storage.database_turn_journal import DatabaseTurnJournal  # noqa: E402
+from src.storage.turn_journal import TurnJournalError  # noqa: E402
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -7,15 +7,15 @@ from unittest.mock import patch
 
 import pytest
 
-from src.agent_graph import _execute_tools
-from src.database import Base, ModelCall, World, get_engine, session_scope
-from src.database_turn_journal import DatabaseTurnJournal
-from src.engine_primitives import TurnCancelledError
-from src.model_request import StreamPolicy, prepare_model_request
-from src.tool_pipeline import ToolPipeline
-from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
-from src.tool_request_authority import issue_model_request
-from src.tools import tool_catalog_for_names
+from src.ai.model.model_request import StreamPolicy, prepare_model_request
+from src.ai.tools.registry import tool_catalog_for_names
+from src.ai.tools.tool_pipeline import ToolPipeline
+from src.ai.tools.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
+from src.ai.tools.tool_request_authority import issue_model_request
+from src.app.agent_graph import _execute_tools
+from src.app.engine_primitives import TurnCancelledError
+from src.storage.database import Base, ModelCall, World, get_engine, session_scope
+from src.storage.database_turn_journal import DatabaseTurnJournal
 
 
 def _model_call(engine: _PipelineEngine, call_id: str, name: str, arguments: str) -> dict:
@@ -114,7 +114,7 @@ def test_pipeline_cancellation_prevents_handler_execution():
 def test_pipeline_deadline_before_execution_is_one_safe_tool_result():
     engine = _PipelineEngine()
     pipeline = ToolPipeline(engine, timeout_ms=1)
-    with patch("src.tool_pipeline.time.monotonic", side_effect=[0.0, 0.01, 0.011]):
+    with patch("src.ai.tools.tool_pipeline.time.monotonic", side_effect=[0.0, 0.01, 0.011]):
         outcome = pipeline.execute(
             _model_call(engine, "call-timeout", "state_add_item", '{"item":"钥匙"}')
         )

@@ -1,6 +1,6 @@
 import unittest
 
-from src.history_compactor import build_summary_input, parse_summary_json
+from src.ai.context.history_compactor import build_summary_input, parse_summary_json
 
 
 class HistoryCompactorTests(unittest.TestCase):

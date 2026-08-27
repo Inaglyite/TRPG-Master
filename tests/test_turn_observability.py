@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.provider_adapter import note_model_retry
-from src.turn_performance import TurnPerformance, increment_counter
+from src.ai.model.provider_adapter import note_model_retry
+from src.gameplay.turn_performance import TurnPerformance, increment_counter
 
 
 def test_increment_counter_noop_without_active_turn():
@@ -38,8 +38,8 @@ def test_model_retry_note_records_log_and_counter():
 
 def test_lore_hit_count_wired_into_engine_retrieval():
     """_retrieve_lore_context 命中条目数进入 lore_hit_count。"""
-    from src.engine import GameEngine
-    from src.lorebook import LorebookEnvelope
+    from src.ai.context.lorebook import LorebookEnvelope
+    from src.app.engine import GameEngine
 
     lorebook = LorebookEnvelope.model_validate(
         {

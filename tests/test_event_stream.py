@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.event_stream import OrderedTurnEventStream, TurnAlreadyActiveError
+from src.app.event_stream import OrderedTurnEventStream, TurnAlreadyActiveError
 
 
 class FakeWebSocket:

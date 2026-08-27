@@ -69,7 +69,7 @@ def detect_unversioned_revision(database_url: str) -> str | None:
     Unknown/partial schemas fail closed.
     """
 
-    from src.database import Base
+    from src.storage.database import Base
 
     engine = create_engine(database_url)
     try:
@@ -195,7 +195,7 @@ def run_packaged_migrations(
 
 def bootstrap_packaged_database() -> None:
     url = run_packaged_migrations()
-    # server.py and src.database must use the exact database just migrated.
+    # server.py and src.storage.database must use the exact database just migrated.
     os.environ["TRPG_DATABASE_URL"] = url
     print("[bootstrap] database migrations are current", file=sys.stderr)
 

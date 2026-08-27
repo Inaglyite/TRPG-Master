@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.player_notes import (
+from src.storage.player_notes import (
     MAX_PLAYER_NOTES_CHARS,
     PlayerNotesConflict,
     PlayerNotesStore,

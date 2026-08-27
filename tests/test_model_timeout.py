@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import src.config as config
-import src.engine as engine_module
-import src.llm as llm_module
+import src.ai.model.llm as llm_module
+import src.app.config as config
+import src.app.engine as engine_module
 
 
 def test_model_timeout_default_matches_sdk_behavior(monkeypatch) -> None:

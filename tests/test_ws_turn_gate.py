@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.config import AUTO_SAVE_SLOT, PROJECT_ROOT
-from src.database import World, session_scope
-from src.persistence import save_game
-from src.runtime import RuntimeContext
-from src.world_branches import WorldBranchService
+from src.app.config import AUTO_SAVE_SLOT, PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.storage.database import World, session_scope
+from src.storage.persistence import save_game
+from src.storage.world_branches import WorldBranchService
 
 
 class WebSocketTurnGateTests(unittest.TestCase):
@@ -58,7 +58,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
     def test_unknown_message_returns_explicit_protocol_error(self):
         import server
 
-        with patch("src.engine.API_KEY", "test-api-key"):
+        with patch("src.app.engine.API_KEY", "test-api-key"):
             with TestClient(server.app) as client:
                 with client.websocket_connect("/ws") as ws:
                     for _ in range(6):
@@ -84,7 +84,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             target_lock.acquire()
             try:
                 with (
-                    patch("src.engine.API_KEY", "test-api-key"),
+                    patch("src.app.engine.API_KEY", "test-api-key"),
                     patch.object(server.WORLD_BRANCHES, "open", return_value=target),
                 ):
                     with TestClient(server.app) as client:
@@ -114,7 +114,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
                 module_name="mansion_of_madness",
             )
             with (
-                patch("src.engine.API_KEY", "test-api-key"),
+                patch("src.app.engine.API_KEY", "test-api-key"),
                 patch.object(server.WORLD_BRANCHES, "open", return_value=target),
             ):
                 with TestClient(server.app) as client:
@@ -137,7 +137,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             runtime_root = Path(temp_dir)
             root, branch, service = self._make_local_branch_contexts(runtime_root)
             with (
-                patch("src.engine.API_KEY", "test-api-key"),
+                patch("src.app.engine.API_KEY", "test-api-key"),
                 patch.object(server, "RUNTIME_ROOT", runtime_root),
                 patch.object(server, "WORLD_BRANCHES", service),
             ):
@@ -169,7 +169,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             target_lock.acquire()
             try:
                 with (
-                    patch("src.engine.API_KEY", "test-api-key"),
+                    patch("src.app.engine.API_KEY", "test-api-key"),
                     patch.object(server, "RUNTIME_ROOT", runtime_root),
                     patch.object(server, "WORLD_BRANCHES", service),
                 ):
@@ -202,7 +202,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             )
 
             with (
-                patch("src.engine.API_KEY", "test-api-key"),
+                patch("src.app.engine.API_KEY", "test-api-key"),
                 patch.object(server, "RUNTIME_ROOT", runtime_root),
                 patch.object(server, "WORLD_BRANCHES", service),
             ):
@@ -224,7 +224,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             engine.cb.on_done()
 
         with (
-            patch("src.engine.API_KEY", "test-api-key"),
+            patch("src.app.engine.API_KEY", "test-api-key"),
             patch.object(server.GameEngine, "handle_action", completed_action),
         ):
             with TestClient(server.app) as client:
@@ -244,7 +244,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
         import server
 
         with (
-            patch("src.engine.API_KEY", "test-api-key"),
+            patch("src.app.engine.API_KEY", "test-api-key"),
             patch.object(server.GameEngine, "load", return_value=None),
         ):
             with TestClient(server.app) as client:
@@ -264,7 +264,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
         import server
 
         with (
-            patch("src.engine.API_KEY", "test-api-key"),
+            patch("src.app.engine.API_KEY", "test-api-key"),
             patch.object(
                 server.GameEngine,
                 "save",
@@ -299,7 +299,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             engine.cb.on_done()
 
         with (
-            patch("src.engine.API_KEY", "test-api-key"),
+            patch("src.app.engine.API_KEY", "test-api-key"),
             patch.object(server.GameEngine, "handle_action", blocked_action),
         ):
             with TestClient(server.app) as client:
@@ -364,7 +364,7 @@ class WebSocketTurnGateTests(unittest.TestCase):
             )
             world_lock = server._world_turn_lock(context)
             with (
-                patch("src.engine.API_KEY", "test-api-key"),
+                patch("src.app.engine.API_KEY", "test-api-key"),
                 patch.object(server.RuntimeContext, "local", return_value=context),
                 patch.object(server.GameEngine, "handle_action", cancellable_action),
             ):

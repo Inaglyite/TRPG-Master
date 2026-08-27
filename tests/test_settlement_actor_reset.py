@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.multiplayer_messages import run_room_message_loop
-from src.room_runtime import GameRoom, RoomDriverTransport, RoomEventHub
+from src.multiplayer.messages import run_room_message_loop
+from src.multiplayer.room_runtime import GameRoom, RoomDriverTransport, RoomEventHub
 
 
 class _QueueSocket:
@@ -128,9 +128,9 @@ def test_next_start_after_settlement_uses_owner_as_actor():
             on_next=re_claim_player,
         )
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-            patch("src.multiplayer_messages.reserve_room_action"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.reserve_room_action"),
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(

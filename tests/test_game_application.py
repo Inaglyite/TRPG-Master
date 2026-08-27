@@ -1,6 +1,6 @@
 import unittest
 
-from src.game_application import (
+from src.app.game_application import (
     ApplicationUseCaseError,
     GameApplication,
     SaveNotFoundError,

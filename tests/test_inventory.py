@@ -1,6 +1,6 @@
 import unittest
 
-from src.inventory import InventoryError, use_item
+from src.gameplay.inventory import InventoryError, use_item
 
 
 def make_world() -> dict:

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-import src.config as config
-from src.context_capacity import (
+import src.app.config as config
+from src.ai.context.context_capacity import (
     STATUS_COMPACT,
     STATUS_IRREDUCIBLE,
     STATUS_WITHIN,

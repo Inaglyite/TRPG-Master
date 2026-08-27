@@ -6,14 +6,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT
-from src.database import SaveSlot, Turn, World, new_id, session_scope
-from src.database_turn_journal import DatabaseTurnJournal
-from src.engine import GameEngine
-from src.persistence import save_game
-from src.player_notes import PlayerNotesStore
-from src.runtime import RuntimeContext
-from src.world_branches import WorldBranchService
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.app.runtime import RuntimeContext
+from src.storage.database import SaveSlot, Turn, World, new_id, session_scope
+from src.storage.database_turn_journal import DatabaseTurnJournal
+from src.storage.persistence import save_game
+from src.storage.player_notes import PlayerNotesStore
+from src.storage.world_branches import WorldBranchService
 
 
 class WorldBranchTests(unittest.TestCase):
@@ -56,7 +56,7 @@ class WorldBranchTests(unittest.TestCase):
             project_root=root,
             runtime_root=root,
         )
-        with patch("src.engine.OpenAI", return_value=object()):
+        with patch("src.app.engine.OpenAI", return_value=object()):
             engine = GameEngine(context)
         engine.prepare_session()
         return engine
@@ -112,7 +112,7 @@ class WorldBranchTests(unittest.TestCase):
             history = branch.context.world_dir / "turns" / "index.json"
             self.assertTrue(history.is_file())
 
-            with patch("src.engine.OpenAI", return_value=object()):
+            with patch("src.app.engine.OpenAI", return_value=object()):
                 branch_engine = GameEngine(branch.context)
             branch_engine.prepare_session()
             branch_engine.adopt_message_history(branch.messages)
@@ -157,7 +157,7 @@ class WorldBranchTests(unittest.TestCase):
 
     def test_branch_catalog_error_propagates_and_cleans_target_world(self):
         """A branch must never survive if pin inheritance cannot establish authority."""
-        from src.skill_manifest import CatalogError
+        from src.ai.skills.skill_manifest import CatalogError
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -172,7 +172,7 @@ class WorldBranchTests(unittest.TestCase):
             assert turn_id is not None
 
             with patch(
-                "src.world_branches.inherit_pins_for_branch",
+                "src.storage.world_branches.inherit_pins_for_branch",
                 side_effect=CatalogError("catalog broken"),
             ):
                 with self.assertRaises(CatalogError):

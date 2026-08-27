@@ -8,10 +8,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.handouts import resolve_handout_asset  # noqa: E402
-from src.runtime import RuntimeContext  # noqa: E402
-from src.state_paths import resolve_path as _resolve_path  # noqa: E402
-from src.state_paths import set_path as _set_path  # noqa: E402
+from src.app.runtime import RuntimeContext  # noqa: E402
+from src.gameplay.handouts import resolve_handout_asset  # noqa: E402
+from src.gameplay.state_paths import resolve_path as _resolve_path  # noqa: E402
+from src.gameplay.state_paths import set_path as _set_path  # noqa: E402
 
 CONTEXT = RuntimeContext.from_env()
 STORE = CONTEXT.world_store

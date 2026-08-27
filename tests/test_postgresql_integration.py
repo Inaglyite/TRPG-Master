@@ -14,9 +14,17 @@ from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 
-from src.auth import create_user
-from src.config import PROJECT_ROOT
-from src.database import (
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.auth.service import create_user
+from src.multiplayer.service import (
+    MultiplayerError,
+    accept_invite,
+    claim_investigator,
+    create_invite,
+    reserve_room_action,
+)
+from src.storage.database import (
     ACTIVE_TURN_WORLD_INDEX,
     SaveSlot,
     Snapshot,
@@ -28,15 +36,7 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.multiplayer import (
-    MultiplayerError,
-    accept_invite,
-    claim_investigator,
-    create_invite,
-    reserve_room_action,
-)
-from src.persistence import save_game
-from src.runtime import RuntimeContext
+from src.storage.persistence import save_game
 from tools.import_worlds_to_database import import_world
 
 POSTGRES_URL = os.environ.get("TRPG_TEST_POSTGRES_URL", "").strip()

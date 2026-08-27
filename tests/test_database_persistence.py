@@ -14,7 +14,8 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from starlette.websockets import WebSocketDisconnect
 
-from src.auth import (
+from src.app.engine import GameEngine
+from src.auth.service import (
     authenticate,
     authorize_world,
     create_login_session,
@@ -22,7 +23,8 @@ from src.auth import (
     resolve_session,
     revoke_session,
 )
-from src.database import (
+from src.multiplayer.service import MultiplayerError, reserve_room_action
+from src.storage.database import (
     ACTIVE_TURN_WORLD_INDEX,
     Base,
     RoomAction,
@@ -37,12 +39,10 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.database_store import DatabaseWorldStore
-from src.database_turn_journal import DatabaseTurnJournal
-from src.engine import GameEngine
-from src.multiplayer import MultiplayerError, reserve_room_action
-from src.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
-from src.world_store import StaleRevisionError
+from src.storage.database_store import DatabaseWorldStore
+from src.storage.database_turn_journal import DatabaseTurnJournal
+from src.storage.turn_journal import ActiveTurnError, TurnJournal, TurnJournalError
+from src.storage.world_store import StaleRevisionError
 from tools.import_worlds_to_database import _record_time, import_world
 
 
@@ -226,7 +226,7 @@ def test_database_journal_recovery_status_never_mutates_foreign_turn(tmp_path: P
         # A status poll is a read.  Even if the original PID were dead by the
         # time the poll runs, only an explicit journal construction/recovery
         # may decide whether to interrupt it.
-        with patch("src.turn_journal._owner_liveness", return_value=False):
+        with patch("src.storage.turn_journal._owner_liveness", return_value=False):
             status = observer.recovery_status(turn_id)
     assert status["requested"]["status"] == "active"
     assert status["active"]["turn_id"] == turn_id
@@ -247,7 +247,7 @@ def test_database_journal_recovers_provably_dead_local_owner(tmp_path: Path):
             owner_token="process-a",
         )
         turn_id = first.begin(kind="action", player_input="观察")
-        with patch("src.turn_journal._owner_liveness", return_value=False):
+        with patch("src.storage.turn_journal._owner_liveness", return_value=False):
             second = DatabaseTurnJournal(
                 world_dir,
                 world_id="world-a",
@@ -283,7 +283,7 @@ def test_database_journal_begin_recovers_owner_that_died_after_connect(tmp_path:
 
         # The observer connected while A was healthy. If A then dies, its next
         # turn attempt must safely recover the orphan instead of remaining busy.
-        with patch("src.turn_journal._owner_liveness", return_value=False):
+        with patch("src.storage.turn_journal._owner_liveness", return_value=False):
             next_turn_id = second.begin(kind="action", player_input="继续")
         status = second.recovery_status(interrupted_turn_id)
         assert status["requested"]["status"] == "interrupted"
@@ -1010,7 +1010,7 @@ def test_http_accounts_and_world_ownership_gate_websocket(tmp_path: Path):
             },
         ),
         patch.object(server, "DATABASE_URL", url),
-        patch("src.engine.API_KEY", "test-api-key"),
+        patch("src.app.engine.API_KEY", "test-api-key"),
     ):
         with TestClient(server.app, base_url="https://testserver") as owner_client:
             response = owner_client.post(

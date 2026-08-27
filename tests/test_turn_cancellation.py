@@ -2,7 +2,7 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from src.engine import GameEngine, TurnCancelledError
+from src.app.engine import GameEngine, TurnCancelledError
 
 
 class BlockingStream:

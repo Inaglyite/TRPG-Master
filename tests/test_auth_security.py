@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from src.auth import (
+from src.auth.service import (
     LoginRateLimiter,
     authenticate,
     create_login_session,
@@ -22,7 +22,7 @@ from src.auth import (
     resolve_session,
     resolve_session_identity,
 )
-from src.database import (
+from src.storage.database import (
     Base,
     User,
     get_engine,

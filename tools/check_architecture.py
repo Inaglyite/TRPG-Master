@@ -11,26 +11,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-DOMAIN_MODULES = (
-    "src/action_resolution.py",
-    "src/discovery.py",
-    "src/encounters.py",
-    "src/consequences.py",
-)
-FORBIDDEN_DOMAIN_IMPORTS = {"fastapi", "openai", "server", "src.engine"}
+SRC_PACKAGES = {
+    "ai",
+    "app",
+    "auth",
+    "gameplay",
+    "modules",
+    "multiplayer",
+    "storage",
+    "web",
+}
+FORBIDDEN_DOMAIN_IMPORTS = {"fastapi", "openai", "server", "src.app.engine"}
 LINE_RATCHETS = {
     # Keep each existing adapter at its verified baseline.  The room HTTP/WS
     # modules had already exceeded their older numbers on master, so those two
     # limits are re-baselined here rather than making CI permanently red; any
     # subsequent growth still requires an extraction first.
-    "src/engine.py": 2126,
-    "src/model_streamer.py": 427,
+    "src/app/engine.py": 2126,
+    "src/ai/model/model_streamer.py": 427,
     "server.py": 1699,
-    "src/tools.py": 1503,
+    "src/ai/tools/registry.py": 1503,
     "tools/state_manager.py": 797,
-    "src/auth_http.py": 120,
-    "src/multiplayer_http.py": 443,
-    "src/multiplayer_ws.py": 761,
+    "src/auth/http.py": 120,
+    "src/multiplayer/http.py": 443,
+    "src/multiplayer/ws.py": 761,
 }
 
 
@@ -50,9 +54,9 @@ def imports(path: Path) -> set[str]:
 
 
 def check_generated_schemas(errors: list[str]) -> None:
-    from src.editor_projects import editor_skill_json_schema
-    from src.lorebook import lorebook_json_schema
-    from src.module_format import (
+    from src.ai.context.lorebook import lorebook_json_schema
+    from src.modules.editor_projects import editor_skill_json_schema
+    from src.modules.module_format import (
         manifest_json_schema,
         manifest_v2_json_schema,
         module_json_schema,
@@ -75,13 +79,28 @@ def check_generated_schemas(errors: list[str]) -> None:
 
 def main() -> int:
     errors: list[str] = []
+    src_root = ROOT / "src"
+    flat_modules = sorted(
+        path.name for path in src_root.glob("*.py") if path.name != "__init__.py"
+    )
+    if flat_modules:
+        fail(errors, f"src 根目录不得恢复平铺业务模块: {flat_modules}")
+    missing_packages = sorted(
+        package
+        for package in SRC_PACKAGES
+        if not (src_root / package / "__init__.py").is_file()
+    )
+    if missing_packages:
+        fail(errors, f"src 缺少约定包: {missing_packages}")
+
     for relative, maximum in LINE_RATCHETS.items():
         count = len((ROOT / relative).read_text(encoding="utf-8").splitlines())
         if count > maximum:
             fail(errors, f"{relative} 为 {count} 行，超过架构上限 {maximum}")
 
-    for relative in DOMAIN_MODULES:
-        for imported in imports(ROOT / relative):
+    for path in sorted((src_root / "gameplay").glob("*.py")):
+        relative = path.relative_to(ROOT).as_posix()
+        for imported in imports(path):
             if any(
                 imported == forbidden or imported.startswith(f"{forbidden}.")
                 for forbidden in FORBIDDEN_DOMAIN_IMPORTS
@@ -91,11 +110,11 @@ def main() -> int:
     server_source = (ROOT / "server.py").read_text(encoding="utf-8")
     if "msg_type ==" in server_source:
         fail(errors, "server.py 不得恢复 WebSocket msg_type 中央分发链")
-    tools_source = (ROOT / "src/tools.py").read_text(encoding="utf-8")
+    tools_source = (ROOT / "src/ai/tools/registry.py").read_text(encoding="utf-8")
     if 'if name ==' in tools_source or 'elif name ==' in tools_source:
-        fail(errors, "src/tools.py 不得恢复工具 name 中央分发链")
+        fail(errors, "src/ai/tools/registry.py 不得恢复工具 name 中央分发链")
 
-    from src.tools import TOOL_RUNTIME, TOOLS
+    from src.ai.tools.registry import TOOL_RUNTIME, TOOLS
 
     declared = {tool["function"]["name"] for tool in TOOLS}
     missing = sorted(declared - TOOL_RUNTIME.names)

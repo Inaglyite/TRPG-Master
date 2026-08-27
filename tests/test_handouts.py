@@ -6,18 +6,18 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from src.config import PROJECT_ROOT
-from src.engine import EngineCallbacks, GameEngine
-from src.handouts import (
+from src.app.config import PROJECT_ROOT
+from src.app.engine import EngineCallbacks, GameEngine
+from src.app.runtime import RuntimeContext
+from src.gameplay.handouts import (
     matching_handouts,
     refresh_static_handout_config,
     resolve_handout_asset,
 )
-from src.module_compiler import compile_module
-from src.module_format import ModuleDefinition, ModuleManifest
-from src.module_registry import ModuleRegistry, build_package
-from src.persistence import save_game
-from src.runtime import RuntimeContext
+from src.modules.module_compiler import compile_module
+from src.modules.module_format import ModuleDefinition, ModuleManifest
+from src.modules.module_registry import ModuleRegistry, build_package
+from src.storage.persistence import save_game
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 

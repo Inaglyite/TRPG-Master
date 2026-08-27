@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.llm_concurrency import LlmBusyError
-from src.model_request import StreamPolicy, prepare_model_request
-from src.model_streamer import ModelStreamer
-from src.provider_adapter import (
+from src.ai.model.llm_concurrency import LlmBusyError
+from src.ai.model.model_request import StreamPolicy, prepare_model_request
+from src.ai.model.model_streamer import ModelStreamer
+from src.ai.model.provider_adapter import (
     apply_reasoning_passback,
     classify_provider_error,
     extract_reasoning_text,

@@ -7,9 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.config import PROJECT_ROOT
-from src.editor_api import create_editor_router
-from src.editor_projects import EditorProjectStore
+from src.app.config import PROJECT_ROOT
+from src.modules.editor_projects import EditorProjectStore
+from src.web.editor_api import create_editor_router
 
 
 def project(title: str = "测试模组") -> dict:

@@ -1,6 +1,6 @@
 """H4 离线 replay 共享设施：归一化 chunk 记录 ↔ 可重放 client。
 
-fixture 格式即 ``src.provider_adapter.normalize_chunk_record`` 的输出
+fixture 格式即 ``src.ai.model.provider_adapter.normalize_chunk_record`` 的输出
 （JSONL，每行一个 chunk 记录）。回放 client 把记录还原成流式 chunk，
 喂给真实的 ModelStreamer，验证投影/工具序列/错误分级的确定性。
 """
@@ -76,7 +76,7 @@ def replay_client(stream: list[dict]) -> ReplayClient:
 
 def streamer_host(client, *, world_id: str = "w-replay"):
     """ModelStreamer 的最小 host：真实 prepare/issue/diagnostics 链路。"""
-    from src.model_request import StreamPolicy
+    from src.ai.model.model_request import StreamPolicy
 
     diagnostics: list[dict] = []
     errors: list[str] = []
@@ -112,7 +112,7 @@ def streamer_host(client, *, world_id: str = "w-replay"):
 
 
 def run_stream(host, *, retry_on_empty: bool = False):
-    from src.model_streamer import ModelStreamer
+    from src.ai.model.model_streamer import ModelStreamer
 
     streamer = ModelStreamer(
         host,

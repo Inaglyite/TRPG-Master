@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.frontend_http import FrontendStaticFiles
+from src.web.frontend_http import FrontendStaticFiles
 
 
 def _frontend_client(tmp_path):

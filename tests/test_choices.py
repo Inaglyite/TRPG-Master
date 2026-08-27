@@ -1,6 +1,6 @@
 import unittest
 
-from src.choices import extract_action_choices
+from src.gameplay.choices import extract_action_choices
 
 
 class ChoiceProtocolTests(unittest.TestCase):

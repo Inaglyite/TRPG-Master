@@ -1,6 +1,6 @@
 import unittest
 
-from src.model_session import ModelSession
+from src.ai.model.model_session import ModelSession
 
 
 class _Stream:

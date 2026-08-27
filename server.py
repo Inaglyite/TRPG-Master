@@ -55,7 +55,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1].endswith(".py"):
     sys.exit(0)
 
 # ---- 从 .env.json 加载配置到环境变量（与 start.py 行为一致）----
-# 必须在 import src.* 之前完成，因为 src/config.py 在导入时就读取 os.environ。
+# 必须在 import src.* 之前完成，因为 src/app/config.py 在导入时就读取 os.environ。
 _ROOT_FOR_ENV = Path(os.environ.get("TRPG_PROJECT_ROOT", Path(__file__).resolve().parent))
 _ENV_FILE = _ROOT_FOR_ENV / ".env.json"
 if _ENV_FILE.exists():
@@ -87,23 +87,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import text
 
-from src.asset_payload import (
-    SpeakerPayloadResolver,
-    asset_payload,
-    enrich_narrative_segments,
-    enrich_pc_for_frontend,
-)
-from src.auth import (
-    audit,
-    auth_required,
-    authorize_world,
-    request_user,
-    validate_websocket_origin,
-    websocket_user,
-)
-from src.auth_http import AuthHttpDependencies, create_auth_router
-from src.characters import list_character_options
-from src.config import (
+from src.ai.context.narrative_history import enrich_public_history_record
+from src.ai.model.model_settings import ModelSettings, persist_model_settings
+from src.app.config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
     JUDGEMENT_MODEL,
@@ -113,54 +99,68 @@ from src.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
-from src.database import (
+from src.app.engine import EngineCallbacks, GameEngine
+from src.app.event_stream import OrderedTurnEventStream
+from src.app.game_application import (
+    ApplicationUseCaseError,
+    GameApplication,
+    SaveNotFoundError,
+)
+from src.app.runtime import RuntimeContext, default_world_id
+from src.auth.http import AuthHttpDependencies, create_auth_router
+from src.auth.service import (
+    audit,
+    auth_required,
+    authorize_world,
+    request_user,
+    validate_websocket_origin,
+    websocket_user,
+)
+from src.gameplay.characters import list_character_options
+from src.gameplay.investigators import (
+    activate_investigator,
+    initialize_investigator_roster,
+    public_investigator_roster,
+)
+from src.modules.editor_projects import EditorProjectStore
+from src.modules.module_registry import ModuleRegistry
+from src.multiplayer.http import (
+    MultiplayerHttpDependencies,
+    create_multiplayer_http_router,
+)
+from src.multiplayer.private_state import reconcile_world_investigator_roster
+from src.multiplayer.room_runtime import ActionReservationError, GameRoom, RoomManager
+from src.multiplayer.world_timeline_ws import (
+    WorldTimelineWsDependencies,
+    register_world_timeline_handlers,
+)
+from src.multiplayer.ws import MultiplayerWsController, MultiplayerWsDependencies
+from src.multiplayer.ws_router import WsMessageRouter
+from src.multiplayer.ws_session import SessionTurnGate, WsSessionContext
+from src.storage.database import (
     World,
     WorldMember,
     database_url,
     session_scope,
 )
-from src.editor_api import create_editor_router
-from src.editor_projects import EditorProjectStore
-from src.engine import EngineCallbacks, GameEngine
-from src.event_stream import OrderedTurnEventStream
-from src.frontend_http import FrontendStaticFiles, mount_editor_bundle
-from src.frontend_payload import enrich_clues_for_frontend
-from src.game_application import (
-    ApplicationUseCaseError,
-    GameApplication,
-    SaveNotFoundError,
+from src.storage.persistence import delete_save, load_game
+from src.storage.player_notes import PlayerNotesConflict, PlayerNotesStore
+from src.storage.world_branches import WorldBranchService
+from src.storage.world_store import StaleRevisionError
+from src.web.asset_payload import (
+    SpeakerPayloadResolver,
+    asset_payload,
+    enrich_narrative_segments,
+    enrich_pc_for_frontend,
 )
-from src.investigators import (
-    activate_investigator,
-    initialize_investigator_roster,
-    public_investigator_roster,
-)
-from src.model_settings import ModelSettings, persist_model_settings
-from src.module_http import (
+from src.web.editor_api import create_editor_router
+from src.web.frontend_http import FrontendStaticFiles, mount_editor_bundle
+from src.web.frontend_payload import enrich_clues_for_frontend
+from src.web.module_http import (
     ModuleHttpDependencies,
     create_module_http_router,
     serve_module_asset,
 )
-from src.module_registry import ModuleRegistry
-from src.multiplayer_http import (
-    MultiplayerHttpDependencies,
-    create_multiplayer_http_router,
-)
-from src.multiplayer_private_state import reconcile_world_investigator_roster
-from src.multiplayer_ws import MultiplayerWsController, MultiplayerWsDependencies
-from src.narrative_history import enrich_public_history_record
-from src.persistence import delete_save, load_game
-from src.player_notes import PlayerNotesConflict, PlayerNotesStore
-from src.room_runtime import ActionReservationError, GameRoom, RoomManager
-from src.runtime import RuntimeContext, default_world_id
-from src.world_branches import WorldBranchService
-from src.world_store import StaleRevisionError
-from src.world_timeline_ws import (
-    WorldTimelineWsDependencies,
-    register_world_timeline_handlers,
-)
-from src.ws_router import WsMessageRouter
-from src.ws_session import SessionTurnGate, WsSessionContext
 
 app = FastAPI(title="TRPG Agent API")
 app.add_middleware(
@@ -1042,7 +1042,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     @router.handler("save_rename")
     async def handle_save_rename(data: dict) -> None:
-        from src.persistence import rename_save
+        from src.storage.persistence import rename_save
 
         slot_id = data.get("slot_id", "")
         label = data.get("label", "")

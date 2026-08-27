@@ -3,11 +3,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.agent_graph import _execute_tools, _route_after_tools
-from src.config import MAX_TOOL_ROUNDS
-from src.engine import GameEngine
-from src.logger import _brief
-from src.tool_policy import (
+from src.ai.tools.registry import (
+    MODEL_TOOLS,
+    execute_function,
+    model_tools_for,
+    tool_catalog_for_names,
+)
+from src.ai.tools.tool_policy import (
     ENGINE_INTERNAL_CALLER,
     MODEL_CALLER,
     REQUEST_METADATA_KEY,
@@ -15,8 +17,11 @@ from src.tool_policy import (
     attach_request_snapshot,
     public_tool_call,
 )
-from src.tool_request_authority import issue_model_request, issued_model_request
-from src.tools import MODEL_TOOLS, execute_function, model_tools_for, tool_catalog_for_names
+from src.ai.tools.tool_request_authority import issue_model_request, issued_model_request
+from src.app.agent_graph import _execute_tools, _route_after_tools
+from src.app.config import MAX_TOOL_ROUNDS
+from src.app.engine import GameEngine
+from src.app.logger import _brief
 
 
 def stream_chunk(*, content=None, tool_calls=None, finish_reason=None):
@@ -290,7 +295,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         ]
         engine.cb = SimpleNamespace(on_narrative=lambda *_args: None, on_error=lambda _msg: None)
 
-        with patch("src.engine.log_model_call"), patch("src.engine.time.sleep"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.time.sleep"):
             engine._stream_llm("test-model", _retry_on_empty=False)
 
         envelope = engine._turn_diagnostics[-1]["request_envelope"]
@@ -333,7 +338,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         engine.messages = []
         engine.cb = SimpleNamespace(on_narrative=lambda *_args: None, on_error=lambda _msg: None)
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             _text, calls = engine._stream_llm("test-model", buffer_if_tools=True)
 
         self.assertEqual(len(calls), 1)
@@ -385,7 +390,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
             on_error=lambda _msg: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, calls = engine._stream_llm("test-model", buffer_if_tools=True)
 
         self.assertEqual(text, "")

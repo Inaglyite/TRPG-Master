@@ -27,11 +27,11 @@ TRPG Game 同时支持本地桌面和账号化云端运行。Electron 提供桌�
 
 ## 术语表
 
-- **TIER（信息边界层级）**：CoC 风格的信息分级，定义于 `skills/core/no_spoiler.skill`：TIER_0 公开（进入场景即可感知的事实、`visible_tags`）、TIER_1 发现（交互或检定得到的表层事实）、TIER_2 推理（由已获线索支撑的结论）、TIER_3 秘密（NPC `secret`、幕后真相，绝不主动揭示）。引擎以滑动窗口向消息历史注入 TIER 提醒（`src/engine.py` 的 `TIER_REMINDER`），防止上下文稀释导致泄密；`link_clues` 工具生成的关联推理线索即 TIER_2 条目。
-- **DSML**：部分 OpenAI 兼容供应商误把工具调用以 `<|DSML|tool_calls>` XML 块写进流式 `delta.content` 的私有协议。`src/tool_protocol.py` 把完整区块隔离并转换为内部工具调用；损坏、过长或未闭合的区块直接丢弃，其参数不进入叙事、消息历史或诊断日志。
+- **TIER（信息边界层级）**：CoC 风格的信息分级，定义于 `skills/core/no_spoiler.skill`：TIER_0 公开（进入场景即可感知的事实、`visible_tags`）、TIER_1 发现（交互或检定得到的表层事实）、TIER_2 推理（由已获线索支撑的结论）、TIER_3 秘密（NPC `secret`、幕后真相，绝不主动揭示）。引擎以滑动窗口向消息历史注入 TIER 提醒（`src/app/engine.py` 的 `TIER_REMINDER`），防止上下文稀释导致泄密；`link_clues` 工具生成的关联推理线索即 TIER_2 条目。
+- **DSML**：部分 OpenAI 兼容供应商误把工具调用以 `<|DSML|tool_calls>` XML 块写进流式 `delta.content` 的私有协议。`src/ai/tools/tool_protocol.py` 把完整区块隔离并转换为内部工具调用；损坏、过长或未闭合的区块直接丢弃，其参数不进入叙事、消息历史或诊断日志。
 - **spine / hybrid prompt**：system prompt 组装档位（`TRPG_PROMPT_PROFILE`，取值 `full`/`hybrid`/`opening`，默认 `hybrid`）。模组 skill 在前 300 字符内声明 `trpg-master:prompt-role=spine` 且脊柱内容合计不少于 1000 字符时，`hybrid` 用这些剧情脊柱（spine）替代完整 `module.md`；未声明或内容不足的第三方模组自动回退 `full`（完整 `module.md + skills`）。`opening` 仅供结构化开场使用。
-- **narrative_model / judgement_model**：两类模型分工。普通叙事使用 `narrative_model`；战斗职责节点、复杂工具命中后的同回合续写、可选回合审计和上下文摘要兜底使用 `judgement_model`。默认值来自 `src/config.py`，可由设置页或 `TRPG_NARRATIVE_MODEL` / `TRPG_JUDGEMENT_MODEL` 环境变量分别指定。
-- **回合记录（TurnRecord）**：一次 GM 回合的持久提交，由 `DatabaseTurnJournal` 写入 `turns` 表（父链、状态、消息与快照引用）与 `turn_events` 表（有序公开事件）；是断线恢复、重新叙述和时间线分支的事实来源。TurnRecord 是文档概念，代码中的共享记录类型与错误位于 `src/turn_journal.py`。
+- **narrative_model / judgement_model**：两类模型分工。普通叙事使用 `narrative_model`；战斗职责节点、复杂工具命中后的同回合续写、可选回合审计和上下文摘要兜底使用 `judgement_model`。默认值来自 `src/app/config.py`，可由设置页或 `TRPG_NARRATIVE_MODEL` / `TRPG_JUDGEMENT_MODEL` 环境变量分别指定。
+- **回合记录（TurnRecord）**：一次 GM 回合的持久提交，由 `DatabaseTurnJournal` 写入 `turns` 表（父链、状态、消息与快照引用）与 `turn_events` 表（有序公开事件）；是断线恢复、重新叙述和时间线分支的事实来源。TurnRecord 是文档概念，代码中的共享记录类型与错误位于 `src/storage/turn_journal.py`。
 
 ## 2. 系统上下文
 
@@ -107,48 +107,33 @@ AppImage。`frontend` 的通用 `npm run dist` 会主动拒绝 Linux 打包，�
 等实际端口），Vite 开发模式才直连本地 8765。浏览器标签页关闭无法可靠代表服务生命周期，因此
 自动关服只由 Electron/启动脚本保证。
 
-## 4. 代码分层
+## 4. 后端模块边界
 
-| 层 | 主要文件 | 职责 |
-|---|---|---|
-| 桌面壳 | `frontend/electron/main.cjs`、`start_desktop.sh` | 窗口、首次配置、后端进程生命周期、退出确认 |
-| 终端入口 | `src/game_loop.py` | 以 print/input 回调运行同一 `GameEngine` 的终端模式循环 |
-| 前端 | `frontend/src/*.ts` | 开局、消息渲染、选项、骰子动画、面板、图片与 WS 状态 |
-| 传输适配 | `server.py`、`src/auth_http.py`、`src/multiplayer_http.py`、`src/multiplayer_ws.py`、`src/ws_session.py`、`src/ws_router.py`、`src/game_application.py`、`src/asset_payload.py` | 应用装配、账号 HTTP、多人 HTTP 控制面、权威房间 WS、单机会话协议、连接生命周期与回合租约、传输无关的游戏用例、素材载荷构建、引擎回调转事件 |
-| 鉴权 | `src/auth.py` | Argon2id 账号、可撤销 Session 与世界成员权限 |
-| 游戏内核 | `src/engine.py`、`src/history_compactor.py`、`src/npc_conversations.py` | 会话消息、模型调用、存档、角色应用、历史压缩策略、NPC 对话有界记忆、回调接口 |
-| 模型会话 | `src/model_session.py`、`src/model_streamer.py`、`src/tool_protocol.py`、`src/speaker_parser.py`、`src/llm.py` | 消息历史、活动流、取消与模型诊断；供应商流式边界、DSML 协议隔离与 NPC 发言归因；GLM 辅助摘要 |
-| 回合编排 | `src/agent_graph.py`、`src/choices.py` | 单引擎叙事/战斗职责节点路由、工具循环、finalize 与结构化 choices 提取 |
-| 战斗域 | `src/combat_agent.py`、`src/combat.py` | 临时战斗职责提示、权威回合状态、对抗与伤害结算 |
-| 行动预检 | `src/action_checks.py` | 在叙述前保守识别明确调查动作并执行真实技能检定 |
-| 行动阶段 | `src/action_resolution.py` | 将玩家输入裁定为抵达、普通交互或实际接触，统一限定本回合副作用边界 |
-| 场景遭遇 | `src/encounters.py` | 按 Mod 声明的条件、幸运难度和持久化策略解析实际在场人物 |
-| 回合对账 | `src/turn_reconciler.py` | 叙事正文裁剪、实体同步、结构化状态审计与受限提交 |
-| 发现规则 | `src/discovery.py` | 匹配模组声明的行动意图与目标，在叙事前结算线索/SAN/NPC 效果 |
-| 素材事件 | `src/handouts.py` | 声明式素材匹配、去重、旧线索图片修复与静态配置刷新 |
-| 结局校验 | `src/endings.py` | 按模组结局定义和 `required_flags` 拒绝伪结局 |
-| 性格归一化 | `src/personality.py` | 角色信念、背景/心理特质与暴力立场的兼容读取 |
-| 道具域 | `src/inventory.py`、`tools/item.py` | 持有验证、一次性消耗、弹药/堆叠数量与使用日志 |
-| 工具路由 | `src/tools.py`、`src/tool_runtime.py` | Function Calling schema、角色工具子集、进程内 handler 注册表与有界执行审计 |
-| 确定性规则 | `tools/*.py`、`src/consequences.py` | 检定、骰子、战斗、状态、伤害、SAN、角色、模组导入的实现库；被 `src/tools.py` 进程内导入调用，同时保留独立 CLI 入口 |
-| 回合性能 | `src/turn_performance.py`、`src/turn_mutations.py` | 阶段计时、首段可见、权威变更账本与审计跳过依据 |
-| 持久化 | `src/persistence.py` | system prompt 组装、存档列表、快照迁移与恢复 |
-| 数据库 | `src/database.py` | 数据库引擎、ORM 模型与事务边界（PostgreSQL 生产、SQLite 桌面/测试） |
-| 角色服务 | `src/characters.py` | 候选角色、角色复制、案件结算与长期履历 |
-| 模组格式 | `src/module_format.py`、`src/module_migrations.py` | v1 作者态模型、交叉引用校验、JSON Schema 与作者态格式迁移 |
-| Lorebook | `src/lorebook.py` | Character Card V3 兼容模型、门槛校验、确定性检索与冷却记录 |
-| 模组编译器 | `src/module_compiler.py` | 无副作用地生成世界模板、守秘人提示、诊断和字段来源追踪 |
-| 模组诊断 | `src/module_diagnostics.py` | 统一模型错误、兼容性错误、警告与作者建议 |
-| 模组注册表 | `src/module_registry.py` | 内置/用户模组发现、包安全检查、版本化原子安装 |
-| 模组编辑器 | `src/editor_api.py`、`src/editor_projects.py` | Mod Editor 持久作者会话的 HTTP 适配与 revision 校验 |
-| 运行时上下文 | `src/runtime.py` | `world_id`、模组定义路径、可写世界路径与旧单人数据迁移 |
-| 世界存储 | `src/database_store.py`、`src/world_migrations.py`、`src/world_store.py` | 数据库行锁、revision、事务恢复与 schema 迁移；旧文件 Store 仅供导入/兼容 |
-| 回合事件流 | `src/event_stream.py` | 跨线程 FIFO 发送、`turn_id`、单调 `seq` 与回合生命周期 |
-| 回合日志 | `src/database_turn_journal.py`、`src/turn_journal.py` | 数据库回合父链、消息/快照、恢复事件、诊断与叙事变体；共享记录类型 |
-| 时间线分支 | `src/world_branches.py` | 复制提交父链、创建独立世界与列出可切换时间线 |
-| 玩家笔记 | `src/player_notes.py` | 按世界和账号存入数据库，独立 revision；不进入世界事实或模型 prompt |
-| 配置 | `src/config.py`、`src/model_settings.py` | 默认数据根目录、模型角色、模型 ID 校验与 `.env.json` 原子持久化 |
-| 日志 | `src/logger.py` | 游戏、工具、摘要、模型调用与错误日志 |
+`src/` 根目录只保留包声明；业务文件必须归入一个明确的所有权包。包名表达“谁维护这段能力”，
+而不是把一次请求强行切成互不调用的纯层。跨包导入统一使用 `src.<package>...` 绝对路径，避免文件
+移动后出现含义不明的多级相对导入。
+
+| 包或入口 | 所有权与代表性内容 |
+|---|---|
+| `server.py` | FastAPI 组合根，只装配 HTTP、WebSocket、应用服务和运行时依赖，不承载玩法规则 |
+| `src/app/` | 应用编排：`GameEngine`、LangGraph 回合、配置、运行时上下文、事件流和终端入口 |
+| `src/gameplay/` | 确定性玩法：行动、场景、NPC、线索、战斗、SAN、道具、时钟、结局与回合对账 |
+| `src/ai/model/` | 模型供应商请求、流式协议、容量控制、诊断和会话生命周期 |
+| `src/ai/context/` | 可见上下文投影、压缩、Lorebook、checkpoint 和 shadow memory |
+| `src/ai/skills/` | Skill catalog、世界 pin、确定性激活与内容完整性校验 |
+| `src/ai/tools/` | 模型工具 catalog、请求授权、参数策略、执行管线与 handler 注册表 |
+| `src/storage/` | PostgreSQL/SQLite、世界状态、存档、快照、回合日志、玩家笔记和时间线 |
+| `src/modules/` | `.trpgmod` 格式、编译器、诊断、迁移、编辑工程与版本化注册表 |
+| `src/auth/` | 账号、Argon2id、可撤销 Session、审计与 HTTP 鉴权适配 |
+| `src/multiplayer/` | 房间控制面、成员权限、共享引擎、多人/云单人协议和恢复协调 |
+| `src/web/` | 模组/编辑器 HTTP 适配、静态前端和玩家安全的素材载荷 |
+| `tools/` | 调用上述包的维护 CLI 与规则工具；不作为第二套应用内核 |
+| `frontend/` | React/Vite/Electron 客户端，只消费服务端协议，不直接修改权威世界状态 |
+
+架构门禁会拒绝重新出现在 `src/` 根目录的平铺业务模块，并禁止 `src/gameplay/` 依赖 FastAPI、
+OpenAI 客户端、`server.py` 或 `GameEngine`。`src/app/` 是组合层，可以依赖玩法、AI、存储和模组包；
+传输适配通过应用服务进入内核。现有少量 AI/context/storage 之间的协作属于后续可继续收紧的依赖，
+本次目录重构不同时改写运行语义。
 
 ## 5. WebSocket 会话、房间与线程
 
@@ -220,7 +205,7 @@ fail-closed 地保留 active；确认原服务已停止后，维护者只能通�
 
 ## 6. GM 单引擎回合工作流
 
-`src/agent_graph.py` 构建以下 LangGraph。节点名中的 `agent` 是历史命名；它们共享同一个
+`src/app/agent_graph.py` 构建以下 LangGraph。节点名中的 `agent` 是历史命名；它们共享同一个
 `GameEngine`、`ModelSession`、消息列表和世界上下文，不代表多个独立 Agent：
 
 ```mermaid
@@ -244,14 +229,14 @@ flowchart TD
 
 - 玩家输入存在时增加玩家回合计数。
 - 根据上轮风险和轮数注入 TIER 提醒。
-- `src.action_resolution` 在任何状态写入前生成单一、不可变的 `ActionResolution`，并在进入 LangGraph 前冻结。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。抵达可来自明确移动、当前场景作者声明的 `action_routes`，或唯一且尚未发现的物理线索目标；后者只接受至少四个归一化字符的明确目标，并只路由到 `source/related_scenes` 唯一的场景，绝不直接发现线索。背包中已经存在且被输入明确点名的物品固定视为当前交互，不能被远端线索的“副本/抄本/墨迹”等短别名劫持。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。
-- `src.action_preflight` 只从冻结计划、当前场景的 `action_advisories`、公开 PC 卡和 flags 判断是否需要预演。低技能、职业或性格冲突只决定是否展示作者写好的公开提醒；NPC `secret`、私有记忆、线索正文和后台阈值不会进入事件。玩家可继续原计划、选择作者声明的准备行动或取消；继续时复用同一个 `ActionResolution`，准备行动也在选择落定时冻结，绝不把按钮标签重新交给自然语言路由。
+- `src.gameplay.action_resolution` 在任何状态写入前生成单一、不可变的 `ActionResolution`，并在进入 LangGraph 前冻结。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。抵达可来自明确移动、当前场景作者声明的 `action_routes`，或唯一且尚未发现的物理线索目标；后者只接受至少四个归一化字符的明确目标，并只路由到 `source/related_scenes` 唯一的场景，绝不直接发现线索。背包中已经存在且被输入明确点名的物品固定视为当前交互，不能被远端线索的“副本/抄本/墨迹”等短别名劫持。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。
+- `src.gameplay.action_preflight` 只从冻结计划、当前场景的 `action_advisories`、公开 PC 卡和 flags 判断是否需要预演。低技能、职业或性格冲突只决定是否展示作者写好的公开提醒；NPC `secret`、私有记忆、线索正文和后台阈值不会进入事件。玩家可继续原计划、选择作者声明的准备行动或取消；继续时复用同一个 `ActionResolution`，准备行动也在选择落定时冻结，绝不把按钮标签重新交给自然语言路由。
 - `arrival` 按 `departure_text → travel_text → 抵达描述 → entry_beat` 推进。离场和途中节拍在状态写入前公开；随后提交明确场景移动并按实际 `current_location/encounters` 计算在场 NPC，只有确认在场后才发送 `entry_beat`。这一回合不执行通用技能预检，也不授权线索、SAN 和发现规则关联 flag；模型提出这些副作用时会被同一行动阶段门禁拒绝。
 - 场景目录的 `npcs_present` 是模组初始驻点和按人物寻路的索引，不是永久出勤承诺。每次抵达时，引擎按 NPC 的运行时 `current_location` 重新生成 `current_scene.npcs_present`；只有实际在场人物才能触发头像。人物离开、被带走或死亡后无需改写静态场景目录。
-- 场景声明 `encounters` 时，`src.encounters` 覆盖对应 NPC 的隐式驻点，统一处理 guaranteed、conditional、luck 和 unavailable。幸运结果使用真实 d100 工具；`repeat=once` 写入 `encounter_history`，避免通过反复进出刷结果。解析只公开在场/不在场及作者提供的可见文本，不把 NPC 的真实位置泄露给故事模型。
-- `contact` 由 `src.discovery` 匹配当前场景中尚未发现的 `discovery_rules`，组合 `approach_text` 并在叙事前结算。无条件规则是本动作的权威契约，不再叠加通用语言推断出来的侦查；只有 `requires_success: true` 才执行作者指定技能。
+- 场景声明 `encounters` 时，`src.gameplay.encounters` 覆盖对应 NPC 的隐式驻点，统一处理 guaranteed、conditional、luck 和 unavailable。幸运结果使用真实 d100 工具；`repeat=once` 写入 `encounter_history`，避免通过反复进出刷结果。解析只公开在场/不在场及作者提供的可见文本，不把 NPC 的真实位置泄露给故事模型。
+- `contact` 由 `src.gameplay.discovery` 匹配当前场景中尚未发现的 `discovery_rules`，组合 `approach_text` 并在叙事前结算。无条件规则是本动作的权威契约，不再叠加通用语言推断出来的侦查；只有 `requires_success: true` 才执行作者指定技能。
 - 前置叙事可见后，在第一次模型请求前原子提交线索、`flag_effects`、SAN、NPC 揭示和素材事件。
-- 没有命中发现规则时，`src.action_checks` 仍对明确搜查、聆听、追踪等动作做一次权威检定。
+- 没有命中发现规则时，`src.gameplay.action_checks` 仍对明确搜查、聆听、追踪等动作做一次权威检定。
 - 将玩家动作、紧凑世界状态、时代约束、真实检定和已结算发现一并追加为 user 消息。
 - 根据权威状态、行动 phase、ruleset、模组 capability 与已派发工具确定性加载战斗、魔法、心理等 Skill；
   内容关键词只留下漏加载诊断，不参与规则注入。
@@ -279,7 +264,7 @@ flowchart TD
 
 ### 6.4 战斗状态机
 
-`combat_start` 在 `world_state.combat_state` 创建权威状态，包含 encounter ID、轮次、参战者、先攻、当前行动者、防御次数、待确认决定和有界日志。玩家消息已经声明开场攻击或武力威胁时，调用方通过 `initial_action` 一次提交，状态机直接进入确认/结算，不再依赖模型节点开战后补交第二次工具调用。`combat_action` 校验行动者并执行 d100 对抗、伤害、重伤与回合推进；PC 枪械攻击通过 `src.inventory` 的共享资源服务扣弹，即使射击落空也会消耗一发，0 发时拒绝动作且不推进回合。`combat_end` 负责非击倒类结束条件。
+`combat_start` 在 `world_state.combat_state` 创建权威状态，包含 encounter ID、轮次、参战者、先攻、当前行动者、防御次数、待确认决定和有界日志。玩家消息已经声明开场攻击或武力威胁时，调用方通过 `initial_action` 一次提交，状态机直接进入确认/结算，不再依赖模型节点开战后补交第二次工具调用。`combat_action` 校验行动者并执行 d100 对抗、伤害、重伤与回合推进；PC 枪械攻击通过 `src.gameplay.inventory` 的共享资源服务扣弹，即使射击落空也会消耗一发，0 发时拒绝动作且不推进回合。`combat_end` 负责非击倒类结束条件。
 
 战斗外道具动作调用 `use_item`：`use` 仅验证持有，`consume` 更新堆叠数量或移除一次性物品，`firearm_discharge` 处理鸣枪、试射、打锁等非攻击开枪。后者与战斗枪击共用形如 `左轮手枪（6发）` 的解析和扣减逻辑，但同一发子弹只能走一条调用路径。成功动作追加到有界 `item_use_log`，并随世界状态快照保存。
 
@@ -290,25 +275,25 @@ flowchart TD
 - NPC 攻击 PC 时状态机先返回 `decision_required`，由 `GameEngine` 完成前端确认后内部调用 `combat_decide`。
 
 为避免流式文本抢在确认之前叙述“已经拔枪”，`GameEngine.handle_action()` 会先通过
-`src.escalation_preflight` 调用无副作用的 `preview_player_escalation()`（`src/combat.py`）。它以
+`src.gameplay.escalation_preflight` 调用无副作用的 `preview_player_escalation()`（`src/gameplay/combat.py`）。它以
 保守关键词识别明确攻击/武力威胁，并从当前世界的 NPC 名称解析目标；假设句、否定句和已敌对
 目标不会拦截。守秘人的公开后果提醒先作为正常聊天气泡发送，底部再显示取消/继续选项；取消时
 不进入 LangGraph、不发送 tension，也不改变世界状态。确认后提醒和玩家回复随回合历史持久化，
 并生成仅本回合有效的一次性授权；后续 `combat_start` / `combat_action` 返回同类型、同目标的
 状态机决定时，授权静默选择确认项，避免第二次询问。授权不匹配或未被消费会在回合结束时清除。
 
-`src.personality` 统一读取 `backstory.beliefs`、背景特质和游戏中获得的心理特质。角色可通过 `backstory.violence_stance` 声明 `avoidant`、`conditional` 或 `unrestrained`；旧角色缺少字段时使用 `conditional`。立场只改变确认措辞和返回给模型职责节点的 `roleplay_context`，不能替玩家否决行动，也不能免除战斗、资源、法律、声望、案件与 SAN 后果。
+`src.gameplay.personality` 统一读取 `backstory.beliefs`、背景特质和游戏中获得的心理特质。角色可通过 `backstory.violence_stance` 声明 `avoidant`、`conditional` 或 `unrestrained`；旧角色缺少字段时使用 `conditional`。立场只改变确认措辞和返回给模型职责节点的 `roleplay_context`，不能替玩家否决行动，也不能免除战斗、资源、法律、声望、案件与 SAN 后果。
 
 模组缺少 NPC 的 DEX 或战斗技能时，状态机使用保守默认值并写入 `assumed_fields`，便于后续补全模组数据。战斗状态属于世界快照，因此可随普通存档恢复。
 
 ### 6.5 `execute_tools`
 
 - 解析模型提供的 JSON 参数。
-- 调用 `GameEngine._execute_tool()`，最终落到 `src.tools.execute_function()`。
+- 调用 `GameEngine._execute_tool()`，最终落到 `src.ai.tools.registry.execute_function()`。
 - 将工具结果作为 tool 消息写回会话。
 - 技能、普通骰、战斗和 SAN 结果转换成 `dice_result`，供前端可视化。
 - 单个工具抛出的异常会变成模型可读的错误结果，不会中断整条 WebSocket 回合；按需 Skill 只在整批 tool 消息写完后注入。
-- NPC 首次揭示、场景切换和图片线索加入会产生权威事件；`src.handouts` 按编译后的
+- NPC 首次揭示、场景切换和图片线索加入会产生权威事件；`src.gameplay.handouts` 按编译后的
   `reveal_on.entity_id` 解析素材并按素材 ID 去重。目录线索必须先归档，图片才可展示；展示层不反向写入线索或旗标，模型调用 `show_handout` 只是受同一状态门禁约束的兼容入口。
 - 可选 GLM 对复杂工具结果生成简短反馈。
 
@@ -334,7 +319,7 @@ flowchart TD
 
 ### 7.1 常驻上下文
 
-`src.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin。对已有数据库 `world` 行，零 pin
+`src.storage.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin。对已有数据库 `world` 行，零 pin
 会原子写入当时完整 catalog；已有 pin 时，核心与模组 Skill 的正文、顺序、`opening` 行为均由 pin 中的
 manifest 快照决定，绝不反读已变化的磁盘 catalog。pin 表不可读、digest/sidecar 校验失败或数据库 schema
 不完整时必须 fail-closed，不能把错误误判成“没有 pin”再回退磁盘。
@@ -364,7 +349,7 @@ catalog version migration 和作者编辑 UI；工具授权在那之前仍只由
 
 ### 7.2 回合 Lorebook
 
-模组可在独立 `lorebook.json` 中提供 Character Card V3 Lorebook。`GameEngine.prepare_session()` 只加载并校验一次；`src.lorebook.select_lore()` 在模型请求前按最近可见消息、当前场景、在场 NPC、已知线索和 flags 做本地确定性筛选。结果有条目数/token 双上限，并追加在本轮 `[引擎权威状态]` 之后，因此不会破坏稳定 system prompt 的前缀缓存。
+模组可在独立 `lorebook.json` 中提供 Character Card V3 Lorebook。`GameEngine.prepare_session()` 只加载并校验一次；`src.ai.context.lorebook.select_lore()` 在模型请求前按最近可见消息、当前场景、在场 NPC、已知线索和 flags 做本地确定性筛选。结果有条目数/token 双上限，并追加在本轮 `[引擎权威状态]` 之后，因此不会破坏稳定 system prompt 的前缀缓存。
 
 检索不调用模型、embedding 服务或数据库。条目分组使用模组 ID、组名和持久化回合序号产生可复现选择；`world_state.narrative_memory` 保存 `turn_sequence` 与最多 512 个条目的最近使用记录，支持跨读档冷却。注入过的权威状态和 Lorebook 内容不会再次参与关键词扫描，`gated` 条目必须先通过服务端线索/flag 门槛。
 
@@ -374,9 +359,9 @@ catalog version migration 和作者编辑 UI；工具授权在那之前仍只由
 
 ### 7.3 按需 Skill
 
-战斗、魔法、心理学、调查方法与角色创建等较大 Skill 不全部常驻。`src.skill_resolver` 只根据
+战斗、魔法、心理学、调查方法与角色创建等较大 Skill 不全部常驻。`src.ai.skills.skill_resolver` 只根据
 权威 `WorldState`、ruleset、模组 capability、行动 phase 和已派发工具确定性激活；
-`diagnostic_keywords` 只写漏加载诊断，绝不作为注入条件。`src.skill_activation` 用 pin 正文注入，
+`diagnostic_keywords` 只写漏加载诊断，绝不作为注入条件。`src.ai.skills.skill_activation` 用 pin 正文注入，
 并以当前模型 surface 上受信的 `(skill_id, digest)` 控制标记避免重复；压缩、读档或重试移除了该标记时会
 确定性补回，不能因进程内的“曾加载”标记而丢失规则。模型不直接读取项目文件，也不能热加载未 pin 的规则。
 
@@ -425,12 +410,12 @@ fact 也不会倒灌到子线；损坏 branch metadata 一律 fail-closed。
 | 当前世界 | `world_states.state` JSONB | `DatabaseWorldStore` | 当前案件 |
 | 主题 | `mod/<name>/theme.json` | 模组作者 | 版本控制 |
 | 模组素材 | `mod/<name>/assets/*` | 模组作者 | 版本控制 |
-| 自动/手动存档 | `save_slots` + `snapshots` | `src.persistence` | 事务化存档与不可变快照 |
+| 自动/手动存档 | `save_slots` + `snapshots` | `src.storage.persistence` | 事务化存档与不可变快照 |
 | 回合提交日志 | `turns` + `turn_events` | `DatabaseTurnJournal` | 当前时间线的可恢复提交历史 |
 | 玩家笔记 | `player_notes` | `PlayerNotesStore` | 按用户隔离，不进入 prompt |
 | 默认调查员 | `characters/default/*.json` | 开发者 | 版本控制 |
 | 自定义调查员 | `characters/custom/*.json` | 玩家/工具 | 本地运行数据 |
-| 长期履历 | `profiles/player_profile.json` | `src.characters` | 跨模组本地数据 |
+| 长期履历 | `profiles/player_profile.json` | `src.gameplay.characters` | 跨模组本地数据 |
 | 模型配置 | `.env.json` | 配置向导/`start.py` | 本地机密 |
 | 运行日志 | `logs/`、`/tmp/trpg-*.log` | 后端/启动脚本 | 诊断数据 |
 
@@ -483,7 +468,7 @@ fact 也不会倒灌到子线；损坏 branch metadata 一律 fail-closed。
 - `snapshots.state` 保存完整世界状态，读档时通过 `DatabaseWorldStore.restore()` 生成新的 revision。
 - 读档记录开始时的 revision；读取槽位期间若世界已被其他动作更新，恢复会以 `StaleRevisionError` 明确拒绝，避免覆盖新行动。
 - `save_slots.metadata_json` 保存列表 UI 所需摘要、schema/revision 与可选 `label`。
-- 旧快照通过 `src.world_migrations` 补充 schema、私有记忆、NPC 揭示与 PC 心理档案。
+- 旧快照通过 `src.storage.world_migrations` 补充 schema、私有记忆、NPC 揭示与 PC 心理档案。
 - 进行中的 `combat_state` 位于完整世界状态内，读档后 LangGraph 会路由到战斗职责节点。
 
 ### 8.4 回合记录、重新叙述与时间线
@@ -718,7 +703,7 @@ reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果
 - Electron 页面加载失败：主进程显示错误窗口。
 - 桌面后端启动失败：启动脚本输出/记录后端末尾日志。
 
-`src/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。
+`src/app/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。
 
 ### 10.1 回合性能
 
@@ -770,7 +755,7 @@ reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果
 
 ### 新增工具
 
-1. 在 `src/tools.py` 添加 Function Calling schema。
+1. 在 `src/ai/tools/registry.py` 添加 Function Calling schema。
 2. 用 `@TOOL_RUNTIME.handler(...)` 注册进程内 handler；`execute_function()` 经注册表分发。
 3. 如需即时反馈，将名称加入 `COMPLEX_FUNCTIONS`；该集合不触发模型切换。
 4. 如有前端副作用，在 `agent_graph._handle_tool_side_effects()` 或 EngineCallbacks 中发事件。
@@ -792,7 +777,7 @@ reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果
 
 ### 模组编译器契约
 
-`src/module_compiler.py` 是游戏安装器、HTTP 预览和 CLI 共同使用的唯一权威编译入口。输入为
+`src/modules/module_compiler.py` 是游戏安装器、HTTP 预览和 CLI 共同使用的唯一权威编译入口。输入为
 `manifest.json + module.json + keeper.md`（`lorebook.json` 为可选校验输入），输出
 `CompilationResult`：世界模板 `world_state`、守秘人提示 `keeper_prompt`、`diagnostics[]` 和
 `trace[]`。`diagnostics` 分 `error`/`warning`/`advice` 三级，带稳定 `code`、`phase`、作者态字段

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.asset_payload import speaker_payload
+from src.web.asset_payload import speaker_payload
 
 
 class StubStore:

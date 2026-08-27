@@ -1,6 +1,6 @@
 import unittest
 
-from src.ws_router import DuplicateMessageHandlerError, WsMessageRouter
+from src.multiplayer.ws_router import DuplicateMessageHandlerError, WsMessageRouter
 
 
 class WsMessageRouterTests(unittest.IsolatedAsyncioTestCase):

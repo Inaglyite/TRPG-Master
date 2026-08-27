@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.multiplayer_recovery import pending_reply_payload
-from src.room_runtime import (
+from src.multiplayer.recovery import pending_reply_payload
+from src.multiplayer.room_runtime import (
     ActionReservationError,
     GameRoom,
     RoomCapacityError,

@@ -1,6 +1,6 @@
 import unittest
 
-from src.speaker_parser import SpeakerStreamParser, parse_segments
+from src.gameplay.speaker_parser import SpeakerStreamParser, parse_segments
 
 
 def npc_ok(npc_id: str) -> bool:
@@ -439,7 +439,7 @@ class SpeakerParserTests(unittest.TestCase):
             pieces = self.feed_all(chunks)
             clean = "".join(t for kind, t, _ in pieces if kind == "text")
             self.assertEqual(clean, expected_clean, f"chunk size {step}")
-            from src.speaker_parser import pieces_to_segments
+            from src.gameplay.speaker_parser import pieces_to_segments
 
             segments = pieces_to_segments(pieces)
             self.assertEqual(

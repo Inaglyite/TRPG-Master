@@ -54,11 +54,11 @@ def _load_env() -> None:
 
 _load_env()
 
-from src.config import PROJECT_ROOT, RUNTIME_ROOT  # noqa: E402
-from src.engine import GameEngine  # noqa: E402
-from src.engine_primitives import EngineCallbacks  # noqa: E402
-from src.tools import execute_function  # noqa: E402
-from src.world_branches import WorldBranchService  # noqa: E402
+from src.ai.tools.registry import execute_function  # noqa: E402
+from src.app.config import PROJECT_ROOT, RUNTIME_ROOT  # noqa: E402
+from src.app.engine import GameEngine  # noqa: E402
+from src.app.engine_primitives import EngineCallbacks  # noqa: E402
+from src.storage.world_branches import WorldBranchService  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 捕获与快照

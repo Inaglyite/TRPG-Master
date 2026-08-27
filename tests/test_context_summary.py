@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import copy
 
-from src.context_summary import is_control_message, validate_summary_visibility
-from src.history_compactor import build_summary_input
+from src.ai.context.context_summary import is_control_message, validate_summary_visibility
+from src.ai.context.history_compactor import build_summary_input
 
 
 def _world() -> dict:

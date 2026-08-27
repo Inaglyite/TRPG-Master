@@ -14,8 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.runtime import RuntimeContext  # noqa: E402
-from src.tools import execute_function  # noqa: E402
+from src.ai.tools.registry import execute_function  # noqa: E402
+from src.app.runtime import RuntimeContext  # noqa: E402
 
 
 def _measure(operation, iterations: int) -> dict:

@@ -1,7 +1,7 @@
 import threading
 import unittest
 
-from src.ws_session import (
+from src.multiplayer.ws_session import (
     PendingReply,
     SessionTurnGate,
     TurnRejection,

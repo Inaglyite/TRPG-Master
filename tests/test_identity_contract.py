@@ -5,12 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.config import PROJECT_ROOT
-from src.engine import GameEngine, _thinking_type_for_request
-from src.persistence import load_system_prompt
-from src.runtime import RuntimeContext
-from src.skill_manifest import load_official_catalog
-from src.tools import MODEL_TOOLS, model_tools_for
+from src.ai.skills.skill_manifest import load_official_catalog
+from src.ai.tools.registry import MODEL_TOOLS, model_tools_for
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine, _thinking_type_for_request
+from src.app.runtime import RuntimeContext
+from src.storage.persistence import load_system_prompt
 
 
 def stream_chunk(content=None, tool_calls=None, finish_reason=None):
@@ -224,7 +224,7 @@ class IdentityContractTests(unittest.TestCase):
         errors = []
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             text, tool_calls = engine._stream_llm("test-model", buffer_if_tools=True)
 
         self.assertEqual(text, "")
@@ -244,7 +244,7 @@ class IdentityContractTests(unittest.TestCase):
         visible = []
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=lambda _msg: None)
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             text, tool_calls = engine._stream_llm("test-model", buffer_if_tools=True)
 
         self.assertEqual(text, "雨落在阿卡姆的石板路上。")
@@ -299,8 +299,8 @@ class IdentityContractTests(unittest.TestCase):
         )
 
         with (
-            patch("src.engine.ENABLE_DYNAMIC_TOOLS", True),
-            patch("src.engine.log_model_call"),
+            patch("src.app.engine.ENABLE_DYNAMIC_TOOLS", True),
+            patch("src.app.engine.log_model_call"),
         ):
             engine._stream_llm("test-model")
 
@@ -330,7 +330,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call") as model_log:
+        with patch("src.app.engine.log_model_call") as model_log:
             engine._stream_llm(
                 "test-model",
                 system_prompt_override="public-opening-system",
@@ -350,9 +350,9 @@ class IdentityContractTests(unittest.TestCase):
 
     def test_auto_thinking_only_disables_official_deepseek_flash_story(self):
         with (
-            patch("src.engine.STORY_THINKING_MODE", "auto"),
-            patch("src.engine.BASE_URL", "https://api.deepseek.com"),
-            patch("src.engine.MODEL_FLASH", "deepseek-v4-flash"),
+            patch("src.app.engine.STORY_THINKING_MODE", "auto"),
+            patch("src.app.engine.BASE_URL", "https://api.deepseek.com"),
+            patch("src.app.engine.MODEL_FLASH", "deepseek-v4-flash"),
         ):
             self.assertEqual(
                 _thinking_type_for_request("deepseek-v4-flash", "story"),
@@ -361,7 +361,7 @@ class IdentityContractTests(unittest.TestCase):
             self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "combat"))
             self.assertIsNone(_thinking_type_for_request("deepseek-v4-pro", "story"))
 
-        with patch("src.engine.BASE_URL", "https://example.test/v1"):
+        with patch("src.app.engine.BASE_URL", "https://example.test/v1"):
             self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "story"))
 
     def test_story_request_sends_selected_thinking_override(self):
@@ -385,8 +385,8 @@ class IdentityContractTests(unittest.TestCase):
         )
 
         with (
-            patch("src.engine.STORY_THINKING_MODE", "disabled"),
-            patch("src.engine.log_model_call"),
+            patch("src.app.engine.STORY_THINKING_MODE", "disabled"),
+            patch("src.app.engine.log_model_call"),
         ):
             engine._stream_llm("test-model")
 
@@ -427,8 +427,8 @@ class IdentityContractTests(unittest.TestCase):
         )
 
         with (
-            patch("src.engine.ENABLE_STREAM_USAGE", True),
-            patch("src.engine.log_model_call") as model_log,
+            patch("src.app.engine.ENABLE_STREAM_USAGE", True),
+            patch("src.app.engine.log_model_call") as model_log,
         ):
             engine._stream_llm("test-model")
 
@@ -528,9 +528,9 @@ class IdentityContractTests(unittest.TestCase):
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
 
         with (
-            patch("src.engine.log_model_call"),
-            patch("src.engine.log_error"),
-            patch("src.engine.time.sleep"),
+            patch("src.app.engine.log_model_call"),
+            patch("src.app.engine.log_error"),
+            patch("src.app.engine.time.sleep"),
         ):
             text, tool_calls = engine._stream_llm("test-model")
 
@@ -557,9 +557,9 @@ class IdentityContractTests(unittest.TestCase):
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
 
         with (
-            patch("src.engine.log_model_call"),
-            patch("src.engine.log_error", side_effect=server_logs.append),
-            patch("src.engine.time.sleep"),
+            patch("src.app.engine.log_model_call"),
+            patch("src.app.engine.log_error", side_effect=server_logs.append),
+            patch("src.app.engine.time.sleep"),
         ):
             text, tool_calls = engine._stream_llm("test-model")
 
@@ -572,7 +572,9 @@ class IdentityContractTests(unittest.TestCase):
         self.assertTrue(any("RuntimeError" in entry for entry in server_logs))
 
     def test_multiplayer_websocket_close_reason_never_echoes_exception(self):
-        source = (PROJECT_ROOT / "src" / "multiplayer_ws.py").read_text(encoding="utf-8")
+        source = (PROJECT_ROOT / "src" / "multiplayer" / "ws.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertNotIn("reason=str(exc)", source)
         self.assertIn('reason="房间连接发生内部错误"', source)
@@ -603,9 +605,9 @@ class IdentityContractTests(unittest.TestCase):
         )
 
         with (
-            patch("src.engine.log_model_call"),
-            patch("src.engine.log_error"),
-            patch("src.engine.time.sleep"),
+            patch("src.app.engine.log_model_call"),
+            patch("src.app.engine.log_error"),
+            patch("src.app.engine.time.sleep"),
         ):
             text, tool_calls = engine._stream_llm("test-model")
 
@@ -640,9 +642,9 @@ class IdentityContractTests(unittest.TestCase):
         )
 
         with (
-            patch("src.engine.log_model_call"),
-            patch("src.engine.log_error"),
-            patch("src.engine.time.sleep"),
+            patch("src.app.engine.log_model_call"),
+            patch("src.app.engine.log_error"),
+            patch("src.app.engine.time.sleep"),
         ):
             text, tool_calls = engine._stream_llm(
                 "test-model",
@@ -684,7 +686,7 @@ class IdentityContractTests(unittest.TestCase):
         errors = []
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(len(calls), 1)
@@ -710,7 +712,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, "你仍站在停尸房。")
@@ -736,7 +738,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, "雨落在阿卡姆。你推开了门。")
@@ -772,7 +774,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         rendered = "".join(visible)
@@ -803,7 +805,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, "公开文本。")
@@ -834,7 +836,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, "公开叙事。")
@@ -864,7 +866,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"):
+        with patch("src.app.engine.log_model_call"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(speakers, ["bryce_fallon"])
@@ -889,7 +891,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, prose)
@@ -916,7 +918,7 @@ class IdentityContractTests(unittest.TestCase):
             on_error=lambda _message: None,
         )
 
-        with patch("src.engine.log_model_call"), patch("src.engine.log_error"):
+        with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
             text, tool_calls = engine._stream_llm("test-model")
 
         self.assertEqual(text, prose)
@@ -925,7 +927,9 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual("".join(part for part, npc_id in events if npc_id is None), prose)
 
     def test_cli_kernel_banner_uses_product_name_not_module_name(self):
-        source = (PROJECT_ROOT / "src" / "game_loop.py").read_text(encoding="utf-8")
+        source = (PROJECT_ROOT / "src" / "app" / "game_loop.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn('print("  🎲  TRPG Game 内核")', source)
         self.assertNotIn("疯狂宅邸", source)

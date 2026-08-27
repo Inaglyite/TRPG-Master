@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 
-from src.database import ACTIVE_TURN_WORLD_INDEX, Base
+from src.storage.database import ACTIVE_TURN_WORLD_INDEX, Base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

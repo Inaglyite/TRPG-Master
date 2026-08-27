@@ -14,16 +14,19 @@ from unittest.mock import patch
 
 import pytest
 
-from src import context_shadow as shadow_adapter
-from src.config import PROJECT_ROOT
-from src.context_checkpoint import ContextCheckpoint
-from src.context_events import (
+from src.ai.context import context_shadow as shadow_adapter
+from src.ai.context.context_checkpoint import ContextCheckpoint
+from src.ai.context.context_events import (
     EVENT_REQUEST_PATCH,
     ContextEventStore,
     messages_digest,
 )
-from src.context_shadow import ContextShadowCoordinator
-from src.database import (
+from src.ai.context.context_shadow import ContextShadowCoordinator
+from src.ai.context.history_compactor import HistoryCompactor
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.app.runtime import RuntimeContext
+from src.storage.database import (
     Base,
     ContextSession,
     ModelContextEvent,
@@ -34,10 +37,7 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.engine import GameEngine
-from src.history_compactor import HistoryCompactor
-from src.persistence import list_saves, load_game_artifacts
-from src.runtime import RuntimeContext
+from src.storage.persistence import list_saves, load_game_artifacts
 
 
 def _url(tmp_path: Path) -> str:
@@ -77,7 +77,7 @@ def _game_engine(tmp_path: Path, world_id: str = "engine-shadow") -> GameEngine:
         project_root=PROJECT_ROOT,
         runtime_root=tmp_path,
     )
-    with patch("src.engine.OpenAI", return_value=object()):
+    with patch("src.app.engine.OpenAI", return_value=object()):
         engine = GameEngine(context)
     engine.prepare_session()
     return engine

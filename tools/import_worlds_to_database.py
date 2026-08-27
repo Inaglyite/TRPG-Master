@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.database import (  # noqa: E402
+from src.storage.database import (  # noqa: E402
     AuditEvent,
     PlayerNote,
     SaveSlot,
@@ -29,8 +29,8 @@ from src.database import (  # noqa: E402
     new_id,
     session_scope,
 )
-from src.player_notes import PLAYER_NOTES_SCHEMA_VERSION  # noqa: E402
-from src.world_migrations import migrate_world_state  # noqa: E402
+from src.storage.player_notes import PLAYER_NOTES_SCHEMA_VERSION  # noqa: E402
+from src.storage.world_migrations import migrate_world_state  # noqa: E402
 
 MAX_BIGINT = (1 << 63) - 1
 

@@ -14,8 +14,26 @@ from fastapi import WebSocketDisconnect
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from src.auth import create_user
-from src.database import (
+from src.auth.service import create_user
+from src.multiplayer.guards import (
+    USER_TURN_GUARD,
+    reset_action_guards,
+)
+from src.multiplayer.messages import UNSUPPORTED_ROOM_TYPES, run_room_message_loop
+from src.multiplayer.room_runtime import GameRoom, RoomEventHub, RoomManager
+from src.multiplayer.service import (
+    MultiplayerError,
+    abandon_solo_world,
+    accept_invite,
+    archive_world,
+    check_solo_abandon_access,
+    create_invite,
+    finish_room_action,
+    reserve_room_action,
+    transfer_owner,
+    update_member_role,
+)
+from src.storage.database import (
     AuditEvent,
     Base,
     RoomAction,
@@ -29,24 +47,6 @@ from src.database import (
     session_scope,
     utcnow,
 )
-from src.multiplayer import (
-    MultiplayerError,
-    abandon_solo_world,
-    accept_invite,
-    archive_world,
-    check_solo_abandon_access,
-    create_invite,
-    finish_room_action,
-    reserve_room_action,
-    transfer_owner,
-    update_member_role,
-)
-from src.multiplayer_guards import (
-    USER_TURN_GUARD,
-    reset_action_guards,
-)
-from src.multiplayer_messages import UNSUPPORTED_ROOM_TYPES, run_room_message_loop
-from src.room_runtime import GameRoom, RoomEventHub, RoomManager
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -684,7 +684,7 @@ def test_active_solo_abandon_http_cancels_busy_room_turn(tmp_path: Path):
             assert installed is room
             # 进行中回合：本地行动锁被占用。
             await room.reserve_control(owner_id, "turn-in-flight")
-            from src.room_runtime import RoomConnection
+            from src.multiplayer.room_runtime import RoomConnection
 
             await room.hub.attach(RoomConnection("conn-owner", owner_id, "owner", socket))
 
@@ -751,7 +751,7 @@ def test_active_solo_abandon_releases_leases_after_unexpected_failure(tmp_path: 
 
         asyncio.run(install_room())
         with patch(
-            "src.multiplayer_archive_http.abandon_solo_world",
+            "src.multiplayer.archive_http.abandon_solo_world",
             side_effect=RuntimeError("database temporarily unavailable"),
         ):
             failed = client.post(f"/api/worlds/{world_id}/abandon", headers=ORIGIN)
@@ -842,9 +842,9 @@ def test_solo_start_skips_ready_gates_and_auto_claims_investigator(tmp_path: Pat
 
     with (
         patch.object(server, "DATABASE_URL", url),
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-        patch("src.multiplayer_messages.list_character_options", return_value=options),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.list_character_options", return_value=options),
     ):
         asyncio.run(scenario())
 
@@ -912,8 +912,8 @@ def test_multiplayer_world_start_keeps_ready_and_claim_gates(tmp_path: Path):
             )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
     ):
         asyncio.run(scenario())
 
@@ -962,8 +962,8 @@ def test_action_in_progress_rejects_second_turn_across_worlds():
             )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
     ):
         asyncio.run(scenario())
 
@@ -1014,9 +1014,9 @@ def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
             )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-        patch("src.multiplayer_messages.reserve_room_action"),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.reserve_room_action"),
     ):
         asyncio.run(scenario())
 
@@ -1068,9 +1068,9 @@ def test_daily_turn_quota_rejects_when_exhausted(monkeypatch: pytest.MonkeyPatch
             )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-        patch("src.multiplayer_messages.reserve_room_action"),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.reserve_room_action"),
     ):
         asyncio.run(scenario())
 

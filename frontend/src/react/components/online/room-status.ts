@@ -12,7 +12,7 @@ export function roomStatusLabel(status: string): string {
   return ROOM_STATUS_LABELS[status] ?? status;
 }
 
-/** 与 src/multiplayer.py list_invites 的状态集合保持一致。 */
+/** 与 src/multiplayer/service.py list_invites 的状态集合保持一致。 */
 const INVITE_STATUS_LABELS: Record<string, string> = {
   active: "有效",
   revoked: "已撤销",

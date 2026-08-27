@@ -4,10 +4,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.action_preflight import match_action_preview
-from src.action_resolution import plan_player_action
-from src.engine import GameEngine
-from src.world_store import WorldStore
+from src.app.engine import GameEngine
+from src.gameplay.action_preflight import match_action_preview
+from src.gameplay.action_resolution import plan_player_action
+from src.storage.world_store import WorldStore
 
 
 def make_world() -> dict:

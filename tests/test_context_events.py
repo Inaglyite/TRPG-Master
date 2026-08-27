@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import event, inspect
 
-from src.context_events import (
+from src.ai.context.context_events import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_CHECKPOINT,
     EVENT_CONTEXT_INJECTION,
@@ -35,7 +35,7 @@ from src.context_events import (
     infer_event_type,
     messages_digest,
 )
-from src.database import (
+from src.storage.database import (
     Base,
     ContextSession,
     ModelContextEvent,
@@ -1107,7 +1107,7 @@ def test_sync_messages_projects_while_world_write_lock_is_held(
     """The prefix snapshot and batch write share one serialization window."""
     from contextlib import contextmanager
 
-    import src.context_events as context_events_module
+    import src.ai.context.context_events as context_events_module
 
     url = sqlite_url(tmp_path)
     seed_world(url)

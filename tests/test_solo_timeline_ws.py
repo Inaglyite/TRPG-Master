@@ -12,8 +12,15 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.auth import create_user
-from src.database import (
+from src.auth.service import create_user
+from src.multiplayer.messages import run_room_message_loop
+from src.multiplayer.room_runtime import GameRoom, RoomEventHub, RoomManager
+from src.multiplayer.service import finish_room_action
+from src.multiplayer.solo_timeline_ws import (
+    POINTER_KEY,
+    resolve_solo_current_world_id,
+)
+from src.storage.database import (
     Base,
     RoomAction,
     User,
@@ -25,14 +32,7 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.multiplayer import finish_room_action
-from src.multiplayer_messages import run_room_message_loop
-from src.room_runtime import GameRoom, RoomEventHub, RoomManager
-from src.solo_timeline_ws import (
-    POINTER_KEY,
-    resolve_solo_current_world_id,
-)
-from src.world_branches import WorldBranchService
+from src.storage.world_branches import WorldBranchService
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -206,8 +206,8 @@ def _run_loop(controller, socket, room, owner_id: str, *, role: str = "owner"):
         )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value=role),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value=role),
     ):
         asyncio.run(scenario())
 

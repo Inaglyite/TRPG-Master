@@ -19,9 +19,10 @@ from unittest.mock import patch
 
 import pytest
 
-from src.config import PROJECT_ROOT
-from src.context_checkpoint import ContextCheckpoint, public_copy, resolve_checkpoint
-from src.database import (
+from src.ai.context.context_checkpoint import ContextCheckpoint, public_copy, resolve_checkpoint
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.storage.database import (
     Base,
     SaveSlot,
     Turn,
@@ -29,12 +30,11 @@ from src.database import (
     get_engine,
     session_scope,
 )
-from src.database_store import DatabaseWorldStore
-from src.database_turn_journal import DatabaseTurnJournal
-from src.persistence import list_saves, load_game, load_game_artifacts, save_game
-from src.runtime import RuntimeContext
-from src.turn_journal import TurnJournal
-from src.world_branches import WorldBranchService
+from src.storage.database_store import DatabaseWorldStore
+from src.storage.database_turn_journal import DatabaseTurnJournal
+from src.storage.persistence import list_saves, load_game, load_game_artifacts, save_game
+from src.storage.turn_journal import TurnJournal
+from src.storage.world_branches import WorldBranchService
 
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64

@@ -2,7 +2,7 @@ import copy
 import random
 import unittest
 
-from src.combat import (
+from src.gameplay.combat import (
     CombatError,
     assign_combat_actor,
     combat_action,
@@ -11,7 +11,7 @@ from src.combat import (
     preview_player_escalation,
     start_combat,
 )
-from src.investigators import project_active_investigator
+from src.gameplay.investigators import project_active_investigator
 
 
 class FixedRandom:

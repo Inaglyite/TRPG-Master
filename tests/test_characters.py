@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.characters import list_character_options
-from src.config import PROJECT_ROOT
-from src.engine import GameEngine
-from src.runtime import RuntimeContext
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine
+from src.app.runtime import RuntimeContext
+from src.gameplay.characters import list_character_options
 
 
 class CharacterListTests(unittest.TestCase):

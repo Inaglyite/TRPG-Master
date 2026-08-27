@@ -16,26 +16,26 @@ from unittest.mock import patch
 
 import pytest
 
-from src import context_shadow as shadow_adapter
-from src.config import PROJECT_ROOT
-from src.context_checkpoint import ContextCheckpoint
-from src.context_events import ContextEventStore, messages_digest
-from src.context_shadow import ContextShadowCoordinator
-from src.database import (
+from src.ai.context import context_shadow as shadow_adapter
+from src.ai.context.context_checkpoint import ContextCheckpoint
+from src.ai.context.context_events import ContextEventStore, messages_digest
+from src.ai.context.context_shadow import ContextShadowCoordinator
+from src.ai.context.history_compactor import (
+    TOOL_RESULT_PRUNE_MIN_CHARS,
+    HistoryCompactor,
+)
+from src.ai.model.model_request import StreamPolicy
+from src.ai.model.model_streamer import ModelStreamer, _is_context_overflow
+from src.app.config import PROJECT_ROOT
+from src.app.engine import GameEngine, TurnCancelledError
+from src.app.runtime import RuntimeContext
+from src.storage.database import (
     Base,
     World,
     get_engine,
     session_scope,
 )
-from src.engine import GameEngine, TurnCancelledError
-from src.history_compactor import (
-    TOOL_RESULT_PRUNE_MIN_CHARS,
-    HistoryCompactor,
-)
-from src.model_request import StreamPolicy
-from src.model_streamer import ModelStreamer, _is_context_overflow
-from src.persistence import load_game_artifacts
-from src.runtime import RuntimeContext
+from src.storage.persistence import load_game_artifacts
 
 
 def _url(tmp_path: Path) -> str:
@@ -57,7 +57,7 @@ def _game_engine(tmp_path: Path, world_id: str = "engine-compact") -> GameEngine
         project_root=PROJECT_ROOT,
         runtime_root=tmp_path,
     )
-    with patch("src.engine.OpenAI", return_value=object()):
+    with patch("src.app.engine.OpenAI", return_value=object()):
         engine = GameEngine(context)
     engine.prepare_session()
     return engine
@@ -81,7 +81,7 @@ def _checkpoint_events(store: ContextEventStore, session_id: str) -> list[dict]:
 
 def _summarize_once(engine: GameEngine) -> bool:
     with (
-        patch("src.llm._get_glm", return_value=None),
+        patch("src.ai.model.llm._get_glm", return_value=None),
         patch.object(
             HistoryCompactor,
             "try_model",
@@ -177,7 +177,7 @@ def test_summary_failure_keeps_original_surface_and_emits_no_checkpoint(tmp_path
     surface_before = copy.deepcopy(engine.messages)
 
     with (
-        patch("src.llm._get_glm", return_value=None),
+        patch("src.ai.model.llm._get_glm", return_value=None),
         patch.object(
             HistoryCompactor,
             "try_model",
@@ -205,8 +205,8 @@ def test_rebase_failure_never_replaces_live_surface(tmp_path: Path) -> None:
     before = copy.deepcopy(engine.messages)
     compactor = HistoryCompactor(engine)
     with (
-        patch("src.context_shadow.compact_engine", return_value=False),
-        patch("src.context_shadow.rebase_engine", return_value=False),
+        patch("src.ai.context.context_shadow.compact_engine", return_value=False),
+        patch("src.ai.context.context_shadow.rebase_engine", return_value=False),
     ):
         assert (
             compactor.apply(
@@ -415,7 +415,7 @@ def test_strip_asset_payloads_removes_only_data_uri() -> None:
     """投递载荷剥离：仅移除 asset_data_uri，保留 asset_url 等模型可用字段。"""
     import json
 
-    from src.tool_aux_handlers import strip_asset_payloads
+    from src.ai.tools.tool_aux_handlers import strip_asset_payloads
 
     payload = {
         "found": True,
@@ -609,7 +609,7 @@ def test_overflow_retry_restores_skill_surface_before_rebuilding_request(
         engine.messages.append({"role": "user", "content": "[restored deterministic skill]"})
         return 1
 
-    monkeypatch.setattr("src.skill_activation.refresh_deterministic_skills", restore)
+    monkeypatch.setattr("src.ai.skills.skill_activation.refresh_deterministic_skills", restore)
     assert _streamer(host).stream(
         "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
     ) == ("恢复后的叙述。", [])
@@ -703,7 +703,7 @@ def test_midstream_overflow_releases_slot_before_compaction_retry() -> None:
 
     client = Client()
     host = _overflow_host(client, compact_result=True)
-    with patch("src.model_streamer.acquire_llm_slot", side_effect=acquire):
+    with patch("src.ai.model.model_streamer.acquire_llm_slot", side_effect=acquire):
         assert _streamer(host).stream(
             "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
         ) == ("恢复后的叙述。", [])
@@ -826,7 +826,7 @@ def test_capacity_preflight_restores_skill_surface_before_final_request(
         engine.messages.append({"role": "user", "content": "[restored deterministic skill]"})
         return 1
 
-    monkeypatch.setattr("src.skill_activation.refresh_deterministic_skills", restore)
+    monkeypatch.setattr("src.ai.skills.skill_activation.refresh_deterministic_skills", restore)
     assert _streamer(host).stream(
         "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
     ) == ("安全的叙述。", [])

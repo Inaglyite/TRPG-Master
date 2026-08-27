@@ -3,17 +3,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.action_resolution import ActionPhase, plan_player_action
-from src.agent_graph import _parse_final_narrative, _prepare_turn
-from src.config import PROJECT_ROOT
-from src.discovery import (
+from src.app.agent_graph import _parse_final_narrative, _prepare_turn
+from src.app.config import PROJECT_ROOT
+from src.app.engine import EngineCallbacks, GameEngine
+from src.app.runtime import RuntimeContext
+from src.gameplay.action_resolution import ActionPhase, plan_player_action
+from src.gameplay.discovery import (
     match_discovery_rules,
     preferred_check_skill,
     preferred_luck_difficulty,
 )
-from src.encounters import resolve_scene_encounters
-from src.engine import EngineCallbacks, GameEngine
-from src.runtime import RuntimeContext
+from src.gameplay.encounters import resolve_scene_encounters
 
 
 def discovery_world() -> dict:

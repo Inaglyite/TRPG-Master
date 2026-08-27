@@ -9,14 +9,14 @@ from unittest.mock import patch
 
 import pytest
 
-from src.combat import combat_action, start_combat
-from src.config import PROJECT_ROOT
-from src.investigators import activate_investigator, sync_active_investigator
-from src.multiplayer_messages import run_room_message_loop
-from src.persistence import load_game, restore_snapshot, save_game
-from src.room_runtime import GameRoom, RoomEventHub
-from src.runtime import RuntimeContext
-from src.tools import TOOL_RUNTIME
+from src.ai.tools.registry import TOOL_RUNTIME
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.gameplay.combat import combat_action, start_combat
+from src.gameplay.investigators import activate_investigator, sync_active_investigator
+from src.multiplayer.messages import run_room_message_loop
+from src.multiplayer.room_runtime import GameRoom, RoomEventHub
+from src.storage.persistence import load_game, restore_snapshot, save_game
 
 
 class ReplySocket:
@@ -80,8 +80,8 @@ def test_combat_defender_can_reply_when_not_the_room_current_actor():
 
     async def scenario() -> None:
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="player"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="player"),
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(
@@ -367,10 +367,10 @@ def test_owner_skip_moves_room_and_combat_turn_to_online_bob_together():
 
     async def scenario() -> None:
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
             patch(
-                "src.multiplayer_messages.room_members",
+                "src.multiplayer.messages.room_members",
                 return_value={
                     "members": [
                         {"user_id": "owner", "role": "owner"},

@@ -155,7 +155,7 @@ example.trpgmod
 
 包内存在相应目录时必须声明 capability。导入界面会据此显示信任提示。
 
-`min_engine_version` 高于当前引擎版本（`src/module_format.py` 中的 `ENGINE_VERSION`）
+`min_engine_version` 高于当前引擎版本（`src/modules/module_format.py` 中的 `ENGINE_VERSION`）
 的包会被拒绝，错误码 `engine_too_old`，不会进入安装目录。
 
 ## 5. module.json

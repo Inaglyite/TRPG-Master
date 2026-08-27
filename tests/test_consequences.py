@@ -1,6 +1,6 @@
 import unittest
 
-from src.consequences import SanitySeverity, classify_sanity_consequence
+from src.gameplay.consequences import SanitySeverity, classify_sanity_consequence
 
 
 class ConsequenceTests(unittest.TestCase):

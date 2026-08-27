@@ -4,7 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
-# This module is imported by pytest before test modules import ``src.config``
+# This module is imported by pytest before test modules import ``src.app.config``
 # or ``server``.  Keep the default writable runtime away from the checkout:
 # many WebSocket tests intentionally use ``RuntimeContext.local()`` and a
 # plain ``TestClient(server.app)``.  Without these two early settings they
@@ -27,7 +27,7 @@ os.environ.pop("TRPG_DATABASE_URL", None)
 
 import pytest
 
-from src.auth import LOGIN_LIMITER
+from src.auth.service import LOGIN_LIMITER
 
 
 @pytest.fixture(autouse=True)

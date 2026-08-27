@@ -12,8 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.inventory import InventoryError, use_item
-from src.runtime import RuntimeContext
+from src.app.runtime import RuntimeContext
+from src.gameplay.inventory import InventoryError, use_item
 
 CONTEXT = RuntimeContext.from_env()
 

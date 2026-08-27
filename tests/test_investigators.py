@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.investigators import (
+from src.gameplay.investigators import (
     activate_investigator,
     initialize_investigator_roster,
     public_investigator_roster,

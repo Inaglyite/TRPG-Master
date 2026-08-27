@@ -13,7 +13,8 @@ import pytest
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from src.auth import (
+from src.auth.http import AuthHttpDependencies, create_auth_router
+from src.auth.service import (
     create_login_session,
     create_user,
     resolve_session,
@@ -21,23 +22,16 @@ from src.auth import (
     revoke_session,
     token_hash,
 )
-from src.auth_http import AuthHttpDependencies, create_auth_router
-from src.database import (
-    AuditEvent,
-    Base,
-    RoomAction,
-    Turn,
-    User,
-    World,
-    WorldInvestigator,
-    WorldInvite,
-    WorldMember,
-    get_engine,
-    new_id,
-    session_scope,
+from src.multiplayer.messages import run_room_message_loop, safe_multiplayer_diagnostics
+from src.multiplayer.recovery import turn_recovery_payload
+from src.multiplayer.room_runtime import (
+    GameRoom,
+    RoomConnection,
+    RoomDriverTransport,
+    RoomEventHub,
+    RoomManager,
 )
-from src.database_store import DatabaseWorldStore
-from src.multiplayer import (
+from src.multiplayer.service import (
     MultiplayerError,
     accept_invite,
     archive_world,
@@ -54,17 +48,23 @@ from src.multiplayer import (
     transfer_owner,
     update_member_role,
 )
-from src.multiplayer_messages import run_room_message_loop, safe_multiplayer_diagnostics
-from src.multiplayer_recovery import turn_recovery_payload
-from src.multiplayer_ws import owner_turn_required
-from src.player_notes import PlayerNotesStore
-from src.room_runtime import (
-    GameRoom,
-    RoomConnection,
-    RoomDriverTransport,
-    RoomEventHub,
-    RoomManager,
+from src.multiplayer.ws import owner_turn_required
+from src.storage.database import (
+    AuditEvent,
+    Base,
+    RoomAction,
+    Turn,
+    User,
+    World,
+    WorldInvestigator,
+    WorldInvite,
+    WorldMember,
+    get_engine,
+    new_id,
+    session_scope,
 )
+from src.storage.database_store import DatabaseWorldStore
+from src.storage.player_notes import PlayerNotesStore
 
 
 def sqlite_url(tmp_path: Path) -> str:
@@ -144,11 +144,11 @@ def test_turn_recovery_payload_uses_public_records_and_enriches_assets():
 
     with (
         patch(
-            "src.multiplayer_recovery.enrich_public_history_record",
+            "src.multiplayer.recovery.enrich_public_history_record",
             side_effect=lambda record, _engine: dict(record),
         ),
         patch(
-            "src.multiplayer_recovery.asset_payload",
+            "src.multiplayer.recovery.asset_payload",
             return_value={"asset_url": "/api/assets/letter.png"},
         ),
     ):
@@ -455,7 +455,7 @@ def test_active_turn_recovery_keeps_pre_action_history_and_replays_live_events(
             }
         )
         with patch(
-            "src.multiplayer_recovery.enrich_public_history",
+            "src.multiplayer.recovery.enrich_public_history",
             side_effect=lambda history, _engine: list(history),
         ):
             payload = await server.MULTIPLAYER_WS.room_full_recovery_payload(
@@ -570,16 +570,16 @@ def test_initial_full_state_is_sent_before_events_created_at_its_boundary(
     with (
         patch.object(server, "DATABASE_URL", url),
         patch.object(server, "ROOM_MANAGER", manager),
-        patch("src.multiplayer_ws.validate_websocket_origin"),
+        patch("src.multiplayer.ws.validate_websocket_origin"),
         patch(
-            "src.multiplayer_ws.websocket_session",
+            "src.multiplayer.ws.websocket_session",
             return_value=SimpleNamespace(
                 user=SimpleNamespace(id=owner.id),
                 token_hash="test-session",
                 locally_valid=lambda: True,
             ),
         ),
-        patch("src.multiplayer_ws.authorize_world", return_value="owner"),
+        patch("src.multiplayer.ws.authorize_world", return_value="owner"),
         patch.object(
             server.MULTIPLAYER_WS,
             "room_bootstrap",
@@ -656,16 +656,16 @@ def test_failed_initial_bootstrap_is_retryable_and_leaves_no_ghost_connection(
     with (
         patch.object(server, "DATABASE_URL", url),
         patch.object(server, "ROOM_MANAGER", manager),
-        patch("src.multiplayer_ws.validate_websocket_origin"),
+        patch("src.multiplayer.ws.validate_websocket_origin"),
         patch(
-            "src.multiplayer_ws.websocket_session",
+            "src.multiplayer.ws.websocket_session",
             return_value=SimpleNamespace(
                 user=SimpleNamespace(id=owner.id),
                 token_hash="test-session",
                 locally_valid=lambda: True,
             ),
         ),
-        patch("src.multiplayer_ws.authorize_world", return_value="owner"),
+        patch("src.multiplayer.ws.authorize_world", return_value="owner"),
         patch.object(
             server.MULTIPLAYER_WS,
             "room_bootstrap",
@@ -758,8 +758,8 @@ def test_member_removed_during_pending_websocket_bootstrap_receives_no_recovery(
     with (
         patch.object(server, "DATABASE_URL", url),
         patch.object(server, "ROOM_MANAGER", manager),
-        patch("src.multiplayer_ws.validate_websocket_origin"),
-        patch("src.multiplayer_ws.websocket_session", return_value=identity),
+        patch("src.multiplayer.ws.validate_websocket_origin"),
+        patch("src.multiplayer.ws.websocket_session", return_value=identity),
         patch.object(
             server.MULTIPLAYER_WS,
             "room_bootstrap",
@@ -819,8 +819,8 @@ def test_player_notes_internal_error_is_logged_but_not_sent_to_client(tmp_path, 
     )
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
         patch.object(PlayerNotesStore, "save", side_effect=OSError(secret_detail)),
         pytest.raises(RuntimeError, match="test complete"),
     ):
@@ -882,10 +882,10 @@ def test_durable_reservation_failure_releases_in_memory_room_lock():
 
     async def scenario():
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
             patch(
-                "src.multiplayer_messages.reserve_room_action",
+                "src.multiplayer.messages.reserve_room_action",
                 side_effect=RuntimeError("database unavailable"),
             ),
         ):
@@ -970,8 +970,8 @@ def test_unclaimed_owner_state_request_never_falls_back_to_active_player():
 
     async def scenario():
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(
@@ -1227,9 +1227,9 @@ def test_start_revalidates_roster_after_room_action_lease():
             await task
 
     with (
-        patch("src.multiplayer_messages.websocket_user", return_value=object()),
-        patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-        patch("src.multiplayer_messages.reserve_room_action") as durable_reserve,
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.reserve_room_action") as durable_reserve,
     ):
         asyncio.run(scenario())
 
@@ -1727,7 +1727,7 @@ def test_starting_room_recovers_from_latest_opening_outcome(
         patch.object(server, "GameEngine", side_effect=FakeEngine),
         patch.object(server, "run_ws_session", new=fake_room_driver),
         patch(
-            "src.multiplayer_ws.RuntimeContext.create",
+            "src.multiplayer.ws.RuntimeContext.create",
             return_value=context,
         ),
         TestClient(server.app, base_url="https://testserver") as client,
@@ -2706,7 +2706,7 @@ def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
     and no extra theme may be injected by the WebSocket layer itself.
     """
     import server
-    from src import multiplayer_ws
+    from src.multiplayer import ws as multiplayer_ws
 
     url = sqlite_url(tmp_path)
     Base.metadata.create_all(get_engine(url))
@@ -3195,8 +3195,8 @@ def test_archived_world_http_claim_rejected_before_runtime_context_and_delete_id
 
                 # claim 的 prefetch 在构建 RuntimeContext / 读取角色表之前拒绝
                 with (
-                    patch("src.multiplayer_http.RuntimeContext.create") as fake_create,
-                    patch("src.multiplayer_http.list_character_options") as fake_options,
+                    patch("src.multiplayer.http.RuntimeContext.create") as fake_create,
+                    patch("src.multiplayer.http.list_character_options") as fake_options,
                 ):
                     for client in (owner_client, player_client):
                         denied = client.post(
@@ -3248,9 +3248,9 @@ def test_settle_case_rejected_in_lobby_without_reserving_control():
 
     async def scenario():
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-            patch("src.multiplayer_messages.reserve_room_action") as durable_reserve,
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.reserve_room_action") as durable_reserve,
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(
@@ -3321,9 +3321,9 @@ def test_settle_case_passes_through_when_room_is_playing():
 
     async def scenario():
         with (
-            patch("src.multiplayer_messages.websocket_user", return_value=object()),
-            patch("src.multiplayer_messages.authorize_world", return_value="owner"),
-            patch("src.multiplayer_messages.reserve_room_action"),
+            patch("src.multiplayer.messages.websocket_user", return_value=object()),
+            patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+            patch("src.multiplayer.messages.reserve_room_action"),
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(

@@ -13,9 +13,9 @@ import argparse
 import time
 from types import SimpleNamespace
 
-from src.tool_pipeline import ToolPipeline
-from src.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
-from src.tools import tool_catalog_for_names
+from src.ai.tools.registry import tool_catalog_for_names
+from src.ai.tools.tool_pipeline import ToolPipeline
+from src.ai.tools.tool_policy import MODEL_CALLER, ToolRequestSnapshot, attach_request_snapshot
 
 
 class _BenchmarkEngine:

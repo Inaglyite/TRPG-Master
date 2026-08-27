@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.endings import validate_ending
-from src.tools import execute_function
-from src.world_store import WorldStore
+from src.ai.tools.registry import execute_function
+from src.gameplay.endings import validate_ending
+from src.storage.world_store import WorldStore
 
 
 def ending_world(*, recovered: bool = False, defeated: bool = False) -> dict:

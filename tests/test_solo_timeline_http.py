@@ -11,7 +11,10 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.database import (
+from src.multiplayer.room_runtime import GameRoom, RoomEventHub
+from src.multiplayer.service import finish_room_action
+from src.multiplayer.solo_timeline_ws import POINTER_KEY
+from src.storage.database import (
     Base,
     RoomAction,
     SaveSlot,
@@ -26,9 +29,6 @@ from src.database import (
     new_id,
     session_scope,
 )
-from src.multiplayer import finish_room_action
-from src.room_runtime import GameRoom, RoomEventHub
-from src.solo_timeline_ws import POINTER_KEY
 
 CLOUD_ENV = {
     "TRPG_REQUIRE_AUTH": "1",

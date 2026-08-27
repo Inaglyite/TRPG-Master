@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.narrative_history import enrich_public_history_record
+from src.ai.context.narrative_history import enrich_public_history_record
 
 
 class _Engine:

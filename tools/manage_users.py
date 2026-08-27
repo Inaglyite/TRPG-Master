@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.auth import create_user  # noqa: E402
-from src.database import (  # noqa: E402
+from src.auth.service import create_user  # noqa: E402
+from src.storage.database import (  # noqa: E402
     LoginSession,
     database_url,
     initialize_database,

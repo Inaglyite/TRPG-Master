@@ -14,10 +14,10 @@ from unittest.mock import patch
 
 import pytest
 
-from src.config import PROJECT_ROOT
-from src.database import SaveSlot, Snapshot, session_scope
-from src.persistence import delete_save, list_saves, save_game
-from src.runtime import RuntimeContext
+from src.app.config import PROJECT_ROOT
+from src.app.runtime import RuntimeContext
+from src.storage.database import SaveSlot, Snapshot, session_scope
+from src.storage.persistence import delete_save, list_saves, save_game
 
 
 def _context(runtime_root: Path, world_id: str) -> RuntimeContext:
@@ -130,7 +130,7 @@ def test_delete_save_never_reports_success_when_compat_cleanup_fails() -> None:
             "slot_001",
             context=context,
         )
-        with patch("src.persistence.shutil.rmtree", side_effect=PermissionError("denied")):
+        with patch("src.storage.persistence.shutil.rmtree", side_effect=PermissionError("denied")):
             with pytest.raises(PermissionError, match="denied"):
                 delete_save("slot_001", context=context)
 
