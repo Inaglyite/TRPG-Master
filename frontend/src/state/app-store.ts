@@ -38,7 +38,14 @@ export type ClueItem = {
 };
 
 export type ClueState = Record<string, ClueItem[]>;
-export type ActionChoice = { label: string; isFree: boolean };
+export type ActionChoice = {
+  label: string;
+  isFree: boolean;
+  description?: string;
+  /** Chat-style action previews reply to a frozen server plan, not a new action. */
+  decisionId?: string;
+  decisionOptionId?: string;
+};
 export type SuggestDialog = {
   kind: "suggest";
   description?: string;

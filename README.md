@@ -1,38 +1,57 @@
 # TRPG Game
 
-**[中文版 README](README.zh-CN.md)**
+一个由 AI 担任守秘人的中文 TRPG 游戏。模型负责叙事与理解玩家意图，d100 检定、战斗、伤害、SAN、线索、世界状态和存档由确定性的 Python 规则引擎结算。
 
-An AI Keeper (game master) for Call-of-Cthulhu-style tabletop role-playing. TRPG Game pairs an LLM narrator with deterministic d100 rules tooling: the model writes the story and interprets your intent, while Python code rolls the dice, tracks the world, and enforces the rules. It runs as a local desktop app (Electron) or as an account-based server.
-
-Two playable modules are bundled: **Mansion of Madness** (疯狂宅邸) and **猩红文档** (The Scarlet Documents). The game UI and narrative are in Chinese.
+支持本地 Electron 单机、浏览器云端单人和 2–4 人联机；仓库内置「疯狂宅邸」与「猩红文档」两个可游玩模组。
 
 <p align="center">
-  <img src="docs/screenshots/menu.png" alt="Start menu with module selection" width="48%"/>
-  <img src="docs/screenshots/character-select.png" alt="Investigator selection" width="48%"/>
-  <img src="docs/screenshots/gameplay.png" alt="A keeper narrative turn with structured choices" width="48%"/>
-  <img src="docs/screenshots/character-panel.png" alt="Gameplay with the investigator panel open" width="48%"/>
+  <img src="docs/screenshots/menu.png" alt="模组选择" width="48%"/>
+  <img src="docs/screenshots/character-select.png" alt="调查员选择" width="48%"/>
+  <img src="docs/screenshots/gameplay.png" alt="守秘人叙事回合" width="48%"/>
+  <img src="docs/screenshots/character-panel.png" alt="调查员面板" width="48%"/>
 </p>
 
-## Features
+## 核心能力
 
-- **LLM narrates, Python decides.** The model handles prose and intent; skill checks, dice, damage, SAN loss, world state, saves and asset reveals are all resolved by deterministic tools — no hallucinated rules.
-- **Server-authoritative combat.** A dedicated state machine handles initiative, opposed d100 rolls, damage, firearm ammo and player defense choices. First lethal aggression against non-hostile NPCs is confirmed with you before the story commits.
-- **Modules you can write and share.** Modules are safe, sandboxed `.trpgmod` ZIP packages (JSON + Markdown + assets) with JSON Schema validation, one-click import, side-by-side versions and a v2 format that guarantees the main investigation can never dead-end on a failed roll. A ready-to-copy [template](examples/module-template/manifest.json) is included.
-- **Lorebook-powered context.** Character Card V3 lorebooks retrieve module lore per turn with budgets, groups and cooldowns; tiered information boundaries keep the model from spoiling secrets it shouldn't know yet.
-- **Frozen rules per adventure.** A database-backed world snapshots its Skill content, manifest and catalog order once, so a later deployment cannot silently change an ongoing case. The H3 memory tables are deliberately an internal shadow foundation, not a player-visible “long-term memory” feature.
-- **Saves, journals and timeline branches.** Per-world save slots, a persistent turn journal that survives disconnects, and branching timelines: rewind to any decision point and play out a different choice without rerolling the past.
-- **Desktop or official cloud.** Linux runs the Electron desktop from source; Windows supports NSIS and portable packages. The official service adds shared 2–4 player rooms, Argon2id accounts, revocable sessions, turn ownership, private-event isolation and PostgreSQL persistence.
+- **模型叙事，代码裁决**：模型不能自行编造骰值、伤害、SAN 或世界状态；关键结果由服务端工具提交。
+- **行动预演与自然转场**：自由输入和推荐选项先经过确定性预检，在真正移动前给出 NPC 劝告、风险提示和可撤回机会。
+- **服务端权威战斗**：先攻、对抗检定、伤害、弹药和防御选择由状态机处理；不可逆的高风险行动需要玩家确认。
+- **场景、NPC 与线索闭环**：模组可以声明发现规则、失败保底、危机、时钟和结局条件，避免调查因一次失败永久卡死。
+- **Lorebook 与 Skill**：按当前场景、权威状态和规则集确定性注入相关材料；模型不能读取任意项目文件或越权调用内部工具。
+- **存档与时间线**：世界、存档位、不可变快照和回合日志持久化；支持从历史决策点创建分支并恢复未完成回合。
+- **模组工具链**：`.trpgmod` 使用 JSON、Markdown 和素材文件，支持 Schema 校验、编译诊断、版本并存及浏览器模组工坊。
+- **桌面与云端**：Electron 保留完整单机体验；云端提供账号、可撤销 Session、房间权限、私密事件过滤和 PostgreSQL 持久化。
 
-## Quick Start
+## 快速开始
 
-### Requirements
+### 环境要求
 
 - Python 3.12+
-- Node.js 20 LTS or newer
-- For local play or server operation: an API key for any OpenAI-compatible endpoint (DeepSeek by default)
-- Optional: a Zhipu GLM API key for fast summaries and context compression
+- Node.js 20+
+- 本地游玩需要 OpenAI 兼容接口的 API Key；仅加入云端游戏不需要个人 Key
+- 云端部署使用 PostgreSQL；本地单机默认使用 SQLite
 
-### Install
+### Linux 一键启动
+
+```bash
+git clone https://github.com/Inaglyite/TRPG-Master.git
+cd TRPG-Master
+bash start_desktop.sh
+```
+
+脚本会在首次需要本地后端时创建 `venv`、安装 Python 依赖、迁移 SQLite，并自动安装与构建前端。只选择云端模式时不会创建本地数据库或安装后端依赖。
+
+### Windows 构建
+
+在安装 Python 3.12+、Node.js LTS 和 Git 后，用 PowerShell 构建安装版与便携版：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1 -UseChinaMirrors
+```
+
+输出位于 `frontend/release/`，API Key 和本地运行数据不会进入安装包。
+
+### 手动安装（开发者）
 
 ```bash
 python3 -m venv venv
@@ -40,218 +59,140 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 ```
 
-### Configure the model
-
-Skip this section if you only join a multiplayer server; its operator owns the model configuration.
-
-Interactive setup (writes `.env.json` in the project root; the file is git-ignored):
+交互式配置模型，配置会写入已被 Git 忽略的 `.env.json`：
 
 ```bash
 python3 start.py --config
 ```
 
-Or create `.env.json` manually — only the first two fields are strictly required:
+最小配置示例：
 
 ```json
 {
   "api_key": "your-api-key",
   "base_url": "https://api.deepseek.com",
   "flash_model": "deepseek-v4-flash",
-  "pro_model": "deepseek-v4-pro",
-  "narrative_model": "deepseek-v4-pro",
-  "judgement_model": "deepseek-v4-pro",
-  "glm_api_key": "optional-glm-key"
+  "pro_model": "deepseek-v4-pro"
 }
 ```
 
-Environment variables take precedence over the file. The full list — model-role presets, lorebook/prompt toggles, database URL, auth and origins for server deployments — is in the fold-out below.
+环境变量会覆盖文件配置。常用项包括 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、
+`TRPG_FLASH_MODEL`、`TRPG_PRO_MODEL`、`TRPG_DATABASE_URL`、
+`TRPG_REQUIRE_AUTH`、`TRPG_ALLOWED_ORIGINS` 和 `TRPG_LLM_MAX_CONCURRENCY`。
+部署所需的完整配置见[部署与恢复](docs/DEPLOYMENT.md)。
 
-<details>
-<summary><strong>Full environment variable reference</strong></summary>
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `OPENAI_API_KEY` | Main model API key | empty |
-| `OPENAI_BASE_URL` | OpenAI-compatible endpoint | `https://api.deepseek.com` |
-| `TRPG_FLASH_MODEL` | Model ID for the "Flash" preset in settings | `deepseek-v4-flash` |
-| `TRPG_PRO_MODEL` | Model ID for the "Pro" preset in settings | `deepseek-v4-pro` |
-| `TRPG_NARRATIVE_MODEL` | Exploration, social and opening narration | `deepseek-v4-pro` |
-| `TRPG_JUDGEMENT_MODEL` | Combat, complex tool follow-ups, audits and summary fallback | `deepseek-v4-pro` |
-| `TRPG_FORCE_PRO` | Legacy switch; explicitly `0/false/no/off` with no role models set makes both roles use Flash | unset |
-| `TRPG_ENABLE_TURN_AUDIT` | Per-turn model audit for diagnostics, `1/true/yes` | off |
-| `TRPG_ENABLE_LOREBOOK` | Module lorebook retrieval, `0/false/no/off` to disable | on |
-| `TRPG_PROMPT_PROFILE` | `hybrid` uses the module's story spine, falls back to `full` when absent | `hybrid` |
-| `TRPG_DYNAMIC_TOOLS` | Send only relevant tool schemas per turn | on |
-| `TRPG_STORY_THINKING` | Narration thinking mode: `auto/disabled/enabled/provider` | `auto` |
-| `GLM_API_KEY` | Optional summary model API key | empty |
-| `GLM_BASE_URL` | GLM endpoint | `https://open.bigmodel.cn/api/paas/v4/` |
-| `GLM_MODEL` | GLM model name | `glm-4-flash-250414` |
-| `TRPG_MODULE` | Module directory used at startup | `mansion_of_madness` |
-| `TRPG_PROJECT_ROOT` | Read-only root for modules, rules and skills | auto-detected |
-| `TRPG_RUNTIME_ROOT` | Writable root for the database, compatibility data, custom characters and profiles | project root in source mode; Electron injects its per-user `userData/runtime` directory when packaged |
-| `TRPG_DATABASE_URL` | SQLAlchemy database URL; PostgreSQL required for cloud deployments | desktop defaults to SQLite at `TRPG_RUNTIME_ROOT/trpg-master.db` |
-| `TRPG_REQUIRE_AUTH` | Enable account, HTTP and WebSocket permission gates | `0`; the production service sets `1` |
-| `TRPG_ALLOW_REGISTRATION` | Open the registration endpoint; when off, accounts are provisioned manually (`tools/manage_users.py`) | `1`; the production service sets `0` |
-| `TRPG_LLM_MAX_CONCURRENCY` | Process-wide cap on concurrent model calls; excess calls queue and time out after 60s with a "server busy" error | `2` |
-| `TRPG_CONTEXT_WINDOW_TOKENS` | Total provider context window used for preflight capacity checks; set this to the documented limit of the selected gateway/model | `65536` (bounded to `8192`–`1048576`) |
-| `TRPG_CONTEXT_TARGET_RATIO` | Fraction of that window at which the server attempts non-destructive context compaction before the next request | `0.78` (bounded to `0.50`–`0.90`) |
-| `TRPG_MAX_OUTPUT_TOKENS` | Maximum completion tokens reserved in each provider request; automatically clamped to leave a real compaction band | `4096` |
-| `TRPG_ACTION_RATE_PER_MINUTE` | Per-account per-minute action rate limit (start/continue/action); excess is rejected with `rate_limited` | `10` |
-| `TRPG_DAILY_TURN_QUOTA` | Per-account daily generated-turn quota; excess is rejected with `daily_quota_exceeded`; in-memory counter, resets on restart | `200` |
-| `TRPG_ALLOWED_ORIGINS` | Origins allowed to carry the login cookie over HTTP/WebSocket | must be set explicitly in production |
-| `TRPG_WORLD_ID` | World instance opened by tool subprocesses; usually injected by the engine | the current module's default local world |
-
-</details>
-
-### Run the Linux desktop app from source
+### 启动桌面版
 
 ```bash
 bash start_desktop.sh
 ```
 
-The launcher builds the UI and opens Electron without touching the local database. Choosing **local play** then
-activates the venv, installs missing backend dependencies, applies migrations, imports legacy saves once and starts
-the local backend; choosing **multiplayer** never starts it. Closing the last Electron window stops a backend owned
-by that window. In an attended terminal, failure to start Electron falls back to a local browser session that runs
-until you press Ctrl+C.
+启动后选择：
 
-The project does not currently produce a Linux AppImage. The Windows package is built separately as described
-under **Windows packaging** below.
+- **单机游戏**：按需启动本地后端，自动应用数据库迁移；首次数据库化启动会导入旧版 `worlds/` 数据。
+- **多人游戏**：直接连接云端，不启动本地后端，也不读取本机 API Key。
 
-### Multiplayer
-
-In a browser, open [https://trpggame.xyz](https://trpggame.xyz). In Electron, choose **多人游戏**
-(Multiplayer); the official server is selected automatically. A custom bare HTTPS origin remains available only
-for development and acceptance testing. After logging in, create a room or join one with an invitation code. See the Chinese
-[multiplayer user guide](docs/MULTIPLAYER_USER_GUIDE.md) for the complete room, character, turn, save,
-reconnection and ownership-transfer flow.
-
-Online players do not need a local model API key and Electron does not start its embedded backend in multiplayer
-mode. Model credentials and inference configuration stay on the server. Multiplayer currently offers only
-default and module-provided investigators; local profile and custom-character files are not uploaded.
-
-The official endpoint uses a publicly trusted certificate. Do not bypass certificate warnings; report them to the
-server operator instead.
-
-### Run in the terminal
+终端版可直接运行：
 
 ```bash
+python3 start.py --setup
+python3 start.py --config
 python3 start.py
 ```
 
-### Frontend development mode
+### 前端开发
 
 ```bash
-# Terminal 1 — backend on http://127.0.0.1:8765 (WebSocket: ws://127.0.0.1:8765/ws)
+# 终端 1
 source venv/bin/activate
 python3 server.py
 
-# Terminal 2 — Vite dev server on http://127.0.0.1:5173
+# 终端 2
 cd frontend && npm run dev
 
-# Terminal 3 — Electron shell
+# 终端 3（可选）
 cd frontend && npm run electron:dev
 ```
 
-## Playing the Game
+## 云端与多人游戏
 
-- **Quick save** overwrites the auto slot `slot_000` of the current world; every completed keeper turn also updates it.
-- **Save manager** handles manual slots: load, create, rename, delete.
-- **Character / clues** shows your investigator's stats, items, clues and revealed handouts.
-- **Model settings** picks narration and judgement models independently (all-Pro, balanced, all-Flash, or custom model IDs).
-- **New game** returns to the module and investigator selection flow.
+官方入口为 [trpggame.xyz](https://trpggame.xyz)。登录后可以：
 
-## Documentation
+1. 在「我的冒险」创建或继续私密云端单人世界；
+2. 创建多人房间并生成邀请码，或使用邀请码加入已有房间；
+3. 选择未被占用的调查员，准备后由房主开局；
+4. 按服务端给出的行动权提交操作，断线后重新进入同一房间即可恢复；
+5. 使用快速存档、手动存档和时间线分支管理调查进度。
 
-The project documentation is written in Chinese:
+云端模型凭据由服务器维护者保管，玩家浏览器和 Electron 客户端不会收到 API Key。桌面单机默认关闭账号门禁，不应直接暴露到公网。
 
-- [架构文档](docs/ARCHITECTURE.md) — processes, modules, turn lifecycle, data ownership, extension points
-- [接口文档](docs/API.md) — HTTP routes, WebSocket protocol, event ordering, payload schemas
-- [部署与恢复](docs/DEPLOYMENT.md) — official server, PostgreSQL, migrations, backup, monitoring and recovery
-- [多人游戏使用说明](docs/MULTIPLAYER_USER_GUIDE.md) — browser/Electron login, rooms, turns, saves and reconnection
-- [模组格式](docs/MODULE_FORMAT.md) — the `.trpgmod` v1/v2 package specification for module authors
-- [开发路线图](docs/ROADMAP.md) — current local/multiplayer baseline and remaining release work
-- [Harness 采纳与 H3 边界](docs/DEEPSEEK_HARNESS_ADOPTION.md) — request safety, context compaction, frozen Skill catalog and the explicitly deferred structured-memory surface
+## 模组开发
 
-### H3 rule and memory boundary
+从示例工程开始：
 
-For a database-backed world, the first resolved Skill catalog is stored as immutable pin rows: content and
-digest in `world_skill_pins`, plus the full manifest snapshot and order in
-`world_skill_pin_manifests`. If an older world has a complete pre-sidecar pin set, it remains readable only as
-bounded, non-invocable core text; it never rereads the current on-disk catalog. A partial sidecar,
-unreadable pin store or malformed database schema fails closed instead of silently changing the rules in a running
-world.
+```bash
+cp -r examples/module-template /tmp/my-trpg-module
+venv/bin/python tools/module_packager.py compile /tmp/my-trpg-module
+venv/bin/python tools/module_packager.py pack /tmp/my-trpg-module /tmp/my-module.trpgmod
+venv/bin/python tools/module_packager.py validate /tmp/my-module.trpgmod
+```
 
-`memory_fact_candidates` and `memory_facts` are currently an internal, shadow-only schema/service boundary. No
-normal game turn, model tool, HTTP endpoint, WebSocket message, player UI or prompt reads or writes them. This
-non-exposure is an intentional H3 completion boundary, not an accidentally missing screen. The tables do not alter
-`WorldState`, turn outcomes, narration or what a player can see; those continue to be governed by the authoritative
-world and turn records. Treat them as implementation groundwork rather than as a public memory or export API.
+模组编译器会验证稳定 ID、场景与 NPC 引用、发现规则、失败保底、危机和结局契约、素材路径及 ZIP 安全。完整字段见[模组格式](docs/MODULE_FORMAT.md)。
 
-## Development
+## 项目结构
 
-Run these checks before submitting changes:
+```text
+trpg-master/
+├── server.py        # FastAPI HTTP / WebSocket 入口
+├── src/             # 游戏引擎、回合工作流、规则、持久化与权限
+├── tools/           # 模组、账号、备份与验收工具
+├── skills/          # 受控的守秘人规则与能力目录
+├── rules/           # 结构化规则数据
+├── mod/             # 内置模组
+├── schemas/         # .trpgmod JSON Schema
+├── examples/        # 模组工程模板
+├── frontend/        # React、Vite 与 Electron
+├── editor/dist/     # 随服务发布的模组工坊静态制品
+└── docs/            # 长期维护的技术契约
+```
+
+## 文档
+
+- [架构](docs/ARCHITECTURE.md)：进程、回合工作流、上下文、数据所有权、安全与扩展边界。
+- [接口](docs/API.md)：HTTP、WebSocket 消息、事件顺序和错误协议。
+- [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 作者契约与编译诊断。
+- [部署与恢复](docs/DEPLOYMENT.md)：PostgreSQL、TLS、备份、监控和发布流程。
+- [路线图](docs/ROADMAP.md)：CoC 规则完整性、复杂战斗、追逐、地图和多人世界演进。
+
+项目只保留上述长期契约；个人 Agent 指令、验收 Skill、临时设计稿和过程记录均不进入版本控制。
+
+## 开发校验
 
 ```bash
 venv/bin/python -m pytest -q
 venv/bin/python -m ruff check src server.py tools tests
 venv/bin/python -m compileall -q src tools server.py tests
+
 cd frontend
 npm test
 npm run format:check
 npm run build
-bash -n ../start_desktop.sh
 ```
 
-Protocol changes must be reflected in [docs/API.md](docs/API.md); changes to save, character or module state structures belong in the data-ownership chapter of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+涉及接口、状态结构或模组格式的变更，必须同步更新对应契约文档。真实模型全流程验收会产生 API 费用，仅在发布候选版本按需执行，不属于普通单元测试。
 
-### Project structure (top level)
+## 当前边界
 
-```text
-trpg-master/
-├── server.py        # FastAPI HTTP + WebSocket adapter
-├── src/             # engine, LangGraph turn workflow, combat, persistence, module tooling
-├── tools/           # deterministic CLI tools (dice, combat, damage, SAN, module packager)
-├── skills/          # keeper constraint prompts, loaded on demand
-├── rules/           # structured rules data
-├── mod/             # bundled modules
-├── schemas/trpgmod/ # shared JSON Schemas for the module format
-├── examples/        # module project template
-├── frontend/        # React + Vite + TypeScript UI and Electron shell
-└── docs/            # project documentation (Chinese)
-```
+- 多人目标为单房间 2–4 人，当前使用单个 Uvicorn worker；尚未实现跨进程房间协调。
+- 结构化记忆目前是 shadow-only 内部边界，不参与正常回合、模型工具、提示词、HTTP/WS 或玩家 UI。
+- 地图、复杂追逐、完整 CoC 长期角色成长和自由分头行动仍在路线图中。
+- Linux 当前从源码运行 Electron；Windows 安装包与便携版通过 `packaging/build_windows.ps1` 构建。
 
-The full module map lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## 许可证
 
-### Windows packaging
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
-```
-
-Run this on Windows. It builds `trpg-server.exe` with PyInstaller, then the NSIS installer and portable builds
-with electron-builder. Output lands in `frontend/release/`. `.env.json` is never bundled. The Electron setup
-window asks for a model endpoint and key only when the player selects local mode; multiplayer mode selects the
-official HTTPS service automatically, with a custom origin available only for development and acceptance testing.
-
-## Current Limitations
-
-- Multiplayer now uses one shared `GameEngine` per active room, authoritative turn ownership and
-  member-filtered recovery. The current target is 2–4 players per room and one Uvicorn worker; cross-process
-  room coordination is not implemented.
-- Local desktop mode ships with auth disabled and must not be exposed to the public internet. Server
-  deployments require `TRPG_REQUIRE_AUTH=1`, trusted TLS and explicit allowed origins (see
-  the [deployment guide](docs/DEPLOYMENT.md) and [multiplayer user guide](docs/MULTIPLAYER_USER_GUIDE.md)).
-
-## Contributing
-
-Contributions are welcome. Please keep protocol, architecture and module-format documentation in sync with code changes, and make sure the checks above pass before opening a PR. Note that the codebase, in-game content and most documentation are in Chinese.
-
-## License
-
-Code is released under the [MIT License](LICENSE). Bundled module content (narrative text and assets under `mod/`) is included for play and study; check each module's own `license` field before redistributing it.
+代码使用 [MIT License](LICENSE)。内置模组的文本与素材仅供游玩和研究；再分发前请检查各模组 `manifest.json` 中的许可字段。

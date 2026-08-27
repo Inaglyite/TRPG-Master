@@ -20,6 +20,10 @@ let streamBuffer = "";
 let playbackTimer: number | null = null;
 let networkStreamFinished = false;
 let authoritativeSegments: NarrativeSegment[] | null = null;
+const sealedNarrativeBeats: Array<{
+  messageId: string;
+  segmentCount: number;
+}> = [];
 const presentationCallbacks: Array<() => void> = [];
 const visibilityCallbacks: Array<() => void> = [];
 let replacement: { sourceTurnId: string; targetId: string } | null = null;
@@ -51,6 +55,10 @@ export type TurnHistoryItem = {
   narrative_segments?: NarrativeSegment[];
   chat_events?: NarrativeSegment[];
   choices?: Array<{ label: string; isFree: boolean }>;
+  player_followups?: Array<{
+    text: string;
+    after_narrative_segment?: number;
+  }>;
 };
 
 export type InvestigatorActor = {
@@ -164,6 +172,7 @@ function lastMessageIndex(
 }
 
 export function setDisplayTurnId(turnId: string | null) {
+  if (turnId && turnId !== displayTurnId) sealedNarrativeBeats.length = 0;
   displayTurnId = turnId;
 }
 
@@ -277,6 +286,7 @@ export function beginNarrativeReplacement(sourceTurnId: string) {
   streamNpc = null;
   networkStreamFinished = false;
   authoritativeSegments = null;
+  sealedNarrativeBeats.length = 0;
   replacement = { sourceTurnId, targetId };
   scrollDown(true);
 }
@@ -421,13 +431,43 @@ export function renderTurnHistory(
               `turn-${turnId}-legacy`,
             ),
           ];
-      messages.push({
-        id: nextId(),
-        kind: "gm",
-        text: String(turn.narrative),
-        turnId,
-        segments,
+      const followups = (turn.player_followups || [])
+        .filter((item) => String(item?.text || "").trim())
+        .map((item) => ({
+          text: String(item.text),
+          after: Math.max(
+            0,
+            Math.min(
+              segments.length,
+              Number(item.after_narrative_segment) || 0,
+            ),
+          ),
+        }))
+        .sort((left, right) => left.after - right.after);
+      let segmentStart = 0;
+      const speaker = normalizeInvestigatorActor(turn.actor);
+      const pushNarrative = (slice: NarrativeSegment[]) => {
+        if (!slice.length) return;
+        messages.push({
+          id: nextId(),
+          kind: "gm",
+          text: slice.map((segment) => segment.text).join(""),
+          turnId,
+          segments: slice,
+        });
+      };
+      followups.forEach((followup) => {
+        pushNarrative(segments.slice(segmentStart, followup.after));
+        messages.push({
+          id: nextId(),
+          kind: "player",
+          text: followup.text,
+          turnId,
+          ...(speaker ? { speaker } : {}),
+        });
+        segmentStart = followup.after;
       });
+      pushNarrative(segments.slice(segmentStart));
     }
   });
   useMessageStore.getState().replaceMessages(messages);
@@ -535,6 +575,7 @@ function clearStream() {
   streamSegments = [];
   streamNpc = null;
   authoritativeSegments = null;
+  sealedNarrativeBeats.length = 0;
   networkStreamFinished = false;
   narrationBoost = false;
   presentationCallbacks.splice(0);
@@ -656,6 +697,33 @@ export function flushNarrativeStream() {
   if (networkStreamFinished) finalizePresentedStream();
 }
 
+/**
+ * Finish the currently visible GM bubble at an in-turn chat decision boundary.
+ * The network turn stays open, so narration after the player's reply starts a
+ * new bubble instead of being appended above that reply.
+ */
+export function sealNarrativeBeat() {
+  flushNarrativeStream();
+  if (!streamMessageId) return;
+  const targetId = streamMessageId;
+  if (streamSegments.length) {
+    sealedNarrativeBeats.push({
+      messageId: targetId,
+      segmentCount: streamSegments.length,
+    });
+  }
+  updateMessages((messages) =>
+    messages.map((message) =>
+      message.id === targetId ? { ...message, streaming: false } : message,
+    ),
+  );
+  streamMessageId = null;
+  streamBuffer = "";
+  streamSegments = [];
+  streamNpc = null;
+  authoritativeSegments = null;
+}
+
 export function onNarrativeChunk(text: string, npcId?: string | null) {
   if (!text) return;
   removeLoading();
@@ -727,12 +795,34 @@ export function onNarrativeSegment(speaker: Speaker | undefined) {
 /** 回合定稿：以服务端权威段结构覆盖流式期间的实时段。 */
 export function onNarrativeSegments(segments: NarrativeSegment[]) {
   if (!Array.isArray(segments) || !segments.length) return;
-  authoritativeSegments = segments.map((segment, segmentIndex) =>
+  const normalized = segments.map((segment, segmentIndex) =>
     normalizeNarrativeSegment(
       segment,
       `turn-${displayTurnId || "unknown"}-${segmentIndex}`,
     ),
   );
+  let consumed = 0;
+  if (sealedNarrativeBeats.length) {
+    const sealed = sealedNarrativeBeats.map((beat) => {
+      const assigned = normalized.slice(consumed, consumed + beat.segmentCount);
+      consumed += assigned.length;
+      return { messageId: beat.messageId, segments: assigned };
+    });
+    updateMessages((messages) =>
+      messages.map((message) => {
+        const beat = sealed.find((item) => item.messageId === message.id);
+        return beat?.segments.length
+          ? { ...message, segments: beat.segments }
+          : message;
+      }),
+    );
+    sealedNarrativeBeats.length = 0;
+  }
+  authoritativeSegments = normalized.slice(consumed);
+  if (!authoritativeSegments.length) {
+    authoritativeSegments = null;
+    return;
+  }
   if (streamMessageId && playbackQueue.length) {
     rebasePlaybackOnAuthoritativeSegments(authoritativeSegments);
   } else if (!playbackQueue.length) {

@@ -1,6 +1,6 @@
 """H3 Skill Catalog tests: manifest / pins freeze / resolver / load_skill / 溯源。
 
-Contract covered (see docs/DEEPSEEK_HARNESS_ADOPTION.md §5.4):
+Contract covered (see docs/ARCHITECTURE.md §7.1 and §7.3):
 - catalog.json is the single metadata source; invalid catalogs fail closed
 - world_skill_pins freeze per world: pin once, never re-pin, branch inherits
 - resolver activation is fully deterministic; keywords only diagnose

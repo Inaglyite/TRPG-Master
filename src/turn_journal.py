@@ -42,6 +42,7 @@ _REPLAY_EVENT_TYPES = {
     "handout",
     "error",
     "choices",
+    "player_reply",
 }
 
 
@@ -386,6 +387,7 @@ class TurnJournal:
         lore_entry_ids: list[str] | None = None,
         diagnostics: dict | None = None,
         narrative_segments: list[dict] | None = None,
+        player_followups: list[dict] | None = None,
         checkpoint: ContextCheckpoint | Mapping[str, Any] | None = None,
     ) -> dict:
         # 写前校验：非法 checkpoint 在触碰锁/写盘之前抛错。
@@ -420,6 +422,7 @@ class TurnJournal:
                     "narrative": str(narrative or ""),
                     "choices": _json_safe(choices),
                     "narrative_segments": _json_safe(narrative_segments or []),
+                    "player_followups": _json_safe(player_followups or []),
                     "events": events,
                     "executed_tools": _json_safe(executed_tools or []),
                     "lore_entry_ids": [str(item) for item in (lore_entry_ids or [])],
@@ -525,6 +528,7 @@ class TurnJournal:
                     "narrative": record.get("narrative", ""),
                     "choices": copy.deepcopy(record.get("choices", [])),
                     "narrative_segments": copy.deepcopy(record.get("narrative_segments", [])),
+                    "player_followups": copy.deepcopy(record.get("player_followups", [])),
                     "completed_at": record.get("completed_at"),
                     "world_revision": record.get("world_revision"),
                 }
@@ -696,6 +700,7 @@ class TurnJournal:
                 "narrative",
                 "choices",
                 "narrative_segments",
+                "player_followups",
                 "events",
                 "world_revision",
                 "message_count",

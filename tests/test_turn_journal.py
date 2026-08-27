@@ -110,9 +110,16 @@ class TurnJournalTests(unittest.TestCase):
                         "token_estimate": 18,
                     },
                 },
+                player_followups=[
+                    {
+                        "text": "仍然进入书房",
+                        "after_narrative_segment": 1,
+                    }
+                ],
             )
 
             self.assertEqual("completed", record["status"])
+            self.assertEqual(record["player_followups"][0]["text"], "仍然进入书房")
             self.assertEqual(7, record["world_revision"])
             self.assertEqual("你拉开抽屉。", record["events"][0]["text"])
             self.assertNotIn("turn_id", record["events"][0])
@@ -127,12 +134,17 @@ class TurnJournalTests(unittest.TestCase):
             self.assertIsNone(index["active_turn_id"])
             self.assertEqual(turn_id, index["latest_completed_turn_id"])
             public = journal.recovery_status(turn_id)["requested"]
+            self.assertEqual(public["player_followups"][0]["text"], "仍然进入书房")
             self.assertNotIn("executed_tools", public)
             self.assertNotIn("lore_entry_ids", public)
             diagnostic = journal.diagnostic_report(turn_id)
             self.assertEqual("story-model", diagnostic["model_calls"][0]["model"])
             self.assertEqual(["skill_check"], diagnostic["tool_names"])
             self.assertEqual(18, diagnostic["lorebook"]["token_estimate"])
+            self.assertEqual(
+                journal.public_history()[0]["player_followups"],
+                [{"text": "仍然进入书房", "after_narrative_segment": 1}],
+            )
 
     def test_public_history_preserves_authoritative_multiplayer_actor(self):
         with tempfile.TemporaryDirectory() as temp:

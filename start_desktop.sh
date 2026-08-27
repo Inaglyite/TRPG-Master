@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TRPG Agent desktop launcher.
+# TRPG Game desktop launcher.
 # Normal invocation keeps logs in the current terminal; --desktop runs quietly.
 # Electron calls --backend-only after the user explicitly chooses local mode.
 set -u
@@ -55,6 +55,18 @@ run_backend() {
     elif [ -f .venv/bin/activate ]; then
         # shellcheck disable=SC1091
         source .venv/bin/activate
+    else
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "❌ 未找到 Python 3.12+，无法启动本地单机后端"
+            return 1
+        fi
+        echo "首次启动：创建 Python 虚拟环境..."
+        python3 -m venv venv || {
+            echo "❌ 虚拟环境创建失败；Debian/Ubuntu 请先安装 python3-venv"
+            return 1
+        }
+        # shellcheck disable=SC1091
+        source venv/bin/activate
     fi
 
     ensure_backend_dependencies || return 1
@@ -89,14 +101,19 @@ if [ "$BACKEND_ONLY" = true ]; then
 fi
 
 echo "========================================"
-echo "  🎲 TRPG Agent 桌面版"
+echo "  🎲 TRPG Game 桌面版"
 echo "========================================"
 echo ""
 
 # ---- Frontend dependencies and build ----
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "❌ 未找到 Node.js 20+ 与 npm，请安装后重试"
+    exit 1
+fi
+
 if [ ! -d frontend/node_modules ]; then
     echo "安装前端依赖..."
-    (cd frontend && npm install) || { echo "❌ 前端依赖安装失败"; exit 1; }
+    (cd frontend && npm ci) || { echo "❌ 前端依赖安装失败"; exit 1; }
 fi
 
 FRONTEND_BUILD_STAMP="frontend/dist/index.html"

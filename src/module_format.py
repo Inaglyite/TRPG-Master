@@ -265,6 +265,127 @@ class EncounterDefinition(StrictModel):
         return self
 
 
+class SceneEntryBeatDefinition(StrictModel):
+    npc_id: str
+    public_text: str = Field(min_length=1, max_length=1200)
+
+    @field_validator("npc_id")
+    @classmethod
+    def validate_npc_id(cls, value: str) -> str:
+        return _validate_entity_id(value, "入场节拍 NPC ID")
+
+
+class ActionRouteDefinition(StrictModel):
+    id: str
+    aliases: list[str] = Field(min_length=1)
+    destination_scene_id: str
+    required_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    forbidden_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    departure_text: str = Field(default="", max_length=1200)
+    travel_text: str = Field(default="", max_length=1200)
+    entry_text: str = Field(default="", max_length=1200)
+
+    @field_validator("id", "destination_scene_id")
+    @classmethod
+    def validate_ids(cls, value: str) -> str:
+        return _validate_entity_id(value, "行动路线 ID/目的地")
+
+    @field_validator("aliases")
+    @classmethod
+    def validate_aliases(cls, values: list[str]) -> list[str]:
+        aliases = [str(value).strip() for value in values]
+        if any(len(value) < 2 for value in aliases):
+            raise ValueError("行动路线别名至少需要两个字符")
+        return list(dict.fromkeys(aliases))
+
+
+class ActionPreviewTriggerDefinition(StrictModel):
+    always: bool = False
+    skill_below: dict[str, int] = Field(default_factory=dict)
+    attribute_below: dict[str, int] = Field(default_factory=dict)
+    occupation_contains_any: list[str] = Field(default_factory=list)
+    traits_contain_any: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_trigger(self) -> ActionPreviewTriggerDefinition:
+        values = [*self.skill_below.values(), *self.attribute_below.values()]
+        if any(value < 0 or value > 100 for value in values):
+            raise ValueError("行动预演技能/属性阈值必须在 0 到 100 之间")
+        if not (
+            self.always
+            or self.skill_below
+            or self.attribute_below
+            or self.occupation_contains_any
+            or self.traits_contain_any
+        ):
+            raise ValueError("行动预演 trigger_if 至少声明一个公开条件")
+        return self
+
+
+class ActionPrepareOptionDefinition(StrictModel):
+    id: str
+    label: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=160)
+    action_text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        return _validate_entity_id(value, "准备选项 ID")
+
+
+class ActionAdvisoryDefinition(StrictModel):
+    id: str
+    destination_scene_id: str
+    transition_kinds: list[
+        Literal["explicit_move", "authored_route", "discovery_target"]
+    ] = Field(default_factory=list)
+    route_ids: list[str] = Field(default_factory=list)
+    required_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    forbidden_flags: dict[str, bool | int | str] = Field(default_factory=dict)
+    trigger_if: ActionPreviewTriggerDefinition | None = None
+    enabled: bool = True
+    title: str = Field(default="", max_length=120)
+    npc_id: str | None = None
+    npc_text: str = Field(default="", max_length=1600)
+    keeper_text: str = Field(default="", max_length=1600)
+    public_hint: str = Field(default="", max_length=500)
+    continue_label: str = Field(default="", max_length=80)
+    continue_description: str = Field(default="", max_length=160)
+    prepare_options: list[ActionPrepareOptionDefinition] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    cancel_label: str = Field(default="", max_length=80)
+    cancel_description: str = Field(default="", max_length=160)
+
+    @field_validator("id", "destination_scene_id")
+    @classmethod
+    def validate_ids(cls, value: str) -> str:
+        return _validate_entity_id(value, "行动预演 ID/目的地")
+
+    @field_validator("npc_id")
+    @classmethod
+    def validate_optional_npc_id(cls, value: str | None) -> str | None:
+        return None if value is None else _validate_entity_id(value, "行动预演 NPC ID")
+
+    @field_validator("route_ids")
+    @classmethod
+    def validate_route_ids(cls, values: list[str]) -> list[str]:
+        return [_validate_entity_id(value, "行动路线 ID") for value in values]
+
+    @model_validator(mode="after")
+    def validate_public_warning(self) -> ActionAdvisoryDefinition:
+        if self.npc_id and not self.npc_text:
+            raise ValueError("行动预演声明 npc_id 时必须提供 npc_text")
+        if not self.npc_text and not self.keeper_text and not self.public_hint:
+            raise ValueError("行动预演必须提供 NPC、守秘人提醒或公开提示")
+        option_ids = [option.id for option in self.prepare_options]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("行动预演准备选项 ID 不能重复")
+        return self
+
+
 class SceneDefinition(StrictModel):
     name: str = Field(min_length=1, max_length=160)
     aliases: list[str] = Field(default_factory=list)
@@ -272,6 +393,9 @@ class SceneDefinition(StrictModel):
     exits: list[str] = Field(default_factory=list)
     npcs_present: list[str] = Field(default_factory=list)
     encounters: list[EncounterDefinition] = Field(default_factory=list)
+    action_routes: list[ActionRouteDefinition] = Field(default_factory=list)
+    action_advisories: list[ActionAdvisoryDefinition] = Field(default_factory=list)
+    entry_beat: SceneEntryBeatDefinition | None = None
     tags: list[str] = Field(default_factory=list)
     document: str | None = None
     asset_id: str | None = None
@@ -543,6 +667,7 @@ class ModuleDefinition(StrictModel):
         npc_ids = set(self.npcs)
         scene_ids = set(self.scenes)
         clue_ids = set(self.clues)
+        flag_ids = set(self.initial_state.flags)
         trigger_targets = {
             "npc_revealed": npc_ids,
             "scene_entered": scene_ids,
@@ -587,6 +712,59 @@ class ModuleDefinition(StrictModel):
                     raise ValueError(
                         f"场景 {scene_id} 的遭遇引用了不存在的 flag: {missing_flags}"
                     )
+            route_ids = [route.id for route in scene.action_routes]
+            if len(route_ids) != len(set(route_ids)):
+                raise ValueError(f"场景 {scene_id} 的行动路线 ID 重复")
+            for route in scene.action_routes:
+                if route.destination_scene_id not in scene_ids:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动路线目的地不存在: "
+                        f"{route.destination_scene_id}"
+                    )
+                missing_flags = sorted(
+                    (set(route.required_flags) | set(route.forbidden_flags))
+                    - flag_ids
+                )
+                if missing_flags:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动路线引用了不存在的 flag: "
+                        f"{missing_flags}"
+                    )
+            advisory_ids = [advisory.id for advisory in scene.action_advisories]
+            if len(advisory_ids) != len(set(advisory_ids)):
+                raise ValueError(f"场景 {scene_id} 的行动预演 ID 重复")
+            for advisory in scene.action_advisories:
+                if advisory.destination_scene_id not in scene_ids:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动预演目的地不存在: "
+                        f"{advisory.destination_scene_id}"
+                    )
+                if advisory.npc_id and advisory.npc_id not in scene.npcs_present:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动预演 NPC 不在初始场景中: "
+                        f"{advisory.npc_id}"
+                    )
+                missing_routes = sorted(set(advisory.route_ids) - set(route_ids))
+                if missing_routes:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动预演引用了不存在的路线: "
+                        f"{missing_routes}"
+                    )
+                missing_flags = sorted(
+                    (set(advisory.required_flags) | set(advisory.forbidden_flags))
+                    - flag_ids
+                )
+                if missing_flags:
+                    raise ValueError(
+                        f"场景 {scene_id} 的行动预演引用了不存在的 flag: "
+                        f"{missing_flags}"
+                    )
+            if scene.entry_beat:
+                if scene.entry_beat.npc_id not in scene.npcs_present:
+                    raise ValueError(
+                        f"场景 {scene_id} 的 entry_beat NPC 不在初始场景中: "
+                        f"{scene.entry_beat.npc_id}"
+                    )
             if scene.asset_id and scene.asset_id not in self.assets.scenes:
                 raise ValueError(f"场景 {scene_id} 的素材不存在: {scene.asset_id}")
 
@@ -623,7 +801,6 @@ class ModuleDefinition(StrictModel):
         if missing_known:
             raise ValueError(f"初始线索不存在: {missing_known}")
 
-        flag_ids = set(self.initial_state.flags)
         for clue_id, clue in self.clues.items():
             missing_flags = sorted(set(clue.flag_effects) - flag_ids)
             if missing_flags:

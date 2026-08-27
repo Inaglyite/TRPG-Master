@@ -84,6 +84,15 @@ def make_callbacks(capture: Capture, *, decision_strategy: str = "default") -> E
 
     def on_decision(info: dict) -> str | None:
         capture.decisions.append(info)
+        if info.get("kind") == "action_preview":
+            return next(
+                (
+                    option.get("id")
+                    for option in info.get("options", [])
+                    if isinstance(option, dict) and option.get("id") == "continue_action"
+                ),
+                info.get("default_option"),
+            )
         if decision_strategy == "confirm":
             options = [o for o in info.get("options", []) if isinstance(o, dict)]
             for option in options:
@@ -241,7 +250,7 @@ def scarlet_beats() -> list[Beat]:
             key="B1_morgue",
             title="停尸房：惠特克罗夫特与验尸",
             inputs=[
-                "拿着法伦的便签前往校医院停尸房，找惠特克罗夫特医生说明来意",
+                "我想先看看莱特教授的尸体。",
                 "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
                 "我仔细验尸：检查莱特遗体的皮肤、指甲、躯干和任何异常痕迹",
             ],
@@ -269,10 +278,19 @@ def scarlet_beats() -> list[Beat]:
             key="B1b_threat",
             title="威胁无辜者确认门（威胁后放弃）",
             inputs=["我拔出左轮指着惠特克罗夫特，威胁他说出真相"],
-            goal=lambda w, c: bool(c.decisions),  # 触发确认门即达标
+            goal=lambda w, c: any(
+                decision.get("kind") == "coercive_threat" for decision in c.decisions
+            ),
             max_turns=2,
             checks=[
-                Check(4, "威胁无辜 NPC 触发确认门", lambda w, c: bool(c.decisions)),
+                Check(
+                    4,
+                    "威胁无辜 NPC 触发确认门",
+                    lambda w, c: any(
+                        decision.get("kind") == "coercive_threat"
+                        for decision in c.decisions
+                    ),
+                ),
                 Check(
                     4,
                     "放弃确认后无战斗状态",
@@ -735,6 +753,9 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     report["errors"] = capture.errors[:20]
     report["handout_count"] = len(capture.handouts)
     report["decision_count"] = len(capture.decisions)
+    report["decision_kinds"] = [
+        str(decision.get("kind") or "") for decision in capture.decisions
+    ]
     report["dice_count"] = len(capture.dice)
     report["turn_count"] = len(capture.turn_snapshots)
     report["turn_snapshots"] = capture.turn_snapshots

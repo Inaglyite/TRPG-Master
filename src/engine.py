@@ -15,9 +15,9 @@ from .action_checks import infer_action_check, infer_scene_transition
 from .action_resolution import ActionResolution, plan_player_action
 from .agent_graph import build_turn_graph
 from .asset_payload import npc_id_known
+from .case_clocks import clock_status
 from .characters import apply_character_to_state, default_character_ref
 from .characters import settle_case as settle_character_case
-from .combat import preview_player_escalation
 from .combat_agent import build_combat_overlay
 from .config import (
     API_KEY,
@@ -33,10 +33,10 @@ from .config import (
     model_timeout_seconds,
 )
 from .database_turn_journal import DatabaseTurnJournal as TurnJournal
-from .case_clocks import clock_status
 from .discovery import DiscoveryMatch, match_discovery_rules, preferred_check_skill
 from .encounters import SceneEncounterResolution, resolve_scene_encounters
 from .engine_primitives import EngineCallbacks, TurnCancelledError
+from .escalation_preflight import resolve_player_escalation
 from .handouts import matching_handouts
 from .history_compactor import HistoryCompactor, build_summary_input, parse_summary_json
 from .logger import error as log_error
@@ -439,6 +439,7 @@ class GameEngine:
         executed_tools: list[dict],
         lore_entry_ids: list[str],
         narrative_segments: list[dict] | None = None,
+        player_followups: list[dict] | None = None,
     ) -> dict | None:
         turn_id = getattr(self, "_active_turn_id", None)
         journal = getattr(self, "turn_journal", None)
@@ -479,6 +480,7 @@ class GameEngine:
                     },
                 },
                 narrative_segments=narrative_segments,
+                player_followups=player_followups,
                 expected_world_revision=expected_world_revision,
                 checkpoint=checkpoint,
             )
@@ -886,27 +888,7 @@ class GameEngine:
 
     def _preflight_player_escalation(self, content: str) -> str | None:
         """Confirm explicit violence before the first model token can narrate it."""
-        try:
-            world = self.context.world_store.load()
-        except Exception:
-            return content
-        preview = preview_player_escalation(world, content)
-        if preview is None:
-            return content
-
-        decision = preview["decision"]
-        selected = self.cb.on_decision(decision)
-        valid_options = {
-            option.get("id") for option in decision.get("options", []) if isinstance(option, dict)
-        }
-        if selected not in valid_options:
-            selected = decision.get("default_option")
-        authorization = preview["authorization"]
-        if selected != authorization["confirm_option"]:
-            return None
-
-        self._preconfirmed_escalation = authorization
-        return f"{content}\n{preview['prompt_suffix']}"
+        return resolve_player_escalation(self, content)
 
     def _preconfirmed_option(self, decision: dict) -> str | None:
         authorization = self._preconfirmed_escalation
@@ -1165,13 +1147,20 @@ class GameEngine:
             )
         return resolved
 
-    def _resolve_scene_transition(self, content: str) -> str | None:
-        """Commit an unambiguous player move before generating its narration."""
+    def _resolve_scene_transition(
+        self,
+        content: str,
+        *,
+        destination_scene_id: str | None = None,
+    ) -> str | None:
+        """Commit a turn-planned, unambiguous move before narration starts."""
         try:
             world = self.context.world_store.load()
         except Exception:
             return None
-        scene_id = infer_scene_transition(content, world)
+        scene_id = destination_scene_id or infer_scene_transition(content, world)
+        if scene_id and scene_id not in (world.get("scene_catalog") or {}):
+            return None
         if scene_id is None:
             return None
         encounter = resolve_scene_encounters(
@@ -1236,33 +1225,6 @@ class GameEngine:
         except json.JSONDecodeError:
             return None
         return scene_id if result.get("ok") else None
-
-    def _turn_prelude(
-        self,
-        scene_id: str | None,
-        discovery_matches: list[DiscoveryMatch],
-    ) -> str:
-        """Build authored, player-visible setup that must precede rule effects."""
-        parts: list[str] = []
-        if scene_id:
-            try:
-                world = self.context.world_store.load()
-                scene = (world.get("scene_catalog", {}) or {}).get(scene_id, {})
-            except Exception:
-                scene = {}
-            name = str(scene.get("name") or "").strip()
-            description = str(scene.get("description") or "").strip()
-            if name:
-                arrival = f"你前往{name}。"
-                if description:
-                    arrival += description
-                parts.append(arrival)
-
-        for match in discovery_matches:
-            approach = str(match.rule.get("approach_text") or "").strip()
-            if approach and approach not in parts:
-                parts.append(approach)
-        return "\n\n".join(parts)
 
     def _authoritative_turn_context(
         self,
@@ -1339,6 +1301,12 @@ class GameEngine:
         action_resolution = getattr(self, "_action_resolution", None)
         encounter_resolution = getattr(self, "_encounter_resolution", None)
         arrival_only = bool(action_resolution and action_resolution.is_arrival)
+        entry_beat = scene.get("entry_beat") if arrival_only else None
+        if (
+            not isinstance(entry_beat, dict)
+            or str(entry_beat.get("npc_id") or "") not in present_npc_ids
+        ):
+            entry_beat = None
         opening_public_facts = (
             [str(clue.get("text") or "")[:400] for clue in known_clues] if opening else []
         )
@@ -1405,6 +1373,7 @@ class GameEngine:
                 if isinstance(encounter_resolution, SceneEncounterResolution)
                 else None
             ),
+            "scene_entry_beat": entry_beat,
             "narrative_fact_scope": {
                 "closed_world_for_this_action": bool(
                     opening or arrival_only or check_result is not None or resolved_discoveries
@@ -1436,6 +1405,8 @@ class GameEngine:
             "narrative_fact_scope.arrival_only 为 true 时，本轮只叙述抵达、环境与接洽在场人物；"
             "玩家所述出行目的不是已经完成的调查动作。不得打开容器、展示或检查尸体、阅读文件，"
             "也不得触发 SAN、线索、NPC 秘密或相关 flag；应把明确调查动作留作抵达后的下一选择。"
+            "scene_entry_beat 非空时，必须让其中 npc_id 对应的在场人物参与这次接洽；"
+            "只能使用 public_text 与该 NPC 的公开特征，直接引语仍必须使用对应的 npc 标签。"
             "narrative_fact_scope.mode 为 module_opening 时，module_opening、opening_public_facts、"
             "current_scene.description 与 npc_public_state 是完整的开场权威调查事实；允许即兴"
             "扩写非核心细节，但未被这些字段或 clue_catalog 支持的内容永远只是叙事点缀，"
@@ -2099,6 +2070,9 @@ class GameEngine:
             raise
         finally:
             self._preconfirmed_escalation = None
+            self.__dict__.pop("_preplanned_action_resolution", None)
+            self.__dict__.pop("_preflight_narrative", None)
+            self.__dict__.pop("_preflight_player_followups", None)
 
     def _handle_action_cached(self, user_content: str | None) -> None:
         self._resume_pending_combat_decision()
@@ -2113,6 +2087,13 @@ class GameEngine:
                     self.save("slot_000")
                     self.cb.on_done()
                     return
+                # Freeze the natural-language interpretation once, before the
+                # graph can emit a warning or any model token.  A chat-style
+                # action preview must resume this exact plan after confirmation
+                # instead of asking the parser to infer the destination again.
+                self._preplanned_action_resolution = self._plan_player_action(
+                    user_content
+                )
             self._turn_graph.invoke(
                 {"engine": self, "user_content": user_content},
                 config={"recursion_limit": 50},

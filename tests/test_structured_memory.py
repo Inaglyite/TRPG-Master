@@ -1,7 +1,7 @@
 """H3 structured-memory invariants: candidate→fact boundary and shadow retrieval.
 
 Covers the branch/audience/tier isolation contract from
-``docs/DEEPSEEK_HARNESS_ADOPTION.md`` §5.5: cross-world, cross-user,
+``docs/ARCHITECTURE.md`` §7.5: cross-world, cross-user,
 cross-branch and cross-tier wrong recall must be zero, and a verbatim NPC
 transcript is never auto-promoted into an accepted fact.
 """

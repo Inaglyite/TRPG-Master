@@ -197,14 +197,26 @@ fail-closed 地保留 active；确认原服务已停止后，维护者只能通�
 
 模型设置更新也尝试获取同一个 `turn_lock`：正在生成时拒绝变更，空闲时校验两个模型 ID、原子更新 `.env.json`、更新当前引擎并作为后续连接的默认值。API Key 和请求地址不会被该操作覆盖。
 
-检定确认和战斗决定是两类阻塞式握手：
+检定确认、战斗决定和行动预演共用阻塞式回复通道：
 
 1. 工作线程通过 `suggest_check` 或 `decision_request` 事件询问前端。
 2. 工作线程最多等待 120 秒。
 3. WebSocket 主循环仍可接收 `suggest_reply` 或带决定 ID 的 `decision_reply`。
 4. `threading.Event` 被置位后，工作线程继续工具调用。
 
-战斗决定超时时采用状态机给出的安全默认项，并发送 `decision_resolved` 关闭旧弹窗。
+战斗决定超时时采用状态机给出的安全默认项。`action_preview` 以及战斗开始前的
+`irreversible_violence/coercive_threat` 预确认虽复用
+`decision_request/decision_reply` 的等待、ID 校验和多人定向投递，但声明
+`presentation=chat`：NPC/守秘人提醒进入正常叙事气泡，回复显示在底部普通选项栏，调查员的
+选择也作为正常玩家气泡发送，不打开战斗弹窗。行动预演超时固定选择 `cancel_action`，暴力与
+威胁预确认分别固定取消；都不得自动移动、掷骰或消耗资源。战斗已经发生后的闪避、反击等即时
+防御决定仍使用聚焦弹窗。
+
+确认回复只持久化公开按钮文案和它前方的叙事段数量（`player_followups`），不保存作者态
+`action_text`、技能阈值或内部计划。实时前端会在决定到达时封口当前守秘人/NPC 气泡，回复后
+的新叙事另起气泡；定稿事件按已封口段数切分，只用未展示的权威后缀覆盖新气泡，历史与断线
+恢复按同一顺序重建。引擎生成的提醒、过场和入场节拍在发出时逐 beat 冻结发言归属；场景切换后
+的 NPC 姓名/在场推断只作用于随后生成的模型正文，不能回头把守秘人提示归给新场景 NPC。
 
 ## 6. GM 单引擎回合工作流
 
@@ -214,7 +226,9 @@ fail-closed 地保留 active；确认原服务已停止后，维护者只能通�
 ```mermaid
 flowchart TD
     Start([START]) --> Prepare[prepare_turn]
-    Prepare --> Route{combat_state.active?}
+    Prepare --> Preview{预演后继续?}
+    Preview -->|取消| Finalize
+    Preview -->|继续/准备| Route{combat_state.active?}
     Route -->|否| Story[call_story_agent]
     Route -->|是| Combat[call_combat_agent]
     Story -->|无工具调用| Finalize[finalize]
@@ -230,8 +244,9 @@ flowchart TD
 
 - 玩家输入存在时增加玩家回合计数。
 - 根据上轮风险和轮数注入 TIER 提醒。
-- `src.action_resolution` 在任何状态写入前生成单一 `ActionResolution`。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。
-- `arrival` 先提交明确的场景移动，再发送场景描述；这一回合不执行通用技能预检，也不授权线索、SAN 和发现规则关联 flag。模型提出这些副作用时会被同一行动阶段门禁拒绝。
+- `src.action_resolution` 在任何状态写入前生成单一、不可变的 `ActionResolution`，并在进入 LangGraph 前冻结。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。抵达可来自明确移动、当前场景作者声明的 `action_routes`，或唯一且尚未发现的物理线索目标；后者只接受至少四个归一化字符的明确目标，并只路由到 `source/related_scenes` 唯一的场景，绝不直接发现线索。背包中已经存在且被输入明确点名的物品固定视为当前交互，不能被远端线索的“副本/抄本/墨迹”等短别名劫持。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。
+- `src.action_preflight` 只从冻结计划、当前场景的 `action_advisories`、公开 PC 卡和 flags 判断是否需要预演。低技能、职业或性格冲突只决定是否展示作者写好的公开提醒；NPC `secret`、私有记忆、线索正文和后台阈值不会进入事件。玩家可继续原计划、选择作者声明的准备行动或取消；继续时复用同一个 `ActionResolution`，准备行动也在选择落定时冻结，绝不把按钮标签重新交给自然语言路由。
+- `arrival` 按 `departure_text → travel_text → 抵达描述 → entry_beat` 推进。离场和途中节拍在状态写入前公开；随后提交明确场景移动并按实际 `current_location/encounters` 计算在场 NPC，只有确认在场后才发送 `entry_beat`。这一回合不执行通用技能预检，也不授权线索、SAN 和发现规则关联 flag；模型提出这些副作用时会被同一行动阶段门禁拒绝。
 - 场景目录的 `npcs_present` 是模组初始驻点和按人物寻路的索引，不是永久出勤承诺。每次抵达时，引擎按 NPC 的运行时 `current_location` 重新生成 `current_scene.npcs_present`；只有实际在场人物才能触发头像。人物离开、被带走或死亡后无需改写静态场景目录。
 - 场景声明 `encounters` 时，`src.encounters` 覆盖对应 NPC 的隐式驻点，统一处理 guaranteed、conditional、luck 和 unavailable。幸运结果使用真实 d100 工具；`repeat=once` 写入 `encounter_history`，避免通过反复进出刷结果。解析只公开在场/不在场及作者提供的可见文本，不把 NPC 的真实位置泄露给故事模型。
 - `contact` 由 `src.discovery` 匹配当前场景中尚未发现的 `discovery_rules`，组合 `approach_text` 并在叙事前结算。无条件规则是本动作的权威契约，不再叠加通用语言推断出来的侦查；只有 `requires_success: true` 才执行作者指定技能。
@@ -274,7 +289,13 @@ flowchart TD
 - `coercive_threat`：PC 用武器胁迫未主动敌对的 NPC 时返回。取消开场威胁会结束刚创建的战斗且不消耗行动、弹药或物品；确认后目标写入 `threatened_by_pc` 并转为 `guarded`，事件追加到 `threat_log`。后续真正攻击仍需独立经过 `irreversible_violence`。
 - NPC 攻击 PC 时状态机先返回 `decision_required`，由 `GameEngine` 完成前端确认后内部调用 `combat_decide`。
 
-为避免流式文本抢在确认之前叙述“已经拔枪”，`GameEngine.handle_action()` 会先调用无副作用的 `preview_player_escalation()`（`src/combat.py`）。它以保守关键词识别明确攻击/武力威胁，并从当前世界的 NPC 名称解析目标；假设句、否定句和已敌对目标不会拦截。取消时不进入 LangGraph、不发送 tension 或 narrative 事件，只记录“行动未发生”；确认后生成仅本回合有效的一次性授权，后续 `combat_start` / `combat_action` 返回同类型、同目标的状态机决定时，授权静默选择确认项，避免第二次弹窗。授权不匹配或未被消费会在回合结束时清除。
+为避免流式文本抢在确认之前叙述“已经拔枪”，`GameEngine.handle_action()` 会先通过
+`src.escalation_preflight` 调用无副作用的 `preview_player_escalation()`（`src/combat.py`）。它以
+保守关键词识别明确攻击/武力威胁，并从当前世界的 NPC 名称解析目标；假设句、否定句和已敌对
+目标不会拦截。守秘人的公开后果提醒先作为正常聊天气泡发送，底部再显示取消/继续选项；取消时
+不进入 LangGraph、不发送 tension，也不改变世界状态。确认后提醒和玩家回复随回合历史持久化，
+并生成仅本回合有效的一次性授权；后续 `combat_start` / `combat_action` 返回同类型、同目标的
+状态机决定时，授权静默选择确认项，避免第二次询问。授权不匹配或未被消费会在回合结束时清除。
 
 `src.personality` 统一读取 `backstory.beliefs`、背景特质和游戏中获得的心理特质。角色可通过 `backstory.violence_stance` 声明 `avoidant`、`conditional` 或 `unrestrained`；旧角色缺少字段时使用 `conditional`。立场只改变确认措辞和返回给模型职责节点的 `roleplay_context`，不能替玩家否决行动，也不能免除战斗、资源、法律、声望、案件与 SAN 后果。
 

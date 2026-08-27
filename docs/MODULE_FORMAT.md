@@ -267,6 +267,74 @@ Markdown（需声明 `scene_documents` capability）。
 未声明 `encounters` 的模组继续按 NPC 的 `current_location` 解析在场情况，保持向后
 兼容。导入时会校验 NPC、flag、遭遇 ID 和枚举值。
 
+场景移动可以声明确定性路线与叙事节拍。`action_routes` 同时适用于模型给出的选项和
+玩家自由输入；别名只负责选择路线，状态切换仍由服务端完成：
+
+```json
+{
+  "action_routes": [
+    {
+      "id": "contact_doctor",
+      "aliases": ["请主任联系医生", "让主任打电话"],
+      "destination_scene_id": "medical_basement",
+      "required_flags": {"case_accepted": true},
+      "departure_text": "主任拨通内线，说明了你的来意。",
+      "travel_text": "你穿过雨中的校园，沿医学院楼梯向下。"
+    }
+  ],
+  "entry_beat": {
+    "npc_id": "doctor_hale",
+    "public_text": "医生抱着病历夹等在冷柜间门口。"
+  }
+}
+```
+
+节拍顺序固定为 `departure_text → travel_text → 抵达描述 → entry_beat`。`entry_beat`
+仅在对应 NPC 抵达结算后确实在场时显示；随机遭遇失败或 NPC 已离开不会错误展示头像与接待。
+旧模组的 `entry_text` 仍作为抵达后的兼容文本，但新模组应使用语义明确的三个字段。
+
+行动不适合立即提交时，可在**出发场景**声明 `action_advisories`：
+
+```json
+{
+  "action_advisories": [
+    {
+      "id": "witch_social_warning",
+      "destination_scene_id": "witch_hut",
+      "transition_kinds": ["explicit_move", "authored_route"],
+      "trigger_if": {
+        "skill_below": {"occult": 40},
+        "traits_contain_any": ["唯物主义"]
+      },
+      "npc_id": "john",
+      "npc_text": "她不喜欢只相信眼前事实的调查者。你仍然可以去，但最好先想好怎样开口。",
+      "keeper_text": "镇上的传闻说，她十分厌恶警察式的盘问。",
+      "public_hint": "『这项行动可能受益于“神秘学”或社交类技能。』",
+      "continue_label": "仍然去拜访她",
+      "prepare_options": [
+        {
+          "id": "ask_customs",
+          "label": "先询问当地礼节",
+          "action_text": "我先问约翰，拜访她时应该注意什么？"
+        }
+      ],
+      "cancel_label": "暂时不去"
+    }
+  ]
+}
+```
+
+`trigger_if` 支持 `always`、`skill_below`、`attribute_below`、
+`occupation_contains_any` 和 `traits_contain_any`；同一对象中的条件按“任一风险成立”触发。
+多个 advisory 按作者顺序匹配第一项，还可用 `route_ids`、`required_flags` 和
+`forbidden_flags` 缩小范围。阈值只参与服务端判断，不自动展示；玩家能看到的内容只能来自
+`npc_text`、`keeper_text`、`public_hint` 与选项文案，因此不得把秘密、准确成功条件或未发现
+线索写进这些公开字段。配置的 NPC 不在场时使用 `keeper_text`；两者都没有且不存在公开提示时
+模组校验失败。
+
+预演走普通聊天气泡和底部行动选项，不使用战斗确认弹窗。继续会执行最初冻结的行动计划；
+准备选项执行其作者态 `action_text`；取消和 120 秒超时都保持场景、资源与发现状态不变。
+
 ### 5.3 初始状态
 
 `initial_state` 只保存新游戏开始时确实已经成立的状态：

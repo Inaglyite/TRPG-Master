@@ -53,6 +53,7 @@ _REPLAY_EVENT_TYPES = {
     "handout",
     "error",
     "choices",
+    "player_reply",
 }
 
 
@@ -473,6 +474,7 @@ class DatabaseTurnJournal:
         lore_entry_ids=None,
         diagnostics=None,
         narrative_segments=None,
+        player_followups=None,
         expected_world_revision: int | None = None,
         checkpoint: ContextCheckpoint | dict | None = None,
     ) -> dict:
@@ -515,6 +517,7 @@ class DatabaseTurnJournal:
                     "narrative": str(narrative or ""),
                     "choices": _json_safe(choices),
                     "narrative_segments": _json_safe(narrative_segments or []),
+                    "player_followups": _json_safe(player_followups or []),
                     "events": events,
                     "executed_tools": _json_safe(executed_tools or []),
                     "lore_entry_ids": [str(x) for x in (lore_entry_ids or [])],
@@ -720,6 +723,7 @@ class DatabaseTurnJournal:
                             "narrative",
                             "choices",
                             "narrative_segments",
+                            "player_followups",
                             "completed_at",
                             "world_revision",
                         )
@@ -883,6 +887,7 @@ class DatabaseTurnJournal:
             "narrative",
             "choices",
             "narrative_segments",
+            "player_followups",
             "events",
             "world_revision",
             "message_count",

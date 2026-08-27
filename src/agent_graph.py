@@ -13,6 +13,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
+from .action_preflight import match_action_preview
 from .choices import extract_action_choices
 from .config import (
     ENABLE_TURN_AUDIT,
@@ -28,8 +29,9 @@ from .discovery import preferred_luck_difficulty
 from .llm import glm_quick_summary, tension
 from .logger import error as log_error
 from .logger import tool as log_tool
-from .skill_activation import note_load_skill_result
 from .npc_speaker_aliases import current_scene_npc_ids
+from .skill_activation import note_load_skill_result
+from .speaker_parser import Segment
 from .speaker_parser import parse_segments as parse_speaker_segments
 from .tool_pipeline import ToolPipeline, record_engine_tool_shadow
 from .tool_policy import (
@@ -47,6 +49,7 @@ from .tools import (
     MODEL_TOOL_NAMES,
     dice_summary,
 )
+from .transition_prelude import build_scene_entry_beat, build_transition_prelude
 
 _NON_REPEATABLE_CHECKS = {
     "skill_check",
@@ -74,6 +77,12 @@ class TurnState(TypedDict, total=False):
     opening_turn: bool
     lore_active: bool
     lore_entry_ids: list[str]
+    skip_agent: bool
+    skip_model_audit: bool
+    player_followups: list[dict]
+    authored_prefix: str
+    authored_clean_prefix: str
+    authored_segments: list[dict]
 
 
 def _tool_category(tool_calls: list[dict]) -> str:
@@ -98,6 +107,39 @@ def _check_cancelled(engine: Any) -> None:
     callback = getattr(engine, "raise_if_turn_cancelled", None)
     if callback:
         callback()
+
+
+def _emit_authored_narrative(engine: Any, text: str) -> None:
+    """Emit a trusted tagged beat through the normal chat bubble callbacks."""
+    if not text.strip():
+        return
+    segments, _clean = parse_speaker_segments(
+        text,
+        is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
+        on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+    )
+    for segment in segments:
+        if segment.kind == "speech" and segment.npc_id:
+            engine.cb.on_speaker_segment(segment.npc_id)
+            engine.cb.on_narrative(f"{segment.text}\n\n", segment.npc_id)
+        else:
+            engine.cb.on_narrative(f"{segment.text}\n\n")
+
+
+def _parse_authored_parts(engine: Any, parts: list[str]) -> tuple[list[Segment], str]:
+    """Parse trusted engine prose beat-by-beat without scene-based speaker guessing."""
+    segments: list[Segment] = []
+    clean_parts: list[str] = []
+    for part in parts:
+        parsed, clean = parse_speaker_segments(
+            part,
+            is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
+            on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+        )
+        segments.extend(parsed)
+        if clean.strip():
+            clean_parts.append(clean.strip())
+    return segments, "\n\n".join(clean_parts)
 
 
 def _performance_span(engine: Any, name: str):
@@ -136,6 +178,10 @@ def _prepare_turn_inner(
     resolved_discoveries: list[dict] = []
     lore_selection = None
     prelude = ""
+    prelude_parts: list[str] = []
+    skip_agent = False
+    skip_model_audit = False
+    player_followups = list(getattr(engine, "_preflight_player_followups", None) or [])
     # 记录回合前的消息数：容量熔断（未发起任何 provider 请求）时 finalize
     # 用它回滚本回合追加，避免重试叠加毒化历史。
     state["pre_turn_message_len"] = len(getattr(engine, "messages", None) or [])
@@ -143,23 +189,80 @@ def _prepare_turn_inner(
     # 供流式发言归属（model_stream_helpers）做玩家台词守卫。
     engine.__dict__["_turn_user_content"] = user_content
     if user_content:
+        original_user_content = user_content
         engine._player_turn_count += 1
         engine._maybe_inject_tier()
         # 模组声明的危机触发（伏击/显形）：条件按上一回合末状态判定，
         # 由引擎确定性落地；文本进 prelude，战斗状态本回合即被战斗 agent 接管。
         crisis_text = "" if opening_turn else maybe_fire_crisis(engine)
-        action_resolution = engine._plan_player_action(user_content)
+        preplanned = getattr(engine, "_preplanned_action_resolution", None)
+        action_resolution = (
+            preplanned
+            if preplanned is not None and preplanned.player_input == user_content
+            else engine._plan_player_action(user_content)
+        )
         engine._action_resolution = action_resolution
-        transition_id = action_resolution.destination_scene_id
-        discovery_matches = list(action_resolution.discovery_matches)
-        discovery_skill = action_resolution.preferred_skill
-        prelude = engine._turn_prelude(transition_id, discovery_matches)
+        prelude_parts = [str(getattr(engine, "_preflight_narrative", "") or "").strip()]
+        prelude_parts = [part for part in prelude_parts if part]
         if crisis_text:
-            prelude = f"{crisis_text}\n\n{prelude}" if prelude else crisis_text
-        if prelude:
-            engine.cb.on_narrative(f"{prelude}\n\n")
+            prelude_parts.append(crisis_text)
+            engine.cb.on_narrative(f"{crisis_text}\n\n")
+
+        try:
+            preview_world = engine.context.world_store.load()
+        except Exception:
+            preview_world = {}
+        action_preview = match_action_preview(action_resolution, preview_world)
+        selected_preview_option = None
+        if action_preview is not None:
+            prelude_parts.append(action_preview.narrative)
+            _emit_authored_narrative(engine, action_preview.narrative)
+            _emit_phase(engine, "awaiting_decision", "等待你决定是否继续……")
+            selected_id = engine.cb.on_decision(action_preview.decision_payload())
+            selected_preview_option = action_preview.option(selected_id)
+            preview_segments, _ = _parse_authored_parts(engine, prelude_parts)
+            player_followups.append(
+                {
+                    "text": selected_preview_option.label,
+                    "after_narrative_segment": len(preview_segments),
+                }
+            )
+            engine.record_turn_event(
+                {"type": "player_reply", "text": selected_preview_option.label}
+            )
+            if selected_preview_option.outcome == "cancel":
+                skip_agent = True
+                skip_model_audit = True
+            elif selected_preview_option.outcome == "replace":
+                user_content = selected_preview_option.action_text
+                engine.__dict__["_turn_user_content"] = user_content
+                # The replacement is authored by the same preview and is
+                # frozen immediately.  The decision reply label is never fed
+                # back through the natural-language router.
+                action_resolution = engine._plan_player_action(user_content)
+                engine._action_resolution = action_resolution
+
+        transition_id = None if skip_agent else action_resolution.destination_scene_id
+        discovery_matches = [] if skip_agent else list(action_resolution.discovery_matches)
+        discovery_skill = None if skip_agent else action_resolution.preferred_skill
+        transition_prelude = (
+            ""
+            if skip_agent
+            else build_transition_prelude(
+                preview_world,
+                action_resolution,
+                transition_id,
+                discovery_matches,
+            )
+        )
+        if transition_prelude:
+            prelude_parts.append(transition_prelude)
+            engine.cb.on_narrative(f"{transition_prelude}\n\n")
         if transition_id:
-            engine._resolve_scene_transition(user_content)
+            engine._resolve_scene_transition(
+                user_content,
+                destination_scene_id=transition_id,
+            )
             ledger = getattr(engine, "_turn_mutations", None)
             if ledger is not None:
                 ledger.record_domain("scene_transition", {"scene_id": transition_id})
@@ -169,8 +272,18 @@ def _prepare_turn_inner(
                 else ""
             ).strip()
             if encounter_text:
-                prelude = f"{prelude}\n\n{encounter_text}" if prelude else encounter_text
+                prelude_parts.append(encounter_text)
                 engine.cb.on_narrative(f"{encounter_text}\n\n")
+            try:
+                entry_world = engine.context.world_store.load()
+            except Exception:
+                entry_world = {}
+            entry_text = build_scene_entry_beat(entry_world, transition_id)
+            if entry_text:
+                prelude_parts.append(entry_text)
+                engine.cb.on_narrative(f"{entry_text}\n\n")
+
+        prelude = "\n\n".join(part for part in prelude_parts if part)
 
         # An authored unconditional discovery is itself the authority for this
         # action.  Do not let the generic language matcher invent an extra roll.
@@ -181,16 +294,17 @@ def _prepare_turn_inner(
         luck_difficulty = preferred_luck_difficulty(discovery_matches)
         check_result = (
             engine._resolve_luck_check(luck_difficulty)
-            if not transition_id and luck_difficulty
+            if not skip_agent and not transition_id and luck_difficulty
             else (
                 engine._resolve_action_check(user_content, discovery_skill)
-                if not transition_id and (not discovery_matches or needs_discovery_check)
+                if not skip_agent
+                and not transition_id
+                and (not discovery_matches or needs_discovery_check)
                 else None
             )
         )
-        resolved_discoveries = engine._resolve_discoveries(
-            discovery_matches,
-            check_result,
+        resolved_discoveries = (
+            engine._resolve_discoveries(discovery_matches, check_result) if not skip_agent else []
         )
         ledger = getattr(engine, "_turn_mutations", None)
         if ledger is not None and resolved_discoveries:
@@ -198,13 +312,20 @@ def _prepare_turn_inner(
                 "resolved_discoveries",
                 {"count": len(resolved_discoveries)},
             )
-        authority = engine._authoritative_turn_context(
-            check_result,
-            resolved_discoveries,
+        authority = (
+            engine._authoritative_turn_context(check_result, resolved_discoveries)
+            if not skip_agent
+            else ""
         )
         retrieve_lore = getattr(engine, "_retrieve_lore_context", None)
-        lore_selection = retrieve_lore(user_content) if retrieve_lore else None
-        content = f"[玩家行动] {user_content}"
+        lore_selection = retrieve_lore(user_content) if retrieve_lore and not skip_agent else None
+        content = f"[玩家行动] {original_user_content}"
+        if selected_preview_option is not None:
+            content += f"\n[行动预演后的选择] {selected_preview_option.label}"
+            if selected_preview_option.outcome == "replace":
+                content += f"\n[本轮实际行动] {user_content}"
+            elif selected_preview_option.outcome == "cancel":
+                content += "\n[权威结果] 玩家暂不执行原行动；场景保持不变。"
         if prelude:
             content += (
                 "\n\n[本轮已向玩家展示的前置叙事]\n"
@@ -220,7 +341,8 @@ def _prepare_turn_inner(
         if lore_selection and lore_selection.context:
             content += f"\n\n{lore_selection.context}"
         engine.messages.append({"role": "user", "content": content})
-        engine._detect_content_skill_hint(user_content)
+        if not skip_agent:
+            engine._detect_content_skill_hint(user_content)
     else:
         check_result = None
         if control_turn:
@@ -239,6 +361,7 @@ def _prepare_turn_inner(
             ):
                 engine.messages[-1]["content"] += f"\n\n{lore_selection.context}"
 
+    authored_segments, authored_clean_prefix = _parse_authored_parts(engine, prelude_parts)
     engine.current_model = getattr(engine, "narrative_model", NARRATIVE_MODEL)
     return {
         "tool_round": 0,
@@ -252,6 +375,13 @@ def _prepare_turn_inner(
         "opening_turn": opening_turn,
         "lore_active": lore_selection is not None,
         "lore_entry_ids": list(lore_selection.entry_ids) if lore_selection else [],
+        "user_content": user_content,
+        "skip_agent": skip_agent,
+        "skip_model_audit": skip_model_audit,
+        "player_followups": player_followups,
+        "authored_prefix": prelude,
+        "authored_clean_prefix": authored_clean_prefix,
+        "authored_segments": [segment.to_dict() for segment in authored_segments],
     }
 
 
@@ -297,6 +427,12 @@ def _call_combat_agent(state: TurnState) -> dict:
 
 def _route_to_agent(state: TurnState) -> str:
     return "call_combat_agent" if state["engine"]._combat_active() else "call_story_agent"
+
+
+def _route_after_prepare(state: TurnState) -> str:
+    if state.get("skip_agent"):
+        return "finalize"
+    return _route_to_agent(state)
 
 
 def _route_after_llm(state: TurnState) -> str:
@@ -610,6 +746,44 @@ def _emit_sanity_dice(engine: Any, output: str) -> None:
     )
 
 
+def _parse_final_narrative(
+    engine: Any, state: TurnState, narrative: str
+) -> tuple[list[Segment], str]:
+    """Keep trusted prelude ownership frozen; infer speakers only in model prose."""
+    prefix = state.get("authored_prefix", "")
+    frozen = state.get("authored_segments", [])
+    if prefix and narrative.startswith(prefix) and isinstance(frozen, list):
+        prefix_segments = [
+            Segment(
+                kind=str(item.get("kind") or "narration"),
+                text=str(item.get("text") or ""),
+                npc_id=str(item.get("npc_id") or "") or None,
+            )
+            for item in frozen
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ]
+        suffix_segments, clean_suffix = parse_speaker_segments(
+            narrative[len(prefix) :],
+            is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
+            on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+            speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
+            player_text=state.get("user_content"),
+            present_npc_ids=current_scene_npc_ids(engine),
+        )
+        return (
+            prefix_segments + suffix_segments,
+            state.get("authored_clean_prefix", "") + clean_suffix,
+        )
+    return parse_speaker_segments(
+        narrative,
+        is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
+        on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
+        speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
+        player_text=state.get("user_content"),
+        present_npc_ids=current_scene_npc_ids(engine),
+    )
+
+
 def _finalize_turn(state: TurnState) -> dict:
     engine = state["engine"]
     _check_cancelled(engine)
@@ -624,14 +798,7 @@ def _finalize_turn(state: TurnState) -> dict:
 
     # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
     # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
-    narrative_segments, narrative = parse_speaker_segments(
-        narrative,
-        is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
-        on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
-        speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
-        player_text=state.get("user_content"),
-        present_npc_ids=current_scene_npc_ids(engine),
-    )
+    narrative_segments, narrative = _parse_final_narrative(engine, state, narrative)
     segment_dicts = [s.to_dict() for s in narrative_segments]
     if state.get("opening_turn") and not narrative.strip():
         log_error("开场失败：模型未生成任何叙述")
@@ -656,6 +823,7 @@ def _finalize_turn(state: TurnState) -> dict:
         if (
             ENABLE_TURN_AUDIT
             and state.get("user_content")
+            and not state.get("skip_model_audit")
             and engine._turn_needs_model_audit(
                 state.get("executed_tools", []),
                 player_action=state.get("user_content") or "",
@@ -686,6 +854,7 @@ def _finalize_turn(state: TurnState) -> dict:
             executed_tools=list(state.get("executed_tools", [])),
             lore_entry_ids=list(state.get("lore_entry_ids", [])),
             narrative_segments=segment_dicts,
+            player_followups=list(state.get("player_followups", [])),
         )
     if segment_dicts and getattr(engine.cb, "on_narrative_segments", None):
         engine.cb.on_narrative_segments(segment_dicts)
@@ -708,10 +877,11 @@ def build_turn_graph():
     graph.add_edge(START, "prepare_turn")
     graph.add_conditional_edges(
         "prepare_turn",
-        _route_to_agent,
+        _route_after_prepare,
         {
             "call_story_agent": "call_story_agent",
             "call_combat_agent": "call_combat_agent",
+            "finalize": "finalize",
         },
     )
     for agent_node in ("call_story_agent", "call_combat_agent"):

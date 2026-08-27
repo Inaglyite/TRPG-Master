@@ -43,6 +43,26 @@ describe("game interaction components", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("如何防御？");
     expect(screen.getByRole("button", { name: /闪避/ })).toBeInTheDocument();
   });
+
+  it("输入锁定时仍允许当前行动者选择聊天式预演回复", () => {
+    useAppStore.setState({
+      mode: "local",
+      inputEnabled: false,
+      choices: [
+        {
+          label: "仍然前往",
+          isFree: false,
+          decisionId: "action-preview-1",
+          decisionOptionId: "continue_action",
+        },
+      ],
+    });
+
+    render(<GameControls />);
+
+    expect(screen.getByRole("button", { name: "1. 仍然前往" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "⏎" })).toBeDisabled();
+  });
 });
 
 describe("GameControls 多人行动门禁", () => {

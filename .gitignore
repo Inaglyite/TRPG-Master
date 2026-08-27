@@ -7,8 +7,11 @@ saves/
 worlds/
 trpg-master.db*
 .claude/
+.agents/
+.codex/
 .reasonix/
 .collab/
+AGENTS.md
 node_modules/
 frontend/dist/
 frontend/release/
@@ -28,3 +31,9 @@ modules/
 .editor-projects/
 *.trpgmod
 .screenshots/
+.pytest_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+frontend/ui/
+frontend/ui_raw/

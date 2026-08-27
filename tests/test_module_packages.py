@@ -121,6 +121,69 @@ class ModuleFormatTests(unittest.TestCase):
         self.assertEqual(rules[0]["skill"], "spot_hidden")
         self.assertTrue(rules[0]["requires_success"])
 
+    def test_action_routes_previews_and_entry_beats_compile_into_runtime_scene(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        npc_id = scene["npcs_present"][0]
+        scene["action_routes"] = [{
+            "id": "ask_for_courtyard",
+            "aliases": ["请管理员带我去庭院"],
+            "destination_scene_id": "archive_courtyard",
+            "departure_text": "管理员收起钥匙，示意你跟上。",
+            "travel_text": "你们沿着档案架之间的窄廊前行。",
+        }]
+        scene["action_advisories"] = [{
+            "id": "courtyard_warning",
+            "destination_scene_id": "archive_courtyard",
+            "route_ids": ["ask_for_courtyard"],
+            "trigger_if": {"skill_below": {"occult": 40}},
+            "npc_id": npc_id,
+            "npc_text": "庭院里的旧井并不安全。",
+            "keeper_text": "旧井附近可能有危险。",
+            "public_hint": "『这项行动可能受益于神秘学。』",
+            "prepare_options": [{
+                "id": "ask_well",
+                "label": "先询问旧井的来历",
+                "action_text": "我先询问管理员旧井的来历。",
+            }],
+        }]
+        raw["scenes"]["archive_study"]["entry_beat"] = {
+            "npc_id": npc_id,
+            "public_text": "管理员停在旧井外，谨慎地望向井口。",
+        }
+        module = ModuleDefinition.model_validate(raw)
+        manifest, _template_module = load_template()
+
+        world = compile_world_state(manifest, module)
+
+        compiled = world["scene_catalog"]["archive_study"]
+        self.assertEqual(compiled["action_routes"][0]["id"], "ask_for_courtyard")
+        self.assertEqual(
+            compiled["action_advisories"][0]["trigger_if"]["skill_below"],
+            {"occult": 40},
+        )
+        self.assertIn(
+            "entry_beat",
+            world["scene_catalog"]["archive_study"],
+        )
+
+    def test_action_preview_rejects_unknown_destination_and_private_only_text(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        scene["action_advisories"] = [{
+            "id": "bad_preview",
+            "destination_scene_id": "missing_scene",
+            "trigger_if": {"always": True},
+        }]
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertTrue(
+            "必须提供 NPC、守秘人提醒或公开提示" in str(raised.exception)
+            or "目的地不存在" in str(raised.exception)
+        )
+
     def test_discovery_rule_rejects_unknown_npc_reveal(self):
         raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
         raw["clues"]["well_paper_fragment"]["discovery_rules"][0][

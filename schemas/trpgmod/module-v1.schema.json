@@ -1,5 +1,315 @@
 {
   "$defs": {
+    "ActionAdvisoryDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "destination_scene_id": {
+          "title": "Destination Scene Id",
+          "type": "string"
+        },
+        "transition_kinds": {
+          "items": {
+            "enum": [
+              "explicit_move",
+              "authored_route",
+              "discovery_target"
+            ],
+            "type": "string"
+          },
+          "title": "Transition Kinds",
+          "type": "array"
+        },
+        "route_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Route Ids",
+          "type": "array"
+        },
+        "required_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Required Flags",
+          "type": "object"
+        },
+        "forbidden_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Forbidden Flags",
+          "type": "object"
+        },
+        "trigger_if": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionPreviewTriggerDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Title",
+          "type": "string"
+        },
+        "npc_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Npc Id"
+        },
+        "npc_text": {
+          "default": "",
+          "maxLength": 1600,
+          "title": "Npc Text",
+          "type": "string"
+        },
+        "keeper_text": {
+          "default": "",
+          "maxLength": 1600,
+          "title": "Keeper Text",
+          "type": "string"
+        },
+        "public_hint": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Public Hint",
+          "type": "string"
+        },
+        "continue_label": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Continue Label",
+          "type": "string"
+        },
+        "continue_description": {
+          "default": "",
+          "maxLength": 160,
+          "title": "Continue Description",
+          "type": "string"
+        },
+        "prepare_options": {
+          "items": {
+            "$ref": "#/$defs/ActionPrepareOptionDefinition"
+          },
+          "maxItems": 3,
+          "title": "Prepare Options",
+          "type": "array"
+        },
+        "cancel_label": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Cancel Label",
+          "type": "string"
+        },
+        "cancel_description": {
+          "default": "",
+          "maxLength": 160,
+          "title": "Cancel Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "destination_scene_id"
+      ],
+      "title": "ActionAdvisoryDefinition",
+      "type": "object"
+    },
+    "ActionPrepareOptionDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 160,
+          "title": "Description",
+          "type": "string"
+        },
+        "action_text": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Action Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "action_text"
+      ],
+      "title": "ActionPrepareOptionDefinition",
+      "type": "object"
+    },
+    "ActionPreviewTriggerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "always": {
+          "default": false,
+          "title": "Always",
+          "type": "boolean"
+        },
+        "skill_below": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Skill Below",
+          "type": "object"
+        },
+        "attribute_below": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Attribute Below",
+          "type": "object"
+        },
+        "occupation_contains_any": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Occupation Contains Any",
+          "type": "array"
+        },
+        "traits_contain_any": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Traits Contain Any",
+          "type": "array"
+        }
+      },
+      "title": "ActionPreviewTriggerDefinition",
+      "type": "object"
+    },
+    "ActionRouteDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Aliases",
+          "type": "array"
+        },
+        "destination_scene_id": {
+          "title": "Destination Scene Id",
+          "type": "string"
+        },
+        "required_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Required Flags",
+          "type": "object"
+        },
+        "forbidden_flags": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Forbidden Flags",
+          "type": "object"
+        },
+        "departure_text": {
+          "default": "",
+          "maxLength": 1200,
+          "title": "Departure Text",
+          "type": "string"
+        },
+        "travel_text": {
+          "default": "",
+          "maxLength": 1200,
+          "title": "Travel Text",
+          "type": "string"
+        },
+        "entry_text": {
+          "default": "",
+          "maxLength": 1200,
+          "title": "Entry Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "aliases",
+        "destination_scene_id"
+      ],
+      "title": "ActionRouteDefinition",
+      "type": "object"
+    },
     "AssetDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -955,6 +1265,31 @@
           "title": "Encounters",
           "type": "array"
         },
+        "action_routes": {
+          "items": {
+            "$ref": "#/$defs/ActionRouteDefinition"
+          },
+          "title": "Action Routes",
+          "type": "array"
+        },
+        "action_advisories": {
+          "items": {
+            "$ref": "#/$defs/ActionAdvisoryDefinition"
+          },
+          "title": "Action Advisories",
+          "type": "array"
+        },
+        "entry_beat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SceneEntryBeatDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "tags": {
           "items": {
             "type": "string"
@@ -997,6 +1332,27 @@
         "description"
       ],
       "title": "SceneDefinition",
+      "type": "object"
+    },
+    "SceneEntryBeatDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "npc_id": {
+          "title": "Npc Id",
+          "type": "string"
+        },
+        "public_text": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Public Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "npc_id",
+        "public_text"
+      ],
+      "title": "SceneEntryBeatDefinition",
       "type": "object"
     }
   },

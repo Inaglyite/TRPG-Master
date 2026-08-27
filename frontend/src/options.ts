@@ -14,6 +14,7 @@ import {
   showRollPending,
   finishNarrativeStream,
   flushNarrativeStream,
+  sealNarrativeBeat,
   whenNarrativePresented,
 } from "./renderer";
 import { safeSend } from "./ws";
@@ -22,6 +23,7 @@ import { useMessageStore } from "./state/message-store";
 import { canCurrentUserAct, useOnlineStore } from "./state/online-store";
 
 let activeDecisionId: string | null = null;
+let activeDecisionPresentation: string | null = null;
 let inputEnabledBeforeDisconnect = false;
 let pendingOptimisticAction: {
   messageId: string;
@@ -35,6 +37,9 @@ let pendingOptimisticAction: {
 export type ActionChoice = {
   label: string;
   isFree: boolean;
+  description?: string;
+  decisionId?: string;
+  decisionOptionId?: string;
 };
 
 // ---- 建议检定弹窗 ----
@@ -46,10 +51,26 @@ export function onSuggest(data: any) {
 
 // ---- 通用多选决定（战斗防御等） ----
 export function onDecision(data: any) {
-  flushNarrativeStream();
+  activeDecisionPresentation = String(data.presentation || "modal");
+  if (activeDecisionPresentation === "chat") sealNarrativeBeat();
+  else flushNarrativeStream();
   removeLoading();
   activeDecisionId = data.id || null;
   const options = Array.isArray(data.options) ? data.options : [];
+  if (activeDecisionPresentation === "chat") {
+    useAppStore.getState().setDialog(null);
+    useAppStore.getState().setChoices(
+      options.map((option: any) => ({
+        label: String(option.label || option.id || "继续"),
+        isFree: false,
+        description: String(option.description || ""),
+        decisionId: String(data.id || ""),
+        decisionOptionId: String(option.id || ""),
+      })),
+    );
+    useAppStore.getState().setInput(false, "先决定是否继续这项行动……");
+    return;
+  }
   useAppStore.getState().setDialog({
     kind: "decision",
     id: String(data.id || ""),
@@ -251,9 +272,12 @@ export function sendDecisionReply(
   label: string,
 ) {
   if (!onlineActionAllowed() || pendingOptimisticAction) return;
+  const chatPresentation = activeDecisionPresentation === "chat";
   const previous = useAppStore.getState();
   useAppStore.getState().setDialog(null);
+  if (chatPresentation) useAppStore.getState().setChoices([]);
   activeDecisionId = null;
+  activeDecisionPresentation = null;
   const messageId = addMsg("player", label, true);
   pendingOptimisticAction = {
     messageId,
@@ -263,7 +287,13 @@ export function sendDecisionReply(
     inputEnabled: previous.inputEnabled,
     inputPlaceholder: previous.inputPlaceholder,
   };
-  if (optionId === "confirm_threat") {
+  if (chatPresentation) {
+    if (
+      !["cancel_action", "cancel_violence", "cancel_threat"].includes(optionId)
+    ) {
+      showGmThinking();
+    }
+  } else if (optionId === "confirm_threat") {
     showGmThinking();
   } else if (!["cancel_violence", "cancel_threat"].includes(optionId)) {
     showRollPending();
@@ -279,8 +309,15 @@ export function sendDecisionReply(
 
 export function onDecisionResolved(data: any) {
   if (!data.automatic || data.decision_id !== activeDecisionId) return;
+  const chatPresentation = activeDecisionPresentation === "chat";
   useAppStore.getState().setDialog(null);
+  if (chatPresentation) useAppStore.getState().setChoices([]);
   activeDecisionId = null;
+  activeDecisionPresentation = null;
+  if (chatPresentation) {
+    addMsg("system", "等待选择超时，已暂不执行这项行动。", true);
+    return;
+  }
   if (["cancel_violence", "cancel_threat"].includes(data.option_id)) {
     const action = data.option_id === "cancel_threat" ? "威胁" : "攻击";
     addMsg("system", `等待确认超时，已取消这次${action}。`, true);

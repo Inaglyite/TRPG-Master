@@ -97,6 +97,7 @@ class CombatStateMachineTests(unittest.TestCase):
         self.assertEqual(preview["decision"]["kind"], "irreversible_violence")
         self.assertEqual(preview["decision"]["target_id"], "bryce_fallon")
         self.assertEqual(preview["decision"]["default_option"], "cancel_violence")
+        self.assertEqual(preview["decision"]["presentation"], "chat")
         self.assertEqual(preview["authorization"]["confirm_option"], "confirm_violence")
         self.assertNotIn("combat_state", world)
 

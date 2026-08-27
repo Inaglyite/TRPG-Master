@@ -33,6 +33,10 @@ export function GameControls() {
       currentActorUserId === userId &&
       (myRole === "owner" || myRole === "player"));
   const enabled = appEnabled && myTurn;
+  const decisionChoiceActive = choices.some(
+    (choice) => choice.decisionId && choice.decisionOptionId,
+  );
+  const choicesEnabled = myTurn && (appEnabled || decisionChoiceActive);
   // 结案（settle_case）为房主专属操作；普通成员只看到继续探索。
   // selector 订阅成员变化，房主移交后按钮即时更新。
   const isOwner = useOnlineStore((state) => {
@@ -97,8 +101,19 @@ export function GameControls() {
             <button
               key={`${choice.label}-${index}`}
               className={`opt-btn${choice.isFree ? " free" : ""}`}
-              disabled={!enabled}
-              onClick={() => void sendAction(choice.label)}
+              disabled={!choicesEnabled}
+              title={choice.description || undefined}
+              onClick={() => {
+                if (choice.decisionId && choice.decisionOptionId) {
+                  void sendDecisionReply(
+                    choice.decisionId,
+                    choice.decisionOptionId,
+                    choice.label,
+                  );
+                } else {
+                  void sendAction(choice.label);
+                }
+              }}
             >
               {index + 1}. {choice.label}
             </button>

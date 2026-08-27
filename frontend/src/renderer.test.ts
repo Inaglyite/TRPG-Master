@@ -466,6 +466,46 @@ describe("React message renderer adapter", () => {
     expect(gm?.segments?.[1].speaker?.name).toBe("旧人");
   });
 
+  it("replays a chat preview reply between the warning and committed result", () => {
+    renderTurnHistory([
+      {
+        turn_id: "t-preview",
+        player_input: "我想看看尸体",
+        actor: { type: "investigator", name: "黄千陆" },
+        narrative: "法伦提醒。你抵达停尸房。",
+        narrative_segments: [
+          {
+            kind: "speech",
+            text: "法伦提醒。",
+            speaker: { type: "npc", id: "fallon", name: "法伦" },
+          },
+          { kind: "narration", text: "公开风险提示。" },
+          { kind: "narration", text: "你抵达停尸房。" },
+        ],
+        player_followups: [
+          {
+            text: "请法伦联系医生，前往停尸房",
+            after_narrative_segment: 2,
+          },
+        ],
+      },
+    ]);
+
+    const messages = useMessageStore.getState().messages;
+    expect(messages.map((message) => message.kind)).toEqual([
+      "player",
+      "gm",
+      "player",
+      "gm",
+    ]);
+    expect(messages[1].text).toBe("法伦提醒。公开风险提示。");
+    expect(messages[2]).toMatchObject({
+      text: "请法伦联系医生，前往停尸房",
+      speaker: { name: "黄千陆" },
+    });
+    expect(messages[3].text).toBe("你抵达停尸房。");
+  });
+
   it("历史玩家输入使用 turn.actor 的权威署名", () => {
     renderTurnHistory([
       {

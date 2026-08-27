@@ -474,6 +474,7 @@ type PublicTurnRecord = {
   narrative?: string;
   narrative_segments?: import("./state/message-store").NarrativeSegment[];
   chat_events?: import("./state/message-store").ChatEvent[];
+  player_followups?: TurnHistoryItem["player_followups"];
   choices?: ActionChoice[];
   events?: any[];
 };
@@ -521,6 +522,9 @@ function replayRecoveredTurn(record: PublicTurnRecord) {
         pendingChoices = Array.isArray(event.choices)
           ? event.choices
           : pendingChoices;
+        break;
+      case "player_reply":
+        addMsg("player", String(event.text || ""), true);
         break;
     }
   }

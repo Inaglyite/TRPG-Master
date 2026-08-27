@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TRPG Agent 启动器 —— 跨平台，自动处理 venv、依赖和配置。
+"""TRPG Game 终端版启动器 —— 跨平台处理 venv、依赖和配置。
 
 用法:
     python3 start.py              # 使用默认配置启动
@@ -39,8 +39,8 @@ VENV_PIP = (
 
 def banner():
     print("=" * 55)
-    print("  TRPG Agent 内核 — 启动器")
-    print("  DeepSeek V4 Flash + Pro (1M 上下文)")
+    print("  TRPG Game 终端版")
+    print("  OpenAI 兼容模型 + 确定性规则引擎")
     print("=" * 55)
 
 
@@ -62,7 +62,10 @@ def setup_venv():
         print("创建虚拟环境...")
         subprocess.run([PYTHON_EXE, "-m", "venv", str(VENV_DIR)], check=True)
     print("安装 Python 依赖...")
-    subprocess.run([str(VENV_PIP), "install", "openai", "langgraph"], check=True)
+    subprocess.run(
+        [str(VENV_PIP), "install", "-r", str(PROJECT_ROOT / "requirements.txt")],
+        check=True,
+    )
     print("完成！")
 
 

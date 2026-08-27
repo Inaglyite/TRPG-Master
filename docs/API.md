@@ -1564,7 +1564,9 @@ system prompt、Lorebook 扫描或 `world_state`。
 
 回合定稿时、`done` 之前发送一次，给出玩家可见的权威聊天事件。客户端必须以它覆盖
 流式期间的临时布局；姓名和头像以服务端 `speaker` 为准，不能从正文推断或接受模型
-自报。事件元素字段：
+自报。若本轮曾用 `presentation=chat` 封口一个提醒气泡，客户端必须先按已封口段数消费
+对应的事件前缀，再把剩余事件应用到回复后的新气泡；不得用整轮事件覆盖后半轮气泡。
+事件元素字段：
 
 | 字段 | 说明 |
 |---|---|
@@ -1610,7 +1612,12 @@ system prompt、Lorebook 扫描或 `world_state`。
 
 #### `decision_request`
 
-战斗状态机需要玩家选择防御方式，或确认对非敌对 NPC 的不可逆暴力/武力威胁时发送。对于从玩家最新输入中明确识别出的攻击和武力威胁，`decision_request` 会在首个 `narrative_chunk` 与 `tension` 事件之前发送；取消后本轮直接发送 `done`，世界状态不变。
+战斗状态机需要玩家选择防御方式，或确认对非敌对 NPC 的不可逆暴力/武力威胁时发送。对于从玩家
+最新输入中明确识别出的攻击和武力威胁，服务端先发送一段公开后果提醒的
+`narrative_chunk`，再在任何模型叙述、`tension`、掷骰或资源消耗之前发送
+`decision_request`。这类预确认带 `presentation:"chat"`，客户端必须把提醒和调查员回复显示为
+普通聊天气泡，并把选项放在底部行动栏；不要打开战斗决定弹窗。取消后本轮直接发送 `done`，世界
+状态不变。战斗已经开始后的防御决定不带该字段，继续使用聚焦弹窗。
 防御示例：
 
 ```json
@@ -1636,6 +1643,7 @@ system prompt、Lorebook 扫描或 `world_state`。
   "type": "decision_request",
   "id": "c28e71af34d0",
   "kind": "irreversible_violence",
+  "presentation": "chat",
   "target_id": "bryce_fallon",
   "title": "你真的要攻击布莱斯·法伦吗？",
   "description": "法伦目前并未主动敌对。调查员通常只在认为必要时使用暴力，这一次是否必要仍由你决定。攻击可能引来报警、法律、声望、案件或理智后果。",
@@ -1662,6 +1670,7 @@ system prompt、Lorebook 扫描或 `world_state`。
   "type": "decision_request",
   "id": "f17c3b22aa10",
   "kind": "coercive_threat",
+  "presentation": "chat",
   "target_id": "bryce_fallon",
   "title": "你真的要用武力威胁布莱斯·法伦吗？",
   "description": "法伦目前并未主动敌对。用武器胁迫他人明显违背了调查员避免主动暴力的行为倾向。即使不开枪，这也可能破坏关系、引来报警或改变案件走向。",
@@ -1692,7 +1701,9 @@ system prompt、Lorebook 扫描或 `world_state`。
 }
 ```
 
-每次决定完成后发送。`automatic:true` 表示等待超时后使用了 `default_option`；客户端应关闭仍显示的决定弹窗。不可逆暴力和武力威胁超时分别默认返回 `cancel_violence`、`cancel_threat`，不会产生掷骰、弹药或回合消耗。
+每次决定完成后发送。`automatic:true` 表示等待超时后使用了 `default_option`；客户端应关闭仍显示的
+决定弹窗或清除底部聊天选项。不可逆暴力和武力威胁超时分别默认返回 `cancel_violence`、
+`cancel_threat`，不会产生掷骰、弹药或回合消耗。
 
 #### `dice_result`
 
@@ -2098,6 +2109,7 @@ T1 守秘人给出 A / B / C
 | `narrative` | 完成回合的叙事全文 |
 | `choices` | 完成回合的结构化选项，元素形如 `{"label":"...","isFree":false}` |
 | `narrative_segments` / `chat_events` | 发言段与同内容的权威聊天事件（见 `chat_events`） |
+| `player_followups` | 回合内聊天式确认的公开玩家回复；`after_narrative_segment` 指明它位于哪一段叙事之后 |
 | `events` | 可重放的公开事件列表（见 `turn_recovery`） |
 | `world_revision` | 回合提交后的世界 revision |
 | `message_count` | 回合提交时的会话消息条数 |
@@ -2129,8 +2141,12 @@ T1 守秘人给出 A / B / C
     "chat_events": [
       {"event_id":"narrative_0","kind":"narration","text":"雨水顺着书房的窗户滑落。","speaker":{"type":"keeper","name":"守秘人"}}
     ],
+    "player_followups": [
+      {"text":"仍然进入书房","after_narrative_segment":1}
+    ],
     "events": [
       {"type":"narrative_chunk","text":"……","offset_ms":850},
+      {"type":"player_reply","text":"仍然进入书房","offset_ms":1200},
       {"type":"dice_result","summary":"侦查 70，d100 = 32，困难成功","roll_data":{},"offset_ms":1600},
       {"type":"choices","choices":[{"label":"检查书桌","isFree":false}],"offset_ms":4100}
     ],
@@ -2143,7 +2159,8 @@ T1 守秘人给出 A / B / C
 三个键都是公开回合记录或 `null`。`chat_events` 只在记录包含发言段时出现（与
 `narrative_segments` 同内容）。`events` 元素按发生顺序排列，`type` 限于
 `narrative_chunk`、`narrative_segment`、`tension`、`dice_result`、`glm_summary`、`handout`、
-`error`、`choices`，各带 `offset_ms`（回合开始后的毫秒偏移），不携带 `turn_id`/`seq`；其中的
+`error`、`choices`、`player_reply`，各带 `offset_ms`（回合开始后的毫秒偏移），不携带
+`turn_id`/`seq`；其中的
 `handout` 元素带有重发的 `asset_data_uri`/`asset_url`。恢复记录不含私有工具输出与 prompt
 内容。客户端恢复时应按 `events` 重放回合，再用 `chat_events`（或 `narrative`）定稿。
 
@@ -2254,6 +2271,7 @@ T1 守秘人给出 A / B / C
 
 `history` 是新世界从开场到源回合的公开回合父链，元素字段为 `turn_id`、`parent_turn_id`、
 `kind`、`player_input`、`narrative`、`choices`、`narrative_segments`、`chat_events`、
+`player_followups`、
 `completed_at`、`world_revision`（不含 `events` 等恢复专用字段）。随后还有 `world_context`、
 `world_list`、`save_list`、`character_state`（§4.20）。
 

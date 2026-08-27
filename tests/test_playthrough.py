@@ -105,6 +105,18 @@ def test_callbacks_capture_events_and_auto_answer_decisions() -> None:
     assert cap.game_over["ending_type"] == "truth_and_seal"
     assert len(cap.decisions) == 1
 
+    preview_selected = cb.on_decision(
+        {
+            "kind": "action_preview",
+            "options": [
+                {"id": "continue_action", "label": "继续"},
+                {"id": "cancel_action", "label": "取消"},
+            ],
+            "default_option": "cancel_action",
+        }
+    )
+    assert preview_selected == "continue_action"
+
     cap2 = Capture()
     cb2 = make_callbacks(cap2, decision_strategy="confirm")
     assert (

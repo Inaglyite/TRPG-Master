@@ -345,7 +345,7 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
             key: copy.deepcopy(value)
             for key, value in pending.items()
             if key != "action"
-        },
+        } | {"presentation": "chat"},
         "authorization": {
             "kind": kind,
             "target_id": target.get("id"),

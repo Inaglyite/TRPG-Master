@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from src.action_resolution import ActionPhase, plan_player_action
-from src.agent_graph import _prepare_turn
+from src.agent_graph import _parse_final_narrative, _prepare_turn
 from src.config import PROJECT_ROOT
 from src.discovery import (
     match_discovery_rules,
@@ -26,12 +26,14 @@ def discovery_world() -> dict:
                 "id": "body",
                 "source": "morgue",
                 "related_scenes": ["morgue"],
-                "discovery_rules": [{
-                    "intent": "examine",
-                    "targets": ["教授遗体", "尸体"],
-                    "skill": "spot_hidden",
-                    "requires_success": True,
-                }],
+                "discovery_rules": [
+                    {
+                        "intent": "examine",
+                        "targets": ["教授遗体", "尸体"],
+                        "skill": "spot_hidden",
+                        "requires_success": True,
+                    }
+                ],
             },
         },
     }
@@ -41,36 +43,48 @@ class DiscoveryMatchingTests(unittest.TestCase):
     def test_declarative_encounter_supports_luck_and_absence(self):
         world = {
             "flags": {"campus_open": True},
-            "npcs": [{
-                "id": "professor",
-                "current_location": "office",
-            }],
+            "npcs": [
+                {
+                    "id": "professor",
+                    "current_location": "office",
+                }
+            ],
             "scene_catalog": {
                 "office": {
-                    "encounters": [{
-                        "id": "professor_after_hours",
-                        "npc_id": "professor",
-                        "availability": "luck",
-                        "required_flags": {"campus_open": True},
-                        "on_present_text": "教授恰好还在办公室。",
-                        "on_absent_text": "办公室已经空了。",
-                    }],
+                    "encounters": [
+                        {
+                            "id": "professor_after_hours",
+                            "npc_id": "professor",
+                            "availability": "luck",
+                            "required_flags": {"campus_open": True},
+                            "on_present_text": "教授恰好还在办公室。",
+                            "on_absent_text": "办公室已经空了。",
+                        }
+                    ],
                 },
             },
         }
 
         absent = resolve_scene_encounters(
-            "office", world, luck_check=lambda _difficulty: {
-                "success": False, "d100_roll": 88, "skill_value": 60,
-            }
+            "office",
+            world,
+            luck_check=lambda _difficulty: {
+                "success": False,
+                "d100_roll": 88,
+                "skill_value": 60,
+            },
         )
         self.assertEqual(absent.present_npc_ids, ())
         self.assertEqual(absent.narrative_text, "办公室已经空了。")
 
         present = resolve_scene_encounters(
-            "office", world, luck_check=lambda _difficulty: {
-                "success": True, "d100_roll": 12, "skill_value": 60,
-            }
+            "office",
+            world,
+            luck_check=lambda _difficulty: {
+                "success": True,
+                "d100_roll": 12,
+                "skill_value": 60,
+            },
         )
         self.assertEqual(present.present_npc_ids, ("professor",))
         self.assertEqual(present.narrative_text, "教授恰好还在办公室。")
@@ -90,22 +104,19 @@ class DiscoveryMatchingTests(unittest.TestCase):
             rerolls += 1
             return {"d100_roll": 1, "skill_value": 60, "success": True}
 
-        cached = resolve_scene_encounters(
-            "office", world, luck_check=unexpected_roll
-        )
+        cached = resolve_scene_encounters("office", world, luck_check=unexpected_roll)
         self.assertEqual(cached.present_npc_ids, ())
         self.assertTrue(cached.outcomes[0].cached)
         self.assertEqual(rerolls, 0)
 
     def test_scarlet_opening_does_not_pregrant_document_contacts(self):
         world = json.loads(
-            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json")
-            .read_text(encoding="utf-8")
+            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json").read_text(
+                encoding="utf-8"
+            )
         )
         initial_text = " ".join(
-            str(clue.get("text") or "")
-            for clues in world["clues_found"].values()
-            for clue in clues
+            str(clue.get("text") or "") for clues in world["clues_found"].values() for clue in clues
         )
         self.assertNotIn("哈兰德·洛奇", initial_text)
         self.assertNotIn("艾米莉亚·考特", initial_text)
@@ -121,8 +132,9 @@ class DiscoveryMatchingTests(unittest.TestCase):
 
     def test_scarlet_history_department_is_an_authoritative_scene(self):
         world = json.loads(
-            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json")
-            .read_text(encoding="utf-8")
+            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json").read_text(
+                encoding="utf-8"
+            )
         )
         world["current_scene"] = world["scene_catalog"]["miskatonic_medical"]
 
@@ -143,19 +155,93 @@ class DiscoveryMatchingTests(unittest.TestCase):
 
         # Old saves may retain a broad university location.  Authored scene
         # presence is the stronger navigation authority.
-        next(npc for npc in world["npcs"] if npc["id"] == "harland_lodge")[
-            "current_location"
-        ] = "miskatonic_university"
+        next(npc for npc in world["npcs"] if npc["id"] == "harland_lodge")["current_location"] = (
+            "miskatonic_university"
+        )
         old_save_lodge = plan_player_action("去东翼二层找哈兰德·洛奇。", world)
         self.assertEqual(
             old_save_lodge.destination_scene_id,
             "miskatonic_lodge_office",
         )
 
+    def test_scarlet_authored_targets_route_before_any_discovery_effect(self):
+        world = json.loads(
+            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        body = plan_player_action("我想先看看莱特教授的尸体。", world)
+        self.assertEqual(body.phase, ActionPhase.ARRIVAL)
+        self.assertEqual(body.destination_scene_id, "miskatonic_medical")
+        self.assertEqual(body.transition_kind, "discovery_target")
+        self.assertEqual(body.discovery_matches, ())
+
+        # Existing worlds retain their old runtime catalog; the target
+        # normalizer must still route the player phrase before a save is reset.
+        legacy = json.loads(json.dumps(world))
+        legacy["clue_catalog"]["wright_body_evidence"]["discovery_rules"][0]["targets"] = [
+            "莱特教授的遗体",
+            "莱特教授遗体",
+            "莱特遗体",
+            "莱特的尸体",
+        ]
+        legacy["scene_catalog"]["miskatonic_university"].pop("action_routes", None)
+        legacy["scene_catalog"]["miskatonic_medical"].pop("entry_beat", None)
+        legacy_body = plan_player_action("我想先看看莱特教授的尸体。", legacy)
+        self.assertEqual(legacy_body.destination_scene_id, "miskatonic_medical")
+        self.assertEqual(legacy_body.transition_kind, "discovery_target")
+
+        world["current_scene"] = world["scene_catalog"]["miskatonic_medical"]
+        world["pc"]["inventory"].append("真实尸检记录副本")
+        carried_copy = plan_player_action("检查翻看一下真实的尸检记录副本", world)
+        self.assertEqual(carried_copy.phase, ActionPhase.INTERACTION)
+        self.assertIsNone(carried_copy.destination_scene_id)
+
+        world["pc"]["inventory"].remove("真实尸检记录副本")
+        bare_copy = plan_player_action("翻看记录副本", world)
+        self.assertEqual(bare_copy.phase, ActionPhase.INTERACTION)
+        self.assertIsNone(bare_copy.destination_scene_id)
+
+        hunter_copy = plan_player_action("查看亨特的复制件", world)
+        self.assertEqual(hunter_copy.destination_scene_id, "arkham_sanatorium")
+        self.assertEqual(hunter_copy.transition_kind, "discovery_target")
+
+        world["current_scene"] = world["scene_catalog"]["arkham_sanatorium"]
+        local_copy = plan_player_action("翻看副本", world)
+        self.assertEqual(local_copy.phase, ActionPhase.CONTACT)
+        self.assertEqual(
+            [match.clue_id for match in local_copy.discovery_matches],
+            ["hunter_copy"],
+        )
+
+        world["current_scene"] = world["scene_catalog"]["miskatonic_university"]
+        contact = plan_player_action("让法伦联系惠特克罗夫特医生。", world)
+        self.assertEqual(contact.phase, ActionPhase.ARRIVAL)
+        self.assertEqual(contact.destination_scene_id, "miskatonic_medical")
+        self.assertEqual(contact.transition_kind, "authored_route")
+        self.assertEqual(contact.route_id, "contact_whitcroft")
+        self.assertIn("惠特克罗夫特医生", contact.departure_text)
+        self.assertIn("医学院", contact.travel_text)
+        self.assertEqual(contact.entry_text, "")
+
+        refused = plan_player_action("我暂时不看莱特教授的尸体。", world)
+        self.assertEqual(refused.phase, ActionPhase.INTERACTION)
+        self.assertIsNone(refused.destination_scene_id)
+
+        asked = plan_player_action("我问法伦能否让我看莱特教授的尸体？", world)
+        self.assertEqual(asked.phase, ActionPhase.INTERACTION)
+        self.assertIsNone(asked.destination_scene_id)
+
+        declined_contact = plan_player_action("我不让法伦联系惠特克罗夫特医生。", world)
+        self.assertEqual(declined_contact.phase, ActionPhase.INTERACTION)
+        self.assertIsNone(declined_contact.destination_scene_id)
+
     def test_scarlet_scene_graph_covers_authored_npc_locations_and_returns(self):
         world = json.loads(
-            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json")
-            .read_text(encoding="utf-8")
+            (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json").read_text(
+                encoding="utf-8"
+            )
         )
         scenes = world["scene_catalog"]
         for scene_id, scene in scenes.items():
@@ -270,18 +356,23 @@ class DiscoveryResolutionTests(unittest.TestCase):
             engine.cb = EngineCallbacks(on_handout=handouts.append)
             world = context.world_store.load()
             lodge_index = next(
-                index for index, npc in enumerate(world["npcs"])
-                if npc["id"] == "harland_lodge"
+                index for index, npc in enumerate(world["npcs"]) if npc["id"] == "harland_lodge"
             )
-            engine._execute_tool("state_set", {
-                "path": f"npcs.{lodge_index}.current_location",
-                "value": '"miskatonic_student_commons"',
-            })
+            engine._execute_tool(
+                "state_set",
+                {
+                    "path": f"npcs.{lodge_index}.current_location",
+                    "value": '"miskatonic_student_commons"',
+                },
+            )
 
-            engine._execute_tool("state_set", {
-                "path": "current_scene.id",
-                "value": '"miskatonic_lodge_office"',
-            })
+            engine._execute_tool(
+                "state_set",
+                {
+                    "path": "current_scene.id",
+                    "value": '"miskatonic_lodge_office"',
+                },
+            )
 
             current = context.world_store.load()["current_scene"]
             self.assertEqual(current["id"], "miskatonic_lodge_office")
@@ -306,7 +397,9 @@ class DiscoveryResolutionTests(unittest.TestCase):
             engine._player_turn_count = 0
             engine.narrative_model = "story-model"
             engine.cb = EngineCallbacks(
-                on_narrative=lambda text: events.append(("narrative", text)),
+                on_narrative=lambda text, npc_id=None: events.append(("narrative", (text, npc_id))),
+                on_speaker_segment=lambda npc_id: events.append(("speaker", npc_id)),
+                on_decision=lambda info: events.append(("decision", info)) or "continue_action",
                 on_tension=lambda _text, category: events.append(("tension", category)),
                 on_dice=lambda summary, _data: events.append(("dice", summary)),
                 on_handout=lambda info: events.append(("handout", info["asset_id"])),
@@ -314,21 +407,40 @@ class DiscoveryResolutionTests(unittest.TestCase):
             engine._maybe_inject_tier = lambda: None
             engine._detect_content_skill_hint = lambda _content: None
             engine._retrieve_lore_context = lambda _content=None: None
-            engine._resolve_action_check = lambda *_args: events.append(
-                ("check", "unexpected")
+            engine._resolve_action_check = lambda *_args: events.append(("check", "unexpected"))
+            frozen_input = "我想先看看莱特教授的尸体。"
+            engine._preplanned_action_resolution = plan_player_action(
+                frozen_input,
+                context.world_store.load(),
+            )
+            engine._plan_player_action = lambda _content: self.fail(
+                "确认行动时不应重新解析已冻结的计划"
             )
 
-            result = _prepare_turn({
-                "engine": engine,
-                "user_content": (
-                    "我前往密斯卡托尼克大学医学院，"
-                    "去见惠特克罗夫特医生并查看莱特教授的遗体。"
-                ),
-            })
+            result = _prepare_turn(
+                {
+                    "engine": engine,
+                    "user_content": frozen_input,
+                }
+            )
 
             narrative_events = [value for kind, value in events if kind == "narrative"]
             self.assertTrue(narrative_events)
-            self.assertNotIn("白布掀起", narrative_events[0])
+            self.assertNotIn("白布掀起", narrative_events[0][0])
+            self.assertEqual(narrative_events[0][1], "bryce_fallon")
+            self.assertIn("想亲眼看看查尔斯", narrative_events[0][0])
+            decisions = [value for kind, value in events if kind == "decision"]
+            self.assertEqual(decisions[0]["presentation"], "chat")
+            self.assertEqual(decisions[0]["kind"], "action_preview")
+            self.assertEqual(
+                result["player_followups"],
+                [
+                    {
+                        "text": "请法伦联系医生，前往停尸房",
+                        "after_narrative_segment": 2,
+                    }
+                ],
+            )
             self.assertNotIn("check", [event[0] for event in events])
             dice_events = [value for kind, value in events if kind == "dice"]
             self.assertEqual(dice_events, [])
@@ -336,9 +448,43 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 [value for kind, value in events if kind == "handout"],
                 ["john_whitcroft"],
             )
-            self.assertTrue(result["narrative"].startswith("你前往密斯卡托尼克大学医学院"))
+            self.assertEqual(
+                context.world_store.load()["current_scene"]["id"],
+                "miskatonic_medical",
+            )
+            self.assertTrue(result["narrative"].startswith("【npc:bryce_fallon】"))
+            self.assertEqual(
+                [
+                    (segment["kind"], segment.get("npc_id"))
+                    for segment in result["authored_segments"][:2]
+                ],
+                [("speech", "bryce_fallon"), ("narration", None)],
+            )
+            self.assertLess(
+                result["narrative"].index("想亲眼看看查尔斯"),
+                result["narrative"].index("你前往密斯卡托尼克大学医学院"),
+            )
             self.assertIn("本轮已向玩家展示的前置叙事", engine.messages[-1]["content"])
             self.assertIn('"arrival_only":true', engine.messages[-1]["content"])
+            self.assertIn(
+                '"scene_entry_beat":{"npc_id":"john_whitcroft"',
+                engine.messages[-1]["content"],
+            )
+
+            model_suffix = (
+                "\n\n医学院地下的空气更冷。惠特克罗夫特医生站在门口等候。\n\n"
+                '惠特克罗夫特医生："法伦主任说你想亲眼看看。"'
+            )
+            final_segments, _ = _parse_final_narrative(
+                engine,
+                result,
+                result["narrative"] + model_suffix,
+            )
+            self.assertEqual(final_segments[0].npc_id, "bryce_fallon")
+            self.assertEqual(final_segments[1].kind, "narration")
+            self.assertIsNone(final_segments[1].npc_id)
+            self.assertIn("你可以立即前往", final_segments[1].text)
+            self.assertEqual(final_segments[-1].npc_id, "john_whitcroft")
 
             blocked = engine._execute_model_tool(
                 "sanity_event",
@@ -349,6 +495,97 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 __import__("json").loads(blocked)["error"],
                 "arrival_turn_effect_not_authorized",
             )
+
+    def test_cancelling_morgue_preview_keeps_origin_scene_and_skips_story_agent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.create(
+                "discovery-preview-cancel",
+                "猩红文档",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+            events: list[tuple[str, object]] = []
+            engine = GameEngine.__new__(GameEngine)
+            engine.context = context
+            engine.messages = []
+            engine._player_turn_count = 0
+            engine.narrative_model = "story-model"
+            engine.cb = EngineCallbacks(
+                on_narrative=lambda text, npc_id=None: events.append(("narrative", (text, npc_id))),
+                on_speaker_segment=lambda npc_id: events.append(("speaker", npc_id)),
+                on_decision=lambda info: events.append(("decision", info)) or "cancel_action",
+            )
+            engine._maybe_inject_tier = lambda: None
+            engine._retrieve_lore_context = lambda _content=None: None
+
+            result = _prepare_turn(
+                {
+                    "engine": engine,
+                    "user_content": "我想先看看莱特教授的尸体。",
+                }
+            )
+
+            self.assertTrue(result["skip_agent"])
+            self.assertTrue(result["skip_model_audit"])
+            self.assertEqual(
+                context.world_store.load()["current_scene"]["id"],
+                "miskatonic_university",
+            )
+            self.assertIn("玩家暂不执行原行动", engine.messages[-1]["content"])
+            self.assertNotIn("你前往密斯卡托尼克大学医学院", result["narrative"])
+
+    def test_prepare_choice_uses_authored_action_without_reparsing_its_label(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.create(
+                "discovery-preview-prepare",
+                "猩红文档",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+            original = "我想先看看莱特教授的尸体。"
+            authored = (
+                "我先留下来问法伦：你为什么不相信莱特的死亡证明？"
+                "在我去看遗体之前，还有什么应该知道的？"
+            )
+            planned: list[str] = []
+            engine = GameEngine.__new__(GameEngine)
+            engine.context = context
+            engine.messages = []
+            engine._player_turn_count = 0
+            engine.narrative_model = "story-model"
+            engine.cb = EngineCallbacks(
+                on_narrative=lambda _text, npc_id=None: None,
+                on_speaker_segment=lambda _npc_id: None,
+                on_decision=lambda _info: "prepare_ask_fallon_first",
+            )
+            engine._maybe_inject_tier = lambda: None
+            engine._detect_content_skill_hint = lambda _content: None
+            engine._retrieve_lore_context = lambda _content=None: None
+            engine._resolve_action_check = lambda *_args: None
+            engine._preplanned_action_resolution = plan_player_action(
+                original,
+                context.world_store.load(),
+            )
+
+            def plan_replacement(content: str):
+                planned.append(content)
+                return plan_player_action(content, context.world_store.load())
+
+            engine._plan_player_action = plan_replacement
+
+            result = _prepare_turn({"engine": engine, "user_content": original})
+
+            self.assertEqual(planned, [authored])
+            self.assertEqual(result["user_content"], authored)
+            self.assertEqual(
+                result["player_followups"][0]["text"],
+                "先问法伦为什么不相信死亡证明",
+            )
+            self.assertEqual(
+                context.world_store.load()["current_scene"]["id"],
+                "miskatonic_university",
+            )
+            self.assertNotIn("你前往密斯卡托尼克大学医学院", result["narrative"])
 
     def test_declared_body_event_commits_before_story_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -368,14 +605,15 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 on_dice=lambda summary, data: dice.append((summary, data)),
                 on_tension=lambda text, category: tension.append((text, category)),
             )
-            engine._execute_tool("state_set", {
-                "path": "current_scene.id",
-                "value": '"miskatonic_medical"',
-            })
-
-            matches, skill = engine._match_discoveries(
-                "我掀开白布，检查莱特教授的遗体。"
+            engine._execute_tool(
+                "state_set",
+                {
+                    "path": "current_scene.id",
+                    "value": '"miskatonic_medical"',
+                },
             )
+
+            matches, skill = engine._match_discoveries("我掀开白布，检查莱特教授的遗体。")
             resolved = engine._resolve_discoveries(matches, None)
 
             self.assertIsNone(skill)
@@ -438,22 +676,26 @@ def antique_shop_world() -> dict:
                 "source": "trivial_pursuits",
                 "related_scenes": ["trivial_pursuits"],
                 "flag_effects": {"deep_basement_found": True},
-                "discovery_rules": [{
-                    "intent": "search",
-                    "targets": ["活板门", "地下室"],
-                    "requires_flags": ["wicks_shop_searched"],
-                }],
+                "discovery_rules": [
+                    {
+                        "intent": "search",
+                        "targets": ["活板门", "地下室"],
+                        "requires_flags": ["wicks_shop_searched"],
+                    }
+                ],
             },
             "witch_trial_documents": {
                 "id": "witch_trial_documents",
                 "source": "trivial_pursuits",
                 "related_scenes": ["trivial_pursuits"],
                 "flag_effects": {"documents_recovered": True},
-                "discovery_rules": [{
-                    "intent": "take",
-                    "targets": ["女巫审判文档", "审判文档原件"],
-                    "requires_flags": ["deep_basement_found"],
-                }],
+                "discovery_rules": [
+                    {
+                        "intent": "take",
+                        "targets": ["女巫审判文档", "审判文档原件"],
+                        "requires_flags": ["deep_basement_found"],
+                    }
+                ],
             },
         },
     }
@@ -462,8 +704,9 @@ def antique_shop_world() -> dict:
 class RequiresFlagsGateTests(unittest.TestCase):
     def test_requires_flags_blocks_premature_match(self):
         world = antique_shop_world()
-        self.assertEqual(match_discovery_rules("搜查店面后面的隔断", world)[0].clue_id,
-                         "wick_shop_secrets")
+        self.assertEqual(
+            match_discovery_rules("搜查店面后面的隔断", world)[0].clue_id, "wick_shop_secrets"
+        )
         # 终局线索不能跳过推进链直接命中
         self.assertEqual(match_discovery_rules("我要拿走女巫审判文档", world), [])
         self.assertEqual(match_discovery_rules("搜查地下室", world), [])
@@ -471,8 +714,7 @@ class RequiresFlagsGateTests(unittest.TestCase):
     def test_chain_unlocks_step_by_step(self):
         world = antique_shop_world()
         world["flags"]["wicks_shop_searched"] = True
-        self.assertEqual(match_discovery_rules("搜查地下室", world)[0].clue_id,
-                         "wick_trapdoor")
+        self.assertEqual(match_discovery_rules("搜查地下室", world)[0].clue_id, "wick_trapdoor")
         self.assertEqual(match_discovery_rules("我要拿走女巫审判文档", world), [])
         world["flags"]["deep_basement_found"] = True
         self.assertEqual(
@@ -492,9 +734,9 @@ class NegationGuardTests(unittest.TestCase):
         wick_shop_secrets 漏匹配，推进链差点断在第一步。"""
         world = antique_shop_world()
         self.assertEqual(
-            match_discovery_rules(
-                "趁店员不注意，检查大厅北端那堵不起眼的木质隔断", world
-            )[0].clue_id,
+            match_discovery_rules("趁店员不注意，检查大厅北端那堵不起眼的木质隔断", world)[
+                0
+            ].clue_id,
             "wick_shop_secrets",
         )
 

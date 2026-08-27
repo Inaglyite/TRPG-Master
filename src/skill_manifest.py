@@ -1,6 +1,6 @@
 """Skill Catalog manifest: 官方目录加载、模组合成条目与内容读取边界。
 
-H3 契约（``docs/DEEPSEEK_HARNESS_ADOPTION.md`` §5.4）：`.skill` 正文不改，
+Skill Catalog 契约（``docs/ARCHITECTURE.md`` §7.1 和 §7.3）：`.skill` 正文不改，
 元数据集中在 ``skills/catalog.json``；模组 skills 在运行时合成为
 ``bundled-module`` 条目。content_digest 不进 catalog 文件，pin 时计算并存入
 world_skill_pins。

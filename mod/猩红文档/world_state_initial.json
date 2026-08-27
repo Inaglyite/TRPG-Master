@@ -501,7 +501,41 @@
       "name": "密斯卡托尼克大学",
       "description": "新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。法伦主任的办公室位于行政楼二层。",
       "exits": ["wright_office", "wright_cottage", "miskatonic_medical", "miskatonic_history", "miskatonic_lodge_office", "miskatonic_student_commons", "sheb_tavern", "trivial_pursuits", "hobhouse_mansion", "arkham_sanatorium"],
-      "npcs_present": ["bryce_fallon"]
+      "npcs_present": ["bryce_fallon"],
+      "action_routes": [
+        {
+          "id": "contact_whitcroft",
+          "aliases": ["让法伦联系惠特克罗夫", "让法伦联系惠特克罗夫特", "联系惠特克罗夫", "联系惠特克罗夫特", "让法伦打电话给惠特克罗夫", "请法伦联系医生"],
+          "destination_scene_id": "miskatonic_medical",
+          "departure_text": "法伦拨通医学院的内线，压低声音说明你的来意；放下听筒后，他示意惠特克罗夫特医生会在停尸房等候。",
+          "travel_text": "你穿过被秋雨浸湿的校园，沿医学院铺着白瓷砖的楼梯一路向下。消毒水的气味越来越重，走廊里的人声却逐渐消失。"
+        }
+      ],
+      "action_advisories": [
+        {
+          "id": "wright_body_handoff",
+          "destination_scene_id": "miskatonic_medical",
+          "transition_kinds": ["discovery_target"],
+          "trigger_if": {"always": true},
+          "title": "前往停尸房之前",
+          "npc_id": "bryce_fallon",
+          "npc_text": "想亲眼看看查尔斯？可以。不过遗体还在医学院的冷柜里，我得先替你知会惠特克罗夫特医生。那份死亡证明是他签的——进去之前，你也许愿意先听听我对这件事的看法。",
+          "keeper_text": "停尸房并非可以自由进出的地方，法伦需要先通知值班医生。",
+          "public_hint": "『你可以立即前往，也可以先向法伦了解更多情况。』",
+          "continue_label": "请法伦联系医生，前往停尸房",
+          "continue_description": "按原定计划查看莱特教授的遗体",
+          "prepare_options": [
+            {
+              "id": "ask_fallon_first",
+              "label": "先问法伦为什么不相信死亡证明",
+              "description": "留在办公室，先了解他的疑虑",
+              "action_text": "我先留下来问法伦：你为什么不相信莱特的死亡证明？在我去看遗体之前，还有什么应该知道的？"
+            }
+          ],
+          "cancel_label": "暂时不去，调查其他线索",
+          "cancel_description": "保持当前场景与世界状态不变"
+        }
+      ]
     },
     "wright_office": {
       "id": "wright_office",
@@ -523,7 +557,11 @@
       "name": "密斯卡托尼克大学医学院",
       "description": "医学院地下的冰冷停尸房，莱特的遗体被锁在冷柜中。",
       "exits": ["miskatonic_university", "miskatonic_history"],
-      "npcs_present": ["john_whitcroft"]
+      "npcs_present": ["john_whitcroft"],
+      "entry_beat": {
+        "npc_id": "john_whitcroft",
+        "public_text": "冷柜间门口，惠特克罗夫特医生正攥着病历夹等候。他显得疲惫而不安，却仍以职业性的克制向你示意。"
+      }
     },
     "miskatonic_history": {
       "id": "miskatonic_history",
@@ -613,7 +651,7 @@
       "discovery_rules": [
         {
           "intent": "examine",
-          "targets": ["莱特教授的遗体", "莱特教授遗体", "莱特遗体", "莱特的尸体"],
+          "targets": ["莱特教授的遗体", "莱特教授遗体", "莱特教授的尸体", "莱特教授尸体", "莱特遗体", "莱特的遗体", "莱特的尸体"],
           "approach_text": "惠特克罗夫特医生带你进入地下停尸房，拉开冰冷的金属冷柜。白布掀起，莱特教授的遗体显露在冷白灯光下。",
           "requires_success": false,
           "sanity_severity": "minor",
