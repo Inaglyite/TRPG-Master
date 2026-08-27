@@ -32,9 +32,16 @@ fi
 
 cd "$SCRIPT_DIR"
 
-ensure_backend_dependencies() {
+backend_dependencies_available() {
     if python3 -c 'import alembic, argon2, fastapi, psycopg, sqlalchemy, uvicorn' \
         >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_backend_dependencies() {
+    if backend_dependencies_available; then
         return 0
     fi
 
@@ -55,6 +62,10 @@ run_backend() {
     elif [ -f .venv/bin/activate ]; then
         # shellcheck disable=SC1091
         source .venv/bin/activate
+    elif backend_dependencies_available; then
+        # CI、容器或开发机可能已经在受控 Python 环境中安装完整依赖。
+        # 此时直接复用，避免为了“形式上的 venv”再次联网安装。
+        :
     else
         if ! command -v python3 >/dev/null 2>&1; then
             echo "❌ 未找到 Python 3.12+，无法启动本地单机后端"

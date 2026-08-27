@@ -1247,6 +1247,10 @@ def test_postgresql_memory_fact_idempotency_constraints() -> None:
 
     with session_scope(POSTGRES_URL) as session:
         session.add(World(id=world_id, module_name="mod"))
+        # No ORM relationship connects these independently-created rows.
+        # Flush the FK parent explicitly so PostgreSQL never depends on unit-
+        # of-work insertion ordering (SQLite's local test path can mask this).
+        session.flush()
         session.add(fact("d1"))
 
     # Same content digest → uq_memory_fact_digest rejects the duplicate.
