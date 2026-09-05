@@ -65,13 +65,20 @@ def register_auxiliary_handlers(
 
     @runtime.handler("sanity_event")
     def sanity_event(args: dict, context: RuntimeContext) -> str:
+        from src.gameplay.sanity_sources import exposure_id_for_clue
+
+        exposure_id = args.get("exposure_id") or exposure_id_for_clue(context.world_store.load(), str(args.get("clue_id") or ""))
         trigger = json.loads(
             runtime.execute("sanity_trigger", {"description": args.get("description", "")}, context)
         )
         loss = json.loads(
             runtime.execute(
                 "sanity_loss",
-                {"severity": args.get("severity", trigger["suggestion"])},
+                {
+                    "severity": args.get("severity", trigger["suggestion"]),
+                    "source": args.get("description", "未知恐怖"),
+                    "exposure_id": exposure_id,
+                },
                 context,
             )
         )

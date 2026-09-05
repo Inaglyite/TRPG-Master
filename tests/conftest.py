@@ -24,6 +24,10 @@ os.environ["TRPG_RUNTIME_ROOT"] = str(TEST_RUNTIME_ROOT)
 # protects a developer's local/production database; the forced runtime root
 # below is then used to derive the safe default database path.
 os.environ.pop("TRPG_DATABASE_URL", None)
+# Existing provider fixtures contain story/combat calls only. Adjudication
+# integration tests explicitly enable the default-on production feature and
+# supply their own structured proposals, keeping all unit tests offline.
+os.environ["TRPG_ACTION_ADJUDICATION"] = "0"
 
 import pytest
 

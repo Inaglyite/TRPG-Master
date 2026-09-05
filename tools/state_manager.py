@@ -361,7 +361,7 @@ def cmd_add_clue(text, category="investigation", clue_type="obvious", tier=1,
     # 真实入册（非重复）+1 并按 case_clock_definitions 的 max 封顶。叙事/审计
     # 模型都不需要再为此时钟记账。
     clocks = data.get("case_clocks")
-    if isinstance(clocks, dict) and isinstance(clocks.get("clue_clarity"), (int, float)):
+    if isinstance(catalog_entry, dict) and isinstance(clocks, dict) and isinstance(clocks.get("clue_clarity"), (int, float)):
         definitions = data.get("case_clock_definitions")
         definition = definitions.get("clue_clarity") if isinstance(definitions, dict) else None
         max_value = definition.get("max") if isinstance(definition, dict) else None
@@ -583,8 +583,7 @@ def cmd_npc_reveal(npc_id, tier, entry_text):
             print(json.dumps(result, ensure_ascii=False))
             break
     if not found:
-        print(f"ERROR: NPC '{npc_id}' 不存在", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError(f"NPC '{npc_id}' 不存在")
     return result
 
 

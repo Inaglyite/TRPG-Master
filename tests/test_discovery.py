@@ -16,6 +16,16 @@ from src.gameplay.discovery import (
 from src.gameplay.encounters import resolve_scene_encounters
 
 
+def make_morgue_preview_blocking(context) -> None:
+    """模组默认的停尸房预演是非阻塞提醒；测试卡牌流程时显式翻回阻塞。"""
+
+    def mutate(world: dict) -> None:
+        advisory = world["scene_catalog"]["miskatonic_university"]["action_advisories"][0]
+        advisory["blocking"] = True
+
+    context.world_store.update(mutate)
+
+
 def discovery_world() -> dict:
     return {
         "pc": {"skills": {"spot_hidden": 70}},
@@ -390,6 +400,7 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 project_root=PROJECT_ROOT,
                 runtime_root=Path(temp_dir),
             )
+            make_morgue_preview_blocking(context)
             events: list[tuple[str, str]] = []
             engine = GameEngine.__new__(GameEngine)
             engine.context = context
@@ -424,20 +435,21 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 }
             )
 
+            # 预演罐头文案不再直接播为最终叙事；决策卡携带大意，
+            # 完整演出由故事模型按素材展开。
             narrative_events = [value for kind, value in events if kind == "narrative"]
-            self.assertTrue(narrative_events)
-            self.assertNotIn("白布掀起", narrative_events[0][0])
-            self.assertEqual(narrative_events[0][1], "bryce_fallon")
-            self.assertIn("想亲眼看看查尔斯", narrative_events[0][0])
+            self.assertFalse(narrative_events)
             decisions = [value for kind, value in events if kind == "decision"]
             self.assertEqual(decisions[0]["presentation"], "chat")
             self.assertEqual(decisions[0]["kind"], "action_preview")
+            self.assertIn("想亲眼看看查尔斯", decisions[0]["description"])
+            self.assertNotIn("【npc:", decisions[0]["description"])
             self.assertEqual(
                 result["player_followups"],
                 [
                     {
                         "text": "请法伦联系医生，前往停尸房",
-                        "after_narrative_segment": 2,
+                        "after_narrative_segment": 0,
                     }
                 ],
             )
@@ -452,24 +464,17 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 context.world_store.load()["current_scene"]["id"],
                 "miskatonic_medical",
             )
-            self.assertTrue(result["narrative"].startswith("【npc:bryce_fallon】"))
-            self.assertEqual(
-                [
-                    (segment["kind"], segment.get("npc_id"))
-                    for segment in result["authored_segments"][:2]
-                ],
-                [("speech", "bryce_fallon"), ("narration", None)],
-            )
+            self.assertEqual(result["narrative"], "")
+            self.assertEqual(result["authored_segments"], [])
+            model_content = engine.messages[-1]["content"]
+            self.assertIn("行动预演素材", model_content)
+            self.assertIn("想亲眼看看查尔斯", model_content)
+            # 既定事实按顺序交付模型：先赶路，再抵达
             self.assertLess(
-                result["narrative"].index("想亲眼看看查尔斯"),
-                result["narrative"].index("你前往密斯卡托尼克大学医学院"),
+                model_content.index("你前往密斯卡托尼克大学医学院"),
+                model_content.index("冷柜间门口"),
             )
-            self.assertIn("本轮已向玩家展示的前置叙事", engine.messages[-1]["content"])
-            self.assertIn('"arrival_only":true', engine.messages[-1]["content"])
-            self.assertIn(
-                '"scene_entry_beat":{"npc_id":"john_whitcroft"',
-                engine.messages[-1]["content"],
-            )
+            self.assertIn('"arrival_only":true', model_content)
 
             model_suffix = (
                 "\n\n医学院地下的空气更冷。惠特克罗夫特医生站在门口等候。\n\n"
@@ -478,13 +483,10 @@ class DiscoveryResolutionTests(unittest.TestCase):
             final_segments, _ = _parse_final_narrative(
                 engine,
                 result,
-                result["narrative"] + model_suffix,
+                model_suffix,
             )
-            self.assertEqual(final_segments[0].npc_id, "bryce_fallon")
-            self.assertEqual(final_segments[1].kind, "narration")
-            self.assertIsNone(final_segments[1].npc_id)
-            self.assertIn("你可以立即前往", final_segments[1].text)
-            self.assertEqual(final_segments[-1].npc_id, "john_whitcroft")
+            self.assertEqual(final_segments[0].kind, "narration")
+            self.assertIn("医学院地下的空气更冷", final_segments[0].text)
 
             blocked = engine._execute_model_tool(
                 "sanity_event",
@@ -504,6 +506,7 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 project_root=PROJECT_ROOT,
                 runtime_root=Path(temp_dir),
             )
+            make_morgue_preview_blocking(context)
             events: list[tuple[str, object]] = []
             engine = GameEngine.__new__(GameEngine)
             engine.context = context
@@ -534,6 +537,60 @@ class DiscoveryResolutionTests(unittest.TestCase):
             self.assertIn("玩家暂不执行原行动", engine.messages[-1]["content"])
             self.assertNotIn("你前往密斯卡托尼克大学医学院", result["narrative"])
 
+    def test_nonblocking_morgue_preview_plays_through_without_a_card(self):
+        """模组默认的停尸房预演是非阻塞提醒：不弹卡、不预播罐头文案，
+        文案作为素材交给故事模型，行动照常结算。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context = RuntimeContext.create(
+                "discovery-preview-nonblocking",
+                "猩红文档",
+                project_root=PROJECT_ROOT,
+                runtime_root=Path(temp_dir),
+            )
+            events: list[tuple[str, object]] = []
+            engine = GameEngine.__new__(GameEngine)
+            engine.context = context
+            engine.messages = []
+            engine._player_turn_count = 0
+            engine.narrative_model = "story-model"
+            engine.cb = EngineCallbacks(
+                on_narrative=lambda text, npc_id=None: events.append(("narrative", (text, npc_id))),
+                on_speaker_segment=lambda _npc_id: None,
+                on_decision=lambda info: events.append(("decision", info)) or "continue_action",
+                on_handout=lambda info: events.append(("handout", info["asset_id"])),
+            )
+            engine._maybe_inject_tier = lambda: None
+            engine._detect_content_skill_hint = lambda _content: None
+            engine._retrieve_lore_context = lambda _content=None: None
+            engine._resolve_action_check = lambda *_args: None
+
+            result = _prepare_turn(
+                {
+                    "engine": engine,
+                    "user_content": "我想先看看莱特教授的尸体。",
+                }
+            )
+
+            self.assertFalse([value for kind, value in events if kind == "decision"])
+            self.assertFalse([value for kind, value in events if kind == "narrative"])
+            self.assertEqual(
+                [value for kind, value in events if kind == "handout"],
+                ["john_whitcroft"],
+            )
+            self.assertEqual(
+                context.world_store.load()["current_scene"]["id"],
+                "miskatonic_medical",
+            )
+            self.assertEqual(result["narrative"], "")
+            self.assertFalse(result["skip_agent"])
+            model_content = engine.messages[-1]["content"]
+            self.assertIn("行动预演素材", model_content)
+            self.assertIn("想亲眼看看查尔斯", model_content)
+            self.assertLess(
+                model_content.index("你前往密斯卡托尼克大学医学院"),
+                model_content.index("冷柜间门口"),
+            )
+
     def test_prepare_choice_uses_authored_action_without_reparsing_its_label(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             context = RuntimeContext.create(
@@ -542,6 +599,7 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 project_root=PROJECT_ROOT,
                 runtime_root=Path(temp_dir),
             )
+            make_morgue_preview_blocking(context)
             original = "我想先看看莱特教授的尸体。"
             authored = (
                 "我先留下来问法伦：你为什么不相信莱特的死亡证明？"

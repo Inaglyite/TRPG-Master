@@ -99,9 +99,8 @@ JUDGEMENT_MODEL = os.environ.get(
 # role-specific models above instead of inferring behavior from FORCE_PRO.
 FORCE_PRO = NARRATIVE_MODEL == MODEL_PRO and JUDGEMENT_MODEL == MODEL_PRO
 PRIMARY_MODEL = NARRATIVE_MODEL
-# 回合事务审计（judgement 模型兜底提交场景/线索/NPC 等权威变更）默认开启：
-# 检定回合叙事模型拿不到工具，确定性匹配一旦漏判就只有这道兜底能收敛状态。
-ENABLE_TURN_AUDIT = os.environ.get("TRPG_ENABLE_TURN_AUDIT", "1").lower() not in (
+# 裁决默认在骰前执行；可选后置审计仅报告叙述偏差，不再反向修改硬状态。
+ENABLE_TURN_AUDIT = os.environ.get("TRPG_ENABLE_TURN_AUDIT", "0").lower() not in (
     "0", "false", "no", "off",
 )
 ENABLE_LOREBOOK = os.environ.get("TRPG_ENABLE_LOREBOOK", "1").lower() not in (

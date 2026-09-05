@@ -59,6 +59,7 @@ from src.app.config import PROJECT_ROOT, RUNTIME_ROOT  # noqa: E402
 from src.app.engine import GameEngine  # noqa: E402
 from src.app.engine_primitives import EngineCallbacks  # noqa: E402
 from src.storage.world_branches import WorldBranchService  # noqa: E402
+from src.storage.world_store import atomic_write_json  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 捕获与快照
@@ -77,6 +78,7 @@ class Capture:
     errors: list[str] = field(default_factory=list)
     game_over: dict | None = None
     turn_snapshots: list[dict] = field(default_factory=list)
+    beat_start: dict[str, int] = field(default_factory=dict)
 
 
 def make_callbacks(capture: Capture, *, decision_strategy: str = "default") -> EngineCallbacks:
@@ -149,6 +151,8 @@ def snapshot_world(world: dict) -> dict:
         "psychological": pc.get("psychological_profile"),
         "clocks": dict(world.get("case_clocks") or {}),
         "combat_active": bool(combat.get("active")),
+        "world_clock": dict(world.get("world_clock") or {}),
+        "last_action_outcome": world.get("last_action_outcome"),
     }
 
 
@@ -189,6 +193,25 @@ def scene_reached(scene_id: str):
 
 def clue_found(clue_id: str):
     return lambda world, _cap: clue_id in clue_ids(world)
+
+
+def _beat_clock_progressed(capture: Capture, beat_key: str) -> bool:
+    """beat 期间案件时钟必须有真实增量；此前 clue_clarity 已被线索堆高，
+    扫全程快照会把旧成果误算成监视的收益（A04 假阳性）。"""
+    start = capture.beat_start.get(beat_key, 0)
+    segment = capture.turn_snapshots[start:]
+    if not segment:
+        return False
+    base_idx = max(0, start - 1)
+    base = (capture.turn_snapshots[base_idx].get("clocks") or {}) if start else {}
+    for snap in segment:
+        clocks = snap.get("clocks") or {}
+        if any(
+            clocks.get(name, 0) > base.get(name, 0)
+            for name in ("monster_manifestation", "human_pressure", "clue_clarity")
+        ):
+            return True
+    return False
 
 
 def check_scene(area: int, scene_id: str) -> Check:
@@ -418,24 +441,11 @@ def scarlet_beats() -> list[Beat]:
                 "又盯了几天：留意店里夜里的异常动静，并打听镇上关于文档或失踪者的传闻",
                 "把这些天的监视结果汇总：谁最可能已经把文档弄到手了？",
             ],
-            goal=lambda w, c: (
-                any(
-                    (w.get("case_clocks") or {}).get(name, 0) >= 2
-                    for name in ("monster_manifestation", "human_pressure", "clue_clarity")
-                )
-                or bool((w.get("flags") or {}).get("monster_manifested"))
-            ),
+            goal=lambda w, c: _beat_clock_progressed(c, "B5b_clock")
+            or bool((w.get("flags") or {}).get("monster_manifested")),
             max_turns=6,
             checks=[
-                Check(
-                    2,
-                    "多日调查中案件时钟有推进（monster/human/clue 其一 >0）",
-                    lambda w, c: any(
-                        (snap.get("clocks") or {}).get(name, 0) > 0
-                        for snap in c.turn_snapshots
-                        for name in ("monster_manifestation", "human_pressure", "clue_clarity")
-                    ),
-                ),
+                Check(2, "多日调查中案件时钟有推进（beat 内差值 >0）", lambda w, c: _beat_clock_progressed(c, "B5b_clock")),
             ],
         ),
         Beat(
@@ -497,6 +507,18 @@ def scarlet_beats() -> list[Beat]:
             ],
         ),
         Beat(
+            key="B6c_read",
+            title="当面阅读：记住内容但不取得原件",
+            inputs=["我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。"],
+            goal=clue_found("witch_trial_documents_read"),
+            max_turns=3,
+            checks=[
+                check_clue(3, "witch_trial_documents_read"),
+                Check(3, "只读不取得文档或完成找回目标", lambda w, c: not (w.get("flags") or {}).get("documents_recovered")
+                      and "阿卡姆女巫审判文档" not in (w.get("pc") or {}).get("inventory", [])),
+            ],
+        ),
+        Beat(
             key="B6c_documents",
             title="古董店：找回女巫审判文档",
             inputs=[
@@ -512,6 +534,14 @@ def scarlet_beats() -> list[Beat]:
             checks=[
                 check_clue(3, "witch_trial_documents"),
             ],
+        ),
+        Beat(
+            key="B6c_badge",
+            title="取得实物：搜查楼上办公室的锡盒",
+            inputs=["我到古董店楼上办公室搜查上锁的锡盒，设法打开它并取出银质徽章。"],
+            goal=clue_found("abner_seal"),
+            max_turns=4,
+            checks=[check_clue(3, "abner_seal")],
         ),
         Beat(
             key="B6d_seal",
@@ -579,12 +609,25 @@ def _madness_check(world: dict) -> bool:
     return any(k in text for k in ("恐惧症", "躁狂", "疯狂", "phobia", "mania"))
 
 
+def choose_beat_input(beat: Beat, attempt: int, world: dict) -> str:
+    """Choose a player response to actual danger, never assume combat ended."""
+    combat = world.get("combat_state") or {}
+    if combat.get("active") and beat.key.startswith("B6"):
+        ammo = _ammo_count(world)
+        hp = (world.get("pc") or {}).get("hp", 10)
+        if beat.key != "B6b_fight" or hp <= 4 or (ammo is not None and ammo <= 1):
+            return "我放低武器，停止开火，与维克谈判：先叫双方停手。我愿意讨论安全处置文档的条件，但不承诺放弃调查。"
+    return beat.inputs[min(attempt, len(beat.inputs) - 1)]
+
+
 def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     wb = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)
     context = wb.create_root(MODULE)
     engine = GameEngine(context)
     capture = Capture()
     engine.cb = make_callbacks(capture)
+    profile_file = context.player_profile_file
+    profile_backup = profile_file.read_bytes() if profile_file.exists() else None
     # reset 才会应用调查员角色与 module_starting_inventory（钥匙/配枪）；
     # 直接 handle_action 跑的是模组默认空 inventory 世界，整场验收都会歪。
     # 角色显式钉死为模组自带调查员：default_character_ref 会优先取玩家
@@ -599,9 +642,6 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     )
 
     # profiles 是真实共享数据：备份，跑完恢复
-    profile_file = PROJECT_ROOT / "profiles" / "player_profile.json"
-    profile_backup = profile_file.read_bytes() if profile_file.exists() else None
-
     world_id = context.world_id
     report: dict = {
         "world_id": world_id,
@@ -609,6 +649,9 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
         "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "beats": [],
         "global_checks": [],
+        "anomalies": [],
+        "turn_snapshots": capture.turn_snapshots,
+        "status": "running",
     }
 
     def log(msg: str) -> None:
@@ -616,11 +659,31 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
             print(msg, flush=True)
 
     def turn(user_input: str | None) -> dict:
-        engine.handle_action(user_input)
+        narrative_start = len(capture.narratives)
+        error_start = len(capture.errors)
+        exception_text = ""
+        try:
+            engine.handle_action(user_input)
+        except Exception as exc:
+            exception_text = f"{type(exc).__name__}: {exc}"
+            capture.errors.append(exception_text)
         world = context.world_store.load()
         snap = snapshot_world(world)
         snap["input"] = user_input
+        snap["narrative"] = "".join(capture.narratives[narrative_start:])
+        resolution = getattr(engine, "_action_resolution", None)
+        snap["adjudication"] = json.loads(resolution.adjudication_json) if resolution and resolution.adjudication_json else None
+        snap["model_diagnostics"] = [
+            {key: call.get(key) for key in ("role", "status", "elapsed_ms", "error")}
+            for call in engine._turn_diagnostics
+        ]
+        snap["errors"] = capture.errors[error_start:]
         capture.turn_snapshots.append(snap)
+        if exception_text or snap["errors"]:
+            report["anomalies"].append({"kind": "turn_error", "turn": len(capture.turn_snapshots), "input": user_input, "errors": snap["errors"]})
+        if any(call.get("role") == "adjudication" and call.get("status") == "fallback" for call in engine._turn_diagnostics):
+            report["anomalies"].append({"kind": "adjudication_fallback", "turn": len(capture.turn_snapshots), "input": user_input})
+        atomic_write_json(report_path, report)
         log(
             f"  [回合{len(capture.turn_snapshots)}] scene={snap['scene']} "
             f"clues={len(snap['clues_found'])} san={snap['san']} hp={snap['hp']}"
@@ -630,10 +693,11 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     try:
         for beat in scarlet_beats():
             log(f"■ {beat.key} {beat.title}")
+            capture.beat_start[beat.key] = len(capture.turn_snapshots)
             world = context.world_store.load()
             done = False
             for attempt in range(beat.max_turns):
-                user_input = beat.inputs[min(attempt, len(beat.inputs) - 1)]
+                user_input = choose_beat_input(beat, attempt, world)
                 world = turn(None if user_input == "__OPENING__" else user_input)
                 if beat.goal(world, capture):
                     done = True
@@ -652,7 +716,10 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
                 )
                 log(f"    [{'✓' if check.result else '✗'}] ({check.area}) {check.desc}")
             report["beats"].append(beat_report)
-            if beat.key == "B6c_documents":
+            if not done:
+                report["anomalies"].append({"kind": "beat_goal_not_met", "beat": beat.key, "turn": len(capture.turn_snapshots)})
+            atomic_write_json(report_path, report)
+            if beat.key == "B6d_seal":
                 # B7 疯狂注入：战斗后把 SAN 压到阈值，验证疯狂链路。
                 # catastrophic 是骰子结算，可能连续小损失；循环注到达标为止（封顶 6 次）。
                 log("■ B7_madness 注入 SAN 损失（catastrophic 直至 san<30，封顶 6 次）")
@@ -683,6 +750,9 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     finally:
         if profile_backup is not None:
             profile_file.write_bytes(profile_backup)
+        elif profile_file.exists():
+            profile_file.unlink()
+        atomic_write_json(report_path, report)
 
     # ---- 全局检查 --------------------------------------------------------
     catalog = json.loads(
@@ -726,17 +796,9 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
         for cid, c in (catalog.get("clue_catalog") or {}).items()
         if len(str(c.get("text") or "")) >= 16
     }
-    for index, narrative in enumerate(capture.narratives):
-        known = (
-            set(
-                (capture.turn_snapshots[min(index, len(capture.turn_snapshots) - 1)] or {}).get(
-                    "clues_found"
-                )
-                or []
-            )
-            if capture.turn_snapshots
-            else set()
-        )
+    for snapshot in capture.turn_snapshots:
+        narrative = str(snapshot.get("narrative") or "")
+        known = set(snapshot.get("clues_found") or [])
         for cid, probe in clue_texts.items():
             if probe and probe in narrative and cid not in known:
                 early.append(cid)
@@ -750,6 +812,12 @@ def run_playthrough(*, report_path: Path, verbose: bool = True) -> dict:
     )
 
     report["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    report["status"] = "completed"
+    report["acceptance_passed"] = (
+        not capture.errors
+        and all(beat["goal_met"] and all(check["pass"] for check in beat["checks"]) for beat in report["beats"])
+        and all(check["pass"] for check in report["global_checks"])
+    )
     report["errors"] = capture.errors[:20]
     report["handout_count"] = len(capture.handouts)
     report["decision_count"] = len(capture.decisions)

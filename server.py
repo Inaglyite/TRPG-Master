@@ -446,6 +446,10 @@ def _list_mods() -> list:
 # ---------------------------------------------------------------------------
 
 
+def _terminal_error_event(message: str) -> dict:
+    return {"type": "error", "message": message, "terminal": True}
+
+
 async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | None = None):
     """在 WebSocket 连接上下文中运行引擎。
 
@@ -543,17 +547,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     )
                 rolled_back_start = finish_room_start(False)
                 if room_start and rolled_back_start:
-                    emit(
-                        {
-                            "type": "error",
-                            "message": "开场未能完成，房间已恢复到大厅，请重试。",
-                            "terminal": True,
-                        }
-                    )
+                    emit(_terminal_error_event("开场未能完成，房间已恢复到大厅，请重试。"))
                 # GameEngine deliberately swallows a cancelled turn after marking
                 # its journal record.  An opening still needs a terminal wire
                 # event so RoomDriverTransport releases the room reservation.
-                if room_start and outbound.has_active_turn:
+                if outbound.has_active_turn:
+                    emit(_terminal_error_event("本轮未完成，请重新发送刚才的行动。"))
                     outbound.end_turn()
                 release_turn()
 

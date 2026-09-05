@@ -25,7 +25,7 @@ from src.ai.context.history_compactor import (
     HistoryCompactor,
 )
 from src.ai.model.model_request import StreamPolicy
-from src.ai.model.model_streamer import ModelStreamer, _is_context_overflow
+from src.ai.model.model_streamer import ModelResponseError, ModelStreamer, _is_context_overflow
 from src.app.config import PROJECT_ROOT
 from src.app.engine import GameEngine, TurnCancelledError
 from src.app.runtime import RuntimeContext
@@ -571,11 +571,11 @@ def test_overflow_compacts_once_and_retries() -> None:
     )
     host = _overflow_host(client, compact_result=True)
 
-    text, tools = _streamer(host).stream(
-        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
-    )
+    with pytest.raises(ModelResponseError, match="模型服务暂时不可用"):
+        _streamer(host).stream(
+            "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+        )
 
-    assert (text, tools) == ("", [])
     assert client.calls == 2
     assert host.summarize_calls == [{"silent": True, "allow_rebase_fallback": False}]
 
@@ -625,11 +625,11 @@ def test_overflow_irreducible_context_does_not_retry() -> None:
     client = _FailingClient([Exception("context_length_exceeded")])
     host = _overflow_host(client, compact_result=False)
 
-    text, tools = _streamer(host).stream(
-        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
-    )
+    with pytest.raises(ModelResponseError, match="模型上下文超出容量"):
+        _streamer(host).stream(
+            "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False
+        )
 
-    assert (text, tools) == ("", [])
     assert client.calls == 1
     assert len(host.summarize_calls) == 1
     # The authoritative surface is untouched by the failed overflow handling.
@@ -648,9 +648,10 @@ def test_overflow_retry_not_attempted_twice() -> None:
     )
     host = _overflow_host(client, compact_result=True)
 
-    _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False)
-
     # Second overflow inside the retried call must not compact again.
+    with pytest.raises(ModelResponseError, match="模型上下文超出容量"):
+        _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False, retry_on_empty=False)
+
     assert client.calls == 2
     assert len(host.summarize_calls) == 1
 
@@ -846,9 +847,10 @@ def test_capacity_hard_limit_never_opens_provider_stream(
     client = _OneChunkClient()
     host = _capacity_host(client, "x" * 30_000)  # ~7500 input tokens >= hard 7192
 
-    assert _streamer(host).stream(
-        "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=True
-    ) == ("", [])
+    with pytest.raises(ModelResponseError, match="模型上下文容量不足"):
+        _streamer(host).stream(
+            "test-model", policy=_POLICY, enable_tools=False, retry_on_empty=True
+        )
     assert client.calls == 0
     assert host.errors == ["当前规则与历史过长，无法安全继续本轮；请稍后重试。"]
     diagnostic = next(
@@ -934,13 +936,14 @@ def test_capacity_override_hard_limit_never_opens_provider_stream(
     client = _OneChunkClient()
     host = _capacity_host(client, "short")
 
-    assert _streamer(host).stream(
-        "test-model",
-        policy=_POLICY,
-        enable_tools=False,
-        messages_override=[{"role": "system", "content": "x" * 30_000}],
-        retry_on_empty=True,
-    ) == ("", [])
+    with pytest.raises(ModelResponseError, match="模型上下文容量不足"):
+        _streamer(host).stream(
+            "test-model",
+            policy=_POLICY,
+            enable_tools=False,
+            messages_override=[{"role": "system", "content": "x" * 30_000}],
+            retry_on_empty=True,
+        )
     assert client.calls == 0
     assert host.errors == ["当前规则与历史过长，无法安全继续本轮；请稍后重试。"]
 
@@ -949,7 +952,8 @@ def test_overflow_with_default_retry_does_not_fall_through_to_generic_retry() ->
     client = _FailingClient([Exception("context_length_exceeded")])
     host = _overflow_host(client, compact_result=False)
 
-    assert _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False) == ("", [])
+    with pytest.raises(ModelResponseError, match="模型上下文超出容量"):
+        _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False)
     assert client.calls == 1
     assert len(host.summarize_calls) == 1
 
@@ -963,6 +967,7 @@ def test_second_overflow_after_safe_retry_is_not_retried_again() -> None:
     )
     host = _overflow_host(client, compact_result=True)
 
-    assert _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False) == ("", [])
+    with pytest.raises(ModelResponseError, match="模型上下文超出容量"):
+        _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False)
     assert client.calls == 2
     assert len(host.summarize_calls) == 1

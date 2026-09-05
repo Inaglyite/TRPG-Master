@@ -1,8 +1,8 @@
 """Tool 定义（Function Calling Schema）+ 执行器 + 骰子摘要"""
 
 import json
-import random
 import threading
+import uuid
 from pathlib import Path
 
 from src.ai.model.model_tool_catalog import build_model_catalog_helpers
@@ -25,6 +25,8 @@ from src.gameplay.combat import (
 )
 from src.gameplay.inventory import InventoryError
 from src.gameplay.inventory import use_item as apply_inventory_use
+from src.gameplay.percentile import REQUIRED_RANKS, choose_percentile, success_level
+from src.gameplay.resolution import current_resolution, resolution_rng
 from src.gameplay.state_paths import resolve_path as _resolve_state_path
 from src.gameplay.state_paths import set_path as _set_state_path
 from src.storage.world_store import atomic_write_json
@@ -68,6 +70,11 @@ TOOLS = [
                         "type": "boolean",
                         "description": "是否为孤注一掷。战斗技能/理智检定不可孤注一掷。push=true 则 is_push=true",
                     },
+                    "required_success_level": {"type": "string", "enum": ["regular", "hard", "extreme"]},
+                    "push_context_id": {"type": "string", "description": "原失败检定返回的推骰授权 ID"},
+                    "approach": {"type": "string", "description": "本次具体做法，推骰时必须与原做法不同"},
+                    "target_id": {"type": "string"},
+                    "push_risk": {"type": "string", "description": "初次检定前说明的推骰失败风险，推骰时不能修改"},
                 },
                 "required": ["skill"],
             },
@@ -869,7 +876,8 @@ def _dice_roll(args: dict, _context: RuntimeContext) -> str:
         count, sides, modifier = _parse_dice_spec(spec)
     except (TypeError, ValueError) as exc:
         return f"[错误] {exc}"
-    rolls = [random.randint(1, sides) for _ in range(count)]
+    rng = resolution_rng("dice", spec)
+    rolls = [rng.randint(1, sides) for _ in range(count)]
     return _json_result(
         {
             "spec": spec,
@@ -890,55 +898,73 @@ def _roll_check(
     bonus: int = 0,
     penalty: int = 0,
     push: bool = False,
+    required_success_level: str = "regular",
+    push_context_id: str = "",
+    approach: str = "",
+    target_id: str = "",
+    push_risk: str = "",
 ) -> str:
+    from src.gameplay.check_context import can_push_skill, record_check_outcome, validate_push
+
     state = context.world_store.load()
     attributes = state.get("pc", {}).get("attributes", {})
     skills = state.get("pc", {}).get("skills", {})
-    value = int(attributes.get(check_id, skills.get(check_id, 50)))
-    tens = random.randint(0, 9)
-    ones = random.randint(0, 9)
+    if check_id not in attributes and check_id not in skills:
+        return _json_result({"ok": False, "error": "unknown_skill", "skill": check_id})
+    if required_success_level not in REQUIRED_RANKS:
+        return _json_result({"ok": False, "error": "invalid_difficulty"})
+    previous = None
+    if push:
+        try:
+            previous = validate_push(state, check_id, push_context_id, approach, target_id)
+        except ValueError as exc:
+            return _json_result({"ok": False, "error": str(exc)})
+        required_success_level = previous["required_success_level"]
+    value = int(attributes.get(check_id, skills.get(check_id)))
+    rng = resolution_rng("check", [check_id, push_context_id])
+    tens = rng.randint(0, 9)
+    ones = rng.randint(0, 9)
     net = max(-2, min(2, penalty - bonus))
-    extra = [random.randint(0, 9) for _ in range(abs(net))]
-    if net < 0:
-        tens = min([tens, *extra])
-    elif net > 0:
-        tens = max([tens, *extra])
-    roll = 100 if tens == 0 and ones == 0 else tens * 10 + ones
-    if roll <= 1:
-        level = "critical_success"
-    elif roll <= max(1, value // 5):
-        level = "extreme_success"
-    elif roll <= max(1, value // 2):
-        level = "hard_success"
-    elif roll <= value:
-        level = "regular_success"
-    elif (value < 50 and roll >= 96) or roll == 100:
-        level = "fumble"
-    else:
-        level = "failure"
+    extra = [rng.randint(0, 9) for _ in range(abs(net))]
+    roll, candidates = choose_percentile([tens, *extra], ones, penalty=net > 0)
+    rank, short_level = success_level(roll, value)
+    level = f"{short_level}_success" if rank > 0 else short_level
     try:
         schema = json.loads((context.project_root / "rules/rule_schema.json").read_text("utf-8"))
         labels = {item["id"]: item.get("name", item["id"]) for item in schema.get("skills", [])}
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         labels = {}
-    return _json_result(
-        {
+    result = {
             "skill": check_id,
             "skill_name": labels.get(check_id, check_id),
             "skill_value": value,
             "d100_roll": roll,
             "tens_dice": [tens, *extra],
             "ones_dice": ones,
+            "candidates": candidates,
             "bonus_dice": bonus,
             "penalty_dice": penalty,
             "difficulty_regular": value,
             "difficulty_hard": max(1, value // 2),
             "difficulty_extreme": max(1, value // 5),
             "level": level,
-            "success": level.endswith("success"),
+            "required_success_level": required_success_level,
+            "success": rank >= REQUIRED_RANKS[required_success_level],
             "is_push": push,
         }
-    )
+    session = current_resolution()
+    result["check_id"] = f"{session.id if session else uuid.uuid4().hex}:{check_id}"[:80]
+    if previous and not result["success"]:
+        result["push_consequence"] = previous["push_risk"]
+    if push or (approach and push_risk and can_push_skill(check_id)):
+        context.world_store.update(
+            lambda world: record_check_outcome(
+                world, skill=check_id, result=result, push=push,
+                push_context_id=push_context_id, approach=approach, target_id=target_id,
+                required_success_level=required_success_level, push_risk=push_risk,
+            )
+        )
+    return _json_result(result)
 
 
 @TOOL_RUNTIME.handler("attribute_check")
@@ -955,7 +981,7 @@ def _attribute_check(args: dict, context: RuntimeContext) -> str:
 def _luck_check(_args: dict, context: RuntimeContext) -> str:
     state = context.world_store.load()
     luck = int(state.get("pc", {}).get("luck", 50))
-    roll = random.randint(1, 100)
+    roll = resolution_rng("luck").randint(1, 100)
     level = "regular_success" if roll <= luck else "failure"
     return _json_result(
         {
@@ -1083,7 +1109,11 @@ def _sanity_mutation(context: RuntimeContext, operation) -> str:
 def _sanity_loss(args: dict, context: RuntimeContext) -> str:
     return _sanity_mutation(
         context,
-        lambda sanity, _world: sanity.apply_sanity_loss(str(args.get("severity", "moderate"))),
+        lambda sanity, _world: sanity.apply_sanity_loss(
+            str(args.get("severity", "moderate")),
+            source=str(args.get("source", "未知恐怖")),
+            exposure_id=str(args.get("exposure_id", "")),
+        ),
     )
 
 
@@ -1236,7 +1266,12 @@ def _combat_status(_args: dict, context: RuntimeContext) -> str:
 
 @TOOL_RUNTIME.handler("combat_action")
 def _combat_action(args: dict, context: RuntimeContext) -> str:
-    return _combat_mutation(context, lambda world: combat_action(world, **args))
+    def resolve(world: dict) -> dict:
+        combat = world.get("combat_state") or {}
+        key = [combat.get("round"), combat.get("current_actor"), args.get("target_id"), args.get("action_type")]
+        return combat_action(world, **args, rng=resolution_rng("combat", key))
+
+    return _combat_mutation(context, resolve)
 
 
 @TOOL_RUNTIME.handler("combat_decide")
@@ -1244,7 +1279,8 @@ def _combat_decide(args: dict, context: RuntimeContext) -> str:
     return _combat_mutation(
         context,
         lambda world: combat_decide(
-            world, str(args.get("decision_id", "")), str(args.get("option_id", ""))
+            world, str(args.get("decision_id", "")), str(args.get("option_id", "")),
+            rng=resolution_rng("combat_decision", (world.get("combat_state") or {}).get("round")),
         ),
     )
 
@@ -1295,6 +1331,11 @@ def _skill_check(args: dict, context: RuntimeContext) -> str:
         int(args.get("bonus_dice", 0) or 0),
         int(args.get("penalty_dice", 0) or 0),
         bool(args.get("push", False)),
+        str(args.get("required_success_level", "regular")),
+        str(args.get("push_context_id", "")),
+        str(args.get("approach", "")),
+        str(args.get("target_id", "")),
+        str(args.get("push_risk", "")),
     )
 
 

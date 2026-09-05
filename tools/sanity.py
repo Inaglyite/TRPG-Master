@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """TRPG 理智值工具 —— COC 第七版三阶段疯狂系统"""
 
+import hashlib
 import json
 import random
 import sys
@@ -10,6 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.app.runtime import RuntimeContext  # noqa: E402
+from src.gameplay.resolution import resolution_rng  # noqa: E402
+from src.gameplay.world_time import game_day  # noqa: E402
 
 CONTEXT = RuntimeContext.from_env()
 STORE = CONTEXT.world_store
@@ -109,7 +112,7 @@ MANIAS = [
 
 
 def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
-                      silent: bool = False) -> dict:
+                      silent: bool = False, exposure_id: str = "") -> dict:
     """施加理智损失。格式: 成功损失X / 失败损失Y。
 
     severity 可以是 "minor/moderate/major/catastrophic" 或自定义格式如 "1/1D6"
@@ -117,6 +120,24 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
     state = _load_state()
     pc = state["pc"]
     current_san = pc.get("san", 65)
+    rng = resolution_rng("sanity", exposure_id or source)
+    if not exposure_id and source != "未知恐怖":
+        scene_id = str((state.get("current_scene") or {}).get("id") or "")
+        exposure_id = hashlib.sha256(f"{scene_id}:{source}".encode()).hexdigest()[:32]
+    exposures = pc.setdefault("sanity_exposures", {})
+    if exposure_id and exposure_id in exposures:
+        result = {
+            **exposures[exposure_id], "duplicate": True, "actual_loss": 0,
+            "san_before": current_san, "san_after": current_san,
+            "temporary_insanity": False, "indefinite_insanity": False,
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    day = game_day(state)
+    daily = pc.get("sanity_day")
+    if not isinstance(daily, dict) or daily.get("day") != day:
+        daily = {"day": day, "start_san": current_san, "loss": 0, "indefinite_triggered": False}
+        pc["sanity_day"] = daily
 
     # 解析 severity
     loss_formats = {
@@ -147,14 +168,14 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
                 d_part = s
                 mod = 0
             count, sides = d_part.split("D")
-            return sum(random.randint(1, int(sides)) for _ in range(int(count))) + mod
+            return sum(rng.randint(1, int(sides)) for _ in range(int(count))) + mod
         return int(s)
 
     success_loss = parse_loss(success_loss_str)
     failure_loss = parse_loss(failure_loss_str)
 
     # SAN 检定（d100 <= 当前SAN = 成功）
-    san_roll = random.randint(1, 100)
+    san_roll = rng.randint(1, 100)
     san_check_success = san_roll <= current_san
 
     if san_check_success:
@@ -170,15 +191,15 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
     bout_index = -1
     if loss >= 5:  # 单次损失 >= 5
         int_val = pc.get("attributes", {}).get("INT", 50)
-        int_roll = random.randint(1, 100)
+        int_roll = rng.randint(1, 100)
         if int_roll <= int_val:
             temp_insanity = True
-            bout_index = random.randint(0, len(BOUT_OF_MADNESS) - 1)
+            bout_index = rng.randint(0, len(BOUT_OF_MADNESS) - 1)
             bout_raw = BOUT_OF_MADNESS[bout_index]
 
             # #9 (index 8): 恐惧症
             if bout_index == 8:
-                suggested = random.choice(PHOBIAS)
+                suggested = rng.choice(PHOBIAS)
                 profile = pc.setdefault("psychological_profile", {
                     "traits": [], "key_relationships": [],
                     "phobias": [], "manias": []
@@ -196,7 +217,7 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
                 )
             # #10 (index 9): 躁狂症
             elif bout_index == 9:
-                suggested = random.choice(MANIAS)
+                suggested = rng.choice(MANIAS)
                 profile = pc.setdefault("psychological_profile", {
                     "traits": [], "key_relationships": [],
                     "phobias": [], "manias": []
@@ -216,16 +237,17 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
 
     # 触发不定疯狂判断
     indefinite_insanity = False
-    one_day_loss = pc.get("_san_loss_today", 0) + loss
+    one_day_loss = int(daily["loss"]) + loss
+    daily["loss"] = one_day_loss
     pc["_san_loss_today"] = one_day_loss
-    if one_day_loss >= current_san // 5:
+    if not daily["indefinite_triggered"] and one_day_loss >= max(1, int(daily["start_san"]) // 5):
         indefinite_insanity = True
+        daily["indefinite_triggered"] = True
 
     # 永久疯狂
     permanent = new_san <= 0
 
     pc["san"] = new_san
-    _save_state(state)
 
     result = {
         "target": "pc",
@@ -243,7 +265,12 @@ def apply_sanity_loss(severity: str = "moderate", source: str = "未知恐怖",
         "insanity_type": insanity_type,
         "indefinite_insanity": indefinite_insanity,
         "permanent_insanity": permanent,
+        "exposure_id": exposure_id,
+        "day": day,
     }
+    if exposure_id:
+        exposures[exposure_id] = dict(result)
+    _save_state(state)
 
     print(json.dumps(result, ensure_ascii=False))
 
@@ -293,8 +320,16 @@ def psychoanalysis(target: str = "pc") -> dict:
             print(json.dumps({"error": f"NPC '{target}' 不存在"}, ensure_ascii=False))
             return {"error": f"NPC '{target}' 不存在"}
 
+    day = game_day(state)
+    if patient.get("psychoanalysis_day") == day:
+        result = {"ok": False, "error": "psychoanalysis_daily_limit", "target": target}
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    patient["psychoanalysis_day"] = day
+
     # 检定
-    roll = random.randint(1, 100)
+    rng = resolution_rng("psychoanalysis", target)
+    roll = rng.randint(1, 100)
     if roll <= 1:
         level = "critical_success"
     elif roll <= max(1, healer_skill // 5):
@@ -309,7 +344,7 @@ def psychoanalysis(target: str = "pc") -> dict:
     success = level != "failure"
 
     if success:
-        restore_amount = random.randint(1, 3)
+        restore_amount = rng.randint(1, 3)
         if level in ("extreme_success", "critical_success"):
             restore_amount += 2  # 极难/大成功额外恢复
         current_san = patient.get("san", 65)
@@ -342,6 +377,7 @@ def psychoanalysis(target: str = "pc") -> dict:
             "note": "同一天内不可对同一目标再次尝试"
         }
 
+    _save_state(state)
     print(json.dumps(result, ensure_ascii=False))
     return result
 

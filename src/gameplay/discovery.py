@@ -32,6 +32,17 @@ _DISCUSSED = re.compile(
     r"|(?:让|要求|命令|叫).{0,24}"
     r"(?:检查|查看|看(?:看|一眼)?|搜查|阅读|拿起|进入|使用|打开)"
 )
+# 明确放弃取得：玩家说"只看、不带走"时，附带取得后果（granted_item/take）的发现
+# 不得落账——看见不等于取得。沿用 _NEGATED 的跨标点守卫风格。
+_NO_TAKE = re.compile(
+    r"(?:不|别|不要|并未|没有|暂时不)[^，。；、]{0,8}(?:带走|拿走|取走|收起|带离|取回|拿)"
+    r"|(?:只|仅)(?:看|查看|检查|阅读|翻阅)[^，。；、]{0,12}(?:不|别|没)[^，。；、]{0,6}(?:带|拿|取|收)"
+)
+
+
+def disclaims_acquisition(text: str) -> bool:
+    """玩家本回合明确放弃取得物品（"只看、不带走"类表述）。"""
+    return bool(_NO_TAKE.search(" ".join(str(text).strip().split())))
 _REMOTE_TARGET_MIN_CHARS = 4
 
 
@@ -122,6 +133,7 @@ def match_discovery_rules(content: str, world: dict) -> list[DiscoveryMatch]:
     if not scene_id or not isinstance(catalog, dict):
         return []
     known = _known_clue_ids(world)
+    no_take = disclaims_acquisition(text)
     matches: list[DiscoveryMatch] = []
     for clue_id, clue in catalog.items():
         if str(clue_id) in known or not isinstance(clue, dict):
@@ -129,10 +141,14 @@ def match_discovery_rules(content: str, world: dict) -> list[DiscoveryMatch]:
         related_scenes = clue.get("related_scenes", [])
         if clue.get("source") != scene_id and scene_id not in related_scenes:
             continue
+        if no_take and clue.get("granted_item"):
+            continue
         rules = clue.get("discovery_rules", [])
         if not isinstance(rules, list):
             continue
         for rule in rules:
+            if no_take and rule.get("intent") == "take":
+                continue
             if (
                 isinstance(rule, dict)
                 and _rule_flags_met(rule, world)

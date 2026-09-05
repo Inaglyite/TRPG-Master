@@ -276,7 +276,11 @@ class DatabaseWorldStore:
     def transaction(self, *, expected_revision: int | None = None) -> Iterator[dict]:
         if self._turn_state is not None:
             before = copy.deepcopy(self._turn_state)
-            yield self._turn_state
+            try:
+                yield self._turn_state
+            except BaseException:
+                self._turn_state = before
+                raise
             if self._turn_state != before:
                 actual = int(before.get("revision", self._turn_base_revision or 0))
                 if expected_revision is not None and expected_revision != actual:

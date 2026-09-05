@@ -451,39 +451,9 @@ def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
     if not body:
         return []
     state = engine.context.world_store.load()
-    scenes = state.get("scene_catalog", {})
-    candidates = []
-    if isinstance(scenes, dict):
-        for scene_id, scene in scenes.items():
-            if not isinstance(scene, dict):
-                continue
-            position = _scene_transition_position(str(scene.get("name") or ""), body)
-            if position >= 0:
-                candidates.append(
-                    (
-                        position,
-                        len(str(scene.get("name") or "")),
-                        str(scene_id),
-                    )
-                )
-
+    # Scene mentions (including negation, dialogue and flashbacks) never
+    # authorize movement. The pre-roll ActionResolution owns that transition.
     applied: list[str] = []
-    if candidates:
-        scene_id = max(candidates)[2]
-        current_scene = state.get("current_scene", {})
-        target_scene = scenes[scene_id]
-        if current_scene.get("id") != scene_id or current_scene.get("name") != target_scene.get(
-            "name"
-        ):
-            engine._execute_tool(
-                "state_set",
-                {
-                    "path": "current_scene.id",
-                    "value": json.dumps(scene_id, ensure_ascii=False),
-                },
-            )
-            applied.append(f"scene:{scene_id}")
-            state = engine.context.world_store.load()
 
     current_scene = state.get("current_scene", {})
     present = set(current_scene.get("npcs_present", []))
@@ -596,284 +566,32 @@ def apply_turn_commit(
     narrative: str,
     executed_tools: list[dict] | None = None,
 ) -> dict:
-    """Validate and apply a model-produced commit through authoritative tools."""
-    executed_tools = executed_tools or []
-    already_executed = {event.get("name") for event in executed_tools}
-    body = narrative_body(narrative)
-    combined_text = f"{player_action}\n{body}"
+    """Report proposed prose/state discrepancies without changing world facts.
+
+    The legacy commit shape remains readable for old recorded audit responses.
+    New mechanical effects must come from the validated pre-roll resolution.
+    """
+    del player_action, narrative, executed_tools
     state = engine.context.world_store.load()
-    applied: list[str] = []
-    skipped: list[str] = []
-
-    scene_id = str(commit.get("scene_id") or "").strip()
-    current_scene_id = str(state.get("current_scene", {}).get("id") or "")
-    scenes = state.get("scene_catalog", {})
-    if scene_id:
-        scene = scenes.get(scene_id) if isinstance(scenes, dict) else None
-        current_scene = state.get("current_scene", {})
-        needs_sync = (
-            scene_id != current_scene_id
-            or not isinstance(current_scene, dict)
-            or current_scene.get("name") != (scene or {}).get("name")
-        )
-        if (
-            needs_sync
-            and isinstance(scene, dict)
-            and _name_mentioned(str(scene.get("name", "")), combined_text)
-        ):
-            scene_value = {key: value for key, value in scene.items() if key != "document"}
-            engine._execute_tool(
-                "state_set",
-                {
-                    "path": "current_scene",
-                    "value": json.dumps(scene_value, ensure_ascii=False),
-                },
-            )
-            applied.append(f"scene:{scene_id}")
-        elif needs_sync:
-            skipped.append(f"scene:{scene_id}")
-
+    issues: list[str] = []
+    scene_id = commit.get("scene_id")
+    if scene_id and scene_id != (state.get("current_scene") or {}).get("id"):
+        issues.append(f"scene:{scene_id}")
     inventory = state.get("pc", {}).get("inventory", [])
-    inventory_text = {str(item) for item in inventory}
-    for item in commit.get("items_add", [])[:12]:
-        item = _clip(item, 160).strip()
-        if item and item not in inventory_text:
-            engine._execute_tool("state_add_item", {"item": item})
-            inventory_text.add(item)
-            applied.append(f"item+:{item}")
-    for item in commit.get("items_remove", [])[:12]:
-        item = _clip(item, 160).strip()
-        if item and item in inventory_text:
-            engine._execute_tool("state_remove_item", {"item": item})
-            inventory_text.remove(item)
-            applied.append(f"item-:{item}")
-
-    clue_catalog = state.get("clue_catalog", {})
-    categories = {"investigation", "event", "task", "npc"}
-    for clue in commit.get("clues", [])[:12]:
-        if not isinstance(clue, dict):
-            continue
-        clue_id = str(clue.get("clue_id") or "").strip()
-        if clue_id and clue_id not in clue_catalog:
-            skipped.append(f"clue:{clue_id}")
-            continue
-        text = _clip(clue.get("text"), 500).strip()
-        category = str(clue.get("category") or "investigation")
-        if not text or category not in categories:
-            continue
-        args = {"text": text, "category": category}
-        asset_id = str(clue.get("asset_id") or "").strip()
-        if clue_id:
-            args["clue_id"] = clue_id
-        elif asset_id:
-            args["asset_id"] = asset_id
-        execute_model_tool = getattr(engine, "_execute_model_tool", None)
-        if execute_model_tool:
-            output = execute_model_tool(
-                "state_add_clue",
-                args,
-                player_action=player_action,
-            )
-        else:
-            output = engine._execute_tool("state_add_clue", args)
-        try:
-            clue_result = json.loads(output)
-        except (TypeError, json.JSONDecodeError, AttributeError):
-            clue_result = {}
-        if clue_result.get("ok") is False:
-            skipped.append(f"clue:{clue_id or text[:24]}")
-            continue
-        if not clue_result.get("duplicate"):
-            applied.append(f"clue:{clue_id or text[:24]}")
-
-    npcs = {
-        str(npc.get("id")): npc
-        for npc in state.get("npcs", [])
-        if isinstance(npc, dict) and npc.get("id")
-    }
-    for reveal in commit.get("npc_reveals", [])[:12]:
-        if not isinstance(reveal, dict):
-            continue
-        npc_id = str(reveal.get("npc_id") or "").strip()
-        npc = npcs.get(npc_id)
-        entry = _clip(reveal.get("text"), 400).strip()
-        tier = int(reveal.get("tier") or 1)
-        if npc and entry and 1 <= tier <= 3 and _name_mentioned(str(npc.get("name", "")), body):
-            output = engine._execute_tool(
-                "npc_reveal",
-                {
-                    "npc_id": npc_id,
-                    "tier": tier,
-                    "entry_text": entry,
-                },
-            )
-            try:
-                duplicate = bool(json.loads(output).get("duplicate"))
-            except (TypeError, json.JSONDecodeError, AttributeError):
-                duplicate = False
-            if not duplicate:
-                applied.append(f"npc:{npc_id}:{tier}")
-        else:
-            skipped.append(f"npc:{npc_id}")
-
-    flags = state.get("flags", {})
-    for change in commit.get("flags_set", [])[:16]:
-        if not isinstance(change, dict):
-            continue
-        key = str(change.get("key") or "").strip()
-        if key not in flags:
-            skipped.append(f"flag:{key}")
-            continue
-        try:
-            value = _parse_json_scalar(str(change.get("value_json", "")))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            skipped.append(f"flag:{key}")
-            continue
-        if flags.get(key) != value:
-            args = {
-                "path": f"flags.{key}",
-                "value": json.dumps(value, ensure_ascii=False),
-            }
-            execute_model_tool = getattr(engine, "_execute_model_tool", None)
-            output = (
-                execute_model_tool("state_set", args, player_action=player_action)
-                if execute_model_tool
-                else engine._execute_tool("state_set", args)
-            )
-            try:
-                flag_result = json.loads(output)
-            except (TypeError, json.JSONDecodeError, AttributeError):
-                flag_result = {}
-            if flag_result.get("ok") is False:
-                skipped.append(f"flag:{key}")
-            else:
-                applied.append(f"flag:{key}={value!r}")
-
-    # 案件时钟：末日钟只增不减，键必须已在 case_clocks 中声明。
-    # 叙事模型无工具，时钟记账只能由本审计完成——keeper 叙述了征兆，
-    # 审计负责把它记成数值，否则模组压力机制永远不启动。
-    clocks = state.get("case_clocks", {})
-    clock_definitions = state.get("case_clock_definitions", {})
-    for change in commit.get("clocks_set", [])[:8]:
-        if not isinstance(change, dict):
-            continue
-        key = str(change.get("key") or "").strip()
-        if key not in clocks:
-            skipped.append(f"clock:{key}")
-            continue
-        try:
-            value = _parse_json_scalar(str(change.get("value_json", "")))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            skipped.append(f"clock:{key}")
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            skipped.append(f"clock:{key}")
-            continue
-        current = clocks.get(key)
-        if not isinstance(current, (int, float)) or value <= current:
-            skipped.append(f"clock:{key}")
-            continue
-        # 模组声明了 max 时越界值收拢到 max（审计保守，不允许跳级爆表）。
-        definition = clock_definitions.get(key)
-        max_value = definition.get("max") if isinstance(definition, dict) else None
-        if isinstance(max_value, int) and not isinstance(max_value, bool):
-            value = min(value, max_value)
-        args = {
-            "path": f"case_clocks.{key}",
-            "value": json.dumps(int(value), ensure_ascii=False),
-        }
-        execute_model_tool = getattr(engine, "_execute_model_tool", None)
-        output = (
-            execute_model_tool("state_set", args, player_action=player_action)
-            if execute_model_tool
-            else engine._execute_tool("state_set", args)
-        )
-        try:
-            clock_result = json.loads(output)
-        except (TypeError, json.JSONDecodeError, AttributeError):
-            clock_result = {}
-        if clock_result.get("ok") is False:
-            skipped.append(f"clock:{key}")
-        else:
-            applied.append(f"clock:{key}={int(value)}")
-
-    if not ({"sanity_event", "sanity_trigger", "sanity_loss"} & already_executed):
-        events = commit.get("sanity_events", [])
-        if isinstance(events, list) and events:
-            event = events[0]
-            severity = str(event.get("severity") or "").strip()
-            description = _clip(event.get("description"), 500).strip()
-            allowed = {"trivial", "minor", "moderate", "major", "catastrophic"}
-            if severity in allowed and description:
-                args = {
-                    "description": description,
-                    "severity": severity,
-                }
-                execute_model_tool = getattr(engine, "_execute_model_tool", None)
-                output = (
-                    execute_model_tool("sanity_event", args, player_action=player_action)
-                    if execute_model_tool
-                    else engine._execute_tool("sanity_event", args)
-                )
-                blocked = False
-                try:
-                    result = json.loads(output)
-                    if result.get("ok") is False:
-                        skipped.append(f"sanity:{severity}")
-                        blocked = True
-                    else:
-                        roll = int(result["san_roll"])
-                        success = bool(result["san_check_success"])
-                        loss = int(result["actual_loss"])
-                        engine.cb.on_dice(
-                            f"理智检定 {roll}，{'成功' if success else '失败'}，SAN -{loss}",
-                            {
-                                "spec": "d100",
-                                "sides": 100,
-                                "count": 1,
-                                "rolls": [roll],
-                                "total": roll,
-                                "sanity": True,
-                            },
-                        )
-                except (TypeError, ValueError, KeyError, json.JSONDecodeError):
-                    pass
-                if not blocked:
-                    applied.append(f"sanity:{severity}")
-
-    ending_id = str(commit.get("ending_id") or "").strip()
-    if ending_id and not state.get("game_over"):
-        endings = {
-            str(ending.get("id")): ending
-            for ending in state.get("endings", [])
-            if isinstance(ending, dict) and ending.get("id")
-        }
-        ending = endings.get(ending_id)
-        if ending:
-            output = engine._execute_tool(
-                "end_game",
-                {
-                    "ending_id": ending_id,
-                    "ending_type": ending.get("ending_type", "neutral"),
-                    "title": ending.get("title", "故事结束"),
-                    "summary": ending.get("description", ""),
-                },
-            )
-            try:
-                end_data = json.loads(output)
-            except json.JSONDecodeError:
-                end_data = {}
-            if end_data.get("game_over"):
-                engine.cb.on_game_over(
-                    end_data.get("ending_type", "neutral"),
-                    end_data.get("title", "故事结束"),
-                    end_data.get("summary", ""),
-                )
-                applied.append(f"ending:{ending_id}")
-            else:
-                skipped.append(f"ending:{ending_id}")
-
-    return {"applied": applied, "skipped": skipped}
+    for item in commit.get("items_add") or []:
+        if item not in inventory:
+            issues.append(f"item+:{item}")
+    for item in commit.get("items_remove") or []:
+        if item in inventory:
+            issues.append(f"item-:{item}")
+    for key in ("flags_set", "clocks_set", "clues", "npc_reveals", "sanity_events"):
+        if commit.get(key):
+            issues.append(f"uncommitted:{key}")
+    if commit.get("ending_id") and not state.get("game_over"):
+        issues.append(f"ending:{commit['ending_id']}")
+    result = {"applied": [], "skipped": issues, "issues": issues, "mode": "diagnostic_only"}
+    engine.__dict__["_narrative_audit"] = result
+    return result
 
 
 def reconcile_turn(

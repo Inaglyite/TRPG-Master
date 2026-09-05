@@ -292,7 +292,7 @@
         "服从维克的命令"
       ],
       "secret": "他们身上的食尸鬼血统比维克更稀薄，但仍是混血非人生物。他们听从维克的命令进行劳作、绑架、盗窃或杀人。近距离观察需进行理智检定（0/1D4）。他们拥有半胶质表皮护甲。",
-      "hp": 14,
+      "hp": 10,
       "disposition": "submissive",
       "current_location": "trivial_pursuits",
       "skills": {
@@ -401,6 +401,10 @@
     "monster_defeated": false,
     "documents_given_to_wick": false,
     "investigation_abandoned": false
+  },
+  "completion_flags": {
+    "cottage_searched": "调查员完成对莱特小屋的搜查",
+    "office_searched": "调查员完成对莱特办公室的搜查"
   },
   "case_clocks": {
     "monster_manifestation": 0,
@@ -518,6 +522,7 @@
           "transition_kinds": ["discovery_target"],
           "trigger_if": {"always": true},
           "title": "前往停尸房之前",
+          "blocking": false,
           "npc_id": "bryce_fallon",
           "npc_text": "想亲眼看看查尔斯？可以。不过遗体还在医学院的冷柜里，我得先替你知会惠特克罗夫特医生。那份死亡证明是他签的——进去之前，你也许愿意先听听我对这件事的看法。",
           "keeper_text": "停尸房并非可以自由进出的地方，法伦需要先通知值班医生。",
@@ -786,6 +791,29 @@
       "asset": null,
       "discovery_notes": "只有调查员实际进入深层地下室后才记录。"
     },
+    "witch_trial_documents_read": {
+      "id": "witch_trial_documents_read",
+      "text": "你当面阅读了原始女巫审判文档：手写段落与几何图示涉及文字中的通道。阅读所得不等于取得原件。",
+      "category": "investigation",
+      "type": "obvious",
+      "tier": 2,
+      "source": "trivial_pursuits",
+      "related_npcs": ["abner_wick"],
+      "related_scenes": ["trivial_pursuits"],
+      "discovery_rules": [
+        {
+          "intent": "read",
+          "targets": ["女巫审判文档", "审判文档原件", "原始文档"],
+          "requires_flags": ["deep_basement_found"],
+          "approach_text": "你当面辨认文档的手写段落与几何图示，将所见记在心里；这次阅读并不转移原件的保管权。",
+          "requires_success": false,
+          "sanity_severity": "minor"
+        }
+      ],
+      "discovered_at": null,
+      "asset": null,
+      "discovery_notes": "允许当面阅读而不取走原件；不设置 documents_recovered，也不发放实物。"
+    },
     "witch_trial_documents": {
       "id": "witch_trial_documents",
       "text": "失踪的阿卡姆女巫审判文档已经被调查员找回。",
@@ -830,7 +858,7 @@
       "discovery_rules": [
         {
           "intent": "search",
-          "targets": ["锁箱", "银质徽章", "银徽章", "徽章", "楼上办公室", "办公室"],
+          "targets": ["锁箱", "锡盒", "银质徽章", "银徽章", "徽章", "楼上办公室", "办公室"],
           "requires_flags": ["feldman_ambushed"],
           "approach_text": "在维克楼上的办公室里，你撬开一只上锁的锡盒——里面是一枚沉甸甸的银质徽章，徽章表面刻着与文档上如出一辙的几何纹路。你立刻明白了它的用途：这是能关闭那道墨中通道的封印之物。",
           "requires_success": false
@@ -921,11 +949,11 @@
     "era": "1920s",
     "technology_constraints": "不得出现手持对讲机、电子蜂鸣探测器、数字相机等时代外设备；通信依赖固定电话、电报、书信或派人传话。",
     "sanity_triggers": [
-      {"match": "第一次阅读女巫审判文档中的手写段落", "severity": "minor"},
-      {"match": "查看莱特教授异常遗体或尸体照片", "severity": "minor"},
-      {"match": "目睹墨中怪物从文字或尸体中显形", "severity": "major"},
-      {"match": "在维克地下室发现被割喉的尸体收藏", "severity": "major"},
-      {"match": "近距离确认费德曼兄妹的非人特征", "severity": "minor"}
+      {"id": "witch_documents_read", "clue_ids": ["witch_trial_documents", "witch_trial_documents_read"], "match": "第一次阅读女巫审判文档中的手写段落", "severity": "minor"},
+      {"id": "wright_body_seen", "clue_ids": ["wright_body_evidence"], "scene_ids": ["miskatonic_medical"], "match": "查看莱特教授异常遗体或尸体照片", "severity": "minor"},
+      {"id": "ink_monster_seen", "match": "目睹墨中怪物从文字或尸体中显形", "severity": "major"},
+      {"id": "basement_bodies_seen", "scene_ids": ["trivial_pursuits"], "match": "在维克地下室发现被割喉的尸体收藏", "severity": "major"},
+      {"id": "feldman_revealed", "scene_ids": ["trivial_pursuits"], "match": "近距离确认费德曼兄妹的非人特征", "severity": "minor"}
     ]
   },
   "private_memory": {

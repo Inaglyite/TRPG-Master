@@ -22,7 +22,8 @@ def _select_ending(state: dict, args: dict) -> tuple[str | None, dict | None, st
     if requested_id:
         ending = endings.get(requested_id)
         if ending is None:
-            return None, None, f"模组不存在结局 {requested_id!r}"
+            available = ", ".join(sorted(endings))
+            return None, None, f"模组不存在结局 {requested_id!r}；可用结局 ID: {available}"
         return requested_id, ending, None
 
     title = str(args.get("title") or "").strip()
@@ -43,6 +44,22 @@ def _select_ending(state: dict, args: dict) -> tuple[str | None, dict | None, st
     if len(same_type) == 1:
         return same_type[0][0], same_type[0][1], None
     return None, None, "模组定义了多个结局，请提供 ending_id"
+
+
+def eligible_endings(state: dict) -> list[dict]:
+    """Endings whose authored required_flags are all satisfied right now."""
+    flags = state.get("flags") or {}
+    return [
+        {
+            "id": str(ending.get("id")),
+            "title": str(ending.get("title") or ""),
+            "ending_type": ending.get("ending_type", "neutral"),
+        }
+        for ending in state.get("endings", [])
+        if isinstance(ending, dict)
+        and ending.get("id")
+        and all(flags.get(key) == value for key, value in (ending.get("required_flags") or {}).items())
+    ]
 
 
 def validate_ending(state: dict, args: dict) -> dict[str, Any]:

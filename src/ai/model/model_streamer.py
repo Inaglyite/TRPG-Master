@@ -9,7 +9,7 @@ from typing import Any
 from src.ai.context import context_shadow as _context_shadow
 from src.ai.context.context_overflow import is_context_overflow as _is_context_overflow
 from src.ai.context.context_overflow import retry_after_overflow as _retry_after_overflow
-from src.ai.model.llm_concurrency import LlmBusyError, acquire_llm_slot
+from src.ai.model.llm_concurrency import LlmBusyError, ModelResponseError, acquire_llm_slot
 from src.ai.model.model_request import StreamPolicy
 from src.ai.model.model_stream_capacity import prepare_with_capacity
 from src.ai.model.model_stream_diagnostics import record_model_diagnostic
@@ -78,11 +78,10 @@ class ModelStreamer:
             compaction_attempted=_capacity_compaction_attempted,
         )
         if prepared is None:
-            return "", []
+            raise ModelResponseError("模型上下文容量不足")
         _context_shadow.record_prepared_request(host, prepared)
-        # Issue authority only after capacity preflight has selected the final
-        # wire request.  Provisional estimates never consume a request step or
-        # become replayable capabilities.
+        # Issue authority only after capacity preflight has selected the final wire
+        # request; provisional estimates never consume a request step or capability.
         issue_model_request(host, prepared.request_snapshot, prepared.request_tools)
         messages = prepared.messages
         request_role = prepared.request_role
@@ -131,7 +130,7 @@ class ModelStreamer:
             if isinstance(exc, LlmBusyError):
                 self.log_error(f"模型并发已满: {exc}")
                 host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
-                return "", []
+                raise ModelResponseError("模型调用排队超时") from exc
             overflow = _is_context_overflow(exc)
             if messages_override is None and overflow:
                 if not _overflow_retried and not _capacity_compaction_attempted:
@@ -154,7 +153,7 @@ class ModelStreamer:
                 # irreducible, so never fall through to the generic retry.
                 self.log_error("模型上下文超出容量，已停止本轮请求")
                 host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
-                return "", []
+                raise ModelResponseError("模型上下文超出容量") from exc
             if retry_on_empty:
                 self.log_error(f"API 建立流失败，正在重试: {type(exc).__name__}")
                 note_model_retry(host, "connect_failed", error_class, 400)
@@ -174,7 +173,7 @@ class ModelStreamer:
                 )
             self.log_error(f"API 请求失败: {type(exc).__name__}")
             host.cb.on_error("模型服务暂时不可用，请稍后重试。")
-            return "", []
+            raise ModelResponseError("模型服务暂时不可用") from exc
 
         full_text = ""
         pending_visible = ""
@@ -289,13 +288,10 @@ class ModelStreamer:
             )
             if retried is not None:
                 return retried
+        if terminal_overflow or deferred_retry == "overflow":
             self.log_error("模型上下文超出容量，已停止本轮请求")
             host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
-            return "", []
-        if terminal_overflow:
-            self.log_error("模型上下文超出容量，已停止本轮请求")
-            host.cb.on_error("当前规则与历史过长，无法安全继续本轮；请稍后重试。")
-            return "", []
+            raise ModelResponseError("模型上下文超出容量")
         if deferred_retry == "empty":
             self.log_error("API 空流中断，正在重试")
             note_model_retry(host, "empty_stream", stream_error_class or "unknown", 400)
@@ -424,4 +420,8 @@ class ModelStreamer:
                 _overflow_retried=_overflow_retried,
                 _capacity_compaction_attempted=_capacity_compaction_attempted,
             )
+        if finish_reason in {"transport_error", "length", "content_filter"}:
+            raise ModelResponseError(f"模型响应未完成：{finish_reason}", full_text)
+        if not full_text and not tool_calls:
+            raise ModelResponseError("模型未生成任何有效内容")
         return full_text, tool_calls

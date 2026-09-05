@@ -426,6 +426,14 @@ NPC id 同键的条目。
 `granted_item` 可选，用于"发现线索时同时获得同名实物"；会幂等加入背包，旧存档已有
 线索但缺少该物品时也会补齐。
 
+阅读与取得必须分成不同条目：只读条目用 `read` 规则，不填 `granted_item` 或
+取得目标的 `flag_effects`；取得条目再负责实物与找回标记。否则每次发现都会发生
+物品转移，无法表达“当面阅读，原件仍由 NPC 保管”。《猩红文档》的
+`witch_trial_documents_read` / `witch_trial_documents` 是这一配对示例。
+玩家明确说“只看、不带走”时，发现匹配、骰前裁决的 `take_item` 和模型发物品工具
+均拒绝取得；只读线索仍可正常入册。两种发现若涉及同一恐怖源，应在
+`module_rules.sanity_triggers[].clue_ids` 中引用同一个稳定 `id`，避免重复曝光扣 SAN。
+
 `flag_effects` 的键必须预先存在于 `initial_state.flags`；发现或重新对账该线索时会
 幂等应用。
 

@@ -7,6 +7,7 @@ player decisions, dice comparison, damage, and round advancement.
 from __future__ import annotations
 
 import copy
+import json
 import random
 import re
 import uuid
@@ -162,17 +163,17 @@ def _participant(world: dict, spec: dict) -> dict:
     entity, kind, path = _entity_for(world, entity_id)
     assumed: list[str] = []
 
-    dex = None if kind == "pc" else spec.get("dex")
-    if dex is None:
-        dex = _read_attribute(entity, "DEX")
+    dex = _read_attribute(entity, "DEX")
+    if dex is None and kind != "pc":
+        dex = spec.get("dex")
     if dex is None:
         dex = 50
         assumed.append("dex=50")
     dex = _number(dex, 50)
 
-    con = None if kind == "pc" else spec.get("con")
-    if con is None:
-        con = _read_attribute(entity, "CON")
+    con = _read_attribute(entity, "CON")
+    if con is None and kind != "pc":
+        con = spec.get("con")
     if con is None:
         con = 50
         assumed.append("con=50")
@@ -180,9 +181,9 @@ def _participant(world: dict, spec: dict) -> dict:
 
     normalized_skills: dict[str, int] = {}
     for skill_id, default in _DEFAULT_SKILLS.items():
-        value = None if kind == "pc" else spec.get(skill_id)
-        if value is None:
-            value = _read_skill(entity, skill_id)
+        value = _read_skill(entity, skill_id)
+        if value is None and kind != "pc":
+            value = spec.get(skill_id)
         if value is None:
             if skill_id == "dodge" and kind == "pc":
                 value = dex // 2
@@ -207,7 +208,7 @@ def _participant(world: dict, spec: dict) -> dict:
         "initiative": dex + (50 if ready_firearm else 0),
         "ready_firearm": ready_firearm,
         "skills": normalized_skills,
-        "damage_spec": str(spec.get("damage_spec") or "1d3"),
+        "damage_spec": str(entity.get("damage_spec") or spec.get("damage_spec") or "1d3"),
         "hp": hp,
         "max_hp": max_hp,
         "conditions": list(entity.get("conditions", [])) if isinstance(entity.get("conditions", []), list) else [],
@@ -267,6 +268,8 @@ def start_combat(
         "defense_counts": {},
         "outcome": None,
         "log": [],
+        "_stall_digest": None,
+        "_stall_turns": 0,
     }
     _append_log(combat, f"战斗开始：{reason or '敌对行动发生'}")
     world[COMBAT_KEY] = combat
@@ -353,6 +356,41 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
         },
         "prompt_suffix": prompt_suffix,
     }
+
+
+def track_stalemate(world: dict, *, limit: int = 3) -> dict | None:
+    """连续 ``limit`` 个战斗回合没有任何状态变化时，以僵持强制结束战斗。
+
+    战斗模型可能冻住 NPC，玩家也可能空耗动作（如空枪连扣）——
+    没有任何变化的战斗实际上已经因僵持而结束，不能让它软锁主线。
+    """
+    combat = world.get(COMBAT_KEY) or {}
+    if not combat.get("active"):
+        return None
+    pc = world.get("pc") or {}
+    digest = json.dumps(
+        {
+            "participants": [
+                {"id": p.get("id"), "hp": p.get("hp"), "conditions": p.get("conditions")}
+                for p in combat.get("participants", [])
+            ],
+            "pc": {
+                "hp": pc.get("hp"),
+                "conditions": pc.get("conditions"),
+                "inventory": pc.get("inventory"),
+            },
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    if digest == combat.get("_stall_digest"):
+        combat["_stall_turns"] = int(combat.get("_stall_turns") or 0) + 1
+    else:
+        combat["_stall_digest"] = digest
+        combat["_stall_turns"] = 1
+    if combat["_stall_turns"] >= limit:
+        return end_combat(world, reason="stalemate")
+    return None
 
 
 def end_combat(world: dict, reason: str = "") -> dict:
@@ -1073,18 +1111,9 @@ def _attribute_roll(participant: dict, attribute_id: str, value: int, rng: rando
 
 
 def _success_level(roll: int, value: int) -> tuple[int, str]:
-    fumble_threshold = 96 if value < 50 else 100
-    if roll == 1:
-        return 4, "critical"
-    if roll >= fumble_threshold:
-        return -1, "fumble"
-    if roll <= max(1, value // 5):
-        return 3, "extreme"
-    if roll <= max(1, value // 2):
-        return 2, "hard"
-    if roll <= value:
-        return 1, "regular"
-    return 0, "failure"
+    from src.gameplay.percentile import success_level
+
+    return success_level(roll, value)
 
 
 def _deal_damage(
@@ -1158,6 +1187,8 @@ def _roll_damage(spec: str, rng: random.Random) -> tuple[list[int], int, int]:
     modifier = int(match.group(3) or 0)
     if not 1 <= count <= 10 or not 2 <= sides <= 100:
         raise CombatError(f"伤害骰超出范围: {spec}")
+    if not -100 <= modifier <= 100:
+        raise CombatError(f"伤害修正值超出范围: {spec}")
     return [rng.randint(1, sides) for _ in range(count)], modifier, count * sides + modifier
 
 

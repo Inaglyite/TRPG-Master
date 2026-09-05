@@ -352,7 +352,7 @@ class FakeCommitEngine:
 
 
 class TurnCommitTests(unittest.TestCase):
-    def test_commit_applies_only_known_authoritative_entities(self):
+    def test_post_narrative_audit_reports_claims_without_mutating_entities(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
             store.initialize(resolution_world())
@@ -391,20 +391,18 @@ class TurnCommitTests(unittest.TestCase):
             )
 
             world = store.load()
-            self.assertEqual(world["current_scene"]["id"], "office")
+            self.assertEqual(world["current_scene"]["id"], "hall")
             self.assertEqual(world["pc"]["inventory"].count("手电筒"), 1)
-            self.assertIn("黄铜钥匙", world["pc"]["inventory"])
-            self.assertTrue(world["flags"]["office_searched"])
+            self.assertNotIn("黄铜钥匙", world["pc"]["inventory"])
+            self.assertFalse(world["flags"]["office_searched"])
             self.assertNotIn("invented_flag", world["flags"])
-            self.assertEqual(
-                world["clues_found"]["investigation"][0]["id"],
-                "melted_mirror",
-            )
-            self.assertEqual(world["npcs"][0]["revealed"]["level"], 1)
-            self.assertIn("flag:invented_flag", result["skipped"])
+            self.assertEqual(world["clues_found"]["investigation"], [])
+            self.assertEqual(world["npcs"][0]["revealed"]["level"], 0)
+            self.assertEqual(result["applied"], [])
+            self.assertIn("uncommitted:flags_set", result["issues"])
 
-    def test_commit_advances_only_declared_clocks_and_never_decreases(self):
-        """案件时钟：只接受已声明的键、数值、且严格递增；其余一律 skipped。"""
+    def test_audit_cannot_advance_even_a_declared_clock(self):
+        """时钟只能由骰前裁决/模组规则结算，正文不能反向推进。"""
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
             world = resolution_world()
@@ -439,15 +437,13 @@ class TurnCommitTests(unittest.TestCase):
             )
 
             clocks = store.load()["case_clocks"]
-            self.assertEqual(clocks["monster_manifestation"], 2)
+            self.assertEqual(clocks["monster_manifestation"], 1)
             self.assertEqual(clocks["human_pressure"], 0)
             self.assertNotIn("invented_clock", clocks)
-            self.assertIn("clock:monster_manifestation=2", result["applied"])
-            self.assertIn("clock:human_pressure", result["skipped"])
-            self.assertIn("clock:invented_clock", result["skipped"])
-            self.assertIn("clock:monster_manifestation", result["skipped"])
+            self.assertEqual(result["applied"], [])
+            self.assertIn("uncommitted:clocks_set", result["issues"])
 
-    def test_commit_clock_value_is_clamped_to_declared_max(self):
+    def test_audit_cannot_jump_clock_to_maximum(self):
         """审计越界报数时按模组声明的 max 收拢，不允许跳级爆表。"""
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
@@ -477,8 +473,8 @@ class TurnCommitTests(unittest.TestCase):
                 narrative="墨迹从纸面挣脱，怪物的轮廓在字里行间凝聚。",
             )
 
-            self.assertEqual(store.load()["case_clocks"]["monster_manifestation"], 6)
-            self.assertIn("clock:monster_manifestation=6", result["applied"])
+            self.assertEqual(store.load()["case_clocks"]["monster_manifestation"], 4)
+            self.assertEqual(result["applied"], [])
 
     def test_audit_payload_exposes_case_clocks(self):
         """审计负载必须携带时钟与等级表：叙事模型无工具，记账只有审计能做。"""
@@ -499,7 +495,7 @@ class ClueClarityClockTests(unittest.TestCase):
     """clue_clarity 时钟由引擎在每次真实线索入册后确定性推进（按 max 封顶）。"""
 
     @staticmethod
-    def _add_clue(world: dict, text: str = "新的物证"):
+    def _add_clue(world: dict, text: str = "新的物证", clue_id: str | None = None):
         from tools import state_manager
 
         previous = state_manager._TRANSACTION_STATE
@@ -508,7 +504,7 @@ class ClueClarityClockTests(unittest.TestCase):
         state_manager._TRANSACTION_STATE = world
         state_manager.print = lambda *_args, **_kwargs: None
         try:
-            return state_manager.cmd_add_clue(text, "investigation")
+            return state_manager.cmd_add_clue(text, "investigation", clue_id=clue_id)
         finally:
             state_manager._TRANSACTION_STATE = previous
             if had_print:
@@ -517,28 +513,37 @@ class ClueClarityClockTests(unittest.TestCase):
                 state_manager.__dict__.pop("print", None)
 
     @staticmethod
-    def _world(clocks, definitions=None):
+    def _world(clocks, definitions=None, catalog=None):
         return {
             "pc": {"inventory": []},
             "clues_found": {"investigation": [], "event": [], "task": [], "npc": []},
-            "clue_catalog": {},
+            "clue_catalog": catalog or {},
             "case_clocks": clocks,
             "case_clock_definitions": definitions or {},
         }
 
     def test_add_clue_bumps_declared_clue_clarity_clock(self):
-        world = self._world({"clue_clarity": 0})
-        result = self._add_clue(world)
+        catalog = {"clue_photo": {"text": "现场照片", "type": "obvious"}}
+        world = self._world({"clue_clarity": 0}, catalog=catalog)
+        result = self._add_clue(world, clue_id="clue_photo")
         self.assertTrue(result.get("ok"))
         self.assertEqual(world["case_clocks"]["clue_clarity"], 1)
 
+    def test_free_text_clue_does_not_bump_clock(self):
+        """无目录自由文本线索不能推进案件时钟：时钟只认模组声明的线索。"""
+        world = self._world({"clue_clarity": 0})
+        result = self._add_clue(world)
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(world["case_clocks"]["clue_clarity"], 0)
+
     def test_add_clue_respects_declared_max(self):
+        catalog = {"clue_photo": {"text": "现场照片", "type": "obvious"}}
         definitions = {"clue_clarity": {"max": 5, "levels": {"5": "真相拼合"}}}
-        world = self._world({"clue_clarity": 5}, definitions)
-        self._add_clue(world)
+        world = self._world({"clue_clarity": 5}, definitions, catalog=catalog)
+        self._add_clue(world, clue_id="clue_photo")
         self.assertEqual(world["case_clocks"]["clue_clarity"], 5)
-        world = self._world({"clue_clarity": 4}, definitions)
-        self._add_clue(world)
+        world = self._world({"clue_clarity": 4}, definitions, catalog=catalog)
+        self._add_clue(world, clue_id="clue_photo")
         self.assertEqual(world["case_clocks"]["clue_clarity"], 5)
 
     def test_add_clue_without_clock_declaration_is_a_noop(self):
@@ -593,7 +598,7 @@ class ClueClarityClockTests(unittest.TestCase):
 
             self.assertEqual(calls[0]["model"], "judge-model")
             self.assertEqual(calls[0]["tool_choice"], "auto")
-            self.assertEqual(result, {"applied": [], "skipped": []})
+            self.assertEqual(result, {"applied": [], "skipped": [], "issues": [], "mode": "diagnostic_only"})
 
     def test_story_state_commit_skips_second_model_audit(self):
         self.assertFalse(
@@ -835,7 +840,7 @@ class ClueClarityClockTests(unittest.TestCase):
         del no_clocks["case_clock_definitions"]
         self.assertFalse(engine_turn_needs_model_audit(_Engine(no_clocks, 0), [], narrative=quiet))
 
-    def test_scene_sync_requires_explicit_transition(self):
+    def test_narrative_cannot_authorize_a_scene_transition(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = WorldStore(Path(temp_dir) / "world")
             store.initialize(resolution_world())
@@ -851,7 +856,7 @@ class ClueClarityClockTests(unittest.TestCase):
                 engine,
                 "你推开沉重的木门，走进莱特的办公室。",
             )
-            self.assertEqual(store.load()["current_scene"]["id"], "office")
+            self.assertEqual(store.load()["current_scene"]["id"], "hall")
 
     def test_narrative_flavor_is_never_promoted_to_a_clue(self):
         world = resolution_world()
@@ -872,7 +877,7 @@ class ClueClarityClockTests(unittest.TestCase):
                 world["clues_found"],
             )
 
-    def test_scene_sync_prefers_longest_nested_scene_name(self):
+    def test_nested_scene_names_in_narrative_cannot_change_location(self):
         world = resolution_world()
         world["scene_catalog"].update(
             {
@@ -894,7 +899,7 @@ class ClueClarityClockTests(unittest.TestCase):
                 "你站在密斯卡托尼克大学医学院地下停尸房内。",
             )
 
-            self.assertEqual(store.load()["current_scene"]["id"], "medical")
+            self.assertEqual(store.load()["current_scene"]["id"], "hall")
 
 
 class FinalizeTurnTests(unittest.TestCase):
@@ -990,10 +995,10 @@ class FinalizeTurnTests(unittest.TestCase):
 
         self.assertEqual(result["narrative"], "第一段叙述。\n\n第二段叙述。")
         self.assertEqual(engine.messages[-1]["content"], result["narrative"])
-        # 审计默认开启后，stub 宣告需要审计时 reconcile 在 handouts 之前运行。
+        # 后置审计默认关闭，骰前裁决负责实际变更。
         self.assertEqual(
             events,
-            ["entities", "reconcile", "handouts", "done", "summary"],
+            ["entities", "handouts", "done", "summary"],
         )
 
     def test_capacity_rejected_turn_rolls_back_appended_messages(self):
@@ -1017,20 +1022,21 @@ class FinalizeTurnTests(unittest.TestCase):
             _maybe_summarize_after_turn=lambda: None,
         )
 
-        _finalize_turn(
-            {
-                "engine": engine,
-                "user_content": "本回合输入",
-                "narrative": "",
-                "text": "",
-                "tool_calls": [],
-                "executed_tools": [],
-                "turn_had_check": False,
-                "pre_turn_message_len": 3,
-            }
-        )
+        with self.assertRaises(RuntimeError):
+            _finalize_turn(
+                {
+                    "engine": engine,
+                    "user_content": "本回合输入",
+                    "narrative": "",
+                    "text": "",
+                    "tool_calls": [],
+                    "executed_tools": [],
+                    "turn_had_check": False,
+                    "pre_turn_message_len": 3,
+                }
+            )
 
-        self.assertEqual(events, ["error", "done"])
+        self.assertEqual(events, ["error"])
         self.assertEqual(len(engine.messages), 3)
         self.assertEqual(engine.messages[-1]["content"], "上一段叙事")
 

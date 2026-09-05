@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.ai.model.llm_concurrency import LlmBusyError
 from src.ai.model.model_request import StreamPolicy, prepare_model_request
-from src.ai.model.model_streamer import ModelStreamer
+from src.ai.model.model_streamer import ModelResponseError, ModelStreamer
 from src.ai.model.provider_adapter import (
     apply_reasoning_passback,
     classify_provider_error,
@@ -172,9 +174,8 @@ def test_stream_truncated_tool_calls_fail_closed():
             _chunk(finish="length"),
         ]
     )
-    text, tool_calls = _stream(host)
-    assert tool_calls == []
-    assert text == ""
+    with pytest.raises(ModelResponseError, match="length"):
+        _stream(host)
     assert any("截断" in message for message in host.errors)
 
 

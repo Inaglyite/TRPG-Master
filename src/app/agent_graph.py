@@ -153,6 +153,8 @@ def _prepare_turn(state: TurnState) -> dict:
     # an arrival boundary from the preceding player action.
     engine._action_resolution = None
     engine._encounter_resolution = None
+    engine._adjudicated_outcome = {}
+    engine._narrative_audit = {}
     _check_cancelled(engine)
     user_content = state.get("user_content")
     control_turn = user_content is None and engine._has_pending_control_instruction()
@@ -202,6 +204,18 @@ def _prepare_turn_inner(
             else engine._plan_player_action(user_content)
         )
         engine._action_resolution = action_resolution
+        if crisis_text and engine._combat_active():
+            # An ambush preempts an investigation planned against the previous
+            # snapshot. Combat owns this action until its turn is resolved.
+            from src.gameplay.action_resolution import ActionPhase, ActionResolution
+
+            action_resolution = ActionResolution(
+                player_input=user_content, phase=ActionPhase.INTERACTION,
+                origin_scene_id=action_resolution.origin_scene_id,
+                adjudication_json=json.dumps({"intent": "combat", "input_quote": user_content,
+                                              "approach": user_content, "npc_direction": "处理刚刚发生的伏击"}, ensure_ascii=False),
+            )
+            engine._action_resolution = action_resolution
         prelude_parts = [str(getattr(engine, "_preflight_narrative", "") or "").strip()]
         prelude_parts = [part for part in prelude_parts if part]
         if crisis_text:
@@ -214,9 +228,14 @@ def _prepare_turn_inner(
             preview_world = {}
         action_preview = match_action_preview(action_resolution, preview_world)
         selected_preview_option = None
-        if action_preview is not None:
-            prelude_parts.append(action_preview.narrative)
-            _emit_authored_narrative(engine, action_preview.narrative)
+        preview_material = ""
+        travel_material: list[str] = []
+        if action_preview is not None and not action_preview.blocking:
+            # 非阻塞提醒：不弹卡打断，文案降级为模型素材，行动照常演出。
+            preview_material = action_preview.narrative
+        elif action_preview is not None:
+            # 预演卡只做决策 UI：罐头文案不再直接播为最终叙事，
+            # 玩家选择后由故事模型按 NPC 性格现场展开（见下方素材注入）。
             _emit_phase(engine, "awaiting_decision", "等待你决定是否继续……")
             selected_id = engine.cb.on_decision(action_preview.decision_payload())
             selected_preview_option = action_preview.option(selected_id)
@@ -231,16 +250,21 @@ def _prepare_turn_inner(
                 {"type": "player_reply", "text": selected_preview_option.label}
             )
             if selected_preview_option.outcome == "cancel":
+                # 取消回合没有模型调用，预演文案是本回合唯一的叙事，原样保留。
+                prelude_parts.append(action_preview.narrative)
+                _emit_authored_narrative(engine, action_preview.narrative)
                 skip_agent = True
                 skip_model_audit = True
-            elif selected_preview_option.outcome == "replace":
-                user_content = selected_preview_option.action_text
-                engine.__dict__["_turn_user_content"] = user_content
-                # The replacement is authored by the same preview and is
-                # frozen immediately.  The decision reply label is never fed
-                # back through the natural-language router.
-                action_resolution = engine._plan_player_action(user_content)
-                engine._action_resolution = action_resolution
+            else:
+                preview_material = action_preview.narrative
+                if selected_preview_option.outcome == "replace":
+                    user_content = selected_preview_option.action_text
+                    engine.__dict__["_turn_user_content"] = user_content
+                    # The replacement is authored by the same preview and is
+                    # frozen immediately.  The decision reply label is never fed
+                    # back through the natural-language router.
+                    action_resolution = engine._plan_player_action(user_content)
+                    engine._action_resolution = action_resolution
 
         transition_id = None if skip_agent else action_resolution.destination_scene_id
         discovery_matches = [] if skip_agent else list(action_resolution.discovery_matches)
@@ -256,8 +280,12 @@ def _prepare_turn_inner(
             )
         )
         if transition_prelude:
-            prelude_parts.append(transition_prelude)
-            engine.cb.on_narrative(f"{transition_prelude}\n\n")
+            if preview_material:
+                # 有预演的回合不预播赶路文本，交给模型按顺序演出。
+                travel_material.append(transition_prelude)
+            else:
+                prelude_parts.append(transition_prelude)
+                engine.cb.on_narrative(f"{transition_prelude}\n\n")
         if transition_id:
             engine._resolve_scene_transition(
                 user_content,
@@ -280,8 +308,11 @@ def _prepare_turn_inner(
                 entry_world = {}
             entry_text = build_scene_entry_beat(entry_world, transition_id)
             if entry_text:
-                prelude_parts.append(entry_text)
-                engine.cb.on_narrative(f"{entry_text}\n\n")
+                if preview_material:
+                    travel_material.append(entry_text)
+                else:
+                    prelude_parts.append(entry_text)
+                    engine.cb.on_narrative(f"{entry_text}\n\n")
 
         prelude = "\n\n".join(part for part in prelude_parts if part)
 
@@ -299,13 +330,25 @@ def _prepare_turn_inner(
                 engine._resolve_action_check(user_content, discovery_skill)
                 if not skip_agent
                 and not transition_id
-                and (not discovery_matches or needs_discovery_check)
+                and (not discovery_matches or needs_discovery_check or bool(
+                    action_resolution.adjudication_json
+                    and json.loads(action_resolution.adjudication_json).get("check")
+                ))
                 else None
             )
         )
         resolved_discoveries = (
             engine._resolve_discoveries(discovery_matches, check_result) if not skip_agent else []
         )
+        adjudicated_outcome = {}
+        if not skip_agent and action_resolution.adjudication_json:
+            from src.gameplay.action_adjudication import apply_adjudicated_effects
+
+            adjudicated_outcome = apply_adjudicated_effects(engine, action_resolution, check_result)
+            engine._adjudicated_outcome = adjudicated_outcome
+            ledger = getattr(engine, "_turn_mutations", None)
+            if ledger is not None:
+                ledger.record_domain("adjudicated_action", adjudicated_outcome)
         ledger = getattr(engine, "_turn_mutations", None)
         if ledger is not None and resolved_discoveries:
             ledger.record_domain(
@@ -326,6 +369,19 @@ def _prepare_turn_inner(
                 content += f"\n[本轮实际行动] {user_content}"
             elif selected_preview_option.outcome == "cancel":
                 content += "\n[权威结果] 玩家暂不执行原行动；场景保持不变。"
+        if preview_material and not skip_agent:
+            lines = [
+                "[行动预演素材｜权威意图，不得原样照抄]",
+                f"玩家表明意图后、出发前，在场人物的回应大意：{preview_material}",
+            ]
+            if travel_material:
+                lines.append("随后的既定事实顺序：" + "；".join(travel_material))
+            lines.append(
+                "请按顺序完整演出本回合：先让该人物在原地以其性格完整回应玩家"
+                "（神态、措辞、细节可自由发挥，但不得改变事实含义与所给信息），"
+                "再写赶路，再写抵达后的第一印象，然后正常继续叙述。"
+            )
+            content += "\n\n" + "\n".join(lines)
         if prelude:
             content += (
                 "\n\n[本轮已向玩家展示的前置叙事]\n"
@@ -334,6 +390,30 @@ def _prepare_turn_inner(
             )
         if authority:
             content += f"\n\n{authority}"
+        if adjudicated_outcome:
+            settled = next(
+                (
+                    event
+                    for event in adjudicated_outcome.get("events", [])
+                    if isinstance(event, dict) and event.get("type") == "time_advanced"
+                ),
+                None,
+            )
+            time_note = ""
+            if settled:
+                minutes = int(settled.get("after", 0)) - int(settled.get("before", 0))
+                if minutes > 0:
+                    time_note = (
+                        f"本回合已结算时间 {minutes} 分钟；叙事的时间跨度不得超出已结算时间，"
+                        "不得把数小时演成数天，不得叙述未结算的昼夜更替。"
+                    )
+            content += (
+                "\n\n[骰前裁决已结算｜不得改写或再次执行]\n"
+                + json.dumps(adjudicated_outcome, ensure_ascii=False)
+                + "\n按 description 和 events 展开结果；npc_direction 指导在场 NPC 的行为。"
+                "这些后果已落账，不得再次发放物品、推进时钟或重复检定。"
+                + time_note
+            )
         content += (
             "\n\n[输出格式] NPC 直接引语的台词必须用 【npc:<npc_public_state 中的 id>】…"
             "【/npc】 包裹（只包台词；提及、转述、动作神态不加）。"
@@ -796,6 +876,29 @@ def _finalize_turn(state: TurnState) -> dict:
             narrative += "\n\n"
         narrative += text
 
+    # 战斗僵持兜底：连续无状态变化的战斗回合强制以僵持结束，
+    # 防止"模型冻住 NPC + 玩家空耗动作"把主线软锁在 combat 意图里。
+    if (
+        state.get("user_content")
+        and not state.get("skip_agent")
+        and getattr(engine, "_combat_active", None)
+        and engine._combat_active()
+    ):
+        from src.gameplay.combat import track_stalemate
+
+        stalemate: list[str] = []
+
+        def _track(world: dict) -> None:
+            outcome = track_stalemate(world)
+            if outcome:
+                stalemate.append(str(outcome.get("outcome") or ""))
+
+        engine.context.world_store.update(_track)
+        if stalemate:
+            notice = "双方都已筋疲力尽，在僵持中各自拉开距离——这场战斗不了了之。"
+            narrative = f"{narrative}\n\n{notice}".strip() if narrative.strip() else notice
+            engine.cb.on_narrative(f"\n\n{notice}\n\n")
+
     # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
     # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
     narrative_segments, narrative = _parse_final_narrative(engine, state, narrative)
@@ -816,6 +919,8 @@ def _finalize_turn(state: TurnState) -> dict:
             pre_len = state.get("pre_turn_message_len")
             if isinstance(pre_len, int) and 0 <= pre_len < len(engine.messages):
                 del engine.messages[pre_len:]
+        if not state.get("executed_tools") and not state.get("skip_agent"):
+            raise RuntimeError("本轮没有可提交的模型结果")
 
     if narrative.strip():
         with _performance_span(engine, "entity_reconcile"):
@@ -847,6 +952,11 @@ def _finalize_turn(state: TurnState) -> dict:
     if choices_callback and choices:
         choices_callback(choices)
     complete_turn = getattr(engine, "_complete_turn_record", None)
+    resolution_session = getattr(engine, "_resolution_session", None)
+    if resolution_session is not None:
+        engine.context.world_store.update(
+            lambda world: world.update(last_resolution_id=resolution_session.id)
+        )
     if complete_turn:
         complete_turn(
             narrative=narrative,

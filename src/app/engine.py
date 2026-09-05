@@ -54,7 +54,7 @@ from src.app.logger import model_call as log_model_call
 from src.app.logger import tier_inject as log_tier
 from src.app.runtime import RuntimeContext
 from src.gameplay import investigators as investigator_roster
-from src.gameplay.action_checks import infer_action_check, infer_scene_transition
+from src.gameplay.action_checks import infer_scene_transition
 from src.gameplay.action_resolution import ActionResolution, plan_player_action
 from src.gameplay.case_clocks import clock_status
 from src.gameplay.characters import apply_character_to_state, default_character_ref
@@ -62,6 +62,7 @@ from src.gameplay.characters import settle_case as settle_character_case
 from src.gameplay.combat_agent import build_combat_overlay
 from src.gameplay.discovery import DiscoveryMatch, match_discovery_rules, preferred_check_skill
 from src.gameplay.encounters import SceneEncounterResolution, resolve_scene_encounters
+from src.gameplay.endings import eligible_endings
 from src.gameplay.escalation_preflight import resolve_player_escalation
 from src.gameplay.handouts import matching_handouts
 from src.gameplay.npc_conversations import commit_npc_conversations
@@ -477,6 +478,11 @@ class GameEngine:
                     "lorebook": dict(self._turn_lore_diagnostics),
                     "performance": performance,
                     "mutations": self._turn_mutations.snapshot(),
+                    "adjudication": {
+                        "resolution_id": getattr(getattr(self, "_resolution_session", None), "id", ""),
+                        "outcome": getattr(self, "_adjudicated_outcome", {}),
+                        "narrative_audit": getattr(self, "_narrative_audit", {}),
+                    },
                     "tool_pipeline": {
                         "version": 2,
                         "outcomes": list(getattr(self, "_tool_pipeline_audit", [])),
@@ -915,32 +921,9 @@ class GameEngine:
         preferred_skill: str | None = None,
     ) -> dict | None:
         """Resolve an explicit investigative action before narration starts."""
-        try:
-            world = self.context.world_store.load()
-        except Exception:
-            return None
-        check = infer_action_check(content, world)
-        if preferred_skill:
-            from src.gameplay.action_checks import ActionCheck
+        from src.gameplay.action_checks import resolve_action_check
 
-            check = ActionCheck(
-                skill=preferred_skill,
-                reason="模组发现规则要求检定",
-            )
-        if check is None:
-            return None
-
-        output = self._execute_tool("skill_check", {"skill": check.skill})
-        try:
-            result = json.loads(output)
-        except json.JSONDecodeError:
-            log_error(f"行动预检无法解析 {check.skill} 结果: {output[:160]}")
-            return None
-        summary = dice_summary(output)
-        if summary:
-            self.cb.on_dice(summary, result)
-        result["reason"] = check.reason
-        return result
+        return resolve_action_check(self, content, preferred_skill)
 
     def _match_discoveries(
         self,
@@ -955,8 +938,10 @@ class GameEngine:
 
     def _plan_player_action(self, content: str) -> ActionResolution:
         """Return the single authority boundary consumed by this turn."""
+        from src.gameplay.action_adjudication import adjudicate_player_action
+
         world = self.context.world_store.load()
-        return plan_player_action(content, world)
+        return adjudicate_player_action(self, content, world, plan_player_action(content, world))
 
     def _emit_sanity_result(self, output: str) -> None:
         try:
@@ -1340,6 +1325,7 @@ class GameEngine:
                 "npc_public_state": present_npcs,
             },
             "flags": world.get("flags", {}),
+            "eligible_endings": eligible_endings(world),
             "case_clocks": clock_status(
                 world.get("case_clocks"), world.get("case_clock_definitions")
             ),
@@ -1427,6 +1413,8 @@ class GameEngine:
             "揭示直接放进 sanity_event；该事务会提交线索、flag_effects 与 NPC 信息。"
             "若本轮需要任何工具，先完成全部工具调用，工具返回后再一次性输出正文；"
             "不要在工具调用前叙述事件，也不要重述本轮已经输出过的段落。"
+            "eligible_endings 非空时，这些结局的前置条件已满足；玩家明确收场或故事自然收束时"
+            "必须调用 end_game(ending_id=其中之一) 再写尾声，不得只用叙述或选项代替工具调用。"
         )
 
     def _reconcile_turn(
@@ -1509,7 +1497,28 @@ class GameEngine:
         player's actual action.  This keeps model judgement useful without
         letting it bypass module progression contracts.
         """
+        from src.gameplay.discovery import disclaims_acquisition
+
+        no_take = disclaims_acquisition(player_action)
+        if name == "state_add_item" and no_take:
+            return json.dumps({"ok": False, "error": "acquisition_declined"}, ensure_ascii=False)
+        if name in {"combat_start", "combat_action"}:
+            from src.gameplay.combat_authority import authorize_combat_proposal
+
+            try:
+                args = authorize_combat_proposal(self.context.world_store.load(), name, args)
+            except (ValueError, TypeError, KeyError) as exc:
+                return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+        from src.gameplay.action_resolution import INCAPACITATED_BLOCKED_TOOLS, pc_incapacitated
+
+        if name in INCAPACITATED_BLOCKED_TOOLS and pc_incapacitated(self.context.world_store.load()):
+            return json.dumps({"ok": False, "error": "pc_incapacitated", "instruction": "调查员已失去行动能力，不能执行身体动作；叙述现状、等待救援或走向结局。"}, ensure_ascii=False)
         action_resolution = getattr(self, "_action_resolution", None)
+        if action_resolution and action_resolution.adjudication_json:
+            # The narrator cannot add a second mechanical plan after the
+            # adjudicator's costs, checks and effects have already committed.
+            if name in {"skill_check", "attribute_check", "luck_check", "state_add_item", "state_remove_item", "use_item", "sanity_event"}:
+                return json.dumps({"ok": False, "error": "pre_roll_resolution_owns_effect", "instruction": "本次行动已由骰前裁决结算；继续叙述结果，不要再次检定、扣费或发放物品。"}, ensure_ascii=False)
         arrival_only = bool(action_resolution and action_resolution.is_arrival)
         if arrival_only and name in {"state_add_clue", "sanity_event"}:
             return json.dumps(
@@ -1568,6 +1577,8 @@ class GameEngine:
                 "",
             )
         clue = catalog.get(clue_id) if clue_id else None
+        if no_take and isinstance(clue, dict) and clue.get("granted_item"):
+            return json.dumps({"ok": False, "error": "acquisition_declined"}, ensure_ascii=False)
         rules = clue.get("discovery_rules", []) if isinstance(clue, dict) else []
         if not isinstance(rules, list) or not rules:
             return self._execute_tool(name, args)
@@ -2059,7 +2070,12 @@ class GameEngine:
 
         try:
             with cache_scope() if cache_scope else nullcontext():
-                self._handle_action_cached(user_content)
+                from src.gameplay.resolution import begin_resolution, resolution_scope
+
+                session = begin_resolution(self.context, self.context.world_store.load(), user_content)
+                self._resolution_session = session
+                with resolution_scope(session):
+                    self._handle_action_cached(user_content)
         except TurnCancelledError as exc:
             self.finish_turn_record(
                 status="cancelled",
@@ -2073,6 +2089,7 @@ class GameEngine:
             )
             raise
         finally:
+            self.__dict__.pop("_resolution_session", None)
             self._preconfirmed_escalation = None
             self.__dict__.pop("_preplanned_action_resolution", None)
             self.__dict__.pop("_preflight_narrative", None)

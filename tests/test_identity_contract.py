@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.ai.model.model_streamer import ModelResponseError
 from src.ai.skills.skill_manifest import load_official_catalog
 from src.ai.tools.registry import MODEL_TOOLS, model_tools_for
 from src.app.config import PROJECT_ROOT
@@ -561,10 +562,11 @@ class IdentityContractTests(unittest.TestCase):
             patch("src.app.engine.log_error", side_effect=server_logs.append),
             patch("src.app.engine.time.sleep"),
         ):
-            text, tool_calls = engine._stream_llm("test-model")
+            with self.assertRaises(ModelResponseError) as caught:
+                engine._stream_llm("test-model")
 
-        self.assertEqual(text, "")
-        self.assertEqual(tool_calls, [])
+        self.assertEqual(str(caught.exception), "模型服务暂时不可用")
+        self.assertNotIn(secret_detail, str(caught.exception))
         self.assertEqual(visible, [])
         self.assertEqual(errors, ["模型服务暂时不可用，请稍后重试。"])
         self.assertNotIn(secret_detail, errors[0])
@@ -665,7 +667,7 @@ class IdentityContractTests(unittest.TestCase):
             self.assertEqual(call["temperature"], 0.65)
             self.assertNotIn("tools", call)
 
-    def test_partial_transport_failure_finishes_with_received_text(self):
+    def test_partial_transport_failure_fails_explicitly_with_partial_text(self):
         calls = []
 
         def create(**_kwargs):
@@ -687,13 +689,13 @@ class IdentityContractTests(unittest.TestCase):
         engine.cb = SimpleNamespace(on_narrative=visible.append, on_error=errors.append)
 
         with patch("src.app.engine.log_model_call"), patch("src.app.engine.log_error"):
-            text, tool_calls = engine._stream_llm("test-model")
+            with self.assertRaises(ModelResponseError) as caught:
+                engine._stream_llm("test-model")
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(text, "已经收到的半段叙述。")
-        self.assertEqual(visible, [text])
+        self.assertEqual(caught.exception.partial_text, "已经收到的半段叙述。")
+        self.assertEqual(visible, ["已经收到的半段叙述。"])
         self.assertEqual(len(errors), 1)
-        self.assertEqual(tool_calls, [])
 
     def test_internal_control_sentence_is_filtered_across_stream_chunks(self):
         chunks = [

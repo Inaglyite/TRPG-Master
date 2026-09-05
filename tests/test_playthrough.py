@@ -20,7 +20,9 @@ from tools.playthrough import (  # noqa: E402
     check_clue,
     check_handout,
     check_scene,
+    choose_beat_input,
     make_callbacks,
+    scarlet_beats,
     scene_is,
     snapshot_world,
 )
@@ -134,3 +136,17 @@ def test_check_result_records_pass_fail() -> None:
     check = Check(area=2, desc="场景", fn=lambda w, c: True)
     check.result = bool(check.fn({}, Capture()))
     assert check.result is True
+
+
+def test_empty_gun_and_low_hp_change_player_strategy():
+    beats = {beat.key: beat for beat in scarlet_beats()}
+    world = _world()
+    world["combat_state"]["active"] = True
+    world["pc"]["inventory"] = [".38口径左轮手枪（0发）"]
+    assert "谈判" in choose_beat_input(beats["B6b_fight"], 5, world)
+    assert "谈判" in choose_beat_input(beats["B6c_documents"], 0, world)
+    world["pc"]["inventory"] = [".38口径左轮手枪（6发）"]
+    world["pc"]["hp"] = 3
+    assert "谈判" in choose_beat_input(beats["B6b_fight"], 5, world)
+    world["combat_state"]["active"] = False
+    assert "取回" in choose_beat_input(beats["B6c_documents"], 1, world)

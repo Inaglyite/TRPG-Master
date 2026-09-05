@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
+from src.ai.model.model_streamer import ModelResponseError
 from tests.model_fixtures import (
     build_chunk,
     load_fixture,
@@ -144,9 +147,9 @@ def test_midstream_cut_preserves_partial_text_and_classifies():
         [("cut", [{"content": "前半段叙述。"}], APIConnectionError_for_test("reset"))]
     )
     host = streamer_host(client)
-    text, tool_calls = run_stream(host)
-    assert tool_calls == []
-    assert "前半段叙述。" in text
+    with pytest.raises(ModelResponseError) as error:
+        run_stream(host)
+    assert "前半段叙述。" in error.value.partial_text
     assert host.diagnostics[-1]["status"] == "transport_error"
     assert host.diagnostics[-1]["error_class"] == "transport"
     assert any("中断" in message for message in host.errors)

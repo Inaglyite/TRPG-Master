@@ -285,7 +285,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         engine.client = SimpleNamespace(
             chat=SimpleNamespace(
                 completions=SimpleNamespace(
-                    create=lambda **_kwargs: [stream_chunk(finish_reason="stop")]
+                    create=lambda **_kwargs: [stream_chunk(content="好的。", finish_reason="stop")]
                 )
             )
         )
@@ -313,7 +313,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(
             envelope["context_section_digests"]["tools"],
-            "4e6d8f31e752a21bc2804216733ed971cb755c4894385409156f9c5dd3b5aa9c",
+            "f80fcbf496b32f3e1077e8dfc33c58a04271d1475755dfbe06aa2b7bc75424e7",
         )
 
     def test_provider_calls_receive_server_snapshot_and_catalog_digest(self):

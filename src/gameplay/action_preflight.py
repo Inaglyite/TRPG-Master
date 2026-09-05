@@ -41,14 +41,18 @@ class ActionPreview:
     npc_id: str | None
     options: tuple[ActionPreviewOption, ...]
     default_option: str
+    blocking: bool = True
 
     def decision_payload(self) -> dict:
+        import re
+
+        gist = re.sub(r"【/?npc(?::[^】]*)?】", "", self.narrative).strip()
         return {
             "id": self.request_id,
             "kind": "action_preview",
             "presentation": "chat",
             "title": self.title,
-            "description": "",
+            "description": gist[:500],
             "options": [
                 {
                     "id": option.id,
@@ -307,5 +311,6 @@ def match_action_preview(action: ActionResolution, world: dict) -> ActionPreview
             options=options,
             # A timeout must never move the investigator or spend resources.
             default_option="cancel_action",
+            blocking=bool(raw.get("blocking", True)),
         )
     return None

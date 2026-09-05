@@ -26,6 +26,37 @@ _DISCUSSED_ROUTE = re.compile(
 )
 
 
+_INCAPACITATING_CONDITIONS = frozenset({"dead", "dying", "unconscious"})
+
+# 失去行动能力时由工具层拒绝的身体/状态动作；sanity/end_game 等仍放行，
+# 以便演出濒死体验或走向结局。
+INCAPACITATED_BLOCKED_TOOLS = frozenset(
+    {
+        "skill_check",
+        "attribute_check",
+        "luck_check",
+        "state_add_clue",
+        "state_add_item",
+        "state_remove_item",
+        "use_item",
+        "combat_start",
+        "combat_action",
+    }
+)
+
+
+def pc_incapacitated(world: dict) -> bool:
+    """战斗外的行动资格门：濒死/昏迷/死亡的调查员本人不能再执行身体动作。"""
+    pc = world.get("pc") or {}
+    conditions = pc.get("conditions") or []
+    if any(str(condition) in _INCAPACITATING_CONDITIONS for condition in conditions):
+        return True
+    try:
+        return float(pc.get("hp", 1)) <= 0
+    except (TypeError, ValueError):
+        return False
+
+
 class ActionPhase(StrEnum):
     ARRIVAL = "arrival"
     INTERACTION = "interaction"
@@ -47,6 +78,7 @@ class ActionResolution:
     entry_text: str = ""
     discovery_matches: tuple[DiscoveryMatch, ...] = ()
     preferred_skill: str | None = None
+    adjudication_json: str = ""
 
     @property
     def is_arrival(self) -> bool:
@@ -140,6 +172,13 @@ def plan_player_action(content: str, world: dict) -> ActionResolution:
     everything else remains ordinary INTERACTION.
     """
     origin = str((world.get("current_scene") or {}).get("id") or "")
+    if pc_incapacitated(world):
+        # 失去行动能力的调查员不能移动、搜查或取得；本回合只做不结算的对话/等待。
+        return ActionResolution(
+            player_input=content,
+            phase=ActionPhase.INTERACTION,
+            origin_scene_id=origin,
+        )
     destination = infer_scene_transition(content, world)
     if destination:
         return ActionResolution(

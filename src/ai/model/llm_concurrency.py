@@ -21,6 +21,14 @@ class LlmBusyError(RuntimeError):
     """Raised when a model call waits too long for a concurrency slot."""
 
 
+class ModelResponseError(RuntimeError):
+    """No complete model result exists; partial prose is not commit authority."""
+
+    def __init__(self, reason: str, partial_text: str = "") -> None:
+        super().__init__(reason)
+        self.partial_text = partial_text
+
+
 def max_concurrency() -> int:
     try:
         return max(1, min(64, int(os.environ.get("TRPG_LLM_MAX_CONCURRENCY", "2"))))
