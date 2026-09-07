@@ -199,6 +199,81 @@ class SpeakerParserTests(unittest.TestCase):
         )
         self.assertIn("我是正义的警察", segments[-1].text)
 
+    def test_cross_line_player_launch_quote_never_falls_back_to_npc(self):
+        """上一段「你看着 X，缓缓问出……——」已标明是玩家在引出这句话：
+        紧随的独立引语行是玩家台词，唯一对话者兜底绝不能归给该 NPC。"""
+        aliases = {"惠特克罗夫特": "whitmore", "惠特克罗夫特医生": "whitmore"}
+        text = (
+            "你看着惠特克罗夫特，缓缓问出那个一直悬在心头的问题——\n\n"
+            "“医生，莱特死前……是不是在害怕什么？”\n\n"
+            "你注意到他攥着病历夹的手指猛地收紧，指节泛白。"
+        )
+        segments, _ = parse_segments(
+            text,
+            speaker_aliases=aliases,
+            player_text="问一下莱特吧，为什么这么害怕",
+            present_npc_ids=["whitmore"],
+        )
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None)],
+        )
+        self.assertIn("莱特死前", segments[0].text)
+
+    def test_vocative_quote_addressing_npc_role_stays_narration(self):
+        """以职业称呼开头的引语（“医生，莱特他……”）是在对该角色说话，
+        后面接的不是第二人称时也不能归给该 NPC。"""
+        aliases = {"惠特克罗夫特": "whitmore", "惠特克罗夫特医生": "whitmore"}
+        text = "惠特克罗夫特停下笔，抬头看你。\n\n“医生，莱特死前是不是一直在害怕什么？”"
+        segments, _ = parse_segments(text, speaker_aliases=aliases, present_npc_ids=["whitmore"])
+
+        self.assertEqual(
+            [(segment.kind, segment.npc_id) for segment in segments],
+            [("narration", None)],
+        )
+
+    def test_npc_addressing_player_with_generic_honorific_keeps_bubble(self):
+        """“先生，请坐。”是 NPC 对玩家的尊称，不属于玩家台词守卫范围。"""
+        aliases = {"法伦": "bryce_fallon"}
+        text = "法伦听到你的追问，没有立刻回答。\n\n“先生，请坐。这件事说来话长，你最好有个准备。”"
+        segments, _ = parse_segments(
+            text, speaker_aliases=aliases, present_npc_ids=["bryce_fallon"]
+        )
+
+        self.assertIn(
+            ("speech", "bryce_fallon"),
+            [(segment.kind, segment.npc_id) for segment in segments],
+        )
+
+    def test_npc_answer_after_indirect_player_question_still_recovers(self):
+        """玩家间接问句不以引出符收尾（“你问法伦昨晚去了哪里。”），
+        之后的 NPC 回答仍按唯一对话者兜底恢复为气泡。"""
+        aliases = {"法伦": "bryce_fallon"}
+        text = "你问法伦昨晚去了哪里。\n\n“我昨晚一直在档案馆查资料，你可以去核实。”"
+        segments, _ = parse_segments(
+            text, speaker_aliases=aliases, present_npc_ids=["bryce_fallon"]
+        )
+
+        self.assertIn(
+            ("speech", "bryce_fallon"),
+            [(segment.kind, segment.npc_id) for segment in segments],
+        )
+
+    def test_explicit_npc_owner_survives_cross_line_player_launch(self):
+        """上一段是玩家引出问句，但本行有显式 NPC 归属时，显式归属优先。"""
+        aliases = {"惠特克罗夫特": "whitmore"}
+        text = (
+            "你看着惠特克罗夫特，缓缓问出那个一直悬在心头的问题——\n"
+            "“他最近总是做噩梦，梦里喊着听不懂的词。”惠特克罗夫特低声说。"
+        )
+        segments, _ = parse_segments(text, speaker_aliases=aliases)
+
+        self.assertIn(
+            ("speech", "whitmore"),
+            [(segment.kind, segment.npc_id) for segment in segments],
+        )
+
     def test_player_led_prose_quote_never_falls_back_to_npc(self):
         """玩家主导散文（你掏出笔记本，"……"）里的引语是玩家台词的写实，
         跨行/唯一对话者兜底绝不能把它塞进在场 NPC 嘴里；同段里真正的

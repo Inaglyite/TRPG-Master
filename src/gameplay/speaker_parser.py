@@ -403,8 +403,13 @@ _CROSS_LINE_SPEECH_CUE = (
     r"(?:说|道|答|回答|问|告诉|开口|出声|打破沉默|解释|补充|承认|提醒|回应|吩咐|表示|喃喃|喊|叫)"
 )
 # 玩家台词守卫：玩家输入的重述、以 NPC 名/称呼开头的呼语，绝不能归给 NPC。
+# 职业/身份称呼（医生/教授/警官……）后接逗号即视为在对该角色说话，不要求
+# 第二人称——“医生，莱特死前……”也是在问医生；通用尊称（先生/女士/小姐/夫人）
+# 同样是 NPC 称呼玩家的惯用语，仍要求第二人称才算玩家台词，避免误吞 NPC 气泡。
 _PLAYER_VOCATIVE = re.compile(
-    r"^(?:医生|主任|教授|警官|警长|管家|老师|神父|夫人|先生|女士|小姐)[，,、]?(?:你|您|你们|诸位|我|我们)"
+    r"^(?:(?:医生|主任|教授|警官|警长|管家|老师|神父)[，,、]"
+    r"|(?:医生|主任|教授|警官|警长|管家|老师|神父|夫人|先生|女士|小姐)"
+    r"[，,、]?(?:你|您|你们|诸位|我|我们))"
 )
 # 兜底归属（跨行/唯一对话者）比行内显式归属可信度低，要求更长的引语体，
 # 避免把碎片语气词吹成气泡。
@@ -459,6 +464,35 @@ def _mask_quoted_spans(line: str) -> str:
 _PLAYER_INLINE_CUE = re.compile(
     r"你[^。！？!?\n]{0,12}(?:说|道|问|答|重复|复述|追问|反问|反驳|喊|叫|解释|补充)"
 )
+# 跨行玩家言语引出：上一段是「你……问/说……」并以引出符（——/：）收尾、
+# 自身不含引语时，紧随其后的独立引语行是玩家正在说的话。比行内线索允许
+# 更长间隔（“你看着惠特克罗夫特医生，缓缓问出……——”）。
+_PLAYER_SPEECH_LAUNCH_CUE = re.compile(
+    r"你[^。！？!?\n]{0,24}(?:说|道|问|答|追问|反问|喊|叫|解释|补充)"
+)
+_PLAYER_SPEECH_LAUNCH_END = re.compile(r"(?:——|—|：|:)\s*$")
+
+
+def _previous_content_line(lines: list[str], index: int) -> str:
+    """最近的上一非空行；空行只是分段，不隔断说话人线索。"""
+    for back in range(1, 4):
+        neighbor = index - back
+        if neighbor < 0:
+            break
+        if lines[neighbor].strip():
+            return lines[neighbor]
+    return ""
+
+
+def _line_launches_player_speech(line: str) -> bool:
+    """本行是玩家在引出言语且自身不含引语：下一行的引语属于玩家。"""
+    if not line or _paired_quoted_speech(line):
+        return False
+    return bool(
+        _PLAYER_SPEECH_LAUNCH_CUE.search(line) and _PLAYER_SPEECH_LAUNCH_END.search(line.rstrip())
+    )
+
+
 # 玩家主导散文：同一行叙述分句以「你/您」开头（“你掏出笔记本，‘……’”）。
 # 此时引语是玩家台词的写实，按跨行/唯一对话者兜底会把玩家的话塞进 NPC
 # 嘴里——宁可少一个 NPC 气泡，也不能错归。
@@ -576,6 +610,10 @@ def _make_fallback_owner(
             return None
         # 本行在「对 NPC 说话」：引语属于搭话的人，不是 NPC。
         if _line_addresses_npc(lines[line_index], literal_aliases):
+            return None
+        # 上一段是玩家在引出这句话（“你看着 X，缓缓问出……——”）：
+        # 引语是玩家台词，绝不归给 NPC。
+        if _line_launches_player_speech(_previous_content_line(lines, line_index)):
             return None
         for back in (1, 2):
             neighbor = line_index - back

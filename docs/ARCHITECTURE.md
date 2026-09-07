@@ -230,11 +230,28 @@ flowchart TD
 - 默认开启 `TRPG_ACTION_ADJUDICATION`：在掷骰前由判定模型提议动作语义、技能与难度、
   成败后果、NPC 反应和时间；`action_adjudication.validate_proposal` 按在场人物、
   模组发现候选、角色表和有界效果校验，确定性规则负责掷骰与落账。校验失败最多重试一次，
-  再回退到确定性解析；回退记录在回合诊断中，不计作模型裁决成功。
+  再回退到确定性解析；回退记录在回合诊断中，不计作模型裁决成功。裁决上下文与叙事层
+  共享同一权威视图（一般 flags、`eligible_endings`、本场景 recent_checks），防止两层
+  对"某事是否已落定"判断不一而拖延结局。
 - 失去行动能力的 PC（HP ≤ 0 或 dead/dying/unconscious）不能执行本人身体动作、发现或
-  检定；允许等待和叙事不等于发生了救援。查看物品与取得实物分别授权，明确拒绝取得时
+  检定；可以 wait/clarify/decline，并可通过 `rescue` 效果请求在场非敌对 NPC 施救——
+  引擎核验救援者在场、非敌对、未死亡（dead 不可逆）且 `time_minutes ≥ 20`，结算为
+  HP 回到 1 并移除 dying/unconscious。查看物品与取得实物分别授权，明确拒绝取得时
   不能改走 `take_item` 或叙事工具发放。已结算分钟数传给叙事模型，禁止扩写未结算时间；
   这仍需真实模型一致性验收，提示词本身不构成叙事正确性的证明。
+- 裁决结果以三态 `status`（executed_success / executed_failure / not_executed）连同
+  description、events 一起传给叙事模型：未执行的行动必须说明原因，不得演成已发生。
+  定稿阶段 `src.gameplay.narrative_consistency` 对叙事做确定性时间跨度核对，越界时
+  重写一次；历史、回合记录与前端权威段统一采用修正文本，检查/重写失败一律 fail-open。
+- 同一技能+同一目标+相同做法的检定在同场景只结算一次（`_check_history`）：已成功不得
+  重检；已失败须改变具体做法，或由玩家明确要求后按既有孤注一掷通道承担风险重试。
+  检定目标由 `target_npc_id` 或 `check.target`（对象稳定标识）给出：双方目标已知且不同
+  一律放行，"目标未知"不等同于"同一目标"。做法指纹为 `approach⟦input_quote⟧`（兜底路径
+  用玩家原文），两条执行路径共用同一构造：裁决改写措辞不改变逐字锚点；调用方给不出
+  做法（空指纹）时无法证明"做法已改变"，按重复处理。重复检定拒绝（`RepeatCheckError`）
+  与模型调用失败分流：前者返回拒行决议按 not_executed 落账，绝不退回可掷骰的确定性
+  流程；后者才回退。执行层被拦的检定以显式 `repeat_blocked` 哨兵按 not_executed 落账，
+  description 只带拒绝原因，不夹带未发生的成败分支叙述。
 - 玩家输入存在时增加玩家回合计数。
 - 根据上轮风险和轮数注入 TIER 提醒。
 - `src.gameplay.action_resolution` 在任何状态写入前生成单一、不可变的 `ActionResolution`，并在进入 LangGraph 前冻结。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。抵达可来自明确移动、当前场景作者声明的 `action_routes`，或唯一且尚未发现的物理线索目标；后者只接受至少四个归一化字符的明确目标，并只路由到 `source/related_scenes` 唯一的场景，绝不直接发现线索。背包中已经存在且被输入明确点名的物品固定视为当前交互，不能被远端线索的“副本/抄本/墨迹”等短别名劫持。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。

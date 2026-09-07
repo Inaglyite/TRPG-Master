@@ -19,6 +19,7 @@ from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 from src.gameplay.action_resolution import ActionPhase, ActionResolution, pc_incapacitated
 from src.gameplay.discovery import DiscoveryMatch, _known_clue_ids, _rule_flags_met
+from src.gameplay.endings import eligible_endings
 from src.gameplay.world_time import advance_time, elapsed_minutes
 
 
@@ -28,6 +29,7 @@ class StrictProposal(BaseModel):
 
 class CheckProposal(StrictProposal):
     skill: str = Field(max_length=80)
+    target: str = Field(default="", max_length=120, description="检定对象的稳定标识（如 左边房门锁）；NPC 目标用外层 target_npc_id")
     required_success_level: Literal["regular", "hard", "extreme"] = "regular"
     bonus_dice: int = Field(default=0, ge=0, le=2)
     penalty_dice: int = Field(default=0, ge=0, le=2)
@@ -37,7 +39,7 @@ class CheckProposal(StrictProposal):
 
 
 class EffectProposal(StrictProposal):
-    kind: Literal["clock_advance", "npc_reaction", "take_item", "consume_item", "flag_set"]
+    kind: Literal["clock_advance", "npc_reaction", "take_item", "consume_item", "flag_set", "rescue"]
     target: str = Field(min_length=1, max_length=180)
     value: str = Field(default="", max_length=80, description="npc_reaction 时仅限 cooperative/guarded/nervous/submissive/unknown")
     source_id: str = Field(default="", max_length=180)
@@ -124,8 +126,17 @@ def adjudication_context(world: dict, content: str, fallback: ActionResolution) 
         "elapsed_minutes": elapsed_minutes(world),
         "module_rules": world.get("module_rules", {}),
         "sanity_sources": available_sanity_sources(world),
+        "recent_checks": [
+            {key: record.get(key) for key in ("skill", "target_id", "approach", "success")}
+            for record in (world.get("pc", {}).get("_check_history") or [])[-8:]
+            if isinstance(record, dict) and record.get("scene_id") == str(scene.get("id") or "")
+        ],
         "combat_state": world.get("combat_state", {}),
         "pc_incapacitated": pc_incapacitated(world),
+        # 与叙事层保持同一权威视图：裁决器需要知道"什么已经落定"，
+        # 否则会把已完成的封印/结案当成"不了解条件"而 clarify 拖延结局。
+        "flags": world.get("flags", {}),
+        "eligible_endings": eligible_endings(world),
         "completion_flags": {
             key: {"achieved": bool((world.get("flags") or {}).get(key)), "description": description}
             for key, description in (world.get("completion_flags") or {}).items()
@@ -138,18 +149,32 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
     proposal = ActionProposal.model_validate(raw)
     if proposal.input_quote not in content:
         raise ValueError("input_quote 必须逐字引用玩家输入")
-    if pc_incapacitated(world):
-        # 失去行动能力的调查员本人不能再执行身体动作：
-        # 只能等待/询问/收场；救援与恢复由后续状态或他人完成。
+    incapacitated = pc_incapacitated(world)
+    if incapacitated:
+        # 失去行动能力的调查员本人不能再执行身体动作：只能等待/呼救/询问/收场。
+        # 可请求在场非敌对 NPC 救援（rescue），资格与代价由本验证器核验；死亡不可逆。
         if proposal.intent not in {"wait", "clarify", "decline"}:
             raise ValueError("调查员已失去行动能力，不能执行身体动作")
-        if proposal.check or proposal.discovery_refs or proposal.on_success or proposal.on_failure:
-            raise ValueError("失去行动能力时不能产生检定、发现或状态变化")
+        if proposal.check or proposal.discovery_refs:
+            raise ValueError("失去行动能力时不能产生检定或发现")
+        if proposal.on_failure:
+            raise ValueError("失去行动能力时没有检定，失败分支不会触发")
+        for effect in proposal.on_success:
+            if effect.kind not in {"rescue", "npc_reaction", "clock_advance"}:
+                raise ValueError("失去行动能力时只能提出救援、在场 NPC 反应或时钟推进")
+        if any(effect.kind == "rescue" for effect in proposal.on_success):
+            if proposal.intent != "wait":
+                raise ValueError("救援应表达为 wait：撑住并呼救，等待他人施救")
+            if "dead" in {str(c) for c in world.get("pc", {}).get("conditions") or []}:
+                raise ValueError("死亡不可逆转，不能提出救援")
+            if proposal.time_minutes < 20:
+                raise ValueError("救援需要时间代价：time_minutes 至少 20")
     present = set((world.get("current_scene") or {}).get("npcs_present", []))
     if proposal.target_npc_id and proposal.target_npc_id not in present:
         raise ValueError("交互目标 NPC 不在当前场景")
     if (world.get("combat_state") or {}).get("active") and proposal.intent != "combat":
-        raise ValueError("战斗中必须交由战斗行动流程，不能免费调查或跨场景移动")
+        if not (incapacitated and proposal.intent in {"wait", "clarify", "decline"}):
+            raise ValueError("战斗中必须交由战斗行动流程，不能免费调查或跨场景移动")
     if proposal.intent == "combat" and (proposal.check or proposal.discovery_refs or proposal.on_success or proposal.on_failure or proposal.time_minutes):
         raise ValueError("战斗动作的检定、消耗和结果由战斗工具结算")
     if proposal.intent in {"clarify", "decline"}:
@@ -178,6 +203,16 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
     skills = {**world.get("pc", {}).get("attributes", {}), **world.get("pc", {}).get("skills", {})}
     if proposal.check and proposal.check.skill not in skills:
         raise ValueError("检定技能不在当前角色表中")
+    check_target = proposal.target_npc_id or (proposal.check.target if proposal.check else "")
+    if proposal.check and not proposal.check.push_context_id:
+        from src.gameplay.check_context import approach_fingerprint, validate_repeat_check
+
+        validate_repeat_check(
+            world,
+            skill=proposal.check.skill,
+            target_id=check_target,
+            approach=approach_fingerprint(proposal.approach, proposal.input_quote),
+        )
     if proposal.check and not proposal.failure_description:
         raise ValueError("检定前必须定义失败的后果")
     if proposal.check and proposal.check.push_context_id:
@@ -185,7 +220,7 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
 
         if not any(word in content for word in ("孤注一掷", "再试", "再来", "冒险重试")):
             raise ValueError("孤注一掷需要玩家明确请求重试")
-        validate_push(world, proposal.check.skill, proposal.check.push_context_id, proposal.approach, proposal.target_npc_id)
+        validate_push(world, proposal.check.skill, proposal.check.push_context_id, proposal.approach, check_target)
     candidates = discovery_candidates(world)
     from src.gameplay.discovery import disclaims_acquisition
 
@@ -251,6 +286,22 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
                 raise ValueError("只能落定模组 completion_flags 声明的完成标记")
             if (world.get("flags") or {}).get(effect.target):
                 raise ValueError("完成标记已落定，不要重复提交")
+        elif effect.kind == "rescue":
+            if not incapacitated:
+                raise ValueError("救援效果仅适用于失去行动能力的调查员")
+            rescuer = next((npc for npc in world.get("npcs", []) if npc.get("id") == effect.target), None)
+            if rescuer is None or effect.target not in present:
+                raise ValueError("救援者必须是当前场景在场的 NPC")
+            # 敌意不能只看社交面具 disposition：危机/伏击会绕过社交态度直接
+            # 打 hostile_to_pc 标记（实体记录或战斗参与者），两处都必须核。
+            if str(rescuer.get("disposition") or "") in {"hostile", "敌对"} or rescuer.get("hostile_to_pc"):
+                raise ValueError("敌对人物不会施救")
+            combat = world.get("combat_state") or {}
+            if any(
+                isinstance(p, dict) and p.get("id") == effect.target and p.get("hostile_to_pc")
+                for p in (combat.get("participants") or [])
+            ):
+                raise ValueError("敌对人物不会施救")
     # An authored route carries arrival beats and previews; preserve them when
     # the semantic adjudicator chose that same destination.
     if proposal.intent == "move":
@@ -269,11 +320,15 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
 
 _PROMPT = """你是 TRPG 的行动裁决守秘人，在任何掷骰和叙述之前决定本回合实际执行什么。
 必须调用 adjudicate_action。玩家输入是意图，不能把回忆、否定、假设、询问当成已发生动作。
-pc_incapacitated=true 时玩家已失去行动能力：只能 wait/clarify/decline，不得提出检定、发现、移动或任何效果。
+pc_incapacitated=true 时玩家已失去行动能力：只能 wait/clarify/decline，不得提出检定、发现、移动或物品效果。
+此状态可用 wait 提出救援：on_success 加 rescue 效果指定在场且非敌对的 NPC 施救，time_minutes≥20，
+可附 npc_reaction（呼救/谈判）与 clock_advance；conditions 含 dead 时不可逆，不得提出救援。
 发挥语义理解：发卡拨动锁芯属于开锁，借身份/说辞支走守卫需要结合 NPC 反应裁量，
 不要因为动作不在固定句式里就忽略。日常无风险交流不检定；有不确定性和代价才检定。
-从角色表选技能，解释难度与奖励/惩罚依据；在骰前确定成功与失败后果。失败应推进情境，
-不能永久封死核心调查。允许提出在场 NPC 的社交反应、既有物品转移、资源代价、时间与案件时钟。
+从角色表选技能，解释难度与奖励/惩罚依据；在骰前确定成功与失败后果。
+check.target 填检定对象的稳定标识（如"左边房门锁""阁楼暗格"）；NPC 目标用 target_npc_id。
+换对象时必须换新标识——同一技能对同场景不同对象的检定不算重复。
+失败应推进情境，不能永久封死核心调查。允许提出在场 NPC 的社交反应、既有物品转移、资源代价、时间与案件时钟。
 completion_flags 是模组声明的场景/任务完成标记（如 cottage_searched）：玩家实际完成对应调查后
 用 flag_set 落定，每个标记只能落定一次；其余 flag 一律不可由裁决设置。
 所有 effect.evidence_quote 与 input_quote 必须逐字引用 player_input；source_id 只能用 available_items 的键。
@@ -291,6 +346,11 @@ combat 意图只给动作语义/NPC 战术方向；战斗的出手、防御、�
 恐怖事件必须从 sanity_sources 选择稳定 ID，按作者允许的范围选择严重度；回忆、假设或重复曝光不再扣 SAN。
 若 discovery_refs 已含同一恐怖发现，由发现流程处理 SAN，无需再提出 sanity_source_id。
 孤注一掷仅当玩家明确要求、给出新做法时，引用 _push_contexts 中已有失败记录；不得自行重复检定。
+recent_checks 记录本场景已执行的检定：同一技能+同一目标+相同做法已成功过的不得重检；
+已失败的须换不同做法，或等玩家明确要求孤注一掷。
+flags/eligible_endings 是权威状态：据此判断某事是否已落定。eligible_endings 非空且玩家
+明确收场/结案时按其意图正常归类（已完成的动作说明已落定即可），叙事层负责调用 end_game，
+不得以不了解封印/结案条件为由 clarify 拖延。
 time_minutes 必须与玩家授权的时间跨度一致：玩家没说"几天"就不要结算数日。
 """
 
@@ -306,6 +366,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
     started = time.monotonic()
     last_error = ""
+    last_exc: Exception | None = None
     for attempt in range(2):
         try:
             with llm_call_slot(model=model, world_id=str(getattr(engine.context, "world_id", ""))):
@@ -333,7 +394,25 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         except Exception as exc:
             engine.raise_if_turn_cancelled()
             last_error = f"{type(exc).__name__}: {exc}"
+            last_exc = exc
             messages.append({"role": "user", "content": f"裁决未通过验证：{last_error[:600]}。请修正提案，不能绕过条件。"})
+    # 重复检定拒绝不是模型失败：不得退回可掷骰的确定性流程，按 not_executed 拒行落账。
+    from src.gameplay.check_context import RepeatCheckError
+
+    if isinstance(last_exc, RepeatCheckError):
+        log_game(f"行动裁决拒绝（重复检定） | {last_error[:300]}")
+        if hasattr(engine, "_turn_diagnostics"):
+            engine._turn_diagnostics.append({"model": model, "role": "adjudication", "status": "repeat_refused", "error": last_error[:300]})
+        refusal = {
+            "intent": "decline",
+            "input_quote": content[:80],
+            "approach": f"重复检定未执行：{last_error[:200]}",
+        }
+        return replace(
+            fallback,
+            discovery_matches=(),
+            adjudication_json=json.dumps(refusal, ensure_ascii=False),
+        )
     log_game(f"行动裁决回退 | {last_error[:300]}")
     if hasattr(engine, "_turn_diagnostics"):
         engine._turn_diagnostics.append({"model": model, "role": "adjudication", "status": "fallback", "error": last_error[:300]})
@@ -347,8 +426,30 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
     if plan.intent == "combat":
         return {"combat_intent": plan.approach, "npc_direction": plan.npc_direction, "events": []}
     succeeded = check_result is None or bool(check_result.get("success"))
-    effects = plan.on_success if succeeded else plan.on_failure
-    result = {"success": succeeded, "description": plan.success_description if succeeded else plan.failure_description,
+    blocked_check = bool(check_result and check_result.get("repeat_blocked"))
+    if plan.intent in {"decline", "clarify"}:
+        # 结果契约三态：执行成功/执行失败/根本未执行。decline 与 clarify 都没有
+        # 掷骰，叙事侧必须知道"这件事没有发生"，而不是拿到一个空 success。
+        status = "not_executed"
+    elif blocked_check:
+        # 执行层重复闸门拦下了本次掷骰：行动未结算，
+        # 不得按"无检定即成功"落账成功分支。
+        status = "not_executed"
+        succeeded = False
+    elif succeeded:
+        status = "executed_success"
+    else:
+        status = "executed_failure"
+    effects = [] if blocked_check else (plan.on_success if succeeded else plan.on_failure)
+    description = plan.success_description if succeeded else plan.failure_description
+    if status == "not_executed" and not description:
+        description = plan.approach
+    if blocked_check:
+        # 只保留拒绝原因与确实结算的代价（时间在 events 里），不得把尚未发生的
+        # 失败后果（failure_description）交给叙事器。
+        detail = check_result.get("detail") or "相同条件的检定已结算过"
+        description = f"检定未执行：{detail}。{plan.approach} 未发生。"
+    result = {"success": succeeded, "status": status, "description": description,
               "npc_direction": plan.npc_direction, "events": []}
     if check_result and check_result.get("push_consequence"):
         result["description"] = check_result["push_consequence"]
@@ -385,6 +486,34 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
                     raise ValueError("完成标记未经模组声明")
                 world.setdefault("flags", {})[effect.target] = True
                 result["events"].append({"type": effect.kind, "target": effect.target})
+            elif effect.kind == "rescue":
+                pc = world["pc"]
+                conditions = [str(c) for c in pc.get("conditions") or []]
+                if "dead" in conditions:
+                    raise ValueError("死亡不可逆转")
+                present_now = set(world.get("current_scene", {}).get("npcs_present", []))
+                if effect.target not in present_now:
+                    raise ValueError("救援者已不在现场")
+                rescuer_now = next((n for n in world.get("npcs", []) if n.get("id") == effect.target), None)
+                combat_now = world.get("combat_state") or {}
+                if (
+                    rescuer_now is None
+                    or str(rescuer_now.get("disposition") or "") in {"hostile", "敌对"}
+                    or rescuer_now.get("hostile_to_pc")
+                    or any(
+                        isinstance(p, dict) and p.get("id") == effect.target and p.get("hostile_to_pc")
+                        for p in (combat_now.get("participants") or [])
+                    )
+                ):
+                    raise ValueError("救援者已变为敌对或离场")
+                try:
+                    hp = float(pc.get("hp", 0) or 0)
+                except (TypeError, ValueError):
+                    hp = 0.0
+                if hp <= 0:
+                    pc["hp"] = 1
+                pc["conditions"] = [c for c in conditions if c not in {"dying", "unconscious"}]
+                result["events"].append({"type": effect.kind, "rescuer": effect.target, "hp_after": pc.get("hp")})
         session = getattr(engine, "_resolution_session", None)
         world["last_action_outcome"] = {"resolution_id": session.id if session else "", **result}
 

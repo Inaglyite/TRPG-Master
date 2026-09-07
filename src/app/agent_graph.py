@@ -402,16 +402,23 @@ def _prepare_turn_inner(
             time_note = ""
             if settled:
                 minutes = int(settled.get("after", 0)) - int(settled.get("before", 0))
-                if minutes > 0:
-                    time_note = (
-                        f"本回合已结算时间 {minutes} 分钟；叙事的时间跨度不得超出已结算时间，"
-                        "不得把数小时演成数天，不得叙述未结算的昼夜更替。"
-                    )
+                time_note = (
+                    f"\n本回合已结算时间 {minutes} 分钟；叙事的时间跨度不得超出已结算时间，"
+                    "不得把数小时演成数天，不得叙述未结算的昼夜更替。"
+                )
+            status = str(adjudicated_outcome.get("status") or "")
+            status_hint = {
+                "executed_success": "行动已执行并成功；按 description 叙述已发生的结果与代价。",
+                "executed_failure": "行动已执行但失败：必须叙述失败及其代价，不得演成成功或装作未尝试。",
+                "not_executed": "行动未执行：必须说明未执行及原因，不得把该行动演成已发生，不得提供需要行动能力的后续选项。",
+            }.get(status, "")
+            status_line = f"\n[结果状态] {status}：{status_hint}" if status_hint else ""
             content += (
                 "\n\n[骰前裁决已结算｜不得改写或再次执行]\n"
                 + json.dumps(adjudicated_outcome, ensure_ascii=False)
                 + "\n按 description 和 events 展开结果；npc_direction 指导在场 NPC 的行为。"
                 "这些后果已落账，不得再次发放物品、推进时钟或重复检定。"
+                + status_line
                 + time_note
             )
         content += (
@@ -898,6 +905,14 @@ def _finalize_turn(state: TurnState) -> dict:
             notice = "双方都已筋疲力尽，在僵持中各自拉开距离——这场战斗不了了之。"
             narrative = f"{narrative}\n\n{notice}".strip() if narrative.strip() else notice
             engine.cb.on_narrative(f"\n\n{notice}\n\n")
+
+    # 叙事一致性闸门（A02）：流式成文后对照本回合结算结果做确定性检查，
+    # 越界则重写一次；定稿文本统一进入历史、回合记录与前端权威段。
+    if narrative.strip() and not state.get("skip_agent"):
+        from src.gameplay.narrative_consistency import apply_narrative_consistency
+
+        with _performance_span(engine, "narrative_consistency"):
+            narrative = apply_narrative_consistency(engine, narrative)
 
     # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
     # 段结构（含发言者）持久化并推送给前端做发言单元渲染。

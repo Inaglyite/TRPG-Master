@@ -213,7 +213,9 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
     return scene_id
 
 
-def resolve_action_check(engine: Any, content: str, preferred_skill: str | None = None) -> dict | None:
+def resolve_action_check(
+    engine: Any, content: str, preferred_skill: str | None = None
+) -> dict | None:
     """Resolve an explicit investigative action before narration starts.
 
     骰前裁决已给出检定时，参数（技能/难度/奖惩/推骰授权）全部来自冻结方案；
@@ -238,38 +240,68 @@ def resolve_action_check(engine: Any, content: str, preferred_skill: str | None 
     if preferred_skill:
         check = ActionCheck(skill=preferred_skill, reason="模组发现规则要求检定")
     resolution = getattr(engine, "_action_resolution", None)
-    proposal = json.loads(resolution.adjudication_json) if resolution and resolution.adjudication_json else None
+    proposal = (
+        json.loads(resolution.adjudication_json)
+        if resolution and resolution.adjudication_json
+        else None
+    )
     check_args = None
     if proposal is not None:
         adjudicated = proposal.get("check")
         if not adjudicated:
             return None
         check = ActionCheck(skill=adjudicated["skill"], reason=adjudicated["reason"])
+        from src.gameplay.check_context import approach_fingerprint
+
         check_args = {
-            **adjudicated, "approach": proposal["approach"], "target_id": proposal.get("target_npc_id", ""),
+            **adjudicated,
+            # 做法指纹共用裁决/兜底同一构造：模型改写措辞不改变逐字引用锚点。
+            "approach": approach_fingerprint(proposal["approach"], proposal.get("input_quote", "")),
+            # 对象目标并入 target_id：门锁/容器等由 check.target 标识，NPC 用 target_npc_id。
+            "target_id": proposal.get("target_npc_id", "") or adjudicated.get("target", ""),
             "push": bool(adjudicated.get("push_context_id")),
         }
         check_args.pop("reason", None)
+        check_args.pop("target", None)
         if check_args["push"]:
-            risk = engine.context.world_store.load()["pc"]["_push_contexts"][check_args["push_context_id"]]["push_risk"]
-            selected = engine.cb.on_decision({
-                "id": "push_check", "kind": "push_check", "presentation": "chat", "title": "孤注一掷",
-                "description": f"再次失败的风险：{risk}；额外耗时至少 10 分钟。",
-                "options": [{"id": "confirm_push", "label": "承担风险，按新做法再试"}, {"id": "cancel_push", "label": "放弃重试"}],
-                "default_option": "cancel_push",
-            })
+            risk = engine.context.world_store.load()["pc"]["_push_contexts"][
+                check_args["push_context_id"]
+            ]["push_risk"]
+            selected = engine.cb.on_decision(
+                {
+                    "id": "push_check",
+                    "kind": "push_check",
+                    "presentation": "chat",
+                    "title": "孤注一掷",
+                    "description": f"再次失败的风险：{risk}；额外耗时至少 10 分钟。",
+                    "options": [
+                        {"id": "confirm_push", "label": "承担风险，按新做法再试"},
+                        {"id": "cancel_push", "label": "放弃重试"},
+                    ],
+                    "default_option": "cancel_push",
+                }
+            )
             if selected != "confirm_push":
                 raise TurnCancelledError("玩家取消孤注一掷")
     if check is None:
         return None
 
-    output = engine._execute_tool("skill_check", check_args or {"skill": check.skill})
+    # 确定性兜底路径没有裁决做法：用玩家原文作为做法指纹。重复同一句话会被
+    # 重复闸门拦下；换目标/换做法的措辞自然不同，不受影响。
+    output = engine._execute_tool(
+        "skill_check", check_args or {"skill": check.skill, "approach": content[:300]}
+    )
     try:
         result = json.loads(output)
     except json.JSONDecodeError:
         log_error(f"行动预检无法解析 {check.skill} 结果: {output[:160]}")
         return None
     if result.get("ok") is False:
+        if result.get("error") == "repeat_check":
+            # 执行层重复闸门兜底：返回显式"未执行"哨兵而不是 None——None 会被
+            # 下游当作"无需检定即成功"，哨兵则让结算层按 not_executed 落账。
+            log_error(f"行动检定被重复闸门拦下：{str(result.get('detail') or '')[:120]}")
+            return {"repeat_blocked": True, "detail": str(result.get("detail") or "")}
         raise ValueError(f"行动检定无效：{result.get('error')}")
     summary = dice_summary(output)
     if summary:

@@ -904,7 +904,11 @@ def _roll_check(
     target_id: str = "",
     push_risk: str = "",
 ) -> str:
-    from src.gameplay.check_context import can_push_skill, record_check_outcome, validate_push
+    from src.gameplay.check_context import (
+        record_check_outcome,
+        validate_push,
+        validate_repeat_check,
+    )
 
     state = context.world_store.load()
     attributes = state.get("pc", {}).get("attributes", {})
@@ -914,6 +918,13 @@ def _roll_check(
     if required_success_level not in REQUIRED_RANKS:
         return _json_result({"ok": False, "error": "invalid_difficulty"})
     previous = None
+    if not push:
+        # 空 approach（确定性兜底路径）也过闸门：它无法证明"做法已改变"，
+        # 由 find_repeat_check 匹配同技能+目标+场景下的任意已记录做法。
+        try:
+            validate_repeat_check(state, skill=check_id, target_id=target_id, approach=approach)
+        except ValueError as exc:
+            return _json_result({"ok": False, "error": "repeat_check", "detail": str(exc)})
     if push:
         try:
             previous = validate_push(state, check_id, push_context_id, approach, target_id)
@@ -956,14 +967,13 @@ def _roll_check(
     result["check_id"] = f"{session.id if session else uuid.uuid4().hex}:{check_id}"[:80]
     if previous and not result["success"]:
         result["push_consequence"] = previous["push_risk"]
-    if push or (approach and push_risk and can_push_skill(check_id)):
-        context.world_store.update(
-            lambda world: record_check_outcome(
-                world, skill=check_id, result=result, push=push,
-                push_context_id=push_context_id, approach=approach, target_id=target_id,
-                required_success_level=required_success_level, push_risk=push_risk,
-            )
+    context.world_store.update(
+        lambda world: record_check_outcome(
+            world, skill=check_id, result=result, push=push,
+            push_context_id=push_context_id, approach=approach, target_id=target_id,
+            required_success_level=required_success_level, push_risk=push_risk,
         )
+    )
     return _json_result(result)
 
 
