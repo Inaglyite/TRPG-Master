@@ -1,6 +1,7 @@
 /* ---- 角色面板 ---- */
 #char-panel {
-  width: 300px;
+  width: 340px;
+  max-width: 360px;
   flex: 0 0 auto;
   border-left: 1px solid var(--border);
   background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);

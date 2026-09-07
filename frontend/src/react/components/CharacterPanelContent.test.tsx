@@ -41,7 +41,7 @@ describe("CharacterPanelContent", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("8 / 10")).toBeInTheDocument();
     expect(screen.getByText("相机")).toBeInTheDocument();
-    expect(screen.getByText("沾血的照片")).toBeInTheDocument();
+    expect(screen.getAllByText("沾血的照片").length).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(screen.getByRole("button", { name: "photo.png" }));
     expect(screen.getAllByRole("img", { name: "photo.png" })).toHaveLength(2);

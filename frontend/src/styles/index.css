@@ -9,6 +9,7 @@
 @import "./components/messages.css";
 @import "./components/controls.css";
 @import "./components/char-panel.css";
+@import "./components/investigator-panel.css";
 @import "./components/handout.css";
 @import "./components/start-screen.css";
 @import "./components/overlays.css";

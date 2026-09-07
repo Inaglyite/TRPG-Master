@@ -233,8 +233,9 @@ export function rollbackPendingAction(): boolean {
 }
 
 // ---- 发送行动 ----
-export function sendAction(text: string) {
-  if (!onlineActionAllowed() || pendingOptimisticAction) return;
+// 返回“是否已接受发送”：被权限/待处理行动拒绝时为 false（调用方可保留草稿）。
+export function sendAction(text: string): boolean {
+  if (!onlineActionAllowed() || pendingOptimisticAction) return false;
   const messageId = addMsg("player", text, true);
   rememberOptimisticAction(messageId);
   useAppStore.getState().setChoices([]);
@@ -242,6 +243,7 @@ export function sendAction(text: string) {
   enableInput(false);
   showGmThinking();
   safeSend(JSON.stringify({ type: "action", content: text }));
+  return true;
 }
 
 // ---- 发送建议检定回复 ----

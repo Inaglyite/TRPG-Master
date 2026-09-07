@@ -88,19 +88,7 @@
   }
 
   #char-panel {
-    position: fixed;
     top: 72px;
-    right: 0;
-    bottom: 0;
-    z-index: 95;
-    width: min(92vw, 320px);
-    flex-basis: auto;
-    padding: 18px;
-    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.5);
-  }
-  #char-panel.collapsed {
-    width: 0;
-    padding: 0;
   }
 
   #handout-container {
@@ -412,12 +400,61 @@
   }
 }
 
-/* ---- 中屏（1080px）：收窄侧栏与留白，避免聊天区被挤压 ---- */
-@media (max-width: 1080px) {
+/* ---- 中屏（1199px 起）：收窄侧栏与留白，避免聊天区被挤压 ---- */
+@media (max-width: 1199px) {
   #char-panel {
-    width: 260px;
+    width: 300px;
     padding: 14px;
   }
+}
+
+/* ---- <1000px：侧栏改为右侧抽屉，不硬挤聊天 ---- */
+@media (max-width: 999px) {
+  #char-panel {
+    position: fixed;
+    top: 84px;
+    right: 0;
+    bottom: 0;
+    z-index: 95;
+    width: min(380px, 100vw);
+    max-width: none;
+    flex-basis: auto;
+    padding: 18px;
+    box-shadow: -12px 0 28px rgba(0, 0, 0, 0.5);
+  }
+  #char-panel.collapsed {
+    width: 0;
+    padding: 0;
+  }
+}
+
+/* ---- ≤640px：抽屉可占全宽；编辑器改底部面板；触控目标 ≥44px ---- */
+@media (max-width: 640px) {
+  #char-panel {
+    width: 100vw;
+  }
+  #char-content .inv-row-btn {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+  #panel-action-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  #panel-action-dialog {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    border-radius: 12px 12px 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .panel-action-cancel,
+  .panel-action-confirm {
+    min-height: 44px;
+  }
+}
+
+/* ---- 中屏（1080px）：收窄留白，避免聊天区被挤压 ---- */
+@media (max-width: 1080px) {
   #messages {
     padding: 24px 22px;
   }

@@ -14,6 +14,8 @@ export type CharacterState = {
   max_san?: number;
   attributes?: Record<string, unknown>;
   inventory?: string[];
+  /** 服务端公开的状态标记（如 major_wound/unconscious）；缺失时不显示。 */
+  conditions?: string[];
   avatar?: {
     asset_url?: string;
     asset_data_uri?: string;
