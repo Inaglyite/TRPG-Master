@@ -27,6 +27,7 @@ from src.ai.model.model_streamer import (
     StreamPolicy,
     sanitize_visible_narrative,
 )
+from src.ai.model.route_service import activate_route_slot, apply_pending_routes
 from src.ai.skills import skill_activation
 from src.ai.tools.registry import (
     dice_summary,
@@ -368,6 +369,8 @@ class GameEngine:
         if active_turn_id is not None:
             return active_turn_id
         self.clear_turn_cancellation()
+        # 回合边界冻结模型路由：本回合所有调用读同一组 client/模型/配置版本。
+        apply_pending_routes(self)
         if not hasattr(self, "turn_journal"):
             return ""
         turn_id = self.turn_journal.begin(
@@ -564,12 +567,7 @@ class GameEngine:
             role = message.get("role")
             if role not in {"user", "assistant"}:
                 continue
-            recent_context.append(
-                {
-                    "role": role,
-                    "content": clip(message.get("content"), 1200),
-                }
-            )
+            recent_context.append({"role": role, "content": clip(message.get("content"), 1200)})
         fixed_outcomes = [
             {
                 "tool": item.get("name"),
@@ -602,6 +600,9 @@ class GameEngine:
         ]
         diagnostics_start = len(getattr(self, "_turn_diagnostics", []))
         self.cb.on_phase("rewriting", "守秘人正在重新组织叙述……")
+        # 重写属于叙述角色：上一回合可能停在裁决 client 上，必须显式切回
+        # 叙述绑定，不能把请求发到另一个服务商的端点。
+        activate_route_slot(self, "narrative")
         rewritten, tool_calls = self._stream_llm(
             self.narrative_model,
             enable_tools=False,
@@ -1404,6 +1405,8 @@ class GameEngine:
             "玩家检查了未列出的部位或对象时，只能说明没有额外值得注意的发现；"
             "不得据此创造新选项、新物品或后续检定目标。available_scene_clues 只是守秘人候选，"
             "未出现在 resolved_discoveries 中就仍未发现。"
+            "未发现不等于不存在：检定失败、重复拒绝或没有发现，只能叙述本次没有结果；"
+            "不得断言目标不存在、已被取走或已移到别处，也不得据此把未发现的线索改到别的场景。"
             "npc_public_state.keeper_private 仅供守秘人判断语气，不代表玩家已知；"
             "只有 visible_tags、revealed_entries 或本轮结算明确释放的内容可以直接说出。"
             "叙事中确实完成的场景、物品、线索、NPC 揭示和结局变化必须调用工具落账。"

@@ -71,6 +71,13 @@ def sqlite_url(tmp_path: Path) -> str:
     return f"sqlite:///{tmp_path / 'multiplayer.db'}"
 
 
+@pytest.fixture(autouse=True)
+def _bypass_byok_readiness_gate():
+    """本模块聚焦房间成员/权限/协议；BYOK 就绪门禁由 test_solo_play_mode 专测。"""
+    with patch("src.multiplayer.messages._room_model_readiness", return_value=None):
+        yield
+
+
 def test_multiplayer_diagnostics_remove_keeper_text_and_tool_arguments():
     secret = "真凶是布莱斯·法伦"
     report = {
@@ -563,7 +570,7 @@ def test_initial_full_state_is_sent_before_events_created_at_its_boundary(
             del code, reason
             self.client_state.name = "DISCONNECTED"
 
-    async def bootstrap(ws, _room):
+    async def bootstrap(ws, _room, *_args):
         await ws.send_json({"type": "test_bootstrap"})
 
     socket = InterleavingSocket()
@@ -649,7 +656,7 @@ def test_failed_initial_bootstrap_is_retryable_and_leaves_no_ghost_connection(
 
     secret_detail = "/srv/trpg-master/runtime/private/bootstrap.db"
 
-    async def failed_bootstrap(_ws, _room):
+    async def failed_bootstrap(_ws, _room, *_args):
         raise RuntimeError(secret_detail)
 
     socket = FailedBootstrapSocket()
@@ -750,7 +757,7 @@ def test_member_removed_during_pending_websocket_bootstrap_receives_no_recovery(
         locally_valid=lambda: True,
     )
 
-    async def remove_during_bootstrap(_ws, target_room):
+    async def remove_during_bootstrap(_ws, target_room, *_args):
         remove_member(url, target_room.world_id, player.id, owner.id)
         await target_room.hub.disconnect_user(player.id)
 
@@ -1375,7 +1382,7 @@ def test_opening_failures_return_room_to_lobby_and_allow_retry(tmp_path: Path):
             patch.object(server, "_load_theme", return_value={}),
             patch.object(
                 server,
-                "_model_settings_payload",
+                "build_payload",
                 return_value={"type": "model_settings"},
             ),
             patch.object(
@@ -2431,6 +2438,9 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
         def list_saves(self):
             return []
 
+        def turn_diagnostics(self, turn_id=None):
+            return {}
+
     def engine_factory(*args, **_kwargs):
         engine = FakeEngine(*args)
         created_engines.append(engine)
@@ -2629,8 +2639,9 @@ def test_shared_room_websocket_creates_one_engine_and_enforces_actor(tmp_path: P
                 unsupported = _receive_until(player_ws, "protocol_error")
                 assert unsupported["code"] == "unsupported_room_message"
                 player_ws.send_json({"type": "turn_diagnostics_get"})
-                diagnostics_denied = _receive_until(player_ws, "room_action_rejected")
-                assert diagnostics_denied["code"] == "owner_required"
+                # 成员可读脱敏诊断（safe 投影只含数值/枚举），编辑仍限房主
+                member_diagnostics = _receive_until(player_ws, "turn_diagnostics")
+                assert isinstance(member_diagnostics["diagnostics"], dict)
 
                 owner_ws.send_json({"type": "start", "action_id": "start-before-ready"})
                 not_ready = _receive_until(owner_ws, "room_action_rejected")
@@ -2787,7 +2798,7 @@ def test_ws_room_theme_is_sent_once_for_creator_and_joiner(tmp_path: Path):
         patch.object(server, "run_ws_session", new=fake_room_driver),
         patch.object(server, "_load_theme", side_effect=fake_load_theme),
         patch.object(server, "_list_mods", return_value=[]),
-        patch.object(server, "_model_settings_payload", return_value={"type": "model_settings"}),
+        patch.object(multiplayer_ws, "build_payload", return_value={"type": "model_settings"}),
         patch.object(multiplayer_ws, "list_character_options", return_value={"groups": []}),
         TestClient(server.app, base_url="https://testserver") as client,
     ):

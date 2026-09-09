@@ -360,6 +360,43 @@ class TurnJournalTests(unittest.TestCase):
             )
             self.assertEqual(engine.messages[-1]["content"], saved_messages[-1]["content"])
 
+    def test_rewrite_uses_narrative_route_slot(self):
+        """重写属于叙述角色：上一回合可能停在裁决 client，必须切回叙述绑定。"""
+        from src.ai.model.route_service import ModelRoutes, ResolvedRole
+
+        with tempfile.TemporaryDirectory() as temp:
+            engine = self.make_engine(Path(temp))
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "书房安静得能听见钟摆。\n\n**你可以——**\n1. 查看书架",
+                [],
+            )
+            engine.handle_action("留在原地观察")
+            turn_id = engine.turn_journal.latest_completed_id()
+            assert turn_id is not None
+
+            def resolved(client: object, model_id: str) -> ResolvedRole:
+                return ResolvedRole(
+                    client=client,  # type: ignore[arg-type]
+                    model_id=model_id,
+                    window_tokens=None,
+                    window_source="unknown",
+                    max_output_tokens=1024,
+                    provider_kind="openai_compatible",
+                    binding_id=f"svc_{model_id}",
+                    base_url_host="example.test",
+                    config_revision=1,
+                )
+
+            narrative_client, judgement_client = object(), object()
+            engine._model_routes = ModelRoutes(
+                narrative=resolved(narrative_client, "narrative-model"),
+                judgement=resolved(judgement_client, "judgement-model"),
+                revision=1,
+            )
+            engine.client = judgement_client  # type: ignore[assignment]
+            engine.rewrite_turn(turn_id)
+            self.assertIs(narrative_client, engine.client)
+
     def test_rewrite_rejects_turn_after_world_has_advanced(self):
         with tempfile.TemporaryDirectory() as temp:
             engine = self.make_engine(Path(temp))

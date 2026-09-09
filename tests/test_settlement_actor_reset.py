@@ -131,6 +131,7 @@ def test_next_start_after_settlement_uses_owner_as_actor():
             patch("src.multiplayer.messages.websocket_user", return_value=object()),
             patch("src.multiplayer.messages.authorize_world", return_value="owner"),
             patch("src.multiplayer.messages.reserve_room_action"),
+            patch("src.multiplayer.messages._room_model_readiness", return_value=None),
         ):
             with pytest.raises(RuntimeError, match="test complete"):
                 await run_room_message_loop(

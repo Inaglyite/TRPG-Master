@@ -63,11 +63,9 @@ class ModelSettingsTests(unittest.TestCase):
         import server
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            env_path = Path(temp_dir) / ".env.json"
-            initial = ModelSettings.validated("story-before", "judge-before")
+            settings_path = Path(temp_dir) / "model_settings.local.json"
             with (
-                patch.object(server, "_ENV_FILE", env_path),
-                patch.object(server, "_active_model_settings", initial),
+                patch.object(server, "_LOCAL_MODEL_SETTINGS_FILE", settings_path),
                 patch("src.app.engine.API_KEY", "test-api-key"),
             ):
                 with TestClient(server.app) as client:
@@ -78,23 +76,64 @@ class ModelSettingsTests(unittest.TestCase):
                             for message in messages
                             if message.get("type") == "model_settings"
                         )
-                        self.assertEqual(current["narrative_model"], "story-before")
+                        # 新合同：默认绑定 + 作用域/权限/版本字段
+                        self.assertEqual(current["mode"], "local")
+                        self.assertTrue(current["can_edit"])
+                        self.assertEqual(current["narrative"]["mode"], "default")
+
+                        # 未确认数据发送时拒绝保存自定义服务
+                        ws.send_json(
+                            {
+                                "type": "model_settings_update",
+                                "narrative": {
+                                    "mode": "custom",
+                                    "service": {
+                                        "provider_kind": "openai_compatible",
+                                        "base_url": "http://127.0.0.1:11434/v1",
+                                        "api_key": "sk-local-test",
+                                        "model_id": "qwen3:32b",
+                                    },
+                                },
+                                "judgement": {"mode": "default"},
+                            }
+                        )
+                        rejected = ws.receive_json()
+                        self.assertEqual(rejected["type"], "model_settings_error")
+                        self.assertIn("确认", rejected["message"])
 
                         ws.send_json(
                             {
                                 "type": "model_settings_update",
-                                "narrative_model": "story-after",
-                                "judgement_model": "judge-after",
+                                "narrative": {
+                                    "mode": "custom",
+                                    "service": {
+                                        "provider_kind": "openai_compatible",
+                                        "base_url": "http://127.0.0.1:11434/v1",
+                                        "api_key": "sk-local-test",
+                                        "model_id": "qwen3:32b",
+                                        "window_tokens": 32768,
+                                    },
+                                },
+                                "judgement": {"mode": "default"},
+                                "confirm_data_sharing": True,
                             }
                         )
                         updated = ws.receive_json()
 
-            saved = json.loads(env_path.read_text(encoding="utf-8"))
+            saved = json.loads(settings_path.read_text(encoding="utf-8"))
 
         self.assertTrue(updated["saved"])
-        self.assertEqual(updated["judgement_model"], "judge-after")
-        self.assertEqual(saved["narrative_model"], "story-after")
-        self.assertEqual(saved["judgement_model"], "judge-after")
+        self.assertIn("下一回合", updated["notice"])
+        self.assertEqual(updated["narrative"]["mode"], "custom")
+        self.assertEqual(updated["narrative"]["model_id"], "qwen3:32b")
+        self.assertEqual(updated["narrative"]["window_source"], "manual")
+        # 凭据不回显：payload 只有 has_key，无任何 key 文本
+        self.assertTrue(updated["narrative"]["service"]["has_key"])
+        self.assertNotIn("sk-local-test", json.dumps(updated, ensure_ascii=False))
+        # 本地文件持久化（下回合生效的路由来源）
+        self.assertEqual(saved["narrative"]["service"]["api_key"], "sk-local-test")
+        self.assertEqual(saved["narrative"]["service"]["model_id"], "qwen3:32b")
+        self.assertEqual(saved["judgement"]["mode"], "default")
 
 
 if __name__ == "__main__":

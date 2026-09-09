@@ -45,6 +45,113 @@ def auth_required() -> bool:
     return os.environ.get("TRPG_REQUIRE_AUTH", "0").lower() in {"1", "true", "yes", "on"}
 
 
+# ---------------------------------------------------------------- 本地连接信任
+#
+# 本地模式（非账号鉴权）下服务只监听回环地址，但浏览器里的任意网页同样能
+# 访问 127.0.0.1：没有来源校验时，恶意站点可以读配置、改目的地或触发带 Key
+# 的模型调用（安全初审 S03）。这里把"受控来源"与"每次启动的连接凭证"一起
+# 校验：
+# - 桌面壳由 Electron 主进程在启动后端时注入一次性凭证，并在主进程的
+#   webRequest 层把它加到发往本地后端的请求头（渲染进程拿不到，URL/日志/
+#   前端存储里都没有）；页面无法为 WebSocket 或跨域请求自定义请求头。
+# - 浏览器本地页面（含编辑器 dev）用 Origin 校验：只接受显式白名单与
+#   环回来源；浏览器页面无法伪造 Origin。
+# - 无 Origin 且无 Sec-Fetch-* 的调用方不是浏览器页面（curl/脚本/测试），
+#   它们本就在本地信任边界内。
+LOCAL_TOKEN_HEADER = "x-trpg-local-token"
+LOCAL_TOKEN_ENV = "TRPG_LOCAL_LAUNCH_TOKEN"
+LOCAL_TOKEN_FILENAME = "local_launch_token"
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_local_token: str | None = None
+_local_token_lock = threading.Lock()
+
+
+def local_token_path():
+    """本地凭证落盘位置（仅本地模式；桌面壳用它接管已在运行的后端）。"""
+    from pathlib import Path
+
+    from src.app.config import RUNTIME_ROOT
+
+    root = os.environ.get("TRPG_RUNTIME_ROOT", "").strip()
+    base = Path(root).resolve() if root else Path(RUNTIME_ROOT)
+    return base / LOCAL_TOKEN_FILENAME
+
+
+def local_launch_token() -> str:
+    """本进程的本地连接凭证：优先启动注入，否则每次启动随机生成。
+
+    非桌面场景（浏览器本地模式）不依赖它，生成后仅用于同进程校验；
+    桌面壳注入时不落盘（避免多一份副本）。
+    """
+    global _local_token
+    if _local_token is not None:
+        return _local_token
+    with _local_token_lock:
+        if _local_token is None:
+            injected = os.environ.get(LOCAL_TOKEN_ENV, "").strip()
+            if injected:
+                _local_token = injected
+            else:
+                _local_token = secrets.token_urlsafe(32)
+                if not auth_required():
+                    _persist_local_token(_local_token)
+    return _local_token
+
+
+def _persist_local_token(token: str) -> None:
+    """把本次启动的凭证写入 0600 文件，供桌面壳接管已在运行的后端。"""
+    path = local_token_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+    except OSError:
+        # 落盘失败不影响校验（同进程仍可用注入或随机凭证）。
+        pass
+
+
+def reset_local_token_for_tests() -> None:
+    global _local_token
+    with _local_token_lock:
+        _local_token = None
+
+
+def _configured_origins() -> set[str]:
+    return {
+        item.strip()
+        for item in os.environ.get("TRPG_ALLOWED_ORIGINS", "").split(",")
+        if item.strip()
+    }
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(origin)
+    if parts.scheme not in {"http", "https"}:
+        return False
+    host = (parts.hostname or "").strip().lower()
+    return host in _LOOPBACK_HOSTS
+
+
+def local_request_trusted(headers) -> bool:
+    """本地模式的来源/凭证联合校验；任一不满足即拒绝。"""
+    token = str(headers.get(LOCAL_TOKEN_HEADER) or "")
+    if token and secrets.compare_digest(token, local_launch_token()):
+        return True
+    origin = str(headers.get("origin") or "").strip()
+    if origin:
+        if origin in _configured_origins():
+            return True
+        return _is_loopback_origin(origin)
+    # 无 Origin：同源导航由浏览器补 Sec-Fetch-Site；完全没有该头的不是浏览器页面。
+    fetch_site = str(headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site:
+        return fetch_site in {"same-origin", "none"}
+    return True
+
+
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -262,11 +369,14 @@ def websocket_session(
 
 
 def validate_websocket_origin(websocket: WebSocket) -> None:
-    allowed = {
-        x.strip() for x in os.environ.get("TRPG_ALLOWED_ORIGINS", "").split(",") if x.strip()
-    }
+    """云端严格白名单；本地模式走来源+启动凭证联合校验（S03）。"""
+    allowed = _configured_origins()
     origin = websocket.headers.get("origin")
-    if auth_required() and not allowed:
-        raise HTTPException(503, "服务端尚未配置 TRPG_ALLOWED_ORIGINS")
-    if allowed and origin not in allowed:
-        raise HTTPException(403, "WebSocket Origin 不受信任")
+    if auth_required():
+        if not allowed:
+            raise HTTPException(503, "服务端尚未配置 TRPG_ALLOWED_ORIGINS")
+        if origin not in allowed:
+            raise HTTPException(403, "WebSocket Origin 不受信任")
+        return
+    if not local_request_trusted(websocket.headers):
+        raise HTTPException(403, "本地 WebSocket 来源或连接凭证不受信任")

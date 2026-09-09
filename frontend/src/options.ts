@@ -189,7 +189,10 @@ export function onConnectionRestored(recoveryRequired: boolean) {
 function onlineActionAllowed(): boolean {
   if (useAppStore.getState().mode !== "online") return true;
   if (canCurrentUserAct()) return true;
-  useOnlineStore.setState({ roomError: "还没有轮到你行动" });
+  useOnlineStore.setState({
+    roomError: "还没有轮到你行动",
+    roomErrorCode: null,
+  });
   return false;
 }
 

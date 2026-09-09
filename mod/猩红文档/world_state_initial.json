@@ -428,7 +428,14 @@
         "把文档交给无防护的 NPC、归还给法伦却未处理怪物。",
         "接触过文档的人被带到强情绪或强暴力场景。",
         "调查已接近真相但缺少紧迫感。"
-      ]
+      ],
+      "time_advance": {
+        "every_minutes": 2880,
+        "advance": 1,
+        "daily_cap": 1,
+        "activity": ["wait"],
+        "carry": true
+      }
     },
     "human_pressure": {
       "max": 5,
@@ -689,7 +696,34 @@
       "discovered_at": null,
       "asset": null,
       "granted_item": "莱特的私人日记",
-      "discovery_notes": "搜查莱特办公桌暗格后发现。"
+      "discovery_notes": "搜查莱特办公桌暗格后发现。",
+      "discovery_rules": [
+        {
+          "intent": "search",
+          "targets": [
+            "私人日记",
+            "日记",
+            "书桌暗格",
+            "办公桌暗格",
+            "暗格",
+            "抽屉夹层",
+            "夹层",
+            "书桌抽屉"
+          ],
+          "approach_text": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。",
+          "requires_success": true,
+          "skill": "spot_hidden",
+          "difficulty": "regular"
+        },
+        {
+          "intent": "examine",
+          "targets": ["书桌", "抽屉", "文件柜", "笔记", "暗格", "夹层"],
+          "approach_text": "你仔细检查书桌与文件柜的每一处接缝和底板，寻找可能存在的暗格。",
+          "requires_success": true,
+          "skill": "spot_hidden",
+          "difficulty": "regular"
+        }
+      ]
     },
     "hunter_copy": {
       "id": "hunter_copy",

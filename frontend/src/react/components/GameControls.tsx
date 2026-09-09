@@ -4,6 +4,7 @@ import { sendAction, sendDecisionReply, sendSuggestReply } from "../../options";
 import { confirmEnding } from "../../panels";
 import { useAppStore, type EndingProposal } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
+import { ContextSummaryButton } from "./ModelSettingsPanel";
 import { useDelayedClose } from "./transitions";
 
 export function GameControls() {
@@ -119,6 +120,9 @@ export function GameControls() {
             </button>
           ))
         )}
+      </div>
+      <div id="context-summary-row">
+        <ContextSummaryButton />
       </div>
       <div id="input-bar">
         <input

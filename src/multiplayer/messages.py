@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
 from typing import Any
 
-from src.ai.model.model_settings import ModelSettings
+from src.ai.model import route_service
+from src.app.logger import redact
+from src.app.settings_service import (
+    SettingsScope,
+    apply_update,
+    build_payload,
+    restore_default,
+    run_test_connection,
+)
 from src.auth.service import authorize_world, websocket_user
 from src.gameplay.characters import list_character_options
 from src.gameplay.combat import CombatError, assign_combat_actor
@@ -41,7 +50,6 @@ UNSUPPORTED_ROOM_TYPES = frozenset(
         "world_switch",
         "switch_module",
         "turn_branch_create",
-        "model_settings_update",
     }
 )
 OWNER_CONTROL_TYPES = frozenset(
@@ -49,6 +57,85 @@ OWNER_CONTROL_TYPES = frozenset(
 )
 MUTATING_TURN_TYPES = frozenset({"start", "continue", "save_load", "action", "turn_rewrite"})
 OWNER_TURN_TYPES = frozenset({"start", "save_load", "turn_rewrite"})
+
+
+def _room_model_readiness(db_url: str, world_id: str) -> tuple[str, str] | None:
+    """开局/回合前的 BYOK 就绪门禁：云端缺绑定即拒绝，绝不落平台兜底。
+
+    房主更换导致的 RouteBlockedError 同样在此转成可读拒绝，
+    而不是等回合内模型调用失败。
+    """
+    from src.storage import model_config_store
+
+    resolver = model_config_store.room_route_resolver(db_url, world_id)
+    try:
+        settings = resolver()
+    except route_service.RouteBlockedError as exc:
+        return ("model_route_blocked", str(exc))
+    except Exception:
+        # 配置存储不可用时不放行（fail-closed），但保留房间连接可重试。
+        logger.exception("房间模型就绪检查失败 world_id=%s", world_id)
+        return ("model_readiness_unavailable", "模型配置检查暂时不可用，请稍后重试")
+    error = route_service.readiness_error(settings)
+    return ("model_not_configured", error) if error else None
+
+
+def room_scope(deps: Any, room: GameRoom, user_id: str, role: str) -> SettingsScope:
+    """当前连接在房间/单人世界里的模型配置作用域视图。"""
+    play_mode = getattr(room, "play_mode", "multiplayer")
+    return SettingsScope(
+        mode="solo" if play_mode == "solo" else "room",
+        can_edit=role == "owner",
+        user_id=user_id,
+        owner_user_id=room.owner_user_id,
+        world_id=room.engine.context.world_id,
+        db_url=deps.database_url(),
+        engine=room.engine,
+    )
+
+
+async def _handle_room_settings(
+    ws: Any,
+    controller: Any,
+    room: GameRoom,
+    user: Any,
+    role: str,
+    data: dict,
+    fn: Any,
+    *,
+    mutate: bool,
+) -> None:
+    if mutate and role != "owner":
+        # 面板内联呈现：与本地同一 model_settings_error 通道，不打房间通用拒绝。
+        await ws.send_json({"type": "model_settings_error", "message": "仅房主可修改模型配置"})
+        return
+    try:
+        payload = await asyncio.to_thread(
+            fn, room_scope(controller.deps, room, user.id, role), data
+        )
+    except (ValueError, PermissionError, OSError) as exc:
+        await ws.send_json({"type": "model_settings_error", "message": str(exc)})
+        return
+    await ws.send_json(payload)
+    if mutate and isinstance(payload, dict) and payload.get("saved"):
+        destinations = sorted(
+            {
+                view["service"]["base_url_host"]
+                for view in (payload.get("narrative"), payload.get("judgement"))
+                if isinstance(view, dict)
+                and isinstance(view.get("service"), dict)
+                and view["service"].get("base_url_host")
+            }
+        )
+        await room.hub.broadcast(
+            {
+                "type": "model_settings_notice",
+                "revision": payload.get("revision"),
+                "destinations": destinations or ["平台默认服务"],
+                "message": "房主已更新房间模型配置，将从下一回合生效",
+            },
+            visibility="public",
+        )
 
 
 def owner_turn_required(message_type: str, data: dict) -> bool:
@@ -118,6 +205,18 @@ def safe_multiplayer_diagnostics(report: Any) -> dict | None:
                     "prompt_profile",
                     "thinking_mode",
                     "error_type",
+                    # 数字合同：配置版本/绑定标识/窗口口径（数值与枚举，无凭据）
+                    "config_revision",
+                    "binding_id",
+                    "provider_kind",
+                    "window_tokens",
+                    "window_source",
+                    "reserved_output_tokens",
+                    "input_tokens",
+                    "input_source",
+                    "output_tokens",
+                    "utilization",
+                    "capacity_state",
                 )
                 if call.get(key) is not None
             }
@@ -285,6 +384,7 @@ async def run_room_message_loop(
                     continue
                 target_investigator_id = str(target_claim["investigator_id"])
                 try:
+
                     def assign_in_state(
                         state: dict,
                         investigator_id: str = target_investigator_id,
@@ -340,7 +440,7 @@ async def run_room_message_loop(
                 }
             except (OSError, TypeError, ValueError, RuntimeError) as exc:
                 print(
-                    f"[room] 玩家笔记访问失败: {type(exc).__name__}: {exc}",
+                    redact(f"[room] 玩家笔记访问失败: {type(exc).__name__}: {exc}"),
                     file=sys.stderr,
                 )
                 payload = {
@@ -361,9 +461,7 @@ async def run_room_message_loop(
                     role,
                 )
                 own_pc = (
-                    investigator_entity(world_state, investigator_id)
-                    if investigator_id
-                    else {}
+                    investigator_entity(world_state, investigator_id) if investigator_id else {}
                 )
                 pc_data = enrich_pc_for_frontend(
                     own_pc if isinstance(own_pc, dict) else {},
@@ -388,9 +486,7 @@ async def run_room_message_loop(
             )
             continue
         if message_type == "turn_recovery_get":
-            await ws.send_json(
-                turn_recovery_payload(room.engine, data.get("turn_id"))
-            )
+            await ws.send_json(turn_recovery_payload(room.engine, data.get("turn_id")))
             continue
         if message_type == "module_list":
             await ws.send_json(
@@ -417,31 +513,35 @@ async def run_room_message_loop(
             await ws.send_json({"type": "save_list", "saves": room.engine.list_saves()})
             continue
         if message_type == "model_settings_get":
-            await ws.send_json(
-                controller.deps.model_settings_payload(
-                    ModelSettings.validated(
-                        room.engine.narrative_model,
-                        room.engine.judgement_model,
-                    )
-                )
+            await _handle_room_settings(
+                ws, controller, room, user, role, {}, build_payload, mutate=False
+            )
+            continue
+        if message_type == "model_settings_update":
+            await _handle_room_settings(
+                ws, controller, room, user, role, data, apply_update, mutate=True
+            )
+            continue
+        if message_type == "model_settings_restore_default":
+            await _handle_room_settings(
+                ws, controller, room, user, role, data, restore_default, mutate=True
+            )
+            continue
+        if message_type == "model_settings_test":
+            await _handle_room_settings(
+                ws, controller, room, user, role, data, run_test_connection, mutate=True
             )
             continue
         if message_type == "turn_diagnostics_get":
-            if role != "owner":
-                await _reject(
-                    ws,
-                    "owner_required",
-                    "只有房主可以查看回合诊断",
-                )
-            else:
-                await ws.send_json(
-                    {
-                        "type": "turn_diagnostics",
-                        "diagnostics": safe_multiplayer_diagnostics(
-                            room.engine.turn_diagnostics(data.get("turn_id"))
-                        ),
-                    }
-                )
+            # 成员可读脱敏统计（safe 投影只保留数值/枚举，无凭据与正文）。
+            await ws.send_json(
+                {
+                    "type": "turn_diagnostics",
+                    "diagnostics": safe_multiplayer_diagnostics(
+                        room.engine.turn_diagnostics(data.get("turn_id"))
+                    ),
+                }
+            )
             continue
         if message_type in {"suggest_reply", "decision_reply"}:
             reply_kind = "suggest" if message_type == "suggest_reply" else "decision"
@@ -544,6 +644,14 @@ async def run_room_message_loop(
                     "房间尚未完成开场，当前不能推进或恢复回合",
                 )
                 continue
+            # BYOK 就绪门禁：开局/继续/行动/重写都先确认所需模型绑定齐全，
+            # 缺失即拒绝并引导配置，绝不消耗平台凭据。
+            readiness = await asyncio.to_thread(
+                _room_model_readiness, controller.deps.database_url(), world_id
+            )
+            if readiness is not None:
+                await _reject(ws, readiness[0], readiness[1])
+                continue
             action_id = str(data.get("action_id") or "")
             try:
                 await room.reserve_action(
@@ -598,9 +706,7 @@ async def run_room_message_loop(
                         )
                         roster, playable_members = controller.room_roster(world_id)
                         claims_by_user = {
-                            str(item["user_id"]): item
-                            for item in roster
-                            if item.get("user_id")
+                            str(item["user_id"]): item for item in roster if item.get("user_id")
                         }
                         actor_claim = claims_by_user.get(actor_id)
                 except Exception:

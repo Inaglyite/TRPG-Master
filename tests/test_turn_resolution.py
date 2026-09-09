@@ -589,7 +589,8 @@ class ClueClarityClockTests(unittest.TestCase):
                 chat=SimpleNamespace(completions=SimpleNamespace(create=create))
             )
 
-            with patch("src.gameplay.turn_reconciler.JUDGEMENT_MODEL", "judge-model"):
+            # 裁决模型路由收口在 route_service（engine 无冻结路由时回落该默认）
+            with patch("src.ai.model.route_service.JUDGEMENT_MODEL", "judge-model"):
                 result = reconcile_turn(
                     engine,
                     player_action="我环顾大厅。",

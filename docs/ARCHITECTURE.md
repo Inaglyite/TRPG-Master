@@ -180,7 +180,22 @@ fail-closed 地保留 active；确认原服务已停止后，维护者只能通�
 `tools/recover_active_turn.py` 的 world/turn/owner-token 栅栏和显式确认中断它，绝不走 HTTP。
 重连客户端可查询该 ID：完整记录直接重放已合并的公开事件，尚在同进程执行则轮询，未提交记录才回退到最近自动存档。
 
-模型设置更新也尝试获取同一个 `turn_lock`：正在生成时拒绝变更，空闲时校验两个模型 ID、原子更新 `.env.json`、更新当前引擎并作为后续连接的默认值。API Key 和请求地址不会被该操作覆盖。
+模型设置保存不再占用 `turn_lock`：任意时刻可保存并写入作用域存储（本地 `model_settings.local.json` 0600 / 云端 `model_service_configs` 表按账号或世界隔离、Key 经 Fernet 加密），引擎在回合边界（`begin_turn_record`）经 `route_service.apply_pending_routes` 冻结解析出本回合的 client 与模型，下回合生效；自定义地址经 `egress_guard` 出站校验（云端仅公网 HTTPS、不跟随重定向、不读系统代理）。API Key 永不回显、不进日志/诊断/存档。
+
+本地模式（非账号鉴权）的 API 与 WebSocket 走"受控来源 + 每次启动的连接凭证"：
+`auth/service.local_request_trusted` 接受显式白名单 Origin、环回 Origin（浏览器本地页面）、
+有效凭证头 `X-TRPG-Local-Token`，以及无 Origin/Sec-Fetch 的非浏览器本地客户端；恶意站点与
+null/缺失来源一律 403。凭证由 Electron 主进程每次启动生成、经子进程环境注入后端，并在主进程
+`webRequest` 层加到发往本地后端的请求头（渲染进程、URL、前端存储与日志里都没有）；接管已在
+运行的后端时，后端把本次启动凭证写入 `<runtime>/local_launch_token`（0600）供主进程读取。
+云端账号鉴权不受影响：本地凭证不参与云端会话校验。
+
+时间型案件时钟由模组声明、引擎按实际结算时间推进（`gameplay/case_clock_time`）：模组在
+`case_clock_definitions.<clock>.time_advance` 声明 `every_minutes / advance / daily_cap /
+activity / carry`，只有声明的时钟按时间推进；进度锚点取 `world_clock.elapsed_minutes` 绝对值，
+重复结算（重试、审计重放、读档）不会重复记账，读档后按该分支锚点继续。跨场景的"先去某地再停留/
+监视"必须先 move 抵达：抵达回合只结算旅行时间（上限 240 分钟），停留时间与时钟推进留到抵达后。
+欺骗、暴露、公开指控等语义事件仍由模型提出、引擎校验。
 
 检定确认、战斗决定和行动预演共用阻塞式回复通道：
 
@@ -730,7 +745,7 @@ reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果
 - Electron 页面加载失败：主进程显示错误窗口。
 - 桌面后端启动失败：启动脚本输出/记录后端末尾日志。
 
-`src/app/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。
+`src/app/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。日志出口统一挂 `RedactingFilter`（文件与 stderr、以及 uvicorn/httpx/sqlalchemy 等第三方 logger）：消息、格式化参数、嵌套载荷与异常堆栈里的 Key/Authorization/Cookie/连接凭证按形状替换为 `***`，错误类别、状态码与请求 ID 保留。server.py 直接写 stderr 的异常打印自行调用 `redact()`；未覆盖的出口（OS core dump、第三方库绕过 logging 的写文件）不在本模块控制范围内。
 
 ### 10.1 回合性能
 

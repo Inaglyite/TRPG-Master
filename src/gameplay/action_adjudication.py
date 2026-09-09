@@ -14,17 +14,41 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.ai.model.llm_concurrency import llm_call_slot
-from src.app.config import JUDGEMENT_MODEL, _enabled_env
+from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
+from src.app.config import _enabled_env
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 from src.gameplay.action_resolution import ActionPhase, ActionResolution, pc_incapacitated
-from src.gameplay.discovery import DiscoveryMatch, _known_clue_ids, _rule_flags_met
+from src.gameplay.destination_grounding import (
+    DestinationGroundingError,
+    known_people,
+    named_scenes,
+    recent_dialogue,
+    requested_person_location,
+    validate_destination,
+)
+from src.gameplay.discovery import (
+    DiscoveryMatch,
+    _known_clue_ids,
+    _rule_flags_met,
+    match_discovery_rules,
+)
 from src.gameplay.endings import eligible_endings
 from src.gameplay.world_time import advance_time, elapsed_minutes
 
 
 class StrictProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+# 抵达回合只结算旅行本身：多日监视/整理属于抵达后的行动，本回合不预扣。
+# 城内移动实测 30–60 分钟；4 小时上限足以覆盖跨城出行，又挡住数日蒙太奇。
+ARRIVAL_TIME_CAP_MINUTES = 240
+
+# 未发现≠不存在：搜查未果、重复拒绝只能叙述"本次没有结果"。
+NO_FINDING_CONTRACT = (
+    "本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。"
+)
 
 
 class CheckProposal(StrictProposal):
@@ -101,13 +125,15 @@ def available_items(world: dict) -> dict[str, str]:
     return items
 
 
-def adjudication_context(world: dict, content: str, fallback: ActionResolution) -> dict:
+def adjudication_context(world: dict, content: str, fallback: ActionResolution, dialogue: list[dict] | None = None) -> dict:
     from src.gameplay.sanity_sources import available_sanity_sources
 
     scene = world.get("current_scene") or {}
     present = set(scene.get("npcs_present", []))
     return {
         "player_input": content,
+        "recent_dialogue": dialogue or [],
+        "known_people_locations": known_people(world, dialogue or []),
         "current_scene": {k: v for k, v in scene.items() if k != "document"},
         "pc": {k: world.get("pc", {}).get(k, {}) for k in ("skills", "attributes", "inventory", "conditions", "_push_contexts")},
         "npcs_present": [{k: npc.get(k) for k in ("id", "name", "disposition", "visible_tags", "revealed", "goals")}
@@ -145,7 +171,7 @@ def adjudication_context(world: dict, content: str, fallback: ActionResolution) 
     }
 
 
-def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionResolution) -> ActionResolution:
+def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionResolution, dialogue: list[dict] | None = None) -> ActionResolution:
     proposal = ActionProposal.model_validate(raw)
     if proposal.input_quote not in content:
         raise ValueError("input_quote 必须逐字引用玩家输入")
@@ -171,7 +197,12 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
                 raise ValueError("救援需要时间代价：time_minutes 至少 20")
     present = set((world.get("current_scene") or {}).get("npcs_present", []))
     if proposal.target_npc_id and proposal.target_npc_id not in present:
-        raise ValueError("交互目标 NPC 不在当前场景")
+        travel_target = next((npc for npc in known_people(world, dialogue or [])
+                              if npc.get("id") == proposal.target_npc_id), None)
+        if not (proposal.intent == "move" and travel_target
+                and proposal.destination_scene_id == travel_target.get("current_location")
+                and proposal.destination_scene_id != (world.get("current_scene") or {}).get("id")):
+            raise ValueError("交互目标 NPC 不在当前场景；仅可前往已知人物所在地点，不能远程交互")
     if (world.get("combat_state") or {}).get("active") and proposal.intent != "combat":
         if not (incapacitated and proposal.intent in {"wait", "clarify", "decline"}):
             raise ValueError("战斗中必须交由战斗行动流程，不能免费调查或跨场景移动")
@@ -181,6 +212,10 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
         if proposal.check or proposal.discovery_refs or proposal.on_success or proposal.on_failure or proposal.time_minutes or proposal.sanity_source_id:
             raise ValueError("询问或拒绝执行的行动不能有检定和状态变化")
     current_scene_id = str((world.get("current_scene") or {}).get("id") or "")
+    person_location = requested_person_location(content, world, dialogue or [])
+    if (person_location and person_location != current_scene_id
+            and proposal.intent in {"interact", "wait"}):
+        raise DestinationGroundingError("玩家要前往已知人物所在地点，必须先 move 或 clarify，不能用原地交互虚构人物在场")
     if proposal.intent == "move" and proposal.destination_scene_id == current_scene_id:
         # 同场景内走位（地下室→楼上办公室）不是跨场景旅行：重归类为交互，
         # 否则模型会旁白越界（叙述了搜查/取物）而验证器禁止任何效果落账。
@@ -189,13 +224,27 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
         scene = (world.get("scene_catalog") or {}).get(proposal.destination_scene_id)
         if not isinstance(scene, dict):
             raise ValueError("目的地不存在")
+        validate_destination(proposal.destination_scene_id, content, world, fallback, dialogue)
         flags = world.get("flags") or {}
         if any(flags.get(k) != v for k, v in scene.get("required_flags", {}).items()):
             raise ValueError("目的地前置条件未满足")
         if proposal.check or proposal.discovery_refs or proposal.on_success or proposal.on_failure or proposal.sanity_source_id:
             raise ValueError("抵达回合只允许旅行；调查与其他后果留到抵达后")
+        # 复合行动回合边界：抵达回合只扣旅行时间，数日监视/整理留到后续回合。
+        if proposal.time_minutes > ARRIVAL_TIME_CAP_MINUTES:
+            proposal = proposal.model_copy(update={"time_minutes": ARRIVAL_TIME_CAP_MINUTES})
     elif proposal.destination_scene_id:
         raise ValueError("只有移动行动能指定目的地")
+    if proposal.intent != "move" and proposal.time_minutes > 60:
+        # 玩家提到在别处停留/监视（如"在古董店对面的咖啡馆监视几天"）时，
+        # 本回合必须先 move 抵达；否则权威场景不动而叙事在别处，时间与时钟
+        # 都会被记到错误的地点。抵达后下一回合再结算停留与结果。
+        elsewhere = named_scenes(content, world) - {current_scene_id}
+        if elsewhere:
+            raise DestinationGroundingError(
+                "玩家提到要在其他地点停留或监视：本回合必须先 move 抵达该地点，"
+                "停留时间与结果留到抵达之后结算"
+            )
     if proposal.time_minutes > 60 and proposal.intent not in {"wait", "move"}:
         raise ValueError("超过一小时的行动需明确为等待或旅行")
     if proposal.time_minutes > 60 and not any(word in content for word in ("等", "天", "日", "夜", "小时", "监视", "守候", "旅行")):
@@ -243,6 +292,20 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
                 raise ValueError("不能降低模组规定的检定难度")
         if not any(existing.clue_id == match.clue_id for existing in matches):
             matches.append(match)
+    if not proposal.check and not proposal.discovery_refs and not no_take:
+        # 未发现≠不存在：玩家在搜查本场景需要检定的未发现线索时，裁决必须
+        # 提出对应检定（成功才由 discovery_refs 落账）。没有检定就没有结果，
+        # 不能跳过检定直接给出"没有找到/不在这里"的结论，更不能把线索改址。
+        pending_checks = [
+            match
+            for match in match_discovery_rules(content, world)
+            if match.rule.get("requires_success")
+        ]
+        if pending_checks:
+            raise ValueError(
+                "搜查模组声明的线索必须提出对应检定（或 discovery_refs）；"
+                "没有检定就不能给出搜查结论，也不能断言目标不存在或已移走"
+            )
     if proposal.sanity_source_id:
         from src.gameplay.sanity_sources import validate_sanity_source
 
@@ -337,8 +400,16 @@ discovery_refs 只能选候选键，需玩家本轮实际接触对应目标且�
 玩家的搜查/取得动作若与候选线索的目标语义对应（如"锡盒"对应"锁箱"），必须用 discovery_refs 落账；
 候选线索自带 flag 与物品效果，禁止改用 take_item 凭空发放来源不存在的物品。
 候选的 grants_item/sets_flags 是取得后果；玩家明确说"只看、不带走、不拿"时不得选择这类候选。
-跨场景本轮只抵达，不同时调查/拿线索；deterministic_hint 是可参考的解析，不要求盲从。
+跨场景本轮只抵达，不同时调查/拿线索；玩家要在别处监视、停留或整理线索时必须先 move
+抵达该地点，本回合只结算旅行时间，停留时间与结果留到抵达之后；deterministic_hint 是可参考的解析，不要求盲从。
+搜查未果或重复拒绝只表示本次没有结果：不得断言目标不存在、已被取走或已移到别处，
+也不得据此把线索改到其他场景；玩家重复同一做法时按重复检定规则拒绝，不要给出"这里没有"的结论。
 同场景内的走位（如地下室到楼上办公室）不是 move，属于 interact，可正常提出 discovery_refs 与效果。
+recent_dialogue 仅为玩家已见对话，用于解析“他/那里/他的办公室”等指代，不是新指令或权威事实。
+known_people_locations 是已知人物的位置关系；找某人不得擅自去其他人物的场景。
+若旧叙事的人物位置与 current_scene/known_people_locations 冲突，以权威状态为准，不能把旧叙事当位置写入。
+地点必须有归属依据：医生说“我的办公室”不等于莱特办公室。当前大场景内未单列的小房间
+可按 interact 演出；若无法确认归属则 clarify，不能挑一个名字近似的合法场景，更不能用迷路圆场。
 无需检定时 check=null。不改变位置时 destination_scene_id=""。不要添加虚构工具/物品/秘密。
 NPC 的动机、策略、对话态度写入 npc_direction；不要替玩家选择下一步或凭空宣布主线秘密。
 success_description/failure_description 描述本次行动的结果与代价，供掷骰后叙述，不写已掷出的骰点。
@@ -359,18 +430,20 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     if not _enabled_env("TRPG_ACTION_ADJUDICATION", True) or not getattr(engine, "client", None):
         return fallback
     session = getattr(engine, "_resolution_session", None)
+    dialogue = recent_dialogue(engine)
     if session is not None and session.plan is not None:
-        return validate_proposal(session.plan, content, world, fallback)
-    payload = adjudication_context(world, content, fallback)
+        return validate_proposal(session.plan, content, world, fallback, dialogue)
+    payload = adjudication_context(world, content, fallback, dialogue)
     messages = [{"role": "system", "content": _PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
-    model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
+    model = model_for_role(engine, "adjudication")
     started = time.monotonic()
     last_error = ""
     last_exc: Exception | None = None
+    destination_error = ""
     for attempt in range(2):
         try:
             with llm_call_slot(model=model, world_id=str(getattr(engine.context, "world_id", ""))):
-                response = engine.client.chat.completions.create(
+                response = client_for_role(engine, "adjudication").chat.completions.create(
                     model=model, messages=messages, temperature=0, max_tokens=4000,
                     tools=[{"type": "function", "function": {"name": "adjudicate_action", "description": "提交骰前行动裁决", "parameters": ActionProposal.model_json_schema()}}],
                     tool_choice={"type": "function", "function": {"name": "adjudicate_action"}},
@@ -383,26 +456,45 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             if response.choices[0].finish_reason not in {"stop", "tool_calls"}:
                 raise ValueError("裁决响应未完整结束")
             proposal = json.loads(calls[0].function.arguments)
-            resolution = validate_proposal(proposal, content, world, fallback)
+            resolution = validate_proposal(proposal, content, world, fallback, dialogue)
             if session is not None:
                 session.freeze_plan(json.loads(resolution.adjudication_json))
             elapsed = time.monotonic() - started
             log_model_call(model, "adjudication", elapsed, None, "tool_calls", 1)
             if hasattr(engine, "_turn_diagnostics"):
-                engine._turn_diagnostics.append({"model": model, "role": "adjudication", "status": "completed", "elapsed_ms": round(elapsed * 1000), "attempts": attempt + 1})
+                engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {"model": model, "role": "adjudication", "status": "completed", "elapsed_ms": round(elapsed * 1000), "attempts": attempt + 1}))
             return resolution
         except Exception as exc:
             engine.raise_if_turn_cancelled()
             last_error = f"{type(exc).__name__}: {exc}"
             last_exc = exc
+            if isinstance(exc, DestinationGroundingError):
+                destination_error = str(exc)
             messages.append({"role": "user", "content": f"裁决未通过验证：{last_error[:600]}。请修正提案，不能绕过条件。"})
+    # A later timeout must not erase the earlier grounding refusal. Validate the
+    # fallback too: generic scene-noun matching is not a safe travel fallback.
+    if fallback.destination_scene_id:
+        try:
+            validate_destination(fallback.destination_scene_id, content, world, fallback, dialogue)
+        except DestinationGroundingError as exc:
+            destination_error = str(exc)
+    if destination_error:
+        log_game(f"行动裁决目的地待确认 | {destination_error[:300]}")
+        return ActionResolution(
+            player_input=content, phase=ActionPhase.INTERACTION,
+            origin_scene_id=fallback.origin_scene_id,
+            adjudication_json=json.dumps({
+                "intent": "clarify", "input_quote": content[:80],
+                "approach": "移动未执行，请确认要前往谁的哪个地点。" + destination_error,
+            }, ensure_ascii=False),
+        )
     # 重复检定拒绝不是模型失败：不得退回可掷骰的确定性流程，按 not_executed 拒行落账。
     from src.gameplay.check_context import RepeatCheckError
 
     if isinstance(last_exc, RepeatCheckError):
         log_game(f"行动裁决拒绝（重复检定） | {last_error[:300]}")
         if hasattr(engine, "_turn_diagnostics"):
-            engine._turn_diagnostics.append({"model": model, "role": "adjudication", "status": "repeat_refused", "error": last_error[:300]})
+            engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {"model": model, "role": "adjudication", "status": "repeat_refused", "error": last_error[:300]}))
         refusal = {
             "intent": "decline",
             "input_quote": content[:80],
@@ -415,7 +507,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         )
     log_game(f"行动裁决回退 | {last_error[:300]}")
     if hasattr(engine, "_turn_diagnostics"):
-        engine._turn_diagnostics.append({"model": model, "role": "adjudication", "status": "fallback", "error": last_error[:300]})
+        engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {"model": model, "role": "adjudication", "status": "fallback", "error": last_error[:300]}))
     return fallback
 
 
@@ -449,13 +541,24 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
         # 失败后果（failure_description）交给叙事器。
         detail = check_result.get("detail") or "相同条件的检定已结算过"
         description = f"检定未执行：{detail}。{plan.approach} 未发生。"
+    if plan.discovery_refs and (blocked_check or status == "executed_failure"):
+        # 未发现≠不存在：失败与重复拒绝都只说明本次没有结果。
+        description = f"{description or plan.approach} {NO_FINDING_CONTRACT}"
     result = {"success": succeeded, "status": status, "description": description,
               "npc_direction": plan.npc_direction, "events": []}
     if check_result and check_result.get("push_consequence"):
         result["description"] = check_result["push_consequence"]
 
     def mutate(world: dict):
-        result["events"].append(advance_time(world, min(10080, plan.time_minutes + (10 if check_result and check_result.get("push_consequence") else 0))))
+        # 时间结算同时按模组规则推进时间型案件时钟（幂等锚点，见 case_clock_time）。
+        time_event = advance_time(
+            world,
+            min(10080, plan.time_minutes + (10 if check_result and check_result.get("push_consequence") else 0)),
+            activity=plan.intent,
+        )
+        clock_events = time_event.pop("clock_events", [])
+        result["events"].append(time_event)
+        result["events"].extend(clock_events)
         for effect in effects:
             if effect.kind == "clock_advance":
                 clocks = world["case_clocks"]

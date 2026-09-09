@@ -13,8 +13,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from src.ai.model.model_settings import ModelSettings
 from src.app.runtime import RuntimeContext
+from src.app.settings_service import build_payload
 from src.auth.service import authorize_world, validate_websocket_origin, websocket_session
 from src.gameplay.characters import list_character_options
 from src.multiplayer.guards import USER_TURN_GUARD
@@ -22,6 +22,7 @@ from src.multiplayer.messages import (
     owner_turn_required as owner_turn_required,
 )
 from src.multiplayer.messages import (
+    room_scope,
     run_room_message_loop,
 )
 from src.multiplayer.private_state import reconcile_world_investigator_roster
@@ -48,18 +49,17 @@ from src.multiplayer.solo_timeline_ws import (
     resolve_solo_current_world_id,
 )
 from src.storage.database import Turn, World, WorldInvestigator, WorldMember, session_scope, utcnow
+from src.storage.model_config_store import room_route_resolver
 
 
 @dataclass(frozen=True)
 class MultiplayerWsDependencies:
     database_url: Callable[[], str]
     room_manager: Callable[[], RoomManager]
-    active_model_settings: Callable[[], ModelSettings]
     engine_factory: Callable[[RuntimeContext], Any]
     run_ws_session: Callable[..., Awaitable[None]]
     list_modules: Callable[[], list[dict]]
     load_theme: Callable[[RuntimeContext], dict]
-    model_settings_payload: Callable[[ModelSettings], dict]
     enrich_clues: Callable[[dict, dict | None, RuntimeContext | None], dict]
     project_root: Path
     runtime_root: Path
@@ -74,7 +74,9 @@ class MultiplayerWsController:
         router.add_api_websocket_route("/ws/room", self.websocket)
         return router
 
-    async def room_bootstrap(self, ws: WebSocket, room: GameRoom) -> None:
+    async def room_bootstrap(
+        self, ws: WebSocket, room: GameRoom, user_id: str, role: str
+    ) -> None:
         engine = room.engine
         await ws.send_json(
             {
@@ -97,8 +99,8 @@ class MultiplayerWsController:
         )
         await ws.send_json({"type": "theme", "theme": self.deps.load_theme(engine.context)})
         await ws.send_json(
-            self.deps.model_settings_payload(
-                ModelSettings.validated(engine.narrative_model, engine.judgement_model)
+            await asyncio.to_thread(
+                build_payload, room_scope(self.deps, room, user_id, role), {}
             )
         )
         await ws.send_json({"type": "save_list", "saves": engine.list_saves()})
@@ -507,10 +509,7 @@ class MultiplayerWsController:
                     runtime_root=self.deps.runtime_root,
                 )
                 engine = self.deps.engine_factory(context)
-                engine.configure_models(
-                    self.deps.active_model_settings().narrative_model,
-                    self.deps.active_model_settings().judgement_model,
-                )
+                engine.route_resolver = room_route_resolver(self.deps.database_url(), world_id)
                 engine.prepare_session()
                 if room_status == "playing":
                     engine.restore_latest_committed_history()
@@ -620,7 +619,7 @@ class MultiplayerWsController:
             await room.hub.update_user_role(user.id, role)
             ordered_ws = OrderedRoomSocket(ws, room.hub, connection_id)
             if not created:
-                await self.room_bootstrap(ordered_ws, room)
+                await self.room_bootstrap(ordered_ws, room, user.id, role)
             recovery_cursor = await self.send_room_full_recovery(
                 ordered_ws,
                 room,

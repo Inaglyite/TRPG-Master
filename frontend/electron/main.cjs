@@ -8,6 +8,7 @@ const {
   shell,
 } = require("electron");
 const http = require("node:http");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
@@ -42,6 +43,16 @@ let backendProcessGroup = false;
 // 本地后端改为按需启动：只有用户在模式选择页点了“单机游戏”才会配置/拉起。
 let localBackendReady = false;
 let localBackendStartPromise = null;
+// 本地连接凭证（安全初审 S03）：每次启动生成一次，经子进程环境注入后端，
+// 再由主进程在 webRequest 层加到发往本地后端的请求头。渲染进程永远拿不到
+// 它——不进 URL、不进前端存储、不进日志。
+const LOCAL_TOKEN_HEADER = "X-TRPG-Local-Token";
+const LOCAL_TOKEN_ENV = "TRPG_LOCAL_LAUNCH_TOKEN";
+const localBackendWsUrl = backendUrl.replace(/^http/, "ws");
+let localLaunchToken =
+  process.env[LOCAL_TOKEN_ENV]?.trim() ||
+  crypto.randomBytes(32).toString("base64url");
+let localTokenInjectionInstalled = false;
 // 联机模式经主进程校验并 loadURL 的云端 origin；导航守卫只放行它。
 let approvedCloudOrigin = null;
 let mainWindow = null;
@@ -250,6 +261,8 @@ async function startPackagedBackend(exePath, runtimeRoot) {
       // src.app.config 在 PyInstaller 的 _internal/ 中自动定位。
       TRPG_PROJECT_ROOT: runtimeRoot,
       TRPG_RUNTIME_ROOT: runtimeRoot,
+      // 本次启动的连接凭证：只经子进程环境交付（S03）。
+      [LOCAL_TOKEN_ENV]: localLaunchToken,
     },
     label: "内置后端",
     timeoutMs: 30000,
@@ -273,7 +286,7 @@ async function startSourceBackend(launcherPath) {
     command: resolvedLauncher,
     args: ["--backend-only"],
     cwd: path.dirname(resolvedLauncher),
-    env: { ...process.env },
+    env: { ...process.env, [LOCAL_TOKEN_ENV]: localLaunchToken },
     label: "源码后端",
     // 首次安装依赖可能明显慢于正常重启。
     timeoutMs: 180000,
@@ -283,6 +296,56 @@ async function startSourceBackend(launcherPath) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 本地后端的运行目录：与 start_desktop.sh / 打包后端保持一致。 */
+function localRuntimeRoot() {
+  const fromEnv = process.env.TRPG_RUNTIME_ROOT?.trim();
+  if (fromEnv) return fromEnv;
+  if (app.isPackaged) return path.join(app.getPath("userData"), "runtime");
+  return path.join(__dirname, "..", "..");
+}
+
+/**
+ * 已在运行（非本次启动）的后端会把本次启动凭证写进 0600 文件；
+ * 主进程在后端就绪后读取它。本次拉起的后端用注入环境变量的凭证，不读文件。
+ */
+function readLocalTokenFile() {
+  try {
+    const raw = fs
+      .readFileSync(path.join(localRuntimeRoot(), "local_launch_token"), "utf8")
+      .trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 只给发往本地后端的请求加凭证头；云端 origin 与其他请求原样放行。 */
+function installLocalTokenInjection() {
+  if (localTokenInjectionInstalled) return;
+  localTokenInjectionInstalled = true;
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["<all_urls>"] },
+    (details, callback) => {
+      const url = details.url || "";
+      const token = localLaunchToken || readLocalTokenFile();
+      if (
+        token &&
+        (url.startsWith(backendUrl) || url.startsWith(localBackendWsUrl))
+      ) {
+        localLaunchToken = token;
+        callback({
+          requestHeaders: {
+            ...details.requestHeaders,
+            [LOCAL_TOKEN_HEADER]: token,
+          },
+        });
+        return;
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    },
+  );
 }
 
 function probeBackendHealth(timeoutMs = 900) {
@@ -387,7 +450,6 @@ async function ensureLocalBackend() {
   localBackendStartPromise = (async () => {
     // Reuse an already-running verified local service without taking ownership.
     if (await probeBackendHealth()) return;
-
     if (process.env.TRPG_EXTERNAL_BACKEND === "1") {
       await waitForBackend();
     } else if (!app.isPackaged && sourceBackendLauncher) {
@@ -415,6 +477,14 @@ async function ensureLocalBackend() {
   try {
     await localBackendStartPromise;
     localBackendReady = true;
+    // 本次未拉起后端（接管已在运行的实例）时，从 0600 文件取本次启动凭证；
+    // 拉起的实例始终使用注入环境变量的那份。
+    if (!backendProcess) {
+      const resolved = readLocalTokenFile();
+      if (resolved) localLaunchToken = resolved;
+      else log("警告：未能取得本地连接凭证，本地 API 请求会被拒绝");
+    }
+    installLocalTokenInjection();
   } finally {
     localBackendStartPromise = null;
   }

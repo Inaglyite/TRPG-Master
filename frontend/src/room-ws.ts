@@ -256,6 +256,7 @@ function open(): void {
         privateEvents: [],
         privateState: null,
         roomError: ROLE_CHANGE_RECONNECT_NOTICE,
+        roomErrorCode: null,
       });
       void refreshRoomMembers();
       scheduleReconnect();
@@ -556,6 +557,10 @@ function handleRoomMessage(raw: unknown): void {
           state.roomError === ROLE_CHANGE_RECONNECT_NOTICE
             ? null
             : state.roomError,
+        roomErrorCode:
+          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE
+            ? null
+            : state.roomErrorCode,
       }));
       // 公共叙事历史走与单机相同的渲染链，缺口/服务重启后恢复完整公共叙事；
       // private_state 绝不进入这条公共链路。
@@ -681,6 +686,7 @@ function handleRoomMessage(raw: unknown): void {
             : null;
       useOnlineStore.setState({
         roomError: REJECTION_TEXTS[code] ?? detail ?? "操作被服务器拒绝",
+        roomErrorCode: code || null,
       });
       recoverRejectedRoomAction();
       break;
@@ -691,6 +697,7 @@ function handleRoomMessage(raw: unknown): void {
           typeof message.message === "string"
             ? message.message
             : "房间协议消息未被服务器接受",
+        roomErrorCode: null,
       });
       break;
     case "room_error": {
@@ -700,7 +707,10 @@ function handleRoomMessage(raw: unknown): void {
           : typeof message.detail === "string"
             ? message.detail
             : null;
-      useOnlineStore.setState({ roomError: detail ?? "房间发生错误" });
+      useOnlineStore.setState({
+        roomError: detail ?? "房间发生错误",
+        roomErrorCode: null,
+      });
       break;
     }
     case "room_event_gap":

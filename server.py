@@ -80,7 +80,10 @@ if _ENV_FILE.exists():
             if val and env_key not in os_environ:
                 os_environ[env_key] = str(val)
     except Exception as e:
-        print(f"⚠️  读取 .env.json 失败: {e}", file=sys.stderr)
+        # JSONDecodeError 会带原文片段，.env.json 里就是真实凭据，必须脱敏。
+        from src.app.logger import redact as _redact_env
+
+        print(_redact_env(f"⚠️  读取 .env.json 失败: {e}"), file=sys.stderr)
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,14 +91,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import text
 
 from src.ai.context.narrative_history import enrich_public_history_record
-from src.ai.model.model_settings import ModelSettings, persist_model_settings
+from src.ai.model.model_stream_diagnostics import turn_context_summary
+from src.ai.model.route_service import LocalRouteResolver
 from src.app.config import (
     AUTO_SAVE_SLOT,
     DEFAULT_MODULE_NAME,
-    JUDGEMENT_MODEL,
-    MODEL_FLASH,
-    MODEL_PRO,
-    NARRATIVE_MODEL,
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
@@ -106,12 +106,21 @@ from src.app.game_application import (
     GameApplication,
     SaveNotFoundError,
 )
+from src.app.logger import redact as redact_log
 from src.app.runtime import RuntimeContext, default_world_id
+from src.app.settings_service import (
+    SettingsScope,
+    apply_update,
+    build_payload,
+    restore_default,
+    run_test_connection,
+)
 from src.auth.http import AuthHttpDependencies, create_auth_router
 from src.auth.service import (
     audit,
     auth_required,
     authorize_world,
+    local_request_trusted,
     request_user,
     validate_websocket_origin,
     websocket_user,
@@ -168,7 +177,8 @@ app.add_middleware(
     allow_origins=["null"],
     allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-Module-Filename"],
+    # X-TRPG-Local-Token 由桌面壳主进程注入（见 authentication_gate 的本地信任校验）。
+    allow_headers=["Content-Type", "X-Module-Filename", "X-TRPG-Local-Token"],
     # 编辑器 dev（:4173）跨域打本地后端时需要带 cookie session；生产同源不受影响。
     allow_credentials=True,
 )
@@ -177,8 +187,8 @@ WORLD_BRANCHES = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)
 EDITOR_PROJECTS = EditorProjectStore(RUNTIME_ROOT)
 app.include_router(create_editor_router(EDITOR_PROJECTS))
 DATABASE_URL = database_url(RUNTIME_ROOT)
+_LOCAL_MODEL_SETTINGS_FILE = RUNTIME_ROOT / "model_settings.local.json"
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
-_active_model_settings = ModelSettings.validated(NARRATIVE_MODEL, JUDGEMENT_MODEL)
 _world_turn_locks: dict[str, threading.Lock] = {}
 _world_turn_locks_guard = threading.Lock()
 ROOM_MANAGER = RoomManager(max_rooms=max(1, int(os.environ.get("TRPG_MAX_ACTIVE_ROOMS", "8"))))
@@ -186,9 +196,7 @@ app.include_router(
     create_auth_router(
         AuthHttpDependencies(
             lambda: DATABASE_URL,
-            disconnect_session=lambda session_hash: ROOM_MANAGER.disconnect_session(
-                session_hash
-            ),
+            disconnect_session=lambda session_hash: ROOM_MANAGER.disconnect_session(session_hash),
         )
     )
 )
@@ -196,12 +204,10 @@ MULTIPLAYER_WS = MultiplayerWsController(
     MultiplayerWsDependencies(
         database_url=lambda: DATABASE_URL,
         room_manager=lambda: ROOM_MANAGER,
-        active_model_settings=lambda: _active_model_settings,
         engine_factory=lambda context: GameEngine(context),
         run_ws_session=lambda *args, **kwargs: run_ws_session(*args, **kwargs),
         list_modules=lambda: _list_mods(),
         load_theme=lambda context: _load_theme(context),
-        model_settings_payload=lambda settings: _model_settings_payload(settings),
         enrich_clues=lambda clues, state, context: enrich_clues_for_frontend(clues, state, context),
         project_root=PROJECT_ROOT,
         runtime_root=RUNTIME_ROOT,
@@ -222,6 +228,25 @@ app.include_router(
         )
     )
 )
+
+# BYOK 主密钥运维提示：仅云端（账号模式）需要。自动生成的主密钥文件一旦
+# 丢失，全部用户模型凭据不可解密；生产应注入 TRPG_CONFIG_MASTER_KEY 并备份。
+if auth_required():
+    from src.ai.model.crypto_box import key_file_path, master_key_source
+
+    if master_key_source() == "file":
+        print(
+            f"⚠️  BYOK 主密钥为自动生成的本地文件 {key_file_path()}（0600）。\n"
+            "    请将该文件纳入备份，或改用环境变量 TRPG_CONFIG_MASTER_KEY 注入。",
+            file=sys.stderr,
+        )
+
+if not auth_required():
+    # 本地模式启动即生成并落盘本次启动凭证：桌面壳接管"已在运行"的后端时
+    # 需要立刻能读到它（否则第一次请求前文件不存在）。见 authentication_gate。
+    from src.auth.service import local_launch_token
+
+    local_launch_token()
 
 
 def _member_mutation_target(request: Request) -> tuple[str, str | None] | None:
@@ -260,8 +285,7 @@ async def _reserve_current_actor_member_mutation(
         return None, None
     combat_member = bool(
         room.driver_transport
-        and target_user_id
-        in room.driver_transport.combat_participant_controllers()
+        and target_user_id in room.driver_transport.combat_participant_controllers()
     )
     if MULTIPLAYER_WS.room_control_change_blocked(room) or combat_member:
         return None, JSONResponse(
@@ -316,6 +340,11 @@ async def authentication_gate(request: Request, call_next):
         or request.url.path == "/"
     )
     actor_mutation_room: GameRoom | None = None
+    if not auth_required() and request.url.path.startswith("/api/") and not public:
+        # 本地模式：来源 + 每次启动的连接凭证联合校验（安全初审 S03）。
+        # 恶意站点与 null/缺失来源在这里就被拒绝，不再依赖"只监听回环"。
+        if not local_request_trusted(request.headers):
+            return JSONResponse({"detail": "本地请求来源或连接凭证不受信任"}, status_code=403)
     if auth_required() and request.url.path.startswith("/api/") and not public:
         user = request_user(request, DATABASE_URL)
         if user is None:
@@ -389,9 +418,7 @@ def _local_world_fallback(module_name: object) -> RuntimeContext:
         # The normal default name could itself be an old archived world.  Do
         # not let fallback turn that logical deletion into a fresh open.
         if existing is not None and existing.status != "active":
-            fallback_world_id = (
-                f"{fallback_world_id}-recovery-{secrets.token_hex(3)}"
-            )
+            fallback_world_id = f"{fallback_world_id}-recovery-{secrets.token_hex(3)}"
     if fallback_world_id != default_world_id(preferred_module):
         return RuntimeContext.create(
             fallback_world_id,
@@ -420,12 +447,13 @@ app.include_router(
 )
 
 
-def _model_settings_payload(settings: ModelSettings | None = None) -> dict:
-    settings = settings or _active_model_settings
-    return {
-        "type": "model_settings",
-        **settings.to_payload(MODEL_FLASH, MODEL_PRO),
-    }
+def _local_settings_scope(engine) -> SettingsScope:
+    return SettingsScope(
+        mode="local",
+        can_edit=True,
+        local_path=_LOCAL_MODEL_SETTINGS_FILE,
+        engine=engine,
+    )
 
 
 def _load_theme(context: RuntimeContext | None = None) -> dict:
@@ -458,7 +486,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     普通同步函数；所有输出进入同一个 FIFO sender，避免跨线程 send_json
     任务与主循环响应互相抢序。
     """
-    global _active_model_settings
 
     loop = asyncio.get_running_loop()
     outbound = OrderedTurnEventStream(ws, loop)
@@ -528,8 +555,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 )
                 import traceback
 
-                print(f"[ws] 回合异常: {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
+                print(redact_log(f"[ws] 回合异常: {e}"), file=sys.stderr)
+                print(redact_log(traceback.format_exc()), file=sys.stderr)
                 emit(
                     {
                         "type": "error",
@@ -621,7 +648,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 outbound.end_turn({"type": "turn_rewritten", **result})
             except Exception as exc:
                 log_message = f"{type(exc).__name__}: {exc}"
-                print(f"[ws] 重新叙述失败: {log_message}", file=sys.stderr)
+                print(redact_log(f"[ws] 重新叙述失败: {log_message}"), file=sys.stderr)
                 outbound.end_turn(
                     {
                         "type": "turn_rewrite_failed",
@@ -654,9 +681,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         with session_scope(DATABASE_URL) as db_session:
             return {
                 row[0]
-                for row in db_session.query(WorldMember.world_id)
-                .filter_by(user_id=user_id)
-                .all()
+                for row in db_session.query(WorldMember.world_id).filter_by(user_id=user_id).all()
             }
 
     def world_list_payload() -> dict:
@@ -769,7 +794,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         emit({"type": "chat_events", "events": enriched})
 
     def on_performance(metrics: dict):
-        emit({"type": "turn_performance", "metrics": metrics})
+        # 附带最近一次叙述调用的上下文占用摘要（纯数字，主界面小组件用）
+        summary = turn_context_summary(engine)
+        payload = {"type": "turn_performance", "metrics": metrics}
+        if summary:
+            payload["context_summary"] = summary
+        emit(payload)
 
     def on_tension(text: str, cat: str):
         emit({"type": "tension", "text": text, "category": cat})
@@ -822,7 +852,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     }
                 )
             except Exception as exc:
-                print(f"[room] 调查员状态同步失败: {exc}", file=sys.stderr)
+                print(redact_log(f"[room] 调查员状态同步失败: {exc}"), file=sys.stderr)
         finish_room_start(True)
         outbound.end_turn()
 
@@ -878,16 +908,25 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         notes = PlayerNotesStore(engine.context.world_dir, user_id=user_id).load()
         await outbound.send({"type": "player_notes", **notes})
 
+    async def _settings_call(fn, data: dict) -> None:
+        try:
+            payload = await asyncio.to_thread(fn, _local_settings_scope(engine), data)
+        except (ValueError, PermissionError, OSError) as exc:
+            await outbound.send({"type": "model_settings_error", "message": str(exc)})
+            return
+        await outbound.send(payload)
+
     @router.handler("model_settings_get")
     async def handle_model_settings_get(_data: dict) -> None:
-        await outbound.send(
-            _model_settings_payload(
-                ModelSettings.validated(
-                    engine.narrative_model,
-                    engine.judgement_model,
-                )
-            )
-        )
+        await _settings_call(build_payload, {})
+
+    @router.handler("model_settings_test")
+    async def handle_model_settings_test(data: dict) -> None:
+        await _settings_call(run_test_connection, data)
+
+    @router.handler("model_settings_restore_default")
+    async def handle_model_settings_restore(data: dict) -> None:
+        await _settings_call(restore_default, data)
 
     @router.handler("module_list")
     async def handle_module_list(_data: dict) -> None:
@@ -956,41 +995,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     @router.handler("model_settings_update")
     async def handle_model_settings_update(data: dict) -> None:
-        global _active_model_settings
-        if not turn_gate.try_acquire_session():
-            await outbound.send(
-                {
-                    "type": "model_settings_error",
-                    "message": "当前回合尚未结束，请在本轮叙述完成后重试。",
-                }
-            )
-            return
-        try:
-            settings = ModelSettings.validated(
-                data.get("narrative_model"),
-                data.get("judgement_model"),
-            )
-            persist_model_settings(_ENV_FILE, settings)
-            engine.configure_models(
-                settings.narrative_model,
-                settings.judgement_model,
-            )
-            _active_model_settings = settings
-            await outbound.send(
-                {
-                    **_model_settings_payload(settings),
-                    "saved": True,
-                }
-            )
-        except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
-            await outbound.send(
-                {
-                    "type": "model_settings_error",
-                    "message": f"模型设置保存失败：{exc}",
-                }
-            )
-        finally:
-            turn_gate.release_session()
+        await _settings_call(apply_update, data)
 
     @router.handler("save")
     async def handle_save(data: dict) -> None:
@@ -1248,18 +1253,14 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 # 打开过但从未开始的世界（无回合无存档）直接复用，避免取消
                 # 开局留下垃圾存档位。
                 if not WORLD_BRANCHES.is_tree_untouched(engine.context.world_id):
-                    fresh_context = WORLD_BRANCHES.create_root(
-                        engine.context.module_name
-                    )
+                    fresh_context = WORLD_BRANCHES.create_root(engine.context.module_name)
                     engine.switch_context(fresh_context)
                     resolve_speaker.clear()
                     turn_gate.rebind_world(_world_turn_lock(fresh_context))
                     _set_active_context(fresh_context)
                     await outbound.send(world_context_payload())
                     await outbound.send(world_list_payload())
-                    await outbound.send(
-                        {"type": "theme", "theme": _load_theme(fresh_context)}
-                    )
+                    await outbound.send({"type": "theme", "theme": _load_theme(fresh_context)})
             intent = game_app.start_game.execute(data.get("character_ref"))
             active_investigator_id = str(data.get("_room_investigator_id") or "")
             if is_room_start:
@@ -1278,7 +1279,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             finish_room_start(False)
             release_turn()
             print(
-                f"[room] 开场初始化失败: {type(exc).__name__}: {exc}",
+                redact_log(f"[room] 开场初始化失败: {type(exc).__name__}: {exc}"),
                 file=sys.stderr,
             )
             await outbound.send(
@@ -1295,7 +1296,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             finish_room_start(False)
             release_turn()
             print(
-                f"[room] 开场角色同步失败: {type(exc).__name__}: {exc}",
+                redact_log(f"[room] 开场角色同步失败: {type(exc).__name__}: {exc}"),
                 file=sys.stderr,
             )
             await outbound.send(
@@ -1315,7 +1316,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         except Exception as exc:
             finish_room_start(False)
             print(
-                f"[room] 开场回合启动失败: {type(exc).__name__}: {exc}",
+                redact_log(f"[room] 开场回合启动失败: {type(exc).__name__}: {exc}"),
                 file=sys.stderr,
             )
             await outbound.send(
@@ -1339,13 +1340,21 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             intent = game_app.resume_game.execute(slot_id)
             if investigator_id:
                 controllers = reconcile_world_investigator_roster(
-                    DATABASE_URL, engine.context, engine.context.world_id,
+                    DATABASE_URL,
+                    engine.context,
+                    engine.context.world_id,
                     preferred_user_id=target_user_id,
                 )
                 investigator_id = controllers.get(str(target_user_id or ""))
                 if not investigator_id:
                     release_turn()
-                    await outbound.send({"type": "error", "message": "当前行动者已没有可操作的调查员", "terminal": True})
+                    await outbound.send(
+                        {
+                            "type": "error",
+                            "message": "当前行动者已没有可操作的调查员",
+                            "terminal": True,
+                        }
+                    )
                     return
         except StaleRevisionError as exc:
             release_turn()
@@ -1473,14 +1482,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     # 发送当前模组主题（electron 用 file:// 加载，fetch('/api/theme') 不可用，
     # 故主题也走 WS 下发）
     await outbound.send({"type": "theme", "theme": _load_theme(engine.context)})
-    await outbound.send(
-        _model_settings_payload(
-            ModelSettings.validated(
-                engine.narrative_model,
-                engine.judgement_model,
-            )
-        )
-    )
+    await outbound.send(await asyncio.to_thread(build_payload, _local_settings_scope(engine), {}))
 
     await outbound.send(save_list_payload())
     await outbound.send(adventure_list_payload())
@@ -1523,10 +1525,12 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 import traceback
 
                 print(
-                    f"[ws] {data.get('type', 'unknown')} 处理异常: {type(exc).__name__}: {exc}",
+                    redact_log(
+                        f"[ws] {data.get('type', 'unknown')} 处理异常: {type(exc).__name__}: {exc}"
+                    ),
                     file=sys.stderr,
                 )
-                traceback.print_exc(file=sys.stderr)
+                print(redact_log(traceback.format_exc()), file=sys.stderr)
                 await outbound.send(
                     {
                         "type": "error",
@@ -1647,10 +1651,7 @@ async def game_ws(ws: WebSocket):
         else:
             context = _local_world_fallback(requested_module)
         engine = GameEngine(context)
-        engine.configure_models(
-            _active_model_settings.narrative_model,
-            _active_model_settings.judgement_model,
-        )
+        engine.route_resolver = LocalRouteResolver(_LOCAL_MODEL_SETTINGS_FILE)
         engine.prepare_session()
     except Exception as e:
         # 配置/初始化失败时，把错误发回客户端而不是静默断开

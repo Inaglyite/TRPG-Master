@@ -329,6 +329,34 @@ async function register(page: Page, username: string): Promise<void> {
   await expect(page.getByRole("heading", { name: "联机大厅" })).toBeVisible();
 }
 
+/** 云端 BYOK-only：房主开局前必须把两个角色绑到模型桩（外部 staging 用其自身配置）。 */
+async function configureRoomByok(page: Page): Promise<void> {
+  if (externalBaseUrl) return;
+  await page
+    .locator(".online-room-screen")
+    .getByRole("button", { name: "模型设置" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  await expect(dialog).toBeVisible();
+  for (const role of ["narrative", "judgement"] as const) {
+    const card = dialog.locator(`[data-role="${role}"]`);
+    await card.getByRole("button", { name: "自定义服务" }).click();
+    await card
+      .getByPlaceholder("https://api.deepseek.com/v1")
+      .fill(modelBaseUrl);
+    await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
+    await card.getByPlaceholder("deepseek-v4-flash").fill("e2e-model");
+  }
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: /保存配置/ }).click();
+  await expect(dialog.locator("#model-settings-status")).toContainText(
+    "下一回合生效",
+    { timeout: 15_000 },
+  );
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(dialog).toBeHidden();
+}
+
 function collectWebSocketFrames(page: Page): string[] {
   const frames: string[] = [];
   page.on("websocket", (socket) => {
@@ -435,6 +463,9 @@ test.beforeAll(async () => {
         TRPG_ALLOWED_ORIGINS: baseUrl,
         TRPG_WRITE_COMPAT_EXPORTS: "0",
         TRPG_ROOM_IDLE_SECONDS: "0",
+        // 云端 BYOK-only：房间开局前房主必须绑定自己的服务。E2E 桩是私网地址，
+        // 仅本环境经运营白名单放行（生产该变量为空）。
+        TRPG_EGRESS_ALLOWED_PRIVATE_HOSTS: "127.0.0.1",
         OPENAI_API_KEY: "e2e-placeholder",
         OPENAI_BASE_URL: modelBaseUrl,
         TRPG_STREAM_USAGE: "0",
@@ -597,6 +628,7 @@ test("两个真实浏览器完成建房、邀请、选角、恢复、隐私与�
   // 超过 Playwright 默认 12 秒 expect 超时；turnTimeout 必须在点击“开始游戏”
   // 前定义，并显式覆盖开局阶段的 dock、行动提示与输入框断言。
   const turnTimeout = externalBaseUrl ? 120_000 : 30_000;
+  await configureRoomByok(owner);
   await player.getByRole("button", { name: "准备" }).click();
   await owner.getByRole("button", { name: "准备" }).click();
   const start = owner.getByRole("button", { name: "开始游戏" });
@@ -782,6 +814,7 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
     // 同上：外部真实模型 opening 可超过默认 12 秒 expect 超时，turnTimeout
     // 在点击“开始游戏”前定义，覆盖双方 dock 与紧邻的输入框状态断言。
     const turnTimeout = externalBaseUrl ? 120_000 : 60_000;
+    await configureRoomByok(page);
     await peer.getByRole("button", { name: "准备" }).click();
     await page.getByRole("button", { name: "准备" }).click();
     const start = page.getByRole("button", { name: "开始游戏" });

@@ -71,8 +71,10 @@ import {
 import { applyTheme } from "./theme";
 import { backendWebSocketUrl } from "./backend-url";
 import {
+  clearContextSummary,
   onModelSettings,
   onModelSettingsError,
+  onModelSettingsTestResult,
   onTurnDiagnostics,
   onTurnPerformance,
 } from "./settings";
@@ -935,6 +937,7 @@ export function handleServerPayload(raw: unknown) {
       break;
     case "world_switched": {
       rememberWorld(data.world_id, data.module_name);
+      clearContextSummary();
       if (getGameStarted()) {
         displayWorldHistory(data.history);
         addMsg("system", "已切换时间线。", true);
@@ -1071,11 +1074,22 @@ export function handleServerPayload(raw: unknown) {
     case "model_settings_error":
       onModelSettingsError(data.message);
       break;
+    case "model_settings_test_result":
+      onModelSettingsTestResult(data);
+      break;
+    case "model_settings_notice":
+      // 房间模型配置变更：目的地主机名公开告知所有成员
+      addMsg(
+        "system",
+        `${data.message || "房间模型配置已更新"}（${(data.destinations || []).join("、")}）`,
+        true,
+      );
+      break;
     case "turn_diagnostics":
       onTurnDiagnostics(data.diagnostics);
       break;
     case "turn_performance":
-      onTurnPerformance(data.metrics);
+      onTurnPerformance(data.metrics, data.context_summary);
       break;
     case "save_list":
       onSaveList(data);

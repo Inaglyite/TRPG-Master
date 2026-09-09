@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
 import { claimByKey, enterSoloLobby, startGame } from "../../../online";
+import { openSettings } from "../../../settings";
 import { useOnlineStore } from "../../../state/online-store";
 import { useStartStore } from "../../../state/start-store";
 import { CharacterDossier } from "../CharacterDossier";
+import { ModelSettingsGateButton } from "../ModelSettingsPanel";
 
 /**
  * 云端单人开局前的角色选择页：与本地开始页共用同一套视觉与档案卡组件
@@ -109,18 +111,28 @@ export function SoloCharacterSelectScreen() {
           <h2>选择调查员</h2>
           <div id="character-module-name">{heading}</div>
         </div>
-        <span
-          className={`online-conn-hint${roomConnection === "connected" ? " online-conn-hint--ok" : ""}`}
-          role="status"
-        >
-          {roomConnection === "connected" ? "已连接" : "正在连接……"}
-        </span>
+        <div className="character-select-side">
+          <button
+            type="button"
+            className="btn-ghost character-settings-entry"
+            onClick={() => openSettings()}
+          >
+            模型设置
+          </button>
+          <span
+            className={`online-conn-hint${roomConnection === "connected" ? " online-conn-hint--ok" : ""}`}
+            role="status"
+          >
+            {roomConnection === "connected" ? "已连接" : "正在连接……"}
+          </span>
+        </div>
       </header>
 
       {roomError && (
-        <p className="online-notice online-notice--error" role="alert">
-          {roomError}
-        </p>
+        <div className="online-notice online-notice--error" role="alert">
+          <span>{roomError}</span>
+          <ModelSettingsGateButton />
+        </div>
       )}
 
       <div className="investigator-layout">

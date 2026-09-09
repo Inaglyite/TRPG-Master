@@ -629,7 +629,7 @@
   border-style: solid;
   border-width: 13px 50px;
   border-image: var(--ui-start-from-slot) 72 280 73 280 fill / 13px 50px / 0
-      stretch;
+    stretch;
   background: none;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
 }

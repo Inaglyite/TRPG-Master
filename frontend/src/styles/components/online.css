@@ -320,6 +320,17 @@
   overflow-wrap: anywhere;
 }
 
+/* 模型未配置引导：错误文案 + "打开模型设置" CTA 同行，CTA 不被压缩 */
+.online-notice .model-gate-cta {
+  flex: 0 0 auto;
+  min-height: 30px;
+  margin-left: 10px;
+  padding: 0 13px;
+  font-size: 13px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .online-notice--error {
   border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
   background: color-mix(in srgb, var(--red) 14%, transparent);
@@ -634,6 +645,19 @@
 }
 
 /* 云端单人角色选择页 */
+.solo-character-select .character-select-side {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.solo-character-select .character-settings-entry {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .solo-character-select .online-conn-hint {
   align-self: center;
   color: var(--text-faint);

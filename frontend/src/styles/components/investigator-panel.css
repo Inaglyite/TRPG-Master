@@ -500,7 +500,9 @@
   transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 #char-content .inv-card-toggle[aria-expanded="false"] .inv-card-chevron,
-#char-content .inv-clue-group-toggle[aria-expanded="false"] .inv-clue-group-caret,
+#char-content
+  .inv-clue-group-toggle[aria-expanded="false"]
+  .inv-clue-group-caret,
 #char-content .inv-attributes-toggle[aria-expanded="false"] .inv-attr-caret {
   transform: rotate(-90deg);
 }

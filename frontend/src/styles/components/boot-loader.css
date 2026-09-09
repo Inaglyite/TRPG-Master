@@ -8,8 +8,11 @@
   align-items: center;
   justify-content: center;
   gap: 18px;
-  background:
-    radial-gradient(ellipse at 50% 35%, var(--bg2, #1e1812) 0%, var(--bg, #14100c) 70%);
+  background: radial-gradient(
+    ellipse at 50% 35%,
+    var(--bg2, #1e1812) 0%,
+    var(--bg, #14100c) 70%
+  );
   color: var(--gold, #c8a24e);
   transition: opacity 620ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -53,7 +56,11 @@
 
 .boot-loader-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--gold-dim, #8a6e30), var(--gold-bright, #ecd07a));
+  background: linear-gradient(
+    90deg,
+    var(--gold-dim, #8a6e30),
+    var(--gold-bright, #ecd07a)
+  );
   border-radius: 2px;
   transition: width 0.2s ease-out;
   animation: boot-loader-pulse 1.6s ease-in-out infinite;

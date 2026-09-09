@@ -95,6 +95,8 @@ export type OnlineState = {
   privateState: PrivateState | null;
   roomBusy: boolean;
   roomError: string | null;
+  /** 最近一次 room_action_rejected 的服务端代码（如 model_not_configured），用于渲染引导动作。 */
+  roomErrorCode: string | null;
   /** playing 中是否打开了完整房间管理页（OnlineRoomDock 的“房间管理”入口）。 */
   roomOpen: boolean;
   /** room_state 下发的房间玩法（"solo"|"multiplayer"）；云端单人时间线能力的权威来源。 */
@@ -144,6 +146,7 @@ export const initialOnlineState: OnlineState = {
   privateState: null,
   roomBusy: false,
   roomError: null,
+  roomErrorCode: null,
   roomOpen: false,
   playMode: null,
   pendingTimelinePanel: false,

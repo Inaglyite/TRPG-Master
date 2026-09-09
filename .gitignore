@@ -2,6 +2,10 @@ venv/
 __pycache__/
 *.pyc
 .env.json
+# 本地自定义模型服务配置（含用户 Key，0600）
+model_settings.local.json
+config_master.key
+local_launch_token
 mod/*/savegame.json
 saves/
 worlds/

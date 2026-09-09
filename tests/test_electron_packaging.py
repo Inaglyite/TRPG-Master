@@ -190,7 +190,8 @@ def test_h3_schema_guard_adopts_current_create_all_schema(
     command.stamp(config, "20260821_0011")
     command.upgrade(config, "head")
 
-    assert _revision(database_url) == MIGRATION_0012.revision
+    # head 随新迁移前进；0012 的守卫必须对最终 ORM 形状保持通过。
+    assert _revision(database_url) == MIGRATION_HOOK.migration_head(PROJECT_ROOT)
     engine = sa.create_engine(database_url)
     try:
         MIGRATION_0012._validate_h3_schema(engine)

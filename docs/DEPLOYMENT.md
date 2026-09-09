@@ -166,10 +166,30 @@ TRPG_ALLOW_REGISTRATION=0
 TRPG_ALLOWED_ORIGINS=https://trpggame.xyz
 TRPG_SESSION_COOKIE=trpg_session
 TRPG_BACKUP_PASSPHRASE_FILE=/etc/trpg-master/backup-passphrase
+# BYOK 凭据主密钥（Fernet，urlsafe base64 32 字节）：
+#   生成：python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# 不设置时自动生成 <runtime>/config_master.key（0600）——该文件必须纳入备份，
+# 丢失或轮换即全部用户已存模型凭据不可解密（用户需重新录入，无需迁移）。
+TRPG_CONFIG_MASTER_KEY=
 ```
 
-云端单人/多人共用服务端全局模型配置（API Key 只在服务器，绝不下发客户端）。花费护栏随
-service 下发，小内存 VM 初期保持保守值，按实测成本再调：
+云端为自带 Key（BYOK-only）模式：用户未配置模型服务时，开局/继续/行动会被
+`model_not_configured` 拒绝，叙事、裁决、压缩、重写与连接测试都不会回落到平台
+默认模型。平台 env（`OPENAI_API_KEY` 等）在云端仅作本地开发兼容保留。用户自配
+Base URL 只允许公网 HTTPS（443/8443）；如需放行内网推理网关（或 E2E 桩），由
+部署者设置 `TRPG_EGRESS_ALLOWED_PRIVATE_HOSTS=host1,host2`（逗号分隔，生产应为空），
+出站连接始终钉扎到校验时解析的 IP 集合。
+
+本地/桌面模式（`TRPG_REQUIRE_AUTH=0`）的 API 与 WebSocket 需要"受控来源 + 每次启动的
+连接凭证"：桌面壳每次启动生成 `TRPG_LOCAL_LAUNCH_TOKEN` 注入后端并在主进程给发往本地
+后端的请求加 `X-TRPG-Local-Token`；手动启动后端再让 Electron 接管时（`npm run electron`
+或 `TRPG_EXTERNAL_BACKEND=1`），后端会把本次启动凭证写到 `<runtime>/local_launch_token`
+（0600）供主进程读取。不要把它写进 URL、日志或前端存储；跨机暴露本地端口时该凭证不能
+替代账号鉴权。
+
+云端不再提供平台模型额度：每个账号/房间使用用户自己配置的服务（Key 只在服务端
+加密存储，绝不下发客户端）。下面的护栏仍由服务器统一实施、约束所有调用的并发与
+容量，小内存 VM 初期保持保守值，按实测情况再调：
 
 ```bash
 TRPG_LLM_MAX_CONCURRENCY=2      # 全局模型调用并发上限，超出排队（60s 超时）

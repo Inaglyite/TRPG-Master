@@ -21,11 +21,13 @@ from src.ai.model.model_stream_helpers import (
     take_complete_sentences,
 )
 from src.ai.model.provider_adapter import (
+    accumulate_tool_call_deltas,
     classify_provider_error,
     extract_reasoning_text,
     finalize_stream_tool_calls,
     maybe_record_stream,
     note_model_retry,
+    raise_for_blocked_route,
 )
 from src.ai.tools.tool_protocol import ToolProtocolFilter
 from src.ai.tools.tool_request_authority import issue_model_request
@@ -131,6 +133,9 @@ class ModelStreamer:
                 self.log_error(f"模型并发已满: {exc}")
                 host.cb.on_error("服务器繁忙：模型调用排队超时，请稍后重试。")
                 raise ModelResponseError("模型调用排队超时") from exc
+            # BYOK 未就绪：重试与通用文案都会误导玩家；直接把可读原因
+            # 交给前端，绝不因缺配置而回落到平台凭据。
+            raise_for_blocked_route(exc, self.log_error, host.cb.on_error)
             overflow = _is_context_overflow(exc)
             if messages_override is None and overflow:
                 if not _overflow_retried and not _capacity_compaction_attempted:
@@ -231,20 +236,7 @@ class ModelStreamer:
                                 emit_visible(pending_visible)
                                 pending_visible = ""
                                 initial_sentence_released = True
-                for tool_call in delta.tool_calls or []:
-                    acc = tool_calls_acc.setdefault(
-                        tool_call.index,
-                        {
-                            "id": "",
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        },
-                    )
-                    if tool_call.id:
-                        acc["id"] += tool_call.id
-                    if tool_call.function:
-                        acc["function"]["name"] += tool_call.function.name or ""
-                        acc["function"]["arguments"] += tool_call.function.arguments or ""
+                accumulate_tool_call_deltas(tool_calls_acc, delta.tool_calls)
             host.raise_if_turn_cancelled()
         except host.turn_cancelled_error:
             raise

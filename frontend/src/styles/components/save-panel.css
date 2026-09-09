@@ -200,7 +200,7 @@
   border-style: solid;
   border-width: 22px 20px 25px 80px;
   border-image: var(--ui-save-slot-card) 170 150 190 420 fill / 22px 20px 25px
-      80px / 0 stretch;
+    80px / 0 stretch;
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
   transition:
     filter 0.18s ease,

@@ -18,6 +18,8 @@ import {
   toggleReady,
 } from "../../../online";
 import { useOnlineStore } from "../../../state/online-store";
+import { openSettings } from "../../../settings";
+import { ModelSettingsGateButton } from "../ModelSettingsPanel";
 import { inviteStatusLabel, roomStatusLabel } from "./room-status";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -183,6 +185,13 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             className="btn-ghost"
+            onClick={() => openSettings()}
+          >
+            模型设置
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
             onClick={() => void enterLobby()}
           >
             ← 大厅
@@ -191,9 +200,10 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
       </header>
 
       {roomError && (
-        <p className="online-notice online-notice--error" role="alert">
-          {roomError}
-        </p>
+        <div className="online-notice online-notice--error" role="alert">
+          <span>{roomError}</span>
+          <ModelSettingsGateButton />
+        </div>
       )}
 
       <section className="online-section" aria-labelledby="room-members-title">

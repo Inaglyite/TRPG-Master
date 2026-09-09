@@ -9,6 +9,7 @@ import {
 } from "../../../online";
 import { connectRoom, disconnectRoom } from "../../../room-ws";
 import { useOnlineStore } from "../../../state/online-store";
+import { ModelSettingsGateButton } from "../ModelSettingsPanel";
 import { useDelayedClose } from "../transitions";
 import { AuthScreen } from "./AuthScreen";
 import { LobbyScreen } from "./LobbyScreen";
@@ -137,9 +138,10 @@ export function OnlineShell() {
               </p>
             </div>
             {roomError && (
-              <p className="online-notice online-notice--error" role="alert">
-                {roomError}
-              </p>
+              <div className="online-notice online-notice--error" role="alert">
+                <span>{roomError}</span>
+                <ModelSettingsGateButton />
+              </div>
             )}
             <button
               type="button"
@@ -159,6 +161,7 @@ export function OnlineShell() {
           }
         />
       )}
+      {/* 模型设置面板由 GameShell 常驻挂载（覆盖层），这里只复用其 store。 */}
     </div>
   );
 }

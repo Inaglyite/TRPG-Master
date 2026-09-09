@@ -68,6 +68,36 @@ def classify_provider_error(exc: BaseException) -> str:
     return ERROR_UNKNOWN
 
 
+def raise_for_blocked_route(exc: BaseException, log_error: Any, on_error: Any) -> None:
+    """BYOK 路由未就绪：给可读原因并中止；其他异常原样返回。
+
+    缺配置重试无用，通用文案又会误导玩家；这里直接暴露可读原因，
+    并且绝不因缺配置而回落到平台凭据（费用归属防线）。
+    """
+    from src.ai.model.llm_concurrency import ModelResponseError
+    from src.ai.model.route_service import RouteNotConfiguredError
+
+    if not isinstance(exc, RouteNotConfiguredError):
+        return
+    log_error("模型路由未就绪，已中止本轮请求")
+    on_error(str(exc))
+    raise ModelResponseError(str(exc)) from exc
+
+
+def accumulate_tool_call_deltas(acc_map: dict[int, dict], deltas: Any) -> None:
+    """把流式 tool_call 增量累加进索引表；缺失增量为空操作（H4 §5.8）。"""
+    for tool_call in deltas or []:
+        acc = acc_map.setdefault(
+            tool_call.index,
+            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+        )
+        if tool_call.id:
+            acc["id"] += tool_call.id
+        if tool_call.function:
+            acc["function"]["name"] += tool_call.function.name or ""
+            acc["function"]["arguments"] += tool_call.function.arguments or ""
+
+
 def reasoning_passback_required() -> bool:
     """只有 DeepSeek API 明确要求时才回传 reasoning（§5.8）。"""
     from src.app import config

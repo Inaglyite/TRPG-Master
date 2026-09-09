@@ -642,6 +642,11 @@ class ModuleImportApiTests(unittest.TestCase):
 
     def test_http_inspect_and_import(self):
         import server
+        from src.auth.service import LOCAL_TOKEN_HEADER, local_launch_token
+
+        # 桌面壳（file:// 页面，Origin=null）的请求由主进程注入本次启动凭证；
+        # 没有凭证的 null 来源会被本地信任门禁拒绝（安全初审 S03）。
+        desktop_headers = {LOCAL_TOKEN_HEADER: local_launch_token()}
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -659,6 +664,7 @@ class ModuleImportApiTests(unittest.TestCase):
                         "Origin": "null",
                         "Access-Control-Request-Method": "POST",
                         "Access-Control-Request-Headers": "content-type,x-module-filename",
+                        **desktop_headers,
                     },
                 )
                 self.assertEqual(preflight.status_code, 200)
@@ -668,7 +674,10 @@ class ModuleImportApiTests(unittest.TestCase):
                 inspected = client.post(
                     "/api/modules/inspect",
                     content=payload,
-                    headers={"Content-Type": "application/vnd.trpg-master.module+zip"},
+                    headers={
+                        "Content-Type": "application/vnd.trpg-master.module+zip",
+                        **desktop_headers,
+                    },
                 )
                 self.assertEqual(inspected.status_code, 200)
                 self.assertEqual(inspected.json()["module"]["title"], "低语档案馆")
@@ -676,7 +685,10 @@ class ModuleImportApiTests(unittest.TestCase):
                 imported = client.post(
                     "/api/modules/import",
                     content=payload,
-                    headers={"Content-Type": "application/vnd.trpg-master.module+zip"},
+                    headers={
+                        "Content-Type": "application/vnd.trpg-master.module+zip",
+                        **desktop_headers,
+                    },
                 )
                 self.assertEqual(imported.status_code, 201)
                 module_key = imported.json()["module"]["id"]

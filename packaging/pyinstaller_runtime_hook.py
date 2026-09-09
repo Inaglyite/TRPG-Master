@@ -30,6 +30,7 @@ LATER_TABLES = {
     "world_skill_pin_manifests",
     "memory_fact_candidates",
     "memory_facts",
+    "model_service_configs",
 }
 
 

@@ -34,14 +34,7 @@ export function AppHeader() {
     );
   });
   const saveOpsVisible = mode !== "online" || isOwner;
-  const openModelSettings = () => {
-    useModelStore.setState((state) => ({
-      open: true,
-      narrativeDraft: state.narrativeModel,
-      judgementDraft: state.judgementModel,
-    }));
-    openSettings();
-  };
+  const openModelSettings = () => openSettings();
 
   const runPanelCommand = (
     command: "quickSave" | "openSavePanel" | "loadState",
@@ -133,14 +126,12 @@ export function AppHeader() {
           aria-label="打开调查笔记"
           onClick={() => openNotes(true)}
         />
-        {mode !== "online" && (
-          <button
-            id="btn-model-settings"
-            title="模型设置"
-            aria-label="打开模型设置"
-            onClick={openModelSettings}
-          />
-        )}
+        <button
+          id="btn-model-settings"
+          title="模型设置"
+          aria-label="打开模型设置"
+          onClick={openModelSettings}
+        />
       </div>
     </>
   );

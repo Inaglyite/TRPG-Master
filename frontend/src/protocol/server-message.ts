@@ -52,6 +52,8 @@ export const serverMessageTypes = [
   "theme",
   "model_settings",
   "model_settings_error",
+  "model_settings_test_result",
+  "model_settings_notice",
   "turn_diagnostics",
   "turn_performance",
   "save_list",

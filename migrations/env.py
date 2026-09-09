@@ -10,7 +10,9 @@ from src.storage.database import Base
 
 config = context.config
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    # 默认 disable_existing_loggers=True 会把应用日志器（trpg）整体停用：
+    # 同进程内跑迁移（测试、桌面端自动升级）之后日志会静默消失。
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 if os.environ.get("TRPG_DATABASE_URL"):
     # ConfigParser treats ``%`` as interpolation syntax. Database passwords
     # commonly contain percent-encoded characters, so escape them only while

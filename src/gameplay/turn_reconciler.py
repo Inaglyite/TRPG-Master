@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from src.ai.model.llm_concurrency import llm_call_slot
-from src.app.config import JUDGEMENT_MODEL
+from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
 from src.app.logger import error as log_error
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
@@ -634,13 +634,13 @@ def reconcile_turn(
         "没有变化时所有数组与 ID 均为空。\n\n" + json.dumps(payload, ensure_ascii=False)
     )
     started_at = time.monotonic()
-    audit_model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
+    audit_model = model_for_role(engine, "audit")
     try:
         with llm_call_slot(
             model=audit_model,
             world_id=str(getattr(getattr(engine, "context", None), "world_id", "") or ""),
         ):
-            response = engine.client.chat.completions.create(
+            response = client_for_role(engine, "audit").chat.completions.create(
                 model=audit_model,
                 messages=[
                     {
@@ -663,9 +663,30 @@ def reconcile_turn(
             )
     except Exception as exc:
         log_error(f"回合审计调用失败: {exc}")
+        if hasattr(engine, "_turn_diagnostics"):
+            engine._turn_diagnostics.append(
+                with_route_info(
+                    engine,
+                    "audit",
+                    {"model": audit_model, "role": "audit", "status": "failed"},
+                )
+            )
         return {"applied": [], "skipped": [], "error": str(exc)}
     elapsed = time.monotonic() - started_at
     log_model_call(audit_model, "audit", elapsed, None, "stop", 1)
+    if hasattr(engine, "_turn_diagnostics"):
+        engine._turn_diagnostics.append(
+            with_route_info(
+                engine,
+                "audit",
+                {
+                    "model": audit_model,
+                    "role": "audit",
+                    "status": "completed",
+                    "elapsed_ms": round(elapsed * 1000),
+                },
+            )
+        )
 
     commit = _extract_commit(response)
     if commit is None:

@@ -8,6 +8,7 @@ from typing import Any
 
 from src.ai.context.context_summary import is_control_message, validate_summary_visibility
 from src.ai.model.llm_concurrency import llm_call_slot
+from src.ai.model.route_service import client_for_role, engine_byok_only, model_for_role
 from src.app.logger import summary_event as log_summary
 
 # Tool results older than the keep-recent window are pruned in place once
@@ -352,7 +353,9 @@ class HistoryCompactor:
                 return None
             return candidate
 
-        glm = _get_glm()
+        # 平台 GLM 旁路仅本地部署可用；云端 BYOK-only 下平台凭据绝不参与，
+        # 压缩直接走冻结路由（用户自己的裁决绑定）。
+        glm = None if engine_byok_only(engine) else _get_glm()
         if glm is not None:
             summary = safe_summary(self.try_model(glm, "glm-4-flash-250414", old_text))
             if summary is not None:
@@ -367,7 +370,13 @@ class HistoryCompactor:
                 )
         if not silent:
             engine.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
-        summary = safe_summary(self.try_model(engine.client, engine.judgement_model, old_text))
+        summary = safe_summary(
+            self.try_model(
+                client_for_role(engine, "summary"),
+                model_for_role(engine, "summary"),
+                old_text,
+            )
+        )
         if summary is not None:
             return self.apply(
                 system_message,

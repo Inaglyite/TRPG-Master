@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
 from src.ai.model.llm import glm_quick_summary, tension
+from src.ai.model.route_service import activate_route_slot, engine_byok_only
 from src.ai.skills.skill_activation import note_load_skill_result
 from src.ai.tools.registry import (
     COMPLEX_FUNCTIONS,
@@ -210,10 +211,18 @@ def _prepare_turn_inner(
             from src.gameplay.action_resolution import ActionPhase, ActionResolution
 
             action_resolution = ActionResolution(
-                player_input=user_content, phase=ActionPhase.INTERACTION,
+                player_input=user_content,
+                phase=ActionPhase.INTERACTION,
                 origin_scene_id=action_resolution.origin_scene_id,
-                adjudication_json=json.dumps({"intent": "combat", "input_quote": user_content,
-                                              "approach": user_content, "npc_direction": "处理刚刚发生的伏击"}, ensure_ascii=False),
+                adjudication_json=json.dumps(
+                    {
+                        "intent": "combat",
+                        "input_quote": user_content,
+                        "approach": user_content,
+                        "npc_direction": "处理刚刚发生的伏击",
+                    },
+                    ensure_ascii=False,
+                ),
             )
             engine._action_resolution = action_resolution
         prelude_parts = [str(getattr(engine, "_preflight_narrative", "") or "").strip()]
@@ -330,10 +339,14 @@ def _prepare_turn_inner(
                 engine._resolve_action_check(user_content, discovery_skill)
                 if not skip_agent
                 and not transition_id
-                and (not discovery_matches or needs_discovery_check or bool(
-                    action_resolution.adjudication_json
-                    and json.loads(action_resolution.adjudication_json).get("check")
-                ))
+                and (
+                    not discovery_matches
+                    or needs_discovery_check
+                    or bool(
+                        action_resolution.adjudication_json
+                        and json.loads(action_resolution.adjudication_json).get("check")
+                    )
+                )
                 else None
             )
         )
@@ -417,9 +430,7 @@ def _prepare_turn_inner(
                 "\n\n[骰前裁决已结算｜不得改写或再次执行]\n"
                 + json.dumps(adjudicated_outcome, ensure_ascii=False)
                 + "\n按 description 和 events 展开结果；npc_direction 指导在场 NPC 的行为。"
-                "这些后果已落账，不得再次发放物品、推进时钟或重复检定。"
-                + status_line
-                + time_note
+                "这些后果已落账，不得再次发放物品、推进时钟或重复检定。" + status_line + time_note
             )
         content += (
             "\n\n[输出格式] NPC 直接引语的台词必须用 【npc:<npc_public_state 中的 id>】…"
@@ -450,6 +461,7 @@ def _prepare_turn_inner(
 
     authored_segments, authored_clean_prefix = _parse_authored_parts(engine, prelude_parts)
     engine.current_model = getattr(engine, "narrative_model", NARRATIVE_MODEL)
+    activate_route_slot(engine, "narrative")
     return {
         "tool_round": 0,
         "narrative": prelude,
@@ -503,6 +515,7 @@ def _call_combat_agent(state: TurnState) -> dict:
         # keeper.combat（不依赖关键词，也不要求模型先尝试不安全的文件读取）。
         sync_skills("")
     _emit_phase(engine, "narrating", "守秘人正在结算战局……")
+    activate_route_slot(engine, "judgement")
     with _performance_span(engine, "combat_model"):
         text, tool_calls = engine._stream_llm(
             getattr(engine, "judgement_model", JUDGEMENT_MODEL),
@@ -550,6 +563,7 @@ def _execute_tools(state: TurnState) -> dict:
     if complex_hit:
         turn_had_check = True
         engine.current_model = getattr(engine, "judgement_model", JUDGEMENT_MODEL)
+        activate_route_slot(engine, "judgement")
     if complex_hit and state.get("tool_round", 0) == 0:
         engine.cb.on_tension(tension(_tool_category(tool_calls)), _tool_category(tool_calls))
 
@@ -744,7 +758,10 @@ def _execute_tools(state: TurnState) -> dict:
     )
 
     if tool_outputs:
-        quick = glm_quick_summary(tool_outputs, text or narrative)
+        # 平台 GLM 快摘要仅本地部署可用；云端 BYOK-only 下平台凭据不参与。
+        quick = (
+            None if engine_byok_only(engine) else glm_quick_summary(tool_outputs, text or narrative)
+        )
         if quick:
             engine.cb.on_glm_summary(quick)
 

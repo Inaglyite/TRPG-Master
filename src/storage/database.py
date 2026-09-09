@@ -304,6 +304,31 @@ class AuditEvent(Base):
     )
 
 
+class ModelServiceConfig(Base):
+    """云端用户模型服务配置（BYOK）。
+
+    作用域：``world_id == ""`` 是账号默认；非空是该世界/房间的覆盖绑定。
+    payload_json 内 narrative/judgement 两个角色绑定的 api_key 一律为
+    Fernet 密文（src/ai/model/crypto_box.py），主密钥独立于数据库。
+    world_id 不设外键：账号默认行不属于任何世界；世界删除后的孤儿覆盖行
+    不会被解析（resolver 只在世界上下文按 owner+world 查询并复核房主）。
+    """
+
+    __tablename__ = "model_service_configs"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "world_id", name="uq_model_service_config_scope"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    world_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    revision: Mapped[int] = mapped_column(BigInteger, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 ACTIVE_CONTEXT_SESSION_INDEX = "uq_context_sessions_one_active_per_world"
 
 

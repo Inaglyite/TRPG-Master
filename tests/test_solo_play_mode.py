@@ -844,6 +844,7 @@ def test_solo_start_skips_ready_gates_and_auto_claims_investigator(tmp_path: Pat
         patch.object(server, "DATABASE_URL", url),
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
         patch("src.multiplayer.messages.list_character_options", return_value=options),
     ):
         asyncio.run(scenario())
@@ -914,6 +915,7 @@ def test_multiplayer_world_start_keeps_ready_and_claim_gates(tmp_path: Path):
     with (
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
     ):
         asyncio.run(scenario())
 
@@ -964,6 +966,7 @@ def test_action_in_progress_rejects_second_turn_across_worlds():
     with (
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
     ):
         asyncio.run(scenario())
 
@@ -1016,6 +1019,7 @@ def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
     with (
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
         patch("src.multiplayer.messages.reserve_room_action"),
     ):
         asyncio.run(scenario())
@@ -1070,6 +1074,7 @@ def test_daily_turn_quota_rejects_when_exhausted(monkeypatch: pytest.MonkeyPatch
     with (
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
         patch("src.multiplayer.messages.reserve_room_action"),
     ):
         asyncio.run(scenario())
@@ -1100,5 +1105,163 @@ def test_cloud_mode_disables_legacy_ws_and_exposes_no_model_settings_http(tmp_pa
 
     http_paths = {route.path for route in server.app.routes if isinstance(route, APIRoute)}
     assert all("model_settings" not in path for path in http_paths)
-    # 房间通道内模型设置更新同样是禁用消息类型
-    assert "model_settings_update" in UNSUPPORTED_ROOM_TYPES
+    # 房间通道内模型设置更新不再是协议禁用项：由房主权限门控（见房间设置测试）。
+    assert "model_settings_update" not in UNSUPPORTED_ROOM_TYPES
+
+
+# ---------------------------------------------------------------- BYOK 就绪门禁
+
+
+def _seed_byok_account(url: str, owner_user_id: str) -> None:
+    """给房主账号种一份自定义服务绑定（IP 字面量地址，离线可解析）。"""
+    from src.ai.model.route_service import EffectiveSettings, RoleBinding, ServiceSpec
+    from src.storage import model_config_store
+
+    service = ServiceSpec(
+        label="测试服务",
+        provider_kind="openai_compatible",
+        base_url="https://93.184.216.34/v1",
+        api_key="sk-byok-test",
+        model_id="deepseek-v4-flash",
+        window_tokens=None,
+        max_output_tokens=None,
+        capabilities=None,
+    )
+    binding = RoleBinding(mode="custom", service=service)
+    model_config_store.save_scope(
+        url,
+        owner_user_id,
+        "",
+        EffectiveSettings(narrative=binding, judgement=binding, revision=0),
+    )
+
+
+def _solo_start_room(owner_id: str):
+    room = GameRoom(
+        "world-solo",
+        SimpleNamespace(context=SimpleNamespace(module_name="mansion_of_madness")),
+        RoomEventHub("world-solo"),
+        owner_id,
+        current_actor_user_id=owner_id,
+        status="lobby",
+        play_mode="solo",
+        ready_users=set(),
+        connected_users={owner_id: 1},
+    )
+    driver = _Driver()
+    room.driver_transport = driver
+    return room, driver
+
+
+def test_start_rejected_when_models_unconfigured(tmp_path: Path):
+    """BYOK-only：未配置模型时 start 被拒 model_not_configured，房间保持 lobby。"""
+    import server
+
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    ref = {"source": "module", "id": "solo-detective"}
+    options = {"groups": [{"characters": [{"id": "solo-detective", "ref": ref}]}]}
+    room, driver = _solo_start_room(owner.id)
+    socket = _QueueSocket([{"type": "start", "action_id": "solo-start-byok"}])
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="test complete"):
+            await run_room_message_loop(
+                server.MULTIPLAYER_WS,
+                socket,
+                room,
+                SimpleNamespace(id=owner.id),
+                room.world_id,
+                "owner-tab",
+                "owner",
+            )
+
+    with (
+        patch.object(server, "DATABASE_URL", url),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.list_character_options", return_value=options),
+    ):
+        asyncio.run(scenario())
+
+    rejection = next(m for m in socket.sent if m["type"] == "room_action_rejected")
+    assert rejection["code"] == "model_not_configured"
+    assert "叙述模型" in rejection["message"]
+    assert "裁决模型" in rejection["message"]
+    assert driver.submitted == []
+    assert room.status == "lobby"
+
+
+def test_start_passes_gate_when_byok_configured(tmp_path: Path):
+    """BYOK-only：账号默认绑定齐全后 start 通过门禁并提交到房间驱动。"""
+    import server
+
+    url = sqlite_url(tmp_path)
+    owner, _guest = seed_solo_world(url)
+    _seed_byok_account(url, owner.id)
+    ref = {"source": "module", "id": "solo-detective"}
+    options = {"groups": [{"characters": [{"id": "solo-detective", "ref": ref}]}]}
+    room, driver = _solo_start_room(owner.id)
+    socket = _QueueSocket([{"type": "start", "action_id": "solo-start-byok-ok"}])
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="test complete"):
+            await run_room_message_loop(
+                server.MULTIPLAYER_WS,
+                socket,
+                room,
+                SimpleNamespace(id=owner.id),
+                room.world_id,
+                "owner-tab",
+                "owner",
+            )
+
+    with (
+        patch.object(server, "DATABASE_URL", url),
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        patch("src.multiplayer.messages.list_character_options", return_value=options),
+    ):
+        asyncio.run(scenario())
+
+    assert [item["type"] for item in driver.submitted] == ["start"]
+    assert room.status == "starting"
+
+
+def test_readiness_db_error_fails_closed():
+    """配置存储故障时门禁 fail-closed：拒绝但保留房间连接与 lobby 状态。"""
+
+    class BrokenDeps:
+        @staticmethod
+        def database_url() -> str:
+            return "sqlite:////nonexistent-dir/broken.db"
+
+    controller = SimpleNamespace(
+        deps=BrokenDeps(),
+        room_roster=lambda _world_id: ([], set()),
+    )
+    room, driver = _solo_start_room("owner")
+    socket = _QueueSocket([{"type": "start", "action_id": "broken-db-start"}])
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="test complete"):
+            await run_room_message_loop(
+                controller,
+                socket,
+                room,
+                SimpleNamespace(id="owner"),
+                room.world_id,
+                "owner-tab",
+                "owner",
+            )
+
+    with (
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+    ):
+        asyncio.run(scenario())
+
+    rejection = next(m for m in socket.sent if m["type"] == "room_action_rejected")
+    assert rejection["code"] == "model_readiness_unavailable"
+    assert driver.submitted == []
+    assert room.status == "lobby"

@@ -14,7 +14,8 @@ import time
 from typing import Any
 
 from src.ai.model.llm_concurrency import llm_call_slot
-from src.app.config import JUDGEMENT_MODEL, _enabled_env
+from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
+from src.app.config import _enabled_env
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 
@@ -87,11 +88,11 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         {"role": "system", "content": _REWRITE_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
-    model = getattr(engine, "narrative_model", None) or JUDGEMENT_MODEL
+    model = model_for_role(engine, "consistency")
     started = time.monotonic()
     try:
         with llm_call_slot(model=model, world_id=str(getattr(engine.context, "world_id", ""))):
-            response = engine.client.chat.completions.create(
+            response = client_for_role(engine, "consistency").chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0,
@@ -110,13 +111,17 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
     log_model_call(model, "narrative_consistency", elapsed, None, "chars", len(rewritten))
     if hasattr(engine, "_turn_diagnostics"):
         engine._turn_diagnostics.append(
-            {
-                "model": model,
-                "role": "narrative_consistency",
-                "status": "completed",
-                "elapsed_ms": round(elapsed * 1000),
-                "violations": len(violations),
-            }
+            with_route_info(
+                engine,
+                "consistency",
+                {
+                    "model": model,
+                    "role": "narrative_consistency",
+                    "status": "completed",
+                    "elapsed_ms": round(elapsed * 1000),
+                    "violations": len(violations),
+                },
+            )
         )
     if not rewritten or len(rewritten) < len(narrative) * 0.3:
         log_game("叙事一致性重写结果过短，保留原文")
