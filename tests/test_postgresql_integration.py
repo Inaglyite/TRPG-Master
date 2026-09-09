@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import secrets
@@ -10,7 +11,9 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 
@@ -130,11 +133,7 @@ def test_postgresql_jsonb_membership_and_room_idempotency(
         context=context,
     )
     with session_scope(POSTGRES_URL) as session:
-        save = (
-            session.query(SaveSlot)
-            .filter_by(world_id=world_id, slot_key="slot_001")
-            .one()
-        )
+        save = session.query(SaveSlot).filter_by(world_id=world_id, slot_key="slot_001").one()
         assert session.get(Snapshot, save.snapshot_id) is not None
 
     invite = create_invite(POSTGRES_URL, world_id, owner.id, max_uses=1)
@@ -165,6 +164,11 @@ def test_postgresql_jsonb_membership_and_room_idempotency(
 
 
 def test_postgresql_migration_schema_matches_orm() -> None:
+    columns = {
+        column["name"]: column
+        for column in inspect(get_engine(POSTGRES_URL)).get_columns("model_service_configs")
+    }
+    assert isinstance(columns["payload_json"]["type"], JSONB)
     env = {
         **os.environ,
         "TRPG_DATABASE_URL": POSTGRES_URL,
@@ -179,6 +183,47 @@ def test_postgresql_migration_schema_matches_orm() -> None:
     )
 
 
+def test_postgresql_model_config_jsonb_migration_preserves_payload() -> None:
+    path = PROJECT_ROOT / "migrations/versions/20260909_0014_model_config_jsonb.py"
+    spec = importlib.util.spec_from_file_location("model_config_jsonb_migration", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    payload = {"narrative": {"api_key": "fake-ciphertext", "model": "测试"}, "revision": 7}
+    # A temporary table shadows the real table only within this connection.
+    # No account data or existing configuration rows are changed by the test.
+    with get_engine(POSTGRES_URL).connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(
+                text(
+                    "CREATE TEMP TABLE model_service_configs "
+                    "(payload_json JSON NOT NULL) ON COMMIT DROP"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO model_service_configs VALUES (CAST(:payload AS JSON))"),
+                {"payload": json.dumps(payload)},
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                for operation, expected in (
+                    (migration.upgrade, "jsonb"),
+                    (migration.downgrade, "json"),
+                    (migration.upgrade, "jsonb"),
+                ):
+                    operation()
+                    row = connection.execute(
+                        text(
+                            "SELECT payload_json, pg_typeof(payload_json)::text "
+                            "FROM model_service_configs"
+                        )
+                    ).one()
+                    assert row[0] == payload
+                    assert row[1] == expected
+        finally:
+            transaction.rollback()
+
+
 def test_postgresql_legacy_import_with_save_and_owner(tmp_path: Path) -> None:
     suffix = secrets.token_hex(5)
     owner = create_user(
@@ -190,9 +235,7 @@ def test_postgresql_legacy_import_with_save_and_owner(tmp_path: Path) -> None:
     slot_dir = world_dir / "saves" / "slot_001"
     slot_dir.mkdir(parents=True)
     state = {"schema_version": 0, "revision": 3, "pc": {"hp": 7}}
-    (world_dir / "world.json").write_text(
-        json.dumps({"module_name": "mansion_of_madness"})
-    )
+    (world_dir / "world.json").write_text(json.dumps({"module_name": "mansion_of_madness"}))
     (world_dir / "world_state.json").write_text(json.dumps(state))
     (slot_dir / "messages.json").write_text("[]")
     (slot_dir / "snapshot.json").write_text(json.dumps(state))
@@ -208,9 +251,5 @@ def test_postgresql_legacy_import_with_save_and_owner(tmp_path: Path) -> None:
         world = session.get(World, world_dir.name)
         assert world is not None
         assert world.created_by == owner.id
-        save = (
-            session.query(SaveSlot)
-            .filter_by(world_id=world_dir.name, slot_key="slot_001")
-            .one()
-        )
+        save = session.query(SaveSlot).filter_by(world_id=world_dir.name, slot_key="slot_001").one()
         assert session.get(Snapshot, save.snapshot_id) is not None
