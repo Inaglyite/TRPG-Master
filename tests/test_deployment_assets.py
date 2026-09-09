@@ -294,6 +294,8 @@ def test_release_installers_stage_atomically_and_install_managed_assets() -> Non
         assert 'systemctl enable --now "$backup_timer"' in installer
         assert health_url in installer
         assert 'chown -R trpgdeploy:trpgdeploy "$candidate"' not in installer
+        # Ubuntu's ensurepip version need not support newer pip-only flags.
+        assert "--resume-retries" not in installer
         assert (
             'install -d -m 0700 -o trpgdeploy -g trpgdeploy "$candidate/.venv"'
             in installer
