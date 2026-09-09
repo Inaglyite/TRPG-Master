@@ -22,9 +22,11 @@
   animation: pop-out 0.16s cubic-bezier(0.3, 0, 0.7, 0.15) both;
 }
 #model-settings-panel {
+  display: flex;
+  flex-direction: column;
   width: min(660px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--border-bright);
   border-radius: var(--r-lg);
   background: linear-gradient(180deg, var(--bg2), var(--bg));
@@ -68,6 +70,8 @@
   font-size: 18px;
 }
 .model-settings-body {
+  min-height: 0;
+  overflow-y: auto;
   padding: 26px 24px 20px;
 }
 .model-preset-control {
@@ -158,6 +162,8 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 14%, transparent);
 }
 #model-settings-status {
+  flex-shrink: 0;
+  padding: 0 24px;
   min-height: 20px;
   margin-top: 16px;
   color: var(--text-dim);
@@ -326,6 +332,7 @@
   color: var(--red-bright);
 }
 .model-settings-actions {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -333,6 +340,9 @@
   border-top: 1px solid var(--border);
 }
 .model-settings-actions button {
+  flex: 0 0 auto;
+  padding: 0 13px;
+  white-space: nowrap;
   min-width: 112px;
   min-height: 42px;
   font-family: var(--font);
@@ -340,6 +350,10 @@
 }
 .model-settings-actions button:disabled {
   cursor: wait;
+}
+.model-settings-header,
+.model-settings-tabs {
+  flex-shrink: 0;
 }
 
 /* ---- 调查笔记与快捷行动 ---- */

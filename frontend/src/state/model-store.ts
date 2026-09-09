@@ -186,7 +186,7 @@ type ModelState = {
   saving: boolean;
   testingRole: "narrative" | "judgement" | null;
   testResult: TestResult | null;
-  /** 首次读取配置进行中（已有 view 的后台刷新不算 loading）。 */
+  /** 等待本次权威配置；缓存视图不可在此期间编辑。 */
   loading: boolean;
   /** 加载失败/超时/旧协议的可读原因；非空时面板给重试入口。 */
   loadError: string | null;

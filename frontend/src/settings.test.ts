@@ -125,6 +125,24 @@ describe("settings commands", () => {
     }
   });
 
+  it("缓存视图刷新也锁住保存，迟到响应同步后才允许填写", () => {
+    vi.useFakeTimers();
+    try {
+      fetchSettings();
+      expect(useModelStore.getState().loading).toBe(true);
+      safeSendMock.mockClear();
+      useModelStore.setState({ confirmSharing: true });
+      saveSettings();
+      expect(safeSendMock).not.toHaveBeenCalled();
+      onModelSettings(view);
+      expect(useModelStore.getState().loading).toBe(false);
+      expect(useModelStore.getState().confirmSharing).toBe(false);
+      expect(useModelStore.getState().status).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("保存载荷：custom 带服务字段，空 Key 不覆盖已保存值", () => {
     useModelStore.setState({ confirmSharing: true });
     saveSettings();

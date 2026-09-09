@@ -86,6 +86,8 @@ function seed(view: ModelSettingsView | null) {
     scopeDraft: "account",
     confirmSharing: false,
     saving: false,
+    loading: false,
+    loadError: null,
     testingRole: null,
     testResult: null,
     status: "",
@@ -100,6 +102,22 @@ describe("ModelSettingsPanel", () => {
   beforeEach(() => {
     localStorage.clear();
     seed(makeView());
+  });
+
+  it("有缓存时仍等待刷新，加载和失败期间不能编辑或保存", () => {
+    useModelStore.setState({ loading: true });
+    render(<ModelSettingsPanel />);
+    expect(screen.getByText("正在读取配置…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "自定义服务" })).toBeNull();
+    expect(screen.getByRole("button", { name: /保存配置/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
+    act(() =>
+      useModelStore.setState({ loading: false, loadError: "读取配置超时" }),
+    );
+    expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /保存配置/ })).toBeDisabled();
+    act(() => useModelStore.setState({ loadError: null }));
+    expect(screen.getByRole("button", { name: /保存配置/ })).toBeEnabled();
   });
 
   it("两页签 + 角色卡片 + 版本三态行", () => {

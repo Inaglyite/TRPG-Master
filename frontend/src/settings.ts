@@ -24,14 +24,13 @@ function clearLoadTimer() {
   }
 }
 
-/** 拉取配置视图：无 view 时显示加载态，8 秒无响应给可读错误与重试入口。 */
+/** 编辑前等待本次权威视图，避免迟到响应覆盖已经填写的草稿。 */
 export function fetchSettings() {
-  const hasView = Boolean(useModelStore.getState().view);
   useModelStore.setState({
-    loading: !hasView,
+    loading: true,
     loadError: null,
-    status: hasView ? "" : "正在读取模型配置…",
-    statusKind: hasView ? "" : "working",
+    status: "正在读取模型配置…",
+    statusKind: "working",
   });
   clearLoadTimer();
   loadTimer = setTimeout(() => {
@@ -163,6 +162,8 @@ function hasCustomDraft(): boolean {
 }
 
 export function saveSettings() {
+  if (useModelStore.getState().loading || useModelStore.getState().loadError)
+    return;
   const invalid = validateDrafts();
   if (invalid) {
     useModelStore.setState({ status: invalid, statusKind: "error" });
@@ -272,7 +273,11 @@ export function onModelSettings(
     state.view !== null &&
     (state.view.revision !== view.revision || state.view.mode !== view.mode);
   const shouldSyncDrafts =
-    !state.open || data.saved || state.view === null || externalChange;
+    state.loading ||
+    !state.open ||
+    data.saved ||
+    state.view === null ||
+    externalChange;
   useModelStore.setState({
     view,
     loading: false,
@@ -280,8 +285,12 @@ export function onModelSettings(
     saving: false,
     status:
       data.notice ||
-      (data.saved ? "配置已保存，将从下一回合生效" : state.status),
-    statusKind: data.saved ? "success" : state.statusKind,
+      (data.saved
+        ? "配置已保存，将从下一回合生效"
+        : state.loading
+          ? ""
+          : state.status),
+    statusKind: data.saved ? "success" : state.loading ? "" : state.statusKind,
     ...(shouldSyncDrafts
       ? {
           drafts: {

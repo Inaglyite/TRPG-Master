@@ -341,7 +341,7 @@ function ModelsTab({ disabled }: { disabled: boolean }) {
   );
   const loading = useModelStore((state) => state.loading);
   const loadError = useModelStore((state) => state.loadError);
-  if (!view) {
+  if (!view || loading || loadError) {
     if (loadError) {
       return (
         <div className="model-settings-load-error" role="alert">
@@ -751,6 +751,8 @@ export function ModelSettingsPanel() {
   const tab = useModelStore((state) => state.tab);
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
+  const loading = useModelStore((state) => state.loading);
+  const loadError = useModelStore((state) => state.loadError);
   const status = useModelStore((state) => state.status);
   const statusKind = useModelStore((state) => state.statusKind);
   const mode = useAppStore((state) => state.mode);
@@ -826,7 +828,7 @@ export function ModelSettingsPanel() {
             <button
               id="model-settings-restore"
               className="btn-ghost"
-              disabled={saving || !view}
+              disabled={saving || loading || Boolean(loadError) || !view}
               onClick={() => restoreDefaultSettings()}
             >
               {view?.byok_required ? "清除配置" : "恢复默认"}
@@ -839,7 +841,9 @@ export function ModelSettingsPanel() {
           {tab === "models" && !readOnly && (
             <button
               id="model-settings-save"
-              disabled={saving || blocked || !view}
+              disabled={
+                saving || loading || Boolean(loadError) || blocked || !view
+              }
               onClick={() => saveSettings()}
             >
               {saving ? "正在保存…" : "保存配置（下回合生效）"}
