@@ -853,7 +853,7 @@ HTTP 创建对应模组的世界后使用 `world_switch`。
 ```json
 {
   "type": "model_settings_update",
-  "narrative_model": "deepseek-v4-flash",
+  "narrative_model": "deepseek-flash",
   "judgement_model": "deepseek-v4-pro"
 }
 ```
@@ -1391,7 +1391,7 @@ system prompt、Lorebook 扫描或 `world_state`。
   "narrative_model": "deepseek-v4-pro",
   "judgement_model": "deepseek-v4-pro",
   "available_models": [
-    {"id":"deepseek-v4-flash","label":"Flash"},
+    {"id":"deepseek-flash","label":"Flash"},
     {"id":"deepseek-v4-pro","label":"Pro"}
   ],
   "saved": true

@@ -243,7 +243,7 @@ function RoleCard({
             <input
               value={service.model_id}
               disabled={disabled}
-              placeholder="deepseek-v4-flash"
+              placeholder="deepseek-flash"
               spellCheck={false}
               onChange={(event) =>
                 updateServiceDraft(role, { model_id: event.target.value })

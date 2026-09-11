@@ -353,17 +353,17 @@ class IdentityContractTests(unittest.TestCase):
         with (
             patch("src.app.engine.STORY_THINKING_MODE", "auto"),
             patch("src.app.engine.BASE_URL", "https://api.deepseek.com"),
-            patch("src.app.engine.MODEL_FLASH", "deepseek-v4-flash"),
+            patch("src.app.engine.MODEL_FLASH", "deepseek-flash"),
         ):
             self.assertEqual(
-                _thinking_type_for_request("deepseek-v4-flash", "story"),
+                _thinking_type_for_request("deepseek-flash", "story"),
                 "disabled",
             )
-            self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "combat"))
+            self.assertIsNone(_thinking_type_for_request("deepseek-flash", "combat"))
             self.assertIsNone(_thinking_type_for_request("deepseek-v4-pro", "story"))
 
         with patch("src.app.engine.BASE_URL", "https://example.test/v1"):
-            self.assertIsNone(_thinking_type_for_request("deepseek-v4-flash", "story"))
+            self.assertIsNone(_thinking_type_for_request("deepseek-flash", "story"))
 
     def test_story_request_sends_selected_thinking_override(self):
         captured = {}

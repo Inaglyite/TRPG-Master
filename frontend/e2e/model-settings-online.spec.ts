@@ -291,7 +291,7 @@ async function configureByokToStub(dialog: ReturnType<Page["getByRole"]>) {
       .getByPlaceholder("https://api.deepseek.com/v1")
       .fill(modelBaseUrl);
     await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
-    await card.getByPlaceholder("deepseek-v4-flash").fill("e2e-model");
+    await card.getByPlaceholder("deepseek-flash").fill("e2e-model");
   }
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();
@@ -343,7 +343,7 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
     .getByPlaceholder("https://api.deepseek.com/v1")
     .fill("https://10.9.9.9/v1");
   await narrativeCard.getByPlaceholder("sk-…").fill("sk-private");
-  await narrativeCard.getByPlaceholder("deepseek-v4-flash").fill("e2e-model");
+  await narrativeCard.getByPlaceholder("deepseek-flash").fill("e2e-model");
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();
   await expect(dialog.locator("#model-settings-status")).toContainText(

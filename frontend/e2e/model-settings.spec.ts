@@ -244,7 +244,7 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
     .getByPlaceholder("https://api.deepseek.com/v1")
     .fill(stubUrl);
   await narrativeCard.getByPlaceholder("sk-…").fill("sk-e2e-local");
-  await narrativeCard.getByPlaceholder("deepseek-v4-flash").fill("e2e-model");
+  await narrativeCard.getByPlaceholder("deepseek-flash").fill("e2e-model");
   await narrativeCard.getByPlaceholder("例如 65536").fill("65536");
 
   // 数据发送确认

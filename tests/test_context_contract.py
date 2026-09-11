@@ -182,7 +182,7 @@ class TestMemberProjection:
             "turn_id": "t1",
             "model_calls": [
                 {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "role": "story",
                     "status": "completed",
                     "input_tokens": 5000,

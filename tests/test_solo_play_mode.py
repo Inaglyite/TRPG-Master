@@ -1122,7 +1122,7 @@ def _seed_byok_account(url: str, owner_user_id: str) -> None:
         provider_kind="openai_compatible",
         base_url="https://93.184.216.34/v1",
         api_key="sk-byok-test",
-        model_id="deepseek-v4-flash",
+        model_id="deepseek-flash",
         window_tokens=None,
         max_output_tokens=None,
         capabilities=None,

@@ -38,7 +38,7 @@ function makeView(patch: Partial<ModelSettingsView> = {}): ModelSettingsView {
     blocked: null,
     narrative: {
       mode: "default",
-      model_id: "deepseek-v4-flash",
+      model_id: "deepseek-flash",
       window_tokens: 65536,
       window_source: "legacy_default",
       max_output_tokens: 4096,
@@ -61,9 +61,9 @@ function makeView(patch: Partial<ModelSettingsView> = {}): ModelSettingsView {
       },
     },
     server_defaults: {
-      narrative_model: "deepseek-v4-flash",
-      judgement_model: "deepseek-v4-flash",
-      available_models: [{ id: "deepseek-v4-flash", label: "Flash" }],
+      narrative_model: "deepseek-flash",
+      judgement_model: "deepseek-flash",
+      available_models: [{ id: "deepseek-flash", label: "Flash" }],
       window_tokens: 65536,
       window_source: "legacy_default",
       max_output_tokens: 4096,
@@ -131,7 +131,7 @@ describe("ModelSettingsPanel", () => {
     );
     expect(screen.getByRole("tab", { name: "上下文" })).toBeInTheDocument();
     // 叙述默认 + 裁决自定义
-    expect(screen.getByText(/当前 deepseek-v4-flash/)).toBeInTheDocument();
+    expect(screen.getByText(/当前 deepseek-flash/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("qwen3:32b")).toBeInTheDocument();
     expect(
       screen.getByDisplayValue("http://127.0.0.1:11434/v1"),
@@ -218,7 +218,7 @@ describe("ModelSettingsPanel", () => {
         contextSummary: {
           world_id: "w1",
           role: "story",
-          model_id: "deepseek-v4-flash",
+          model_id: "deepseek-flash",
           input_tokens: 18400,
           input_source: "provider",
           window_tokens: 65536,
@@ -233,7 +233,7 @@ describe("ModelSettingsPanel", () => {
           turn_id: "t1",
           model_calls: [
             {
-              model: "deepseek-v4-flash",
+              model: "deepseek-flash",
               role: "story",
               status: "completed",
               input_tokens: 18400,
@@ -247,7 +247,7 @@ describe("ModelSettingsPanel", () => {
               },
             },
             {
-              model: "deepseek-v4-flash",
+              model: "deepseek-flash",
               role: "audit",
               status: "completed",
               input_tokens: 900,
@@ -314,7 +314,7 @@ describe("ContextSummaryButton", () => {
     useModelStore.setState({
       contextSummary: {
         world_id: "w1",
-        model_id: "deepseek-v4-flash",
+        model_id: "deepseek-flash",
         utilization: 0.28,
         from_narrative: true,
       },
@@ -342,7 +342,7 @@ describe("BYOK-only 云端语义", () => {
         byok_required: true,
         judgement: {
           mode: "default",
-          model_id: "deepseek-v4-flash",
+          model_id: "deepseek-flash",
           window_tokens: 65536,
           window_source: "legacy_default",
           max_output_tokens: 4096,
@@ -377,7 +377,7 @@ describe("BYOK-only 云端语义", () => {
         byok_required: true,
         narrative: {
           mode: "custom",
-          model_id: "deepseek-v4-flash",
+          model_id: "deepseek-flash",
           window_tokens: null,
           window_source: "unknown",
           max_output_tokens: 4096,

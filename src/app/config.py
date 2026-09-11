@@ -79,7 +79,7 @@ MODEL_TIMEOUT = _bounded_float_env("TRPG_MODEL_TIMEOUT", 600.0, 1.0, 3600.0)
 def model_timeout_seconds() -> float:
     """运行时读取模型超时，便于测试与运维动态调整（未设置时回退到启动值）。"""
     return _bounded_float_env("TRPG_MODEL_TIMEOUT", MODEL_TIMEOUT, 1.0, 3600.0)
-MODEL_FLASH = os.environ.get("TRPG_FLASH_MODEL", "deepseek-v4-flash")
+MODEL_FLASH = os.environ.get("TRPG_FLASH_MODEL", "deepseek-flash")
 MODEL_PRO = os.environ.get("TRPG_PRO_MODEL", "deepseek-v4-pro")
 _legacy_force_pro = os.environ.get("TRPG_FORCE_PRO")
 _default_role_model = (

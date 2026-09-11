@@ -345,7 +345,7 @@ async function configureRoomByok(page: Page): Promise<void> {
       .getByPlaceholder("https://api.deepseek.com/v1")
       .fill(modelBaseUrl);
     await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
-    await card.getByPlaceholder("deepseek-v4-flash").fill("e2e-model");
+    await card.getByPlaceholder("deepseek-flash").fill("e2e-model");
   }
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();

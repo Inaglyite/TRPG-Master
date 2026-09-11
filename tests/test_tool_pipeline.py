@@ -183,7 +183,7 @@ def test_typed_request_envelope_freezes_capacity_context_and_turn_identity():
     )
     prepared = prepare_model_request(
         host,
-        "deepseek-v4-flash",
+        "deepseek-flash",
         policy=StreamPolicy(
             dynamic_tools=True,
             stream_usage=True,
@@ -258,12 +258,12 @@ def test_database_turn_journal_keeps_active_and_completed_v2_audit(tmp_path: Pat
             diagnostics={
                 "model_calls": [
                     {
-                        "model": "deepseek-v4-flash",
+                        "model": "deepseek-flash",
                         "prompt_profile": "hybrid",
                         "usage": {"prompt_tokens": 12, "completion_tokens": 8},
                         "request_envelope": {
                             "provider": "openai_compatible",
-                            "model": "deepseek-v4-flash",
+                            "model": "deepseek-flash",
                             "capacity": {"max_output_tokens": 4096},
                             "tool_catalog_digest": "c" * 64,
                             "sections": [{"id": "system", "digest": "d" * 64}],

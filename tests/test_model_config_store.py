@@ -32,7 +32,7 @@ CLOUD_SERVICE = {
     "provider_kind": "deepseek",
     "base_url": "https://api.deepseek.com/v1",
     "api_key": "sk-cloud-user-key",
-    "model_id": "deepseek-v4-flash",
+    "model_id": "deepseek-flash",
     "window_tokens": 65536,
     "max_output_tokens": 4096,
 }
@@ -56,7 +56,7 @@ def db(tmp_path):
     return url
 
 
-def _custom_settings(model_id: str = "deepseek-v4-flash") -> EffectiveSettings:
+def _custom_settings(model_id: str = "deepseek-flash") -> EffectiveSettings:
     return EffectiveSettings(
         narrative=parse_role_binding(
             {"mode": "custom", "service": {**CLOUD_SERVICE, "model_id": model_id}},
@@ -97,13 +97,13 @@ def test_account_isolation(db):
 
 
 def test_world_override_beats_account_default(db):
-    save_scope(db, "user-a", ACCOUNT_SCOPE, _custom_settings("deepseek-v4-flash"))
+    save_scope(db, "user-a", ACCOUNT_SCOPE, _custom_settings("deepseek-flash"))
     save_scope(db, "user-a", "world-1", _custom_settings("deepseek-v4-pro"))
     resolved = resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-1")
     assert resolved.narrative.service.model_id == "deepseek-v4-pro"
     # 别的世界回落账号默认
     other = resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-2")
-    assert other.narrative.service.model_id == "deepseek-v4-flash"
+    assert other.narrative.service.model_id == "deepseek-flash"
 
 
 def test_owner_transfer_blocks_old_room_config(db):
@@ -114,11 +114,11 @@ def test_owner_transfer_blocks_old_room_config(db):
 
 
 def test_restore_default_only_deletes_override(db):
-    save_scope(db, "user-a", ACCOUNT_SCOPE, _custom_settings("deepseek-v4-flash"))
+    save_scope(db, "user-a", ACCOUNT_SCOPE, _custom_settings("deepseek-flash"))
     save_scope(db, "user-a", "world-1", _custom_settings("deepseek-v4-pro"))
     assert delete_scope(db, "user-a", "world-1") is True
     resolved = resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-1")
-    assert resolved.narrative.service.model_id == "deepseek-v4-flash"
+    assert resolved.narrative.service.model_id == "deepseek-flash"
     assert delete_scope(db, "user-a", "world-1") is False
 
 

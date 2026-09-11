@@ -9,7 +9,7 @@
 环境变量（优先级高于配置文件）:
     OPENAI_API_KEY     API 密钥
     OPENAI_BASE_URL    API 地址（默认 https://api.deepseek.com）
-    TRPG_FLASH_MODEL   Flash 模型名（默认 deepseek-v4-flash）
+    TRPG_FLASH_MODEL   Flash 模型名（默认 deepseek-flash）
     TRPG_PRO_MODEL     Pro 模型名（默认 deepseek-v4-pro）
 """
 
@@ -83,7 +83,7 @@ def interactive_config():
     if base_url:
         cfg["base_url"] = base_url
 
-    flash_model = input(f"Flash 模型 [{cfg.get('flash_model', 'deepseek-v4-flash')}]: ").strip()
+    flash_model = input(f"Flash 模型 [{cfg.get('flash_model', 'deepseek-flash')}]: ").strip()
     if flash_model:
         cfg["flash_model"] = flash_model
 
@@ -108,7 +108,7 @@ def run_game():
     env = os.environ.copy()
     env.setdefault("OPENAI_API_KEY", cfg.get("api_key", ""))
     env.setdefault("OPENAI_BASE_URL", cfg.get("base_url", "https://api.deepseek.com"))
-    env.setdefault("TRPG_FLASH_MODEL", cfg.get("flash_model", "deepseek-v4-flash"))
+    env.setdefault("TRPG_FLASH_MODEL", cfg.get("flash_model", "deepseek-flash"))
     env.setdefault("TRPG_PRO_MODEL", cfg.get("pro_model", "deepseek-v4-pro"))
     if cfg.get("glm_api_key"):
         env.setdefault("GLM_API_KEY", cfg["glm_api_key"])

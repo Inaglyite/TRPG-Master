@@ -76,7 +76,7 @@ python3 start.py --config
 {
   "api_key": "your-api-key",
   "base_url": "https://api.deepseek.com",
-  "flash_model": "deepseek-v4-flash",
+  "flash_model": "deepseek-flash",
   "pro_model": "deepseek-v4-pro"
 }
 ```

@@ -23,7 +23,7 @@ CUSTOM_FORM = {
         "provider_kind": "deepseek",
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "sk-room-owner-key",
-        "model_id": "deepseek-v4-flash",
+        "model_id": "deepseek-flash",
         "window_tokens": 65536,
     },
 }
@@ -170,7 +170,7 @@ class TestSoloScopes:
         assert "已单独覆盖" in view["scope_label"]
         assert view["judgement"]["model_id"] == "deepseek-v4-pro"
         # 叙述仍走账号默认覆盖
-        assert view["narrative"]["model_id"] == "deepseek-v4-flash"
+        assert view["narrative"]["model_id"] == "deepseek-flash"
 
 
 class TestLocalScope:

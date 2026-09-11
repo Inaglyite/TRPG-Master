@@ -51,7 +51,7 @@ const view: ModelSettingsView = {
   },
   judgement: {
     mode: "default",
-    model_id: "deepseek-v4-flash",
+    model_id: "deepseek-flash",
     window_tokens: 65536,
     window_source: "legacy_default",
     max_output_tokens: 4096,
@@ -59,8 +59,8 @@ const view: ModelSettingsView = {
     service: null,
   },
   server_defaults: {
-    narrative_model: "deepseek-v4-flash",
-    judgement_model: "deepseek-v4-flash",
+    narrative_model: "deepseek-flash",
+    judgement_model: "deepseek-flash",
     available_models: [],
     window_tokens: 65536,
     window_source: "legacy_default",
@@ -96,7 +96,7 @@ describe("settings commands", () => {
 
   it("旧协议响应（仅 narrative_model）明确报后端过旧，不再静默卡加载", () => {
     useModelStore.setState({ loading: true, view: null });
-    onModelSettings({ narrative_model: "deepseek-v4-flash" } as never);
+    onModelSettings({ narrative_model: "deepseek-flash" } as never);
     const state = useModelStore.getState();
     expect(state.loading).toBe(false);
     expect(state.view).toBeNull();
