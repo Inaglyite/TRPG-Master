@@ -229,13 +229,23 @@ describe("settings commands", () => {
     expect(state.confirmSharing).toBe(false);
   });
 
-  it("onModelSettingsError 复位 saving/testing", () => {
+  it("onModelSettingsError 复位 saving/testing 且保留已有视图可继续编辑", () => {
     useModelStore.setState({ saving: true, testingRole: "narrative" });
     onModelSettingsError("保存失败：端口被拒绝");
     const state = useModelStore.getState();
     expect(state.saving).toBe(false);
     expect(state.testingRole).toBeNull();
+    expect(state.view).toBe(view);
+    expect(state.loadError).toBeNull();
     expect(state.status).toContain("保存失败");
+  });
+
+  it("首次加载失败且没有视图时才进入加载错误态", () => {
+    useModelStore.setState({ view: null, loading: true });
+    onModelSettingsError("后端不可用");
+    const state = useModelStore.getState();
+    expect(state.loadError).toBe("后端不可用");
+    expect(state.view).toBeNull();
   });
 
   it("onModelSettingsTestResult 写入结果", () => {

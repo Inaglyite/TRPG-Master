@@ -341,7 +341,7 @@ function ModelsTab({ disabled }: { disabled: boolean }) {
   );
   const loading = useModelStore((state) => state.loading);
   const loadError = useModelStore((state) => state.loadError);
-  if (!view || loading || loadError) {
+  if (!view) {
     if (loadError) {
       return (
         <div className="model-settings-load-error" role="alert">
@@ -361,6 +361,9 @@ function ModelsTab({ disabled }: { disabled: boolean }) {
         {loading ? "正在读取配置…" : "尚未读取配置"}
       </p>
     );
+  }
+  if (loading) {
+    return <p className="model-settings-loading">正在读取配置…</p>;
   }
   const anyCustom =
     drafts.narrative.mode === "custom" || drafts.judgement.mode === "custom";
@@ -828,7 +831,7 @@ export function ModelSettingsPanel() {
             <button
               id="model-settings-restore"
               className="btn-ghost"
-              disabled={saving || loading || Boolean(loadError) || !view}
+              disabled={saving || loading || !view}
               onClick={() => restoreDefaultSettings()}
             >
               {view?.byok_required ? "清除配置" : "恢复默认"}
@@ -841,9 +844,7 @@ export function ModelSettingsPanel() {
           {tab === "models" && !readOnly && (
             <button
               id="model-settings-save"
-              disabled={
-                saving || loading || Boolean(loadError) || blocked || !view
-              }
+              disabled={saving || loading || blocked || !view}
               onClick={() => saveSettings()}
             >
               {saving ? "正在保存…" : "保存配置（下回合生效）"}

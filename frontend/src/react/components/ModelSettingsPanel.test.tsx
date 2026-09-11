@@ -104,7 +104,7 @@ describe("ModelSettingsPanel", () => {
     seed(makeView());
   });
 
-  it("有缓存时仍等待刷新，加载和失败期间不能编辑或保存", () => {
+  it("有缓存时等待刷新，但刷新/操作失败后仍保留表单供修正", () => {
     useModelStore.setState({ loading: true });
     render(<ModelSettingsPanel />);
     expect(screen.getByText("正在读取配置…")).toBeInTheDocument();
@@ -112,11 +112,16 @@ describe("ModelSettingsPanel", () => {
     expect(screen.getByRole("button", { name: /保存配置/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
     act(() =>
-      useModelStore.setState({ loading: false, loadError: "读取配置超时" }),
+      useModelStore.setState({
+        loading: false,
+        loadError: null,
+        status: "读取配置超时，可稍后重试",
+        statusKind: "error",
+      }),
     );
-    expect(screen.getByRole("button", { name: "重试" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /保存配置/ })).toBeDisabled();
-    act(() => useModelStore.setState({ loadError: null }));
+    expect(
+      screen.getAllByRole("button", { name: "自定义服务" })[0],
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: /保存配置/ })).toBeEnabled();
   });
 

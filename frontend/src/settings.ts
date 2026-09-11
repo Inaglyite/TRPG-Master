@@ -34,12 +34,17 @@ export function fetchSettings() {
   });
   clearLoadTimer();
   loadTimer = setTimeout(() => {
-    if (useModelStore.getState().loading) {
+    const state = useModelStore.getState();
+    if (state.loading) {
       useModelStore.setState({
         loading: false,
-        loadError: "读取配置超时：请检查与守秘人的连接后重试",
-        status: "",
-        statusKind: "",
+        // 有缓存视图时保留表单可编辑；超时只是刷新失败，不应把用户
+        // 正在编辑的配置替换成错误页。
+        loadError: state.view
+          ? null
+          : "读取配置超时：请检查与守秘人的连接后重试",
+        status: state.view ? "读取配置超时，可稍后重试" : "",
+        statusKind: state.view ? "error" : "",
       });
     }
   }, LOAD_TIMEOUT_MS);
@@ -162,8 +167,8 @@ function hasCustomDraft(): boolean {
 }
 
 export function saveSettings() {
-  if (useModelStore.getState().loading || useModelStore.getState().loadError)
-    return;
+  const current = useModelStore.getState();
+  if (current.loading || !current.view) return;
   const invalid = validateDrafts();
   if (invalid) {
     useModelStore.setState({ status: invalid, statusKind: "error" });
@@ -305,11 +310,14 @@ export function onModelSettings(
 
 export function onModelSettingsError(message: string) {
   clearLoadTimer();
+  const hasView = Boolean(useModelStore.getState().view);
   useModelStore.setState({
     saving: false,
     testingRole: null,
     loading: false,
-    loadError: message || "模型设置操作失败",
+    // 操作/校验失败不能抹掉已有权威视图，否则用户无法修正草稿并重试。
+    // 只有首次加载没有视图时才进入整页错误态。
+    loadError: hasView ? null : message || "模型设置操作失败",
     status: message || "模型设置操作失败",
     statusKind: "error",
   });
