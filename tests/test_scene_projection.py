@@ -305,14 +305,31 @@ def _room(world_store) -> GameRoom:
     )
 
 
-def test_room_state_request_carries_the_scene_projection():
+def test_room_state_request_carries_the_scene_projection(tmp_path: Path):
+    """房间的 state 查询走真实数据库：M1 之后这一步会解析世界（execution_profile，
+    keeper 授权），因此需要真实表与 World 行，而不是内存空库。"""
+    from src.auth.service import create_user
     from src.multiplayer.messages import run_room_message_loop
+    from src.storage.database import Base, World, get_engine, session_scope
+
+    database_url = f"sqlite:///{tmp_path / 'room-scene.db'}"
+    Base.metadata.create_all(get_engine(database_url))
+    owner = create_user(database_url, "scene_owner", "scene owner password")
+    with session_scope(database_url) as session:
+        session.add(
+            World(
+                id="world-scene",
+                module_name="猩红文档",
+                created_by=owner.id,
+                metadata_json={"execution_profile": "legacy"},
+            )
+        )
 
     room = _room(SimpleNamespace(load=_room_world))
     socket = _OneStateSocket()
     controller = SimpleNamespace(
         deps=SimpleNamespace(
-            database_url=lambda: "sqlite://",
+            database_url=lambda: database_url,
             enrich_clues=lambda clues, _state, _context: clues,
         ),
         authoritative_investigator_id=lambda *_args: None,
@@ -328,7 +345,7 @@ def test_room_state_request_carries_the_scene_projection():
                     controller,
                     socket,
                     room,
-                    SimpleNamespace(id="owner"),
+                    SimpleNamespace(id=owner.id),
                     room.world_id,
                     "owner-tab",
                     "owner",

@@ -4,15 +4,16 @@
 共享引擎的旧回合管线（效果所有权），直接由命令服务落库，事件经
 RoomEventHub.send_direct 按接收者 principal 过滤后逐连接投递。
 
-human keeper_mode 的结构化房间：开局只翻转房间状态并下发快照，不建模型
-会话、不做 BYOK 就绪检查、不跑开场回合。
+human keeper_mode 的结构化房间：开局只物化调查员名册 + 翻转房间状态 +
+下发快照，不建模型会话、不做 BYOK 就绪检查、不跑开场回合。
 """
 
 from __future__ import annotations
 
 import logging
 
-from src.storage.database import World, session_scope
+from src.gameplay.investigators import initialize_investigator_roster
+from src.storage.database import World, WorldInvestigator, session_scope
 
 from .bootstrap import KEEPER_MODES
 from .gateway import STRUCTURED_FRAME_TYPES, StructuredGateway, world_modes
@@ -107,6 +108,56 @@ async def handle_structured_room_start(
                 "type": "room_action_rejected",
                 "code": "keeper_required",
                 "message": "结构化房间由获授权的守秘人开局（keeper 与房主分别授权）",
+            }
+        )
+        return
+    # 把玩家认领的调查员物化进世界状态（与旧模式 handle_start 同一步，只是
+    # 不跑开场回合）。没有这一步，世界状态里没有 investigators 名册，
+    # 命令服务看不到任何调查员：grant_clue/request_check/adjust_stat 的目标
+    # 都会 object_not_found，玩家 principal 也拿不到自己的 investigator_id，
+    # 快照只能退化成 public_investigator_roster 的兜底 id。
+    try:
+        # 注意标识空间：结构化层（player/keeper principal、audience 过滤、
+        # check 归属）统一以 **character_key** 作为调查员 id（见
+        # principal.controlled_investigators 与 bootstrap.local_player_investigator_ids）。
+        # 房间的 claim 行 id 是另一套标识，这里必须用 character_key 作状态键，
+        # 否则发布给甲的定向事件在按 principal 过滤时会被丢掉。
+        with session_scope(controller.deps.database_url()) as session:
+            claims = (
+                session.query(WorldInvestigator)
+                .filter_by(world_id=world_id, status="claimed")
+                .all()
+            )
+            roster = [
+                {
+                    "investigator_id": str(claim.character_key),
+                    "user_id": str(claim.controller_user_id or ""),
+                    "character_ref": dict(claim.character_ref or {}),
+                }
+                for claim in claims
+                if claim.controller_user_id and claim.character_key
+            ]
+        if not roster:
+            await ws.send_json(
+                {
+                    "type": "room_action_rejected",
+                    "code": "investigator_required",
+                    "message": "房间中还没有玩家选择调查员",
+                }
+            )
+            return
+        initialize_investigator_roster(
+            room.engine.context,
+            roster,
+            active_investigator_id=str(roster[0]["investigator_id"]),
+        )
+    except Exception as exc:  # noqa: BLE001 - 开局失败要回执而不是静默
+        logger.warning("结构化房间开局物化调查员名册失败：%s", exc)
+        await ws.send_json(
+            {
+                "type": "room_action_rejected",
+                "code": "investigator_required",
+                "message": str(exc) or "调查员名册不可用，请重新选择角色",
             }
         )
         return

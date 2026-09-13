@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+from src.app.runtime import RuntimeContext
 from src.modules.module_registry import ModuleRegistry
 from src.multiplayer.service import MultiplayerError
 from src.multiplayer.world_creation import create_owned_world
-from src.storage.database import User, World, WorldMember, session_scope
+from src.storage.database import User, World, WorldInvestigator, WorldMember, session_scope
 from src.structured.room_integration import (
     handle_structured_room_start,
     room_world_modes,
@@ -184,18 +187,54 @@ class StructuredRoomStartTests(unittest.IsolatedAsyncioTestCase):
         )["world_id"]
         with session_scope(self.db_url) as session:
             session.add(WorldMember(id="m-p", world_id=self.world_id, user_id="u-p", role="player"))
+        # 一名已认领调查员：开局需要把名册物化进世界状态
+        characters_dir = self.root / "characters" / "custom"
+        characters_dir.mkdir(parents=True, exist_ok=True)
+        (characters_dir / "test-investigator.json").write_text(
+            json.dumps(
+                {
+                    "name": "测试员",
+                    "occupation": "记者",
+                    "attributes": {"STR": 50},
+                    "derived": {"HP": 10, "max_HP": 10, "SAN": 50, "max_SAN": 50},
+                    "skills": {"侦查": 60},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        with session_scope(self.db_url) as session:
+            session.add(
+                WorldInvestigator(
+                    id="wi-p",
+                    world_id=self.world_id,
+                    character_key="inv-p",
+                    character_ref={"source": "custom", "file": "test-investigator.json"},
+                    controller_user_id="u-p",
+                    status="claimed",
+                )
+            )
 
     def tearDown(self):
         self._temp.cleanup()
 
-    def _room(self, status="lobby"):
+    def _room(self, status="lobby", world_id=None):
         hub = _FakeHub(
             [
                 {"connection_id": "c-k", "user_id": "u-k", "role": "owner", "last_ack": 0},
                 {"connection_id": "c-p", "user_id": "u-p", "role": "player", "last_ack": 0},
             ]
         )
-        return _FakeRoom(hub, status=status)
+        room = _FakeRoom(hub, status=status)
+        room.engine = SimpleNamespace(
+            context=RuntimeContext.create(
+                world_id or self.world_id,
+                "test-module",
+                project_root=self.root,
+                runtime_root=self.root,
+            )
+        )
+        return room
 
     async def test_keeper_start_without_model_session(self):
         room = self._room()
@@ -209,8 +248,38 @@ class StructuredRoomStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({"c-k", "c-p"}, set(sent))
         self.assertEqual("session_snapshot", sent["c-k"]["type"])
         self.assertEqual("structured_v1", sent["c-k"]["payload"]["execution_profile"])
-        # 玩家连接没有任何调查员认领 → investigator_id 为 null
-        self.assertIsNone(sent["c-p"]["payload"]["investigator_id"])
+        # 玩家连接按 principal 投影：已认领 inv-p → investigator_id 为 character_key
+        self.assertEqual("inv-p", sent["c-p"]["payload"]["investigator_id"])
+        # 名册已物化进世界状态
+        from src.storage.database_store import DatabaseWorldStore
+
+        state = DatabaseWorldStore(self.db_url, self.world_id, room.engine.context.world_dir).load()
+        self.assertEqual({"inv-p"}, set(state.get("investigators") or {}))
+
+    async def test_start_without_claimed_investigators_rejected(self):
+        other_world = (
+            await create_owned_world(
+                database_url=self.db_url,
+                creator_id="u-k",
+                creator_username="k",
+                data={
+                    "module": "test-module",
+                    "name": "无人认领房",
+                    "execution_profile": "structured_v1",
+                    "keeper_mode": "human",
+                },
+                module_registry=ModuleRegistry(self.root, self.root),
+                default_module_name="test-module",
+                project_root=self.root,
+                runtime_root=self.root,
+            )
+        )["world_id"]
+        room = self._room(world_id=other_world)
+        controller = _FakeController(self.db_url)
+        ws = _FakeWs()
+        await handle_structured_room_start(controller, room, ws, _FakeUser("u-k"), other_world)
+        self.assertEqual([], controller.status_calls)
+        self.assertEqual("investigator_required", ws.sent[0]["code"])
 
     async def test_non_keeper_cannot_start(self):
         room = self._room()
