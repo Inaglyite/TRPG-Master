@@ -86,6 +86,17 @@ pending → resolved（服务端恰好结算一次）
 committed 附带领域 result（success/failure/not_executed 及明细）与新 revision；
 rejected/conflict 不改变状态、不发布权威事件（只回 `request_error` 给调用者）。
 
+命令事件的因果标签（M1 定稿）：
+
+- 由玩家请求引发的命令（`cause_id` 非空）：事件 `cause_request_id` = 上游玩家
+  request_id，玩家请求卡随之更新。
+- 无上游的命令：`cause_request_id` = command_id 自身。
+- 每条 committed 命令额外追加一条 `action_status{request_id: command_id,
+  status: "completed", outcome}` 作为命令卡收尾，audience 定向发起方
+  （keeper/agent 或该玩家），让发起端的“主持操作/发言”卡离开等待态。
+- `request_error` 同样持久化到 event_outbox（真实 event_id/sequence，
+  前端游标可去重），但不推进世界 revision，audience 定向发起方。
+
 ## 4. 错误码
 
 正本在 `common.json#/$defs/error_code`。前端已知 13 码（REQUEST_ERROR_TEXTS）不得改名；
@@ -138,9 +149,11 @@ rejected/conflict 不改变状态、不发布权威事件（只回 `request_erro
 
 1. 世界状态新增 `item_registry` 与 `clue_registry`（带 `schema_version`）：
    - 物品条目：`item_id`（`item_` + 12 位稳定散列/序号）、`label`（原标签）、`quantity`、
-     `stack_key`（重名物品按持有者与获取次序区分）、`legacy_label`、`operations`。
+     `stack_key`（同一持有者的同名旧字符串折叠为同一堆叠，数量累加；不同持有者
+     绝不合并；拆分/转移产生的新堆叠由命令层生成新 ID）、`legacy_label`、`operations`。
    - 线索条目：`clue_id`（模组目录有 catalog_id 用之，否则 `clue_` + 稳定散列）、
-     `legacy_key`（category+text 拼接原键）、`category`、`text`、`grants`（知情授权列表）。
+     `legacy_key`（category+text 拼接原键）、`category`、`text`、`granted_to`
+     （知情授权列表）。
 2. 迁移在打开旧世界时**一次性**执行并随状态持久化（不是每次读取重算）；
    幂等：已迁移世界不再改动。迁移只新增注册表与映射，不重置进度、不覆盖自定义内容。
 3. 兼容投影：旧前端/旧模式继续看到字符串背包与按类别的线索列表（由注册表投影生成）；
@@ -190,3 +203,14 @@ zcode 已声明其 `frontend/src/protocol/structured-fixtures.ts` 为过渡草�
 
 其余字段（信封、请求、错误码、状态枚举、事件类型）与 zcode 草案一致；后端错误码
 集合是其已知集的超集，前端未知码用 `message` 兜底即可。
+
+M1 实现期的两处 schema 修正（均为放宽/归位，已有 fixtures 不受影响）：
+
+1. `state_changed.payload` 归位新增可选 `targets`（在场目标列表，供 set_npc_presence
+   等命令推送）；此前误置于事件层级，任何载荷都过不了校验。
+2. `session_snapshot.payload.investigator_id` 允许 null（keeper/旁观连接无行动
+   调查员；玩家连接仍为非空字符串）。
+
+另：上线信封不携带路由 `audience`（envelope_base 无此字段，且定向接收者列表本身
+即私密信息）；`message_started`/`message_completed` 载荷内的 `audience` 是消息自身
+属性，照常下发。

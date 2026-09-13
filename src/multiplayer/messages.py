@@ -40,6 +40,13 @@ from src.multiplayer.solo_timeline_ws import (
     handle_solo_timeline_message,
 )
 from src.storage.player_notes import PlayerNotesConflict, PlayerNotesStore
+from src.structured.room_integration import (
+    STRUCTURED_FRAME_TYPES,
+    gateway_for,
+    handle_room_structured_frame,
+    handle_structured_room_start,
+    structured_frame_gate_reason,
+)
 from src.web.asset_payload import enrich_pc_for_frontend
 
 logger = logging.getLogger("trpg.multiplayer_messages")
@@ -275,6 +282,15 @@ async def run_room_message_loop(
     initial_role: str,
 ) -> None:
     """Receive, authorize, validate, and forward one member connection."""
+    # structured_v1 世界：连接建立即下发该成员的权威快照投影（keeper 与玩家
+    # 的秘密范围不同），前端据此切换交互路径；legacy 世界不动作。
+    _gateway = gateway_for(controller.deps.database_url())
+    if _gateway.is_structured(world_id):
+        _snapshot = await asyncio.to_thread(
+            lambda: _gateway.snapshot_envelope(world_id=world_id, user_id=user.id)
+        )
+        if _snapshot is not None:
+            await ws.send_json(_snapshot)
     role = initial_role
     while True:
         raw = await ws.receive_text()
@@ -585,6 +601,31 @@ async def run_room_message_loop(
             )
             if outcome == "close":
                 return
+            continue
+        # 结构化协议（structured_v1 世界）：按钮/检定/主持命令帧由命令服务
+        # 直接落库，不进共享引擎的旧回合管线；legacy 世界收到结构化帧由网关
+        # 回 request_error(profile_mismatch)。旧文字回合入口在结构化世界关闭。
+        structured_mode = structured_frame_gate_reason(controller.deps.database_url(), world_id)
+        if message_type in STRUCTURED_FRAME_TYPES:
+            await handle_room_structured_frame(
+                controller, room, ws, user, world_id, connection_id, data
+            )
+            continue
+        if structured_mode is not None and message_type in {
+            "action",
+            "continue",
+            "save_load",
+            "turn_rewrite",
+        }:
+            await _reject(
+                ws,
+                "structured_required",
+                "该世界使用结构化协议：行动请使用出示/使用/前往等结构化入口",
+            )
+            continue
+        if structured_mode is not None and message_type == "start":
+            # human keeper 开局不建模型会话、不做 BYOK 门禁、不跑开场回合。
+            await handle_structured_room_start(controller, room, ws, user, world_id)
             continue
         if message_type in UNSUPPORTED_ROOM_TYPES:
             await _reject(

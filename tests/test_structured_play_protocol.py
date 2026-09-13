@@ -157,8 +157,10 @@ class StructuredPlayProtocolTests(unittest.TestCase):
 
     def test_every_event_type_has_a_fixture(self):
         fixture_files = {path.stem for path in (FIXTURE_DIR / "event").glob("*.json")}
-        # state_changed 有两个代表形态（调查员状态 / 世界时钟）
-        self.assertEqual(EVENT_TYPES | {"state_changed_clock"}, fixture_files)
+        # state_changed 有三个代表形态（调查员状态 / 世界时钟 / 在场目标）
+        self.assertEqual(
+            EVENT_TYPES | {"state_changed_clock", "state_changed_targets"}, fixture_files
+        )
         events_schema = self.schemas["events.json"]
         declared = {
             events_schema["$defs"][branch["$ref"].split("/")[-1]]["properties"]["type"]["const"]

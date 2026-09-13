@@ -11,6 +11,26 @@ from src.app.runtime import RuntimeContext
 from src.modules.module_registry import ModuleRegistry
 from src.multiplayer.service import PLAY_MODES, MultiplayerError
 from src.storage.database import User, World, WorldMember, new_id, session_scope
+from src.structured.bootstrap import EXECUTION_PROFILES, KEEPER_MODES
+
+
+def _profile_and_keeper_mode(data: dict) -> tuple[str, str]:
+    """结构化协议的世界级设置（协议 §2）；缺省保持 legacy 不改变既有行为。"""
+    profile = str(data.get("execution_profile") or "legacy").strip()
+    if profile not in EXECUTION_PROFILES:
+        raise MultiplayerError(
+            "invalid_execution_profile",
+            "execution_profile 必须是 legacy 或 structured_v1",
+            400,
+        )
+    keeper_mode = str(data.get("keeper_mode") or "human").strip()
+    if keeper_mode not in KEEPER_MODES:
+        raise MultiplayerError(
+            "invalid_keeper_mode",
+            "keeper_mode 必须是 human/assisted/agent",
+            400,
+        )
+    return profile, keeper_mode
 
 
 def _max_worlds_per_user() -> int:
@@ -87,6 +107,7 @@ async def create_owned_world(
     except (FileNotFoundError, ValueError) as exc:
         raise MultiplayerError("module_not_found", "模组不存在", 404) from exc
     play_mode, max_players = _play_mode_and_max_players(data)
+    execution_profile, keeper_mode = _profile_and_keeper_mode(data)
     name = str(data.get("name") or "").strip()[:120]
     name = name or f"{creator_username} 的房间"
     world_id = f"world-{secrets.token_hex(12)}"
@@ -114,6 +135,8 @@ async def create_owned_world(
             "room_status": "lobby",
             "max_players": max_players,
             "play_mode": play_mode,
+            "execution_profile": execution_profile,
+            "keeper_mode": keeper_mode,
         }
         session.add(
             World(
@@ -132,6 +155,8 @@ async def create_owned_world(
                 world_id=world_id,
                 user_id=creator_id,
                 role="owner",
+                # 结构化世界创建者默认兼有 keeper 授权（之后可分别授予/收回）。
+                can_keeper=execution_profile == "structured_v1",
             )
         )
 
@@ -162,5 +187,7 @@ async def create_owned_world(
             "room_status": "lobby",
             "max_players": max_players,
             "play_mode": play_mode,
+            "execution_profile": execution_profile,
+            "keeper_mode": keeper_mode,
         }
     return {"world_id": context.world_id, "module": module}

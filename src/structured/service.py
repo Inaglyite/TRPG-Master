@@ -219,6 +219,31 @@ class StructuredPlayService:
             outcome = handler(state, payload, ctx)
             if not isinstance(outcome, CommandResult):
                 raise StructuredError("internal_error", f"命令 {kind} 返回了非法结果。")
+            # 命令卡的收尾事件：以 command_id 为键，让发起方的“主持操作”卡
+            # 离开等待态（协议 §3.3：committed 附带领域结果）。domain_outcome
+            # 只接受 success/failure/not_executed，非法值降级为 success。
+            command_outcome = str(outcome.result.get("status") or "success")
+            if command_outcome not in {"success", "failure", "not_executed"}:
+                command_outcome = "success"
+            ack_audience = (
+                {"kind": "keeper"}
+                if principal.kind in {"keeper", "agent"}
+                else {
+                    "kind": "investigators",
+                    "investigator_ids": list(principal.investigator_ids),
+                }
+            )
+            outcome.events.append(
+                EventSpec(
+                    "action_status",
+                    {
+                        "request_id": command_id,
+                        "status": "completed",
+                        "outcome": command_outcome,
+                    },
+                    ack_audience,
+                )
+            )
             self._write_state(row, state, bump=outcome.bump_revision)
             session.add(
                 GameCommand(
@@ -237,8 +262,11 @@ class StructuredPlayService:
                     created_at=utcnow(),
                 )
             )
+            # 事件因果标签：有上游请求归上游（玩家请求卡随之更新），否则归
+            # 命令自身（让网关与客户端能按 command_id 回收命令的投递与重试）。
+            effective_cause = cause_id or command_id
             envelopes = self._append_events(
-                session, world_id, int(row.revision), cause_id, outcome.events
+                session, world_id, int(row.revision), effective_cause, outcome.events
             )
             revision_after = int(row.revision)
         # 事务在此已提交（session_scope 退出即 commit）；事件在提交成功后才返回发布。
@@ -586,7 +614,7 @@ class StructuredPlayService:
             ),
             "scene": {"id": scene_id, "name": scene_name} if scene_id else None,
             "destinations": destinations,
-            "investigator_id": sorted(own)[0] if own else "",
+            "investigator_id": sorted(own)[0] if own else None,
             "targets": _public_targets(state),
             "clues": clues,
             "items": self._visible_items(state, own, is_keeper),
@@ -747,11 +775,14 @@ class StructuredPlayService:
             granted = set(entry.get("granted_to") or [])
             if not is_keeper and granted and not (granted & own):
                 continue
+            category = str(entry.get("category") or "")
+            if category not in {"investigation", "event", "task", "npc"}:
+                category = "investigation"  # schema 固定四类；未知类别降级，不泄露原始键
             clues.append(
                 {
                     "id": entry["clue_id"],
-                    "category": entry["category"],
-                    "text": entry["text"],
+                    "category": category,
+                    "text": str(entry.get("text") or "")[:500] or "（内容待守秘人补充）",
                     "presentation": ["describe"],
                 }
             )
@@ -838,3 +869,18 @@ class StructuredPlayService:
                 PlayerRequest.request_id == request_id,
             )
         ).scalar_one_or_none()
+
+
+def audience_visible(audience: dict, principal: Principal) -> bool:
+    """事件路由范围判定（投递前的服务端过滤，协议 §5.2）。"""
+    return StructuredPlayService._audience_visible(audience, principal)
+
+
+def wire_envelope(envelope: dict) -> dict:
+    """上线信封：剥离路由 audience。
+
+    audience 是服务端投递依据（含定向接收者列表），下发会泄露“谁收到了
+    私密内容”，且不在事件 schema 的 envelope_base 里（unevaluatedProperties
+    会判非法）。message 载荷内部的 audience 是消息自身属性，不受影响。
+    """
+    return {key: value for key, value in envelope.items() if key != "audience"}

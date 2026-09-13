@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "event_id": 16,
+  "world_id": "world-fixture-1",
+  "sequence": 16,
+  "revision": 14,
+  "type": "state_changed",
+  "cause_request_id": "cmd-presence-1",
+  "payload": {
+    "targets": [
+      {"kind": "npc", "id": "keeper_npc", "name": "老看守"},
+      {"kind": "investigator", "id": "inv-alice", "name": "爱丽丝"}
+    ]
+  }
+}

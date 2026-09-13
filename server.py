@@ -157,6 +157,7 @@ from src.storage.persistence import delete_save, load_game
 from src.storage.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.storage.world_branches import WorldBranchService
 from src.storage.world_store import StaleRevisionError
+from src.structured.server_integration import StructuredLocalWire
 from src.web.asset_payload import (
     SpeakerPayloadResolver,
     asset_payload,
@@ -880,6 +881,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         emit({"type": "error", "message": msg})
 
     router = WsMessageRouter()
+    structured_wire = StructuredLocalWire(engine, outbound, user_id).register(router)
 
     @router.handler("ping")
     async def handle_ping(_data: dict) -> None:
@@ -1485,6 +1487,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     await outbound.send(save_list_payload())
     await outbound.send(adventure_list_payload())
+    await structured_wire.send_snapshot()
 
     engine.cb = EngineCallbacks(
         on_narrative=on_narrative,
@@ -1515,7 +1518,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 continue
 
             try:
-                routed = await router.dispatch(data)
+                routed = await structured_wire.dispatch(router, data)
             except Exception as exc:
                 # A malformed save/state/control operation must not terminate the
                 # shared room driver for every connected player. Turn workers

@@ -255,7 +255,10 @@ class StructuredCommandTests(unittest.TestCase):
         )
         self.assertEqual("committed", result["status"])
         self.assertEqual("library", result["result"]["scene_id"])
-        self.assertEqual(["scene_changed", "state_changed"], [e["type"] for e in result["events"]])
+        self.assertEqual(
+            ["scene_changed", "state_changed", "action_status"],
+            [e["type"] for e in result["events"]],
+        )
 
         state, revision = self.persisted()
         self.assertEqual("library", state["current_scene"]["id"])
@@ -264,7 +267,7 @@ class StructuredCommandTests(unittest.TestCase):
         self.assertEqual(["keeper_npc"], state["current_scene"]["npcs_present"])
         # 抵达不等于调查：无线索/物品/理智副作用
         self.assertEqual(58, state["investigators"]["inv-alice"]["san"])
-        self.assertEqual(2, len(self.outbox_rows()))
+        self.assertEqual(3, len(self.outbox_rows()))  # 含命令收尾 action_status
 
     def test_pre_commit_failure_persists_nothing_and_publishes_nothing(self):
         """事务内故障：独立连接看不到状态/命令/事件，调用方拿不到事件。"""
@@ -431,7 +434,7 @@ class StructuredCommandTests(unittest.TestCase):
         )
         self.assertEqual("committed", result["status"])
         self.assertEqual(
-            ["message_started", "message_completed"],
+            ["message_started", "message_completed", "action_status"],
             [event["type"] for event in result["events"]],
         )
 

@@ -171,7 +171,15 @@
               }
             },
             "investigator_id": {
-              "$ref": "common.json#/$defs/id_string"
+              "oneOf": [
+                {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "本连接当前行动调查员；keeper/旁观为 null。"
             },
             "targets": {
               "type": "array",
@@ -1073,13 +1081,13 @@
                   "minimum": 0
                 }
               }
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/public_target"
+              }
             }
-          }
-        },
-        "targets": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/public_target"
           }
         }
       },
