@@ -6,8 +6,6 @@ import copy
 import json
 import time
 
-from openai import OpenAI
-
 from src.ai.context import context_shadow as _context_shadow
 from src.ai.context.history_compactor import (
     HistoryCompactor,
@@ -29,10 +27,7 @@ from src.ai.model.model_streamer import (
 )
 from src.ai.model.route_service import activate_route_slot, apply_pending_routes
 from src.ai.skills import skill_activation
-from src.ai.tools.registry import (
-    dice_summary,
-    execute_function,
-)
+from src.ai.tools.registry import dice_summary, execute_function
 from src.ai.tools.tool_pipeline import ToolExecutionLedger
 from src.app.agent_graph import build_turn_graph
 from src.app.config import (
@@ -86,6 +81,7 @@ from src.storage.persistence import (
     normalize_tool_message_history,
     restore_snapshot,
 )
+from src.structured.engine_gate import build_engine_client
 from src.web.asset_payload import npc_id_known
 
 _OPENING_SYSTEM_CONTRACT = """# 新游戏公开开场模式
@@ -166,7 +162,9 @@ class GameEngine:
 
     def __init__(self, context: RuntimeContext | None = None):
         self.context = context or RuntimeContext.local()
-        self.client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds())
+        self.client = build_engine_client(
+            self.context, api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds()
+        )
         self._model_session = ModelSession()
         self._history_compactor = HistoryCompactor(self)
         self.narrative_model = NARRATIVE_MODEL

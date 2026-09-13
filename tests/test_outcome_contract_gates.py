@@ -67,7 +67,7 @@ def test_status_contract_is_announced_to_narrator(tmp_path, monkeypatch):
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response(proposal())))
     )
-    with patch("src.app.engine.OpenAI", return_value=client):
+    with patch("src.structured.engine_gate.OpenAI", return_value=client):
         engine = GameEngine(context)
     engine._retrieve_lore_context = lambda *_: None
     engine._detect_content_skill_hint = lambda *_: None
@@ -186,7 +186,7 @@ def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path,
         )
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    with patch("src.app.engine.OpenAI", return_value=client):
+    with patch("src.structured.engine_gate.OpenAI", return_value=client):
         engine = GameEngine(context)
     engine._retrieve_lore_context = lambda *_: None
     engine._detect_content_skill_hint = lambda *_: None
