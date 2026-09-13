@@ -88,10 +88,20 @@ async def _run_keeper_agent(
     except Exception as exc:
         logger.warning("keeper agent 模型路由不可用 world=%s: %s", world_id, type(exc).__name__)
         if trigger_request_id:
+            from .principal import bind_agent_control, current_control
+
             try:
+                # 人类在控时请求由人类处理，不抢占；否则绑定本次运行的
+                # epoch 再置 paused（resolve_intent 需要主持控制权）。
+                with session_scope(database_url) as session:
+                    if current_control(session, world_id).controller_kind == "human":
+                        return
+                run_id = new_run_id()
+                with session_scope(database_url) as session:
+                    bind_agent_control(session, world_id, run_id)
                 gateway.service.execute_command(
                     world_id=world_id,
-                    principal=Principal(kind="agent", run_id=new_run_id()),
+                    principal=Principal(kind="agent", run_id=run_id),
                     kind="resolve_intent",
                     payload={
                         "request_id": trigger_request_id,

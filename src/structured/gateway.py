@@ -223,6 +223,7 @@ class StructuredGateway:
         frame: dict,
         deliver: Deliver,
         broadcast: Broadcast | None = None,
+        agent_broadcast: Broadcast | None = None,
     ) -> None:
         """处理一帧：错误只回发起方；已提交事件按各连接 principal 过滤投递。"""
         async with self._world_lock(world_id):
@@ -255,8 +256,9 @@ class StructuredGateway:
         # 玩家尝试/检定结算提交成功后，assisted/agent 世界调度一次守秘人运行。
         # 普通骰（free_roll_request）按规格不触发剧情；human 模式在
         # maybe_schedule_keeper_agent 内部直接返回 False。Agent 没有发起连接：
-        # 房间场景 deliver 置 None（事件只经 broadcast 按各连接 principal 过滤），
-        # 本地单连接场景沿用 deliver（本地操作者同时持有 keeper 与调查员身份）。
+        # 房间场景 deliver 置 None，事件经 agent_broadcast（不排除发起方——
+        # 发起玩家也必须收到 agent 产生的场景/消息事件）按各连接 principal
+        # 过滤；本地单连接场景沿用 deliver（本地操作者同时持有两顶帽子）。
         frame_type = str(frame.get("type") or "")
         if frame_type in _AGENT_TRIGGER_FRAMES:
             from .agent_runtime import maybe_schedule_keeper_agent
@@ -266,7 +268,7 @@ class StructuredGateway:
                 world_id=world_id,
                 trigger_request_id=str(frame.get("request_id") or ""),
                 deliver=deliver if broadcast is None else None,
-                broadcast=broadcast,
+                broadcast=agent_broadcast if agent_broadcast is not None else broadcast,
             )
 
     # ------------------------------------------------------------------

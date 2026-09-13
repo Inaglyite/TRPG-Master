@@ -58,11 +58,18 @@ async def handle_room_structured_frame(
         await ws.send_json(envelope)
 
     async def broadcast(envelope: dict) -> None:
+        await _broadcast(envelope, include_origin=False)
+
+    async def broadcast_all(envelope: dict) -> None:
+        """Agent 运行没有发起连接：发起玩家也必须收到 agent 产生的事件。"""
+        await _broadcast(envelope, include_origin=True)
+
+    async def _broadcast(envelope: dict, *, include_origin: bool) -> None:
         audience = envelope.get("audience") or {"kind": "public"}
         wire = wire_envelope(envelope)
         for connection in await room.hub.connection_snapshot():
             other_id = connection["connection_id"]
-            if other_id == connection_id:
+            if other_id == connection_id and not include_origin:
                 continue  # 发起方已由 deliver 按自身 principal 投递
             other_user = str(connection["user_id"])
             if other_user not in principals:
@@ -80,6 +87,7 @@ async def handle_room_structured_frame(
         frame=frame,
         deliver=deliver,
         broadcast=broadcast,
+        agent_broadcast=broadcast_all,
     )
 
 
