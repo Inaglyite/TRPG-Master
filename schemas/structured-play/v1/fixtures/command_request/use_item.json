@@ -1,0 +1,21 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-use-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": "req-use-bandage",
+  "kind": "use_item",
+  "payload": {
+    "investigator_id": "inv-alice",
+    "item_id": "item_bandage",
+    "quantity": 1,
+    "operation": "apply",
+    "target": {
+      "kind": "investigator",
+      "id": "inv-bob"
+    },
+    "consume": true,
+    "result_note": "检定成功，绷带消耗一条。"
+  }
+}

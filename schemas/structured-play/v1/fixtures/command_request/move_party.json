@@ -1,0 +1,14 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-move-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": "req-move-1",
+  "kind": "move_party",
+  "payload": {
+    "destination_scene_id": "miskatonic_medical",
+    "travel_minutes": 20,
+    "transition_note": "穿过雨中的校园，沿医学院楼梯向下。"
+  }
+}

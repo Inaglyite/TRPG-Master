@@ -1,0 +1,8 @@
+{
+  "type": "free_roll_request",
+  "protocol_version": 1,
+  "request_id": "req-roll-2",
+  "world_id": "world-fixture-1",
+  "investigator_id": "inv-bob",
+  "spec": "2d6+3"
+}

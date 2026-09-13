@@ -1,0 +1,22 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-transfer-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "transfer_item",
+  "payload": {
+    "item_id": "item_press_pass",
+    "quantity": 1,
+    "from": {
+      "kind": "investigator",
+      "id": "inv-alice"
+    },
+    "to": {
+      "kind": "npc",
+      "id": "john_whitcroft"
+    },
+    "note": "玩家明确选择交给对方（独立确认操作）。"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/check_response.json",
+  "title": "check_response：待检定卡的玩家回应",
+  "description": "检定参数（技能、难度、奖惩骰、代价）已保存在服务端 check_requests 行；按钮只提交 roll/decline 决定，不携带任何可影响结果的参数。",
+  "type": "object",
+  "required": ["type", "protocol_version", "request_id", "world_id", "check_request_id", "decision"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "check_response"},
+    "protocol_version": {"const": 1},
+    "request_id": {"$ref": "common.json#/$defs/id_string"},
+    "world_id": {"$ref": "common.json#/$defs/id_string"},
+    "check_request_id": {"$ref": "common.json#/$defs/id_string"},
+    "decision": {"enum": ["roll", "decline"]}
+  }
+}

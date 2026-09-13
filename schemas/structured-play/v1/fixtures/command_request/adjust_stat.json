@@ -1,0 +1,15 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-stat-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "adjust_stat",
+  "payload": {
+    "investigator_id": "inv-alice",
+    "field": "san",
+    "delta": -1,
+    "reason": "看到遗体背部焦痕（轻微理智冲击）。"
+  }
+}

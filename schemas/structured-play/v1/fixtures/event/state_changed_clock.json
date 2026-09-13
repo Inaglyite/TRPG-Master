@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "event_id": 15,
+  "world_id": "world-fixture-1",
+  "sequence": 15,
+  "revision": 13,
+  "type": "state_changed",
+  "cause_request_id": "cmd-time-1",
+  "payload": {
+    "clock": {
+      "elapsed_minutes": 375
+    }
+  }
+}

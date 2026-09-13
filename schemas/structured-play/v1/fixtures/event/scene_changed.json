@@ -1,0 +1,23 @@
+{
+  "protocol_version": 1,
+  "event_id": 11,
+  "world_id": "world-fixture-1",
+  "sequence": 11,
+  "revision": 13,
+  "type": "scene_changed",
+  "cause_request_id": "req-move-1",
+  "payload": {
+    "scene": {
+      "id": "miskatonic_medical",
+      "name": "密斯卡托尼克大学医学院"
+    },
+    "destinations": [
+      {
+        "id": "miskatonic_university",
+        "name": "密斯卡托尼克大学"
+      }
+    ],
+    "travel_minutes": 20,
+    "cause_command_id": "cmd-move-1"
+  }
+}

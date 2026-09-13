@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "event_id": 9,
+  "world_id": "world-fixture-1",
+  "sequence": 9,
+  "revision": 12,
+  "type": "message_chunk",
+  "cause_request_id": null,
+  "payload": {
+    "message_id": "msg-1",
+    "index": 0,
+    "text": "死亡证明是我签的——"
+  }
+}

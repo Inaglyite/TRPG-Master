@@ -1,0 +1,13 @@
+{
+  "protocol_version": 1,
+  "event_id": 6,
+  "world_id": "world-fixture-1",
+  "sequence": 6,
+  "revision": 12,
+  "type": "check_cancelled",
+  "cause_request_id": null,
+  "payload": {
+    "check_request_id": "chk-1",
+    "reason": "相关条件已变化，守秘人撤回检定。"
+  }
+}

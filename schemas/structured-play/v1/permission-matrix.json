@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/permission-matrix.json",
+  "title": "结构化协议 v1：权限矩阵（机器可读正本）",
+  "version": 1,
+  "roles": {
+    "owner": "房间管理（成员/邀请/移交/计费授权）；不自动获得主持秘密。",
+    "keeper": "主持能力：读取主持资料、处理玩家意图、调用主持命令。与 owner 分别授权。",
+    "player": "控制一名或多名调查员的玩家。",
+    "viewer": "只读旁观。",
+    "agent": "被委派的 Agent 运行时：拥有 keeper 命令子集，调用必须携带当前 controller_epoch。"
+  },
+  "permissions": {
+    "action_request.submit": {
+      "roles": ["player"],
+      "conditions": ["controls_investigator"]
+    },
+    "free_roll_request.submit": {
+      "roles": ["player"],
+      "conditions": ["controls_investigator"]
+    },
+    "check_response.submit": {
+      "roles": ["player"],
+      "conditions": ["controls_investigator", "check_designated_investigator"]
+    },
+    "command.publish_message.player": {
+      "roles": ["player"],
+      "conditions": ["speaker_is_own_investigator"]
+    },
+    "command.publish_message.keeper": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.request_check": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.resolve_check": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "check_still_pending"]
+    },
+    "command.present_information": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.grant_clue": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "recipients_authorized"]
+    },
+    "command.use_item": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "ownership_verified"]
+    },
+    "command.transfer_item": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "ownership_verified"]
+    },
+    "command.adjust_stat": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.advance_time": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.move_party": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "destination_known_to_party"]
+    },
+    "command.resolve_intent": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.present_handout": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "asset_authorized_for_recipients"]
+    },
+    "command.set_npc_presence": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "command.record_fact": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "keeper.read_module_secrets": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "keeper.read_private_knowledge": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
+    },
+    "keeper.take_control": {
+      "roles": ["keeper"],
+      "conditions": ["increments_controller_epoch"]
+    },
+    "keeper.approve_draft": {
+      "roles": ["keeper"],
+      "conditions": ["rechecks_current_revision"]
+    },
+    "owner.manage_room": {
+      "roles": ["owner"],
+      "conditions": []
+    },
+    "owner.manage_billing_keys": {
+      "roles": ["owner"],
+      "conditions": []
+    },
+    "session.snapshot.read": {
+      "roles": ["owner", "keeper", "player", "viewer", "agent"],
+      "conditions": ["payload_filtered_by_recipient"]
+    },
+    "events.replay": {
+      "roles": ["owner", "keeper", "player", "viewer", "agent"],
+      "conditions": ["payload_filtered_by_recipient", "cursor_scoped_to_world"]
+    }
+  },
+  "notes": [
+    "principal 一律由服务端会话/委派解析，客户端自报身份无效。",
+    "owner 不是 keeper：房主看不到主持秘密，除非同时被显式授予 keeper。",
+    "每次命令提交都重新校验权限与 controller_epoch，不只在连接建立时校验。",
+    "已授权的秘密无法让人“忘记”：撤销只停止后续访问。"
+  ]
+}

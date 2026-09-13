@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/free_roll_request.json",
+  "title": "free_roll_request：普通掷骰请求",
+  "description": "普通骰不消耗模型额度、不触发剧情分支、不发放线索、不扣 SAN，也不能绕过重复检定门禁。结果事件固定注明“普通掷骰”。",
+  "type": "object",
+  "required": ["type", "protocol_version", "request_id", "world_id", "investigator_id", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "free_roll_request"},
+    "protocol_version": {"const": 1},
+    "request_id": {"$ref": "common.json#/$defs/id_string"},
+    "world_id": {"$ref": "common.json#/$defs/id_string"},
+    "investigator_id": {"$ref": "common.json#/$defs/id_string"},
+    "spec": {"$ref": "common.json#/$defs/dice_spec"}
+  }
+}

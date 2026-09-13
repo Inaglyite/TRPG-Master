@@ -1,0 +1,16 @@
+{
+  "protocol_version": 1,
+  "event_id": 12,
+  "world_id": "world-fixture-1",
+  "sequence": 12,
+  "revision": 13,
+  "type": "clue_granted",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "clue_id": "clue_autopsy_note",
+    "investigator_id": "inv-alice",
+    "category": "investigation",
+    "text": "惠特克罗夫特医生承认死亡证明是在压力下签署的。",
+    "asset_id": "asset_autopsy_note"
+  }
+}

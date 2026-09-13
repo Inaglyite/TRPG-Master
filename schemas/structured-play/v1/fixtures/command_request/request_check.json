@@ -1,0 +1,19 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-chk-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": "req-present-describe",
+  "kind": "request_check",
+  "payload": {
+    "investigator_id": "inv-alice",
+    "skill": "说服",
+    "difficulty": "regular",
+    "bonus_penalty": 0,
+    "attempt": "向医生说明你想查看遗体的理由。",
+    "known_cost": "可能需要出示证件",
+    "visibility": "public",
+    "related_request_id": "req-present-describe"
+  }
+}

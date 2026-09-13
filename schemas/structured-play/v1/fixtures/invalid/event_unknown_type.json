@@ -1,0 +1,12 @@
+{
+  "protocol_version": 1,
+  "event_id": 99,
+  "world_id": "world-fixture-1",
+  "sequence": 99,
+  "revision": 13,
+  "type": "secret_state_broadcast",
+  "cause_request_id": null,
+  "payload": {
+    "all": "npc secrets"
+  }
+}

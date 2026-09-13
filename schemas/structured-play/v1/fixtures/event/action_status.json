@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "event_id": 3,
+  "world_id": "world-fixture-1",
+  "sequence": 3,
+  "revision": 13,
+  "type": "action_status",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "request_id": "req-present-describe",
+    "status": "completed",
+    "outcome": "success",
+    "detail": "惠特克罗夫特医生认出了自己的签名。"
+  }
+}

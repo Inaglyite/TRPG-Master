@@ -1,0 +1,13 @@
+{
+  "protocol_version": 1,
+  "event_id": 18,
+  "world_id": "world-fixture-1",
+  "sequence": 18,
+  "revision": 13,
+  "type": "keeper_draft_resolved",
+  "cause_request_id": null,
+  "payload": {
+    "draft_id": "draft-1",
+    "decision": "approved"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "protocol_version": 1,
+  "event_id": 14,
+  "world_id": "world-fixture-1",
+  "sequence": 14,
+  "revision": 13,
+  "type": "state_changed",
+  "cause_request_id": null,
+  "payload": {
+    "investigator_id": "inv-alice",
+    "hp": 11,
+    "max_hp": 12,
+    "san": 58,
+    "max_san": 65,
+    "conditions": []
+  }
+}

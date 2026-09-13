@@ -1,0 +1,19 @@
+{
+  "protocol_version": 1,
+  "event_id": 5,
+  "world_id": "world-fixture-1",
+  "sequence": 5,
+  "revision": 12,
+  "type": "check_resolved",
+  "cause_request_id": "req-chk-1",
+  "payload": {
+    "check_request_id": "chk-1",
+    "investigator_id": "inv-alice",
+    "skill": "说服",
+    "target_value": 55,
+    "roll": 23,
+    "level": "hard_success",
+    "outcome": "success",
+    "detail": "23 ≤ 27（困难成功）。"
+  }
+}

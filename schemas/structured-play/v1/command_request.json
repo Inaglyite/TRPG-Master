@@ -1,0 +1,761 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/command_request.json",
+  "title": "command_request：主持领域命令信封",
+  "description": "人类主持台与 Agent 适配器共用的命令入口。客户端不发送 principal/controller_epoch：身份由服务端会话或委派解析，epoch 在受理时由服务端绑定当前控制权。payload 按 kind 严格校验，禁止万能 execute_tool(name,args) 与任意 state_set。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/publish_message"
+    },
+    {
+      "$ref": "#/$defs/request_check"
+    },
+    {
+      "$ref": "#/$defs/resolve_check"
+    },
+    {
+      "$ref": "#/$defs/present_information"
+    },
+    {
+      "$ref": "#/$defs/grant_clue"
+    },
+    {
+      "$ref": "#/$defs/use_item"
+    },
+    {
+      "$ref": "#/$defs/transfer_item"
+    },
+    {
+      "$ref": "#/$defs/adjust_stat"
+    },
+    {
+      "$ref": "#/$defs/advance_time"
+    },
+    {
+      "$ref": "#/$defs/move_party"
+    },
+    {
+      "$ref": "#/$defs/resolve_intent"
+    },
+    {
+      "$ref": "#/$defs/present_handout"
+    },
+    {
+      "$ref": "#/$defs/set_npc_presence"
+    },
+    {
+      "$ref": "#/$defs/record_fact"
+    }
+  ],
+  "$defs": {
+    "publish_message": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "publish_message"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "speaker",
+            "audience",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "speaker": {
+              "$ref": "common.json#/$defs/speaker"
+            },
+            "audience": {
+              "$ref": "common.json#/$defs/audience"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "in_character": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "request_check": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "request_check"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "investigator_id",
+            "skill",
+            "difficulty",
+            "attempt",
+            "visibility"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "skill": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "difficulty": {
+              "enum": [
+                "regular",
+                "hard",
+                "extreme"
+              ]
+            },
+            "bonus_penalty": {
+              "type": "integer",
+              "minimum": -2,
+              "maximum": 2,
+              "description": "正为奖励骰个数，负为惩罚骰个数。"
+            },
+            "attempt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "known_cost": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "target": {
+              "$ref": "common.json#/$defs/target"
+            },
+            "visibility": {
+              "enum": [
+                "public",
+                "keeper"
+              ],
+              "description": "keeper=秘密检定：细节与结果仅主持可见投影。"
+            },
+            "related_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "time_cost_minutes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10080
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "resolve_check": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "resolve_check"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "check_request_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "check_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "push": {
+              "type": "boolean",
+              "description": "孤注一掷：仅当为 true 时校验与原检定的规则关联；不存在普通“重掷”。"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "present_information": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "present_information"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "clue_id",
+            "presentation",
+            "target"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "clue_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "presentation": {
+              "enum": [
+                "describe",
+                "image",
+                "original"
+              ]
+            },
+            "target": {
+              "$ref": "common.json#/$defs/target"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "grant_clue": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "grant_clue"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "clue_id",
+            "recipient_investigator_ids",
+            "basis"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "clue_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "recipient_investigator_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "common.json#/$defs/id_string"
+              },
+              "description": "知情授权按接收者显式记录；不是全局 clues_found 开关。"
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "present_asset_id": {
+              "$ref": "common.json#/$defs/id_string",
+              "description": "固定原子组合：发放线索同时展示对应授权图片；省略则只发放。"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "use_item": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "use_item"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "investigator_id",
+            "item_id",
+            "quantity",
+            "operation"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "item_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "quantity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 999
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "target": {
+              "$ref": "common.json#/$defs/target"
+            },
+            "approach": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "consume": {
+              "type": "boolean",
+              "description": "明确执行扣减才允许 true；检定失败但已消耗等规则结果由主持裁定。"
+            },
+            "result_note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "transfer_item": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "transfer_item"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "item_id",
+            "quantity",
+            "from",
+            "to"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "quantity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 999
+            },
+            "from": {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "investigator",
+                    "npc",
+                    "scene"
+                  ]
+                },
+                "id": {
+                  "$ref": "common.json#/$defs/id_string"
+                }
+              }
+            },
+            "to": {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "investigator",
+                    "npc",
+                    "scene"
+                  ]
+                },
+                "id": {
+                  "$ref": "common.json#/$defs/id_string"
+                }
+              }
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "adjust_stat": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "adjust_stat"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "investigator_id",
+            "field",
+            "delta",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "field": {
+              "enum": [
+                "hp",
+                "san",
+                "max_hp",
+                "max_san"
+              ]
+            },
+            "delta": {
+              "type": "integer",
+              "minimum": -99,
+              "maximum": 99
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "advance_time": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "advance_time"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "minutes",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "minutes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10080
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "related_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "move_party": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "move_party"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "destination_scene_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "destination_scene_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/id_string"
+              },
+              "description": "省略=全队。分队移动在 P2 之前不开放按组拆分。"
+            },
+            "travel_minutes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1440
+            },
+            "transition_note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "resolve_intent": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "resolve_intent"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "request_id",
+            "resolution"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "resolution": {
+              "enum": [
+                "completed",
+                "declined",
+                "cancelled",
+                "paused"
+              ]
+            },
+            "outcome": {
+              "$ref": "common.json#/$defs/domain_outcome"
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "remaining_steps": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "present_handout": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "present_handout"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "asset_id",
+            "recipient_investigator_ids"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "recipient_investigator_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "common.json#/$defs/id_string"
+              }
+            },
+            "caption": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "set_npc_presence": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "set_npc_presence"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "npc_id",
+            "scene_id",
+            "presence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "npc_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "scene_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "presence": {
+              "enum": [
+                "enter",
+                "leave"
+              ]
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "record_fact": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "record_fact"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "text",
+            "audience"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "audience": {
+              "$ref": "common.json#/$defs/audience"
+            },
+            "source": {
+              "enum": [
+                "keeper",
+                "module",
+                "ruling"
+              ]
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "envelope_base": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "command_request"
+        },
+        "protocol_version": {
+          "const": 1
+        },
+        "command_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "world_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "expected_revision": {
+          "$ref": "common.json#/$defs/revision"
+        },
+        "cause_id": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "引发本命令的玩家 request_id 或上游 command_id。"
+        }
+      },
+      "required": [
+        "type",
+        "protocol_version",
+        "command_id",
+        "world_id",
+        "expected_revision",
+        "kind",
+        "payload"
+      ]
+    }
+  }
+}

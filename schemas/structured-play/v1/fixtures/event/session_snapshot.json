@@ -1,0 +1,108 @@
+{
+  "protocol_version": 1,
+  "event_id": 1,
+  "world_id": "world-fixture-1",
+  "sequence": 1,
+  "revision": 12,
+  "type": "session_snapshot",
+  "cause_request_id": null,
+  "payload": {
+    "revision": 12,
+    "execution_profile": "structured_v1",
+    "keeper_mode": "human",
+    "server_capabilities": {
+      "protocol_version": 1,
+      "structured_protocol": true,
+      "execution_profile": "structured_v1",
+      "keeper_modes": [
+        "human",
+        "assisted",
+        "agent"
+      ],
+      "commands": [
+        "move_party",
+        "request_check",
+        "resolve_check",
+        "present_information",
+        "grant_clue",
+        "use_item",
+        "transfer_item",
+        "adjust_stat",
+        "advance_time",
+        "publish_message",
+        "resolve_intent",
+        "present_handout",
+        "set_npc_presence",
+        "record_fact"
+      ],
+      "keeper_console": true,
+      "free_roll": true,
+      "assisted_draft": true,
+      "agent_takeover": true,
+      "check_request": true,
+      "move_action": true,
+      "present_clue": true,
+      "use_item": true
+    },
+    "keeper": {
+      "user_id": "user-keeper",
+      "mode": "human"
+    },
+    "scene": {
+      "id": "miskatonic_university",
+      "name": "密斯卡托尼克大学"
+    },
+    "destinations": [
+      {
+        "id": "miskatonic_medical",
+        "name": "密斯卡托尼克大学医学院"
+      },
+      {
+        "id": "miskatonic_history",
+        "name": "历史系研究生自习室"
+      }
+    ],
+    "investigator_id": "inv-alice",
+    "targets": [
+      {
+        "kind": "npc",
+        "id": "bryce_fallon",
+        "name": "布莱斯·法伦"
+      },
+      {
+        "kind": "investigator",
+        "id": "inv-bob",
+        "name": "鲍勃"
+      }
+    ],
+    "clues": [
+      {
+        "id": "clue_death_certificate",
+        "category": "investigation",
+        "text": "莱特的死亡证明由惠特克罗夫特医生签署。",
+        "presentation": [
+          "describe",
+          "image"
+        ]
+      }
+    ],
+    "items": [
+      {
+        "id": "item_press_pass",
+        "label": "记者证",
+        "quantity": 1,
+        "operations": [
+          "show",
+          "inspect"
+        ]
+      }
+    ],
+    "requests": [],
+    "pending_checks": [],
+    "cursor": {
+      "event_id": 1,
+      "revision": 12,
+      "sequence": 1
+    }
+  }
+}

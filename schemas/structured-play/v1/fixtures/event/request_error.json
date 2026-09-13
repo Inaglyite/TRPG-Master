@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "event_id": 16,
+  "world_id": "world-fixture-1",
+  "sequence": 16,
+  "revision": 13,
+  "type": "request_error",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "request_id": "req-present-describe",
+    "code": "revision_conflict",
+    "message": "世界版本已从 12 变为 13",
+    "retryable": true
+  }
+}

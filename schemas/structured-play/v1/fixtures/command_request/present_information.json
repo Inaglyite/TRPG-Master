@@ -1,0 +1,18 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-present-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": "req-present-describe",
+  "kind": "present_information",
+  "payload": {
+    "clue_id": "clue_death_certificate",
+    "presentation": "describe",
+    "target": {
+      "kind": "npc",
+      "id": "john_whitcroft"
+    },
+    "note": "玩家说明证明内容，医生辨认签名。"
+  }
+}

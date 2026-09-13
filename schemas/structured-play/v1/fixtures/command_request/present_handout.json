@@ -1,0 +1,16 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-handout-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "present_handout",
+  "payload": {
+    "asset_id": "asset_autopsy_note",
+    "recipient_investigator_ids": [
+      "inv-alice"
+    ],
+    "caption": "惠特克罗夫特的验尸笔记（照片）"
+  }
+}

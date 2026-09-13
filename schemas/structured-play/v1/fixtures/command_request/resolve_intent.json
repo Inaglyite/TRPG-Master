@@ -1,0 +1,15 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-resolve-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "resolve_intent",
+  "payload": {
+    "request_id": "req-present-describe",
+    "resolution": "completed",
+    "outcome": "success",
+    "note": "医生认出了自己的签名。"
+  }
+}

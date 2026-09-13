@@ -1,0 +1,12 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-chk-2",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "resolve_check",
+  "payload": {
+    "check_request_id": "chk-1"
+  }
+}

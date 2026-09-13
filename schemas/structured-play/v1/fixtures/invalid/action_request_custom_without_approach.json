@@ -1,0 +1,14 @@
+{
+  "type": "action_request",
+  "protocol_version": 1,
+  "request_id": "req-bad-2",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "investigator_id": "inv-alice",
+  "action": {
+    "kind": "use_item",
+    "item_id": "item_press_pass",
+    "quantity": 1,
+    "operation": "custom"
+  }
+}

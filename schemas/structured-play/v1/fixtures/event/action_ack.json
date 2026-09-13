@@ -1,0 +1,13 @@
+{
+  "protocol_version": 1,
+  "event_id": 2,
+  "world_id": "world-fixture-1",
+  "sequence": 2,
+  "revision": 12,
+  "type": "action_ack",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "request_id": "req-present-describe",
+    "status": "queued"
+  }
+}

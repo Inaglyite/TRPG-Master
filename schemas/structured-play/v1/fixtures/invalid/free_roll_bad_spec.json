@@ -1,0 +1,8 @@
+{
+  "type": "free_roll_request",
+  "protocol_version": 1,
+  "request_id": "req-roll-bad",
+  "world_id": "world-fixture-1",
+  "investigator_id": "inv-alice",
+  "spec": "1d100; drop table"
+}

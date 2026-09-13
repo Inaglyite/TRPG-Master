@@ -1,0 +1,24 @@
+{
+  "protocol_version": 1,
+  "event_id": 7,
+  "world_id": "world-fixture-1",
+  "sequence": 7,
+  "revision": 12,
+  "type": "roll_resolved",
+  "cause_request_id": "req-roll-1",
+  "payload": {
+    "request_id": "req-roll-1",
+    "expression": "1d100",
+    "dice": [
+      {
+        "sides": 100,
+        "values": [
+          42
+        ]
+      }
+    ],
+    "total": 42,
+    "modifier": 0,
+    "note": "普通掷骰"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "protocol_version": 1,
+  "event_id": 10,
+  "world_id": "world-fixture-1",
+  "sequence": 10,
+  "revision": 12,
+  "type": "message_completed",
+  "cause_request_id": null,
+  "payload": {
+    "message_id": "msg-1",
+    "speaker": {
+      "kind": "npc",
+      "id": "john_whitcroft"
+    },
+    "audience": {
+      "kind": "public"
+    },
+    "text": "死亡证明是我签的——但我当时没有别的选择。"
+  }
+}

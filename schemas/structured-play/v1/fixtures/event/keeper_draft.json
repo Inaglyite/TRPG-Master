@@ -1,0 +1,27 @@
+{
+  "protocol_version": 1,
+  "event_id": 17,
+  "world_id": "world-fixture-1",
+  "sequence": 17,
+  "revision": 13,
+  "type": "keeper_draft",
+  "cause_request_id": null,
+  "payload": {
+    "draft_id": "draft-1",
+    "kind": "commands",
+    "request_id": "req-present-describe",
+    "summary": "建议：允许出示并发放验尸笔记线索（附图片）。",
+    "proposed_commands": [
+      {
+        "kind": "grant_clue",
+        "payload": {
+          "clue_id": "clue_autopsy_note",
+          "recipient_investigator_ids": [
+            "inv-alice"
+          ],
+          "basis": "医生承认证明是在压力下签署的。"
+        }
+      }
+    ]
+  }
+}

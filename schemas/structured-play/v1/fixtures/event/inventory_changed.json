@@ -1,0 +1,19 @@
+{
+  "protocol_version": 1,
+  "event_id": 13,
+  "world_id": "world-fixture-1",
+  "sequence": 13,
+  "revision": 13,
+  "type": "inventory_changed",
+  "cause_request_id": "req-use-bandage",
+  "payload": {
+    "investigator_id": "inv-alice",
+    "items": [
+      {
+        "id": "item_press_pass",
+        "label": "记者证",
+        "quantity": 1
+      }
+    ]
+  }
+}

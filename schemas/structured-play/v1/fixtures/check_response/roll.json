@@ -1,0 +1,8 @@
+{
+  "type": "check_response",
+  "protocol_version": 1,
+  "request_id": "req-chk-1",
+  "world_id": "world-fixture-1",
+  "check_request_id": "chk-1",
+  "decision": "roll"
+}

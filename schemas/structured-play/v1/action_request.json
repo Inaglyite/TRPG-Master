@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/action_request.json",
+  "title": "action_request：玩家结构化行动尝试请求",
+  "description": "按钮提交明确对象与操作的尝试请求；请求被接受不等于行动成功。action 为 discriminated union（kind）。",
+  "type": "object",
+  "required": ["type", "protocol_version", "request_id", "world_id", "expected_revision", "investigator_id", "action"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "action_request"},
+    "protocol_version": {"const": 1},
+    "request_id": {"$ref": "common.json#/$defs/id_string"},
+    "world_id": {"$ref": "common.json#/$defs/id_string"},
+    "expected_revision": {"$ref": "common.json#/$defs/revision"},
+    "investigator_id": {"$ref": "common.json#/$defs/id_string"},
+    "action": {"$ref": "#/$defs/action"}
+  },
+  "$defs": {
+    "action": {
+      "oneOf": [
+        {"$ref": "#/$defs/present_clue"},
+        {"$ref": "#/$defs/use_item"},
+        {"$ref": "#/$defs/move"},
+        {"$ref": "#/$defs/freeform"}
+      ]
+    },
+    "present_clue": {
+      "type": "object",
+      "required": ["kind", "clue_id", "presentation", "physical_item_id", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "present_clue"},
+        "clue_id": {"$ref": "common.json#/$defs/id_string"},
+        "presentation": {
+          "enum": ["describe", "image", "original"],
+          "description": "describe=说明已知内容；image=展示已获准查看的图片；original=展示实际持有的原件。"
+        },
+        "physical_item_id": {
+          "oneOf": [{"$ref": "common.json#/$defs/id_string"}, {"type": "null"}],
+          "description": "presentation=original 时必填且必须为持有者实物；其余方式必须为 null。默认不转移所有权。"
+        },
+        "target": {"$ref": "common.json#/$defs/target"},
+        "question": {"type": "string", "maxLength": 200}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"presentation": {"const": "original"}}},
+          "then": {"properties": {"physical_item_id": {"$ref": "common.json#/$defs/id_string"}}}
+        },
+        {
+          "if": {"properties": {"presentation": {"enum": ["describe", "image"]}}},
+          "then": {"properties": {"physical_item_id": {"const": null}}}
+        }
+      ]
+    },
+    "use_item": {
+      "type": "object",
+      "required": ["kind", "item_id", "quantity", "operation"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "use_item"},
+        "item_id": {"$ref": "common.json#/$defs/id_string"},
+        "quantity": {"type": "integer", "minimum": 1, "maximum": 999},
+        "operation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "模组声明的用法枚举值；即兴用法固定为 custom 并必须给 approach。提交不等于扣减。"
+        },
+        "target": {"$ref": "common.json#/$defs/target"},
+        "approach": {"type": "string", "maxLength": 200}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"operation": {"const": "custom"}}},
+          "then": {
+            "required": ["approach"],
+            "properties": {"approach": {"type": "string", "minLength": 1, "maxLength": 200}}
+          }
+        }
+      ]
+    },
+    "move": {
+      "type": "object",
+      "required": ["kind", "destination_scene_id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "move"},
+        "destination_scene_id": {"$ref": "common.json#/$defs/id_string"}
+      }
+    },
+    "freeform": {
+      "type": "object",
+      "required": ["kind", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "freeform"},
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "自由扮演/交谈/补充做法。不直接改变世界；由主持解释成明确命令或交谈回应。"
+        }
+      }
+    }
+  }
+}

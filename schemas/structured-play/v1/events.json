@@ -1,0 +1,1366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/events.json",
+  "title": "结构化协议 v1：服务端事件",
+  "description": "公共事件信封 + 每类型载荷。事件在命令事务提交成功后才发布；可见性在服务端过滤后投递。event_id 为全局数据库标识，sequence 为世界内单调游标（断线按游标补发），revision 为已提交世界版本（纯消息不必推进 revision，但仍有独立事件顺序）。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/session_snapshot"
+    },
+    {
+      "$ref": "#/$defs/action_ack"
+    },
+    {
+      "$ref": "#/$defs/action_status"
+    },
+    {
+      "$ref": "#/$defs/check_requested"
+    },
+    {
+      "$ref": "#/$defs/check_resolved"
+    },
+    {
+      "$ref": "#/$defs/check_cancelled"
+    },
+    {
+      "$ref": "#/$defs/roll_resolved"
+    },
+    {
+      "$ref": "#/$defs/message_started"
+    },
+    {
+      "$ref": "#/$defs/message_chunk"
+    },
+    {
+      "$ref": "#/$defs/message_completed"
+    },
+    {
+      "$ref": "#/$defs/scene_changed"
+    },
+    {
+      "$ref": "#/$defs/clue_granted"
+    },
+    {
+      "$ref": "#/$defs/inventory_changed"
+    },
+    {
+      "$ref": "#/$defs/state_changed"
+    },
+    {
+      "$ref": "#/$defs/request_error"
+    },
+    {
+      "$ref": "#/$defs/keeper_draft"
+    },
+    {
+      "$ref": "#/$defs/keeper_draft_resolved"
+    },
+    {
+      "$ref": "#/$defs/keeper_control"
+    },
+    {
+      "$ref": "#/$defs/intent_pending"
+    }
+  ],
+  "$defs": {
+    "session_snapshot": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "session_snapshot"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "revision",
+            "execution_profile",
+            "keeper_mode",
+            "server_capabilities",
+            "scene",
+            "destinations",
+            "investigator_id",
+            "targets",
+            "clues",
+            "items",
+            "requests",
+            "pending_checks",
+            "cursor"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "$ref": "common.json#/$defs/revision"
+            },
+            "execution_profile": {
+              "enum": [
+                "legacy",
+                "structured_v1"
+              ]
+            },
+            "keeper_mode": {
+              "enum": [
+                "human",
+                "assisted",
+                "agent"
+              ]
+            },
+            "server_capabilities": {
+              "$ref": "#/$defs/server_capabilities"
+            },
+            "keeper": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "user_id",
+                    "mode"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "user_id": {
+                      "$ref": "common.json#/$defs/id_string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "human",
+                        "assisted",
+                        "agent"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scene": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "$ref": "common.json#/$defs/id_string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "玩家允许知道的当前位置；未公开地名由服务端替换为中性称呼或 null。"
+            },
+            "destinations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/public_destination"
+              }
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/public_target"
+              }
+            },
+            "clues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/known_clue"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/known_item"
+              }
+            },
+            "requests": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/request_status_entry"
+              }
+            },
+            "pending_checks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/pending_check"
+              }
+            },
+            "cursor": {
+              "type": "object",
+              "required": [
+                "event_id",
+                "revision"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "revision": {
+                  "$ref": "common.json#/$defs/revision"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "server_capabilities": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "structured_protocol",
+        "execution_profile",
+        "keeper_modes",
+        "commands"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "structured_protocol": {
+          "type": "boolean"
+        },
+        "execution_profile": {
+          "enum": [
+            "legacy",
+            "structured_v1"
+          ]
+        },
+        "keeper_modes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "human",
+              "assisted",
+              "agent"
+            ]
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "keeper_console": {
+          "type": "boolean"
+        },
+        "free_roll": {
+          "type": "boolean"
+        },
+        "assisted_draft": {
+          "type": "boolean"
+        },
+        "agent_takeover": {
+          "type": "boolean"
+        },
+        "check_request": {
+          "type": "boolean"
+        },
+        "move_action": {
+          "type": "boolean"
+        },
+        "present_clue": {
+          "type": "boolean"
+        },
+        "use_item": {
+          "type": "boolean"
+        }
+      }
+    },
+    "public_target": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "npc",
+            "investigator",
+            "scene_object"
+          ]
+        },
+        "id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "public_destination": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "known_clue": {
+      "type": "object",
+      "required": [
+        "id",
+        "category",
+        "text",
+        "presentation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "category": {
+          "enum": [
+            "investigation",
+            "event",
+            "task",
+            "npc"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "presentation": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "describe",
+              "image",
+              "original"
+            ]
+          }
+        }
+      }
+    },
+    "known_item": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "quantity",
+        "operations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        }
+      }
+    },
+    "request_status_entry": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "status": {
+          "$ref": "#/$defs/action_status_kind"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "pending_check": {
+      "type": "object",
+      "required": [
+        "check_request_id",
+        "investigator_id",
+        "skill",
+        "difficulty",
+        "attempt",
+        "visibility"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "check_request_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "skill": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ]
+        },
+        "bonus_penalty": {
+          "type": "integer",
+          "minimum": -2,
+          "maximum": 2
+        },
+        "attempt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "known_cost": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "keeper"
+          ]
+        }
+      }
+    },
+    "action_status_kind": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "processing",
+        "awaiting_player",
+        "completed",
+        "declined",
+        "cancelled",
+        "paused",
+        "failed"
+      ]
+    },
+    "action_ack": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "action_ack"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "request_id",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "status": {
+              "const": "queued",
+              "description": "ack 仅代表请求已持久接收，不代表行动成功。"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "action_status": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "action_status"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "request_id",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "status": {
+              "$ref": "#/$defs/action_status_kind"
+            },
+            "outcome": {
+              "$ref": "common.json#/$defs/domain_outcome"
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "check_requested": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "check_requested"
+        },
+        "payload": {
+          "$ref": "#/$defs/pending_check"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "check_resolved": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "check_resolved"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "check_request_id",
+            "investigator_id",
+            "skill",
+            "target_value",
+            "roll",
+            "outcome"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "check_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "skill": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            },
+            "target_value": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "roll": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "level": {
+              "enum": [
+                "critical_success",
+                "extreme_success",
+                "hard_success",
+                "regular_success",
+                "failure",
+                "fumble"
+              ]
+            },
+            "outcome": {
+              "enum": [
+                "success",
+                "failure"
+              ]
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "check_cancelled": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "check_cancelled"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "check_request_id",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "check_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "roll_resolved": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "roll_resolved"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "request_id",
+            "expression",
+            "dice",
+            "total",
+            "modifier",
+            "note"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "expression": {
+              "$ref": "common.json#/$defs/dice_spec"
+            },
+            "dice": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "sides",
+                  "values"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "sides": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 100
+                  },
+                  "values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            },
+            "total": {
+              "type": "integer"
+            },
+            "modifier": {
+              "type": "integer"
+            },
+            "note": {
+              "const": "普通掷骰",
+              "description": "固定标注：普通骰不产生剧情效果。"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "message_started": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "message_started"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "message_id",
+            "speaker",
+            "audience"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "message_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "speaker": {
+              "$ref": "common.json#/$defs/speaker"
+            },
+            "audience": {
+              "$ref": "common.json#/$defs/audience"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "message_chunk": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "message_chunk"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "message_id",
+            "index",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "message_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "message_completed": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "message_completed"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "message_id",
+            "speaker",
+            "audience",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "message_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "speaker": {
+              "$ref": "common.json#/$defs/speaker"
+            },
+            "audience": {
+              "$ref": "common.json#/$defs/audience"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "scene_changed": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "scene_changed"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "scene",
+            "destinations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "scene": {
+              "type": "object",
+              "required": [
+                "id",
+                "name"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                }
+              }
+            },
+            "destinations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/public_destination"
+              }
+            },
+            "travel_minutes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cause_command_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "clue_granted": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "clue_granted"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "clue_id",
+            "investigator_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "clue_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "category": {
+              "enum": [
+                "investigation",
+                "event",
+                "task",
+                "npc"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "asset_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "inventory_changed": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "inventory_changed"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "investigator_id",
+            "items"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "label",
+                  "quantity"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "$ref": "common.json#/$defs/id_string"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "state_changed": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "state_changed"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "hp": {
+              "type": "integer"
+            },
+            "max_hp": {
+              "type": "integer"
+            },
+            "san": {
+              "type": "integer"
+            },
+            "max_san": {
+              "type": "integer"
+            },
+            "conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 60
+              }
+            },
+            "clock": {
+              "type": "object",
+              "required": [
+                "elapsed_minutes"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "elapsed_minutes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "request_error": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "request_error"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "command_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "check_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "code": {
+              "$ref": "common.json#/$defs/error_code"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "keeper_draft": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "keeper_draft"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "draft_id",
+            "kind",
+            "summary"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "draft_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "kind": {
+              "enum": [
+                "commands",
+                "narrative"
+              ]
+            },
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "proposed_commands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "payload": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "keeper_draft_resolved": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "keeper_draft_resolved"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "draft_id",
+            "decision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "draft_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "decision": {
+              "enum": [
+                "approved",
+                "rejected",
+                "edited"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "keeper_control": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "keeper_control"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "controller_epoch",
+            "controller",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "controller_epoch": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "controller": {
+              "type": "object",
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "human",
+                    "agent",
+                    "none"
+                  ]
+                },
+                "id": {
+                  "$ref": "common.json#/$defs/id_string"
+                }
+              }
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "intent_pending": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "intent_pending"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "request_id",
+            "investigator_id",
+            "summary"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "envelope_base": {
+      "type": "object",
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "event_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "world_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "$ref": "common.json#/$defs/revision"
+        },
+        "cause_request_id": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "event_id",
+        "world_id",
+        "sequence",
+        "revision",
+        "type",
+        "payload"
+      ]
+    }
+  }
+}

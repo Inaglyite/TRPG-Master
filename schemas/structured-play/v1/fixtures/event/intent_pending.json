@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "event_id": 20,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "intent_pending",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "request_id": "req-present-describe",
+    "investigator_id": "inv-alice",
+    "summary": "向惠特克罗夫特出示死亡证明（说明内容）"
+  }
+}

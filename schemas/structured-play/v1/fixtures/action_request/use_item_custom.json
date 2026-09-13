@@ -1,0 +1,15 @@
+{
+  "type": "action_request",
+  "protocol_version": 1,
+  "request_id": "req-use-custom",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "investigator_id": "inv-alice",
+  "action": {
+    "kind": "use_item",
+    "item_id": "item_press_pass",
+    "quantity": 1,
+    "operation": "custom",
+    "approach": "把记者证别在领口，假装来采访院方"
+  }
+}

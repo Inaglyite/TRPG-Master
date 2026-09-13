@@ -1,0 +1,18 @@
+{
+  "type": "action_request",
+  "protocol_version": 1,
+  "request_id": "req-present-original",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "investigator_id": "inv-alice",
+  "action": {
+    "kind": "present_clue",
+    "clue_id": "clue_death_certificate",
+    "presentation": "original",
+    "physical_item_id": "item_press_pass",
+    "target": {
+      "kind": "investigator",
+      "id": "inv-bob"
+    }
+  }
+}

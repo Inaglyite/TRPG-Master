@@ -1,0 +1,14 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-npc-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "set_npc_presence",
+  "payload": {
+    "npc_id": "bryce_fallon",
+    "scene_id": "miskatonic_medical",
+    "presence": "leave"
+  }
+}

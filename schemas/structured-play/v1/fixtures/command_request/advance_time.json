@@ -1,0 +1,14 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-time-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "cause_id": null,
+  "kind": "advance_time",
+  "payload": {
+    "minutes": 20,
+    "reason": "前往医学院的路程。",
+    "related_request_id": "req-move-1"
+  }
+}

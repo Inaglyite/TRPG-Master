@@ -1,0 +1,12 @@
+{
+  "type": "action_request",
+  "protocol_version": 1,
+  "request_id": "req-move-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "investigator_id": "inv-alice",
+  "action": {
+    "kind": "move",
+    "destination_scene_id": "miskatonic_medical"
+  }
+}
