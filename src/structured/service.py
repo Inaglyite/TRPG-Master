@@ -409,6 +409,78 @@ class StructuredPlayService:
             )
         return {"request_id": request_id, "status": "queued", "events": envelopes}
 
+    def create_keeper_draft(
+        self,
+        *,
+        world_id: str,
+        summary: str,
+        proposed_commands: list[dict],
+        narration: str = "",
+        related_request_id: str = "",
+    ) -> dict:
+        """assisted 草稿：只持久化 + 通知 keeper，不执行任何命令。
+
+        草稿占用 player_requests（request_type=keeper_draft），批准/拒绝由
+        resolve_draft 命令收尾；重复 draft_id 幂等返回。
+        """
+        from .ids import new_stable_id
+
+        draft_id = new_stable_id("draft")
+        digest = canonical_digest(
+            {
+                "summary": summary,
+                "commands": proposed_commands,
+                "narration": narration,
+            }
+        )
+        with session_scope(self.database_url) as session:
+            _world, row, _state = self._locked_world(session, world_id)
+            session.add(
+                PlayerRequest(
+                    id=new_row_id("req"),
+                    world_id=world_id,
+                    request_id=draft_id,
+                    request_type="keeper_draft",
+                    investigator_id="",
+                    submitted_by=None,
+                    payload={
+                        "draft": {
+                            "summary": summary,
+                            "commands": proposed_commands,
+                            "narration": narration,
+                        }
+                    },
+                    payload_digest=digest,
+                    status="queued",
+                    created_at=utcnow(),
+                    updated_at=utcnow(),
+                )
+            )
+            envelopes = self._append_events(
+                session,
+                world_id,
+                int(row.revision),
+                draft_id,
+                [
+                    EventSpec(
+                        "keeper_draft",
+                        {
+                            "draft_id": draft_id,
+                            "kind": "commands" if proposed_commands else "narrative",
+                            **({"request_id": related_request_id} if related_request_id else {}),
+                            "summary": summary,
+                            **(
+                                {"proposed_commands": proposed_commands}
+                                if proposed_commands
+                                else {}
+                            ),
+                        },
+                        {"kind": "keeper"},
+                    )
+                ],
+            )
+        return {"draft_id": draft_id, "status": "queued", "events": envelopes}
+
     def cancel_action_request(
         self,
         *,
@@ -653,6 +725,10 @@ class StructuredPlayService:
     # ------------------------------------------------------------------
 
     def session_snapshot(self, *, world_id: str, principal: Principal) -> dict:
+        is_keeper = principal.kind in {"keeper", "agent"}
+        own = set(principal.investigator_ids)
+        from .domains import _known_destinations, _public_targets
+
         with session_scope(self.database_url) as session:
             world = session.get(World, world_id)
             if world is None:
@@ -665,44 +741,63 @@ class StructuredPlayService:
             from src.storage.database import KeeperControl
 
             control = session.get(KeeperControl, world_id)
-            requests = session.execute(
-                select(PlayerRequest).where(
-                    PlayerRequest.world_id == world_id,
-                    PlayerRequest.status.in_(
-                        ["queued", "processing", "awaiting_player", "paused", "failed"]
-                    ),
+            requests = (
+                session.execute(
+                    select(PlayerRequest).where(
+                        PlayerRequest.world_id == world_id,
+                        PlayerRequest.status.in_(
+                            ["queued", "processing", "awaiting_player", "paused", "failed"]
+                        ),
+                    )
                 )
-            ).scalars()
-            checks = session.execute(
-                select(CheckRequest).where(
-                    CheckRequest.world_id == world_id,
-                    CheckRequest.status == "pending",
+                .scalars()
+                .all()
+            )
+            checks = (
+                session.execute(
+                    select(CheckRequest).where(
+                        CheckRequest.world_id == world_id,
+                        CheckRequest.status == "pending",
+                    )
                 )
-            ).scalars()
+                .scalars()
+                .all()
+            )
             cursor = self._next_sequence(session, world_id) - 1
             last_event_id = session.execute(
                 select(func.max(EventOutbox.id)).where(EventOutbox.world_id == world_id)
             ).scalar_one()
-
-        is_keeper = principal.kind in {"keeper", "agent"}
-        own = set(principal.investigator_ids)
-        from .domains import _known_destinations, _public_targets
+            revision = int(row.revision)
+            keeper_info = (
+                {
+                    "user_id": control.controller_id,
+                    "mode": "agent" if control.controller_kind == "agent" else "human",
+                }
+                if control is not None and control.controller_kind in {"human", "agent"}
+                else None
+            )
+            # 投影必须在会话内完成：会话提交后 ORM 属性即过期，惰性结果集
+            # 在块外迭代会撞上失效的 identity map。
+            pending_checks = [
+                self._check_projection(check, is_keeper)
+                for check in checks
+                if is_keeper or check.visibility == "public" or check.investigator_id in own
+            ]
+            request_entries = [
+                {
+                    "request_id": req.request_id,
+                    "status": req.status,
+                    "summary": (
+                        str((req.payload or {}).get("draft", {}).get("summary") or "")[:200]
+                        if req.request_type == "keeper_draft"
+                        else self._request_summary((req.payload or {}).get("action") or {})
+                    ),
+                }
+                for req in requests
+                if is_keeper or req.investigator_id in own
+            ]
 
         clues = self._visible_clues(state, own, is_keeper)
-        pending_checks = [
-            self._check_projection(check, is_keeper)
-            for check in checks
-            if is_keeper or check.visibility == "public" or check.investigator_id in own
-        ]
-        request_entries = [
-            {
-                "request_id": req.request_id,
-                "status": req.status,
-                "summary": self._request_summary((req.payload or {}).get("action") or {}),
-            }
-            for req in requests
-            if is_keeper or req.investigator_id in own
-        ]
         scene = state.get("current_scene") or {}
         scene_id = str(scene.get("id") or "")
         scene_name = str(scene.get("name") or scene_id) or None
@@ -711,18 +806,11 @@ class StructuredPlayService:
             for scene_id_, name in sorted(_known_destinations(state).items())
         ]
         payload = {
-            "revision": int(row.revision),
+            "revision": revision,
             "execution_profile": meta.get("execution_profile", "legacy"),
             "keeper_mode": meta.get("keeper_mode", "human"),
             "server_capabilities": self._capabilities(meta),
-            "keeper": (
-                {
-                    "user_id": control.controller_id,
-                    "mode": "agent" if control.controller_kind == "agent" else "human",
-                }
-                if control is not None and control.controller_kind in {"human", "agent"}
-                else None
-            ),
+            "keeper": keeper_info,
             "scene": {"id": scene_id, "name": scene_name} if scene_id else None,
             "destinations": destinations,
             "investigator_id": sorted(own)[0] if own else None,
@@ -733,7 +821,7 @@ class StructuredPlayService:
             "pending_checks": pending_checks,
             "cursor": {
                 "event_id": int(last_event_id or 0),
-                "revision": int(row.revision),
+                "revision": revision,
                 "sequence": max(cursor, 0),
             },
         }

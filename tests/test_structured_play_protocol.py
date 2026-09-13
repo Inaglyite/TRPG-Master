@@ -53,6 +53,7 @@ COMMAND_KINDS = {
     "present_handout",
     "set_npc_presence",
     "record_fact",
+    "resolve_draft",
 }
 
 EVENT_TYPES = {

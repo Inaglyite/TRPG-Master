@@ -45,6 +45,9 @@
     },
     {
       "$ref": "#/$defs/record_fact"
+    },
+    {
+      "$ref": "#/$defs/resolve_draft"
     }
   ],
   "$defs": {
@@ -767,6 +770,45 @@
         "kind",
         "payload"
       ]
+    },
+    "resolve_draft": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "resolve_draft"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "draft_id",
+            "decision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "draft_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "decision": {
+              "enum": [
+                "approved",
+                "rejected",
+                "edited"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
     }
   }
 }

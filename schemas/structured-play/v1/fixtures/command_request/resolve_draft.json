@@ -1,0 +1,13 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-draft-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "kind": "resolve_draft",
+  "payload": {
+    "draft_id": "draft_abc123",
+    "decision": "approved",
+    "note": "按建议执行"
+  }
+}

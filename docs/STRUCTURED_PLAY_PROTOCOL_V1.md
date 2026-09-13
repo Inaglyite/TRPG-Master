@@ -15,10 +15,10 @@
 | `schemas/structured-play/v1/cancel_request.json` | 玩家取消自己 queued 的行动请求（M2 新增帧类型） |
 | `schemas/structured-play/v1/free_roll_request.json` | 普通掷骰请求（受限表达式） |
 | `schemas/structured-play/v1/check_response.json` | 待检定卡回应（roll / decline，不携带参数） |
-| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 14 种命令的严格载荷 |
+| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 15 种命令的严格载荷（M3 新增 resolve_draft） |
 | `schemas/structured-play/v1/events.json` | 事件信封 + 20 种事件载荷（含 session_snapshot / server_capabilities / handout_presented） |
 | `schemas/structured-play/v1/permission-matrix.json` | 权限矩阵机器可读正本 |
-| `schemas/structured-play/v1/fixtures/` | 47 个正例 + 7 个反例 |
+| `schemas/structured-play/v1/fixtures/` | 50 个正例 + 7 个反例 |
 | `tests/test_structured_play_protocol.py` | 双向校验与一致性门禁（7 项 + 74 子项） |
 
 校验方式：后端 `pytest tests/test_structured_play_protocol.py`；前端用同一目录的
@@ -46,6 +46,12 @@ JSON Schema（Ajv 2020-12，需支持 `unevaluatedProperties`）或直接把 fix
 
 human 房间的模型就绪门禁：structured_v1 + human 不经 `_room_model_readiness`；
 agent/assisted 仍走 BYOK 校验，**不**因此放开平台 Key 兜底。
+
+Agent 触发语义（M3 实现冻结）：`action_request` / `check_response` 提交成功后调度一次
+守秘人运行；`free_roll_request`（普通骰）与主持自己的 `command_request` 不触发剧情。
+同一世界同一时刻至多一个活动运行；运行中到达的新触发由下一轮上下文重建吸收。
+模型路由不可用（BYOK 未配置/被阻断）时不消耗模型、触发请求置 paused 并给主持可见提示；
+人类在控时运行返回 blocked 不抢占。
 
 ### 2.3 server_capabilities 协商
 
@@ -103,6 +109,22 @@ rejected/conflict 不改变状态、不发布权威事件（只回 `request_erro
   （keeper/agent 或该玩家），让发起端的“主持操作/发言”卡离开等待态。
 - `request_error` 同样持久化到 event_outbox（真实 event_id/sequence，
   前端游标可去重），但不推进世界 revision，audience 定向发起方。
+
+### 3.4 keeper_draft（assisted 草稿，M3）
+
+assisted 模式的 AI 产物**不是命令执行**，而是草稿：占用 `player_requests`
+（`request_type=keeper_draft`），仅主持可见（事件 audience=keeper）。
+
+```
+queued → completed（主持 resolve_draft decision=approved/edited）
+       → declined（decision=rejected）
+```
+
+- 草稿携带 `summary`、`proposed_commands`（无 command_id 的建议命令列表）、
+  `narration`；批准本身**不执行**任何命令——主持批准后以各自的
+  `command_request` 单独提交（幂等），edited 表示主持改过内容再发。
+- 终态草稿不能重复收尾（invalid_action）；未知 draft_id 报 request_not_found。
+- 模型不可用时不产草稿、不消耗后续调用，运行记 draft_unavailable 暂停。
 
 ## 4. 错误码
 
@@ -232,3 +254,15 @@ M2 协议增补（zcode 侧需要跟进）：
 3. 出示 `presentation=image` 需要已授权素材（`presentation_requires_asset`）；
    快照 `known_clue.presentation` 现在按接收者投放可用出示方式（describe 恒有，
    image 仅在素材已授权后出现）。
+
+M3 协议增补（zcode 侧需要跟进）：
+
+1. 第 15 种主持命令 `resolve_draft`：`{draft_id, decision: approved|rejected|edited,
+   note?}`，收尾 assisted 草稿（见 §3.4）。权限矩阵已含 `command.resolve_draft`
+   （keeper/agent）。
+2. 新事件 `keeper_draft`（assisted 产出，audience=keeper；载荷含 draft_id/summary/
+   proposed_commands/narration/可选 request_id）与 `keeper_draft_resolved`
+   （draft_id/decision/note?）。两者在 M0 冻结的 events.json 中已定义，本轮起真正产生。
+3. Agent 触发语义见 §2.2 末段：仅 action_request / check_response 触发；
+   agent 运行产生的事件在房间场景只经 broadcast 按各连接 principal 过滤投递，
+   不回溯发起玩家的连接。

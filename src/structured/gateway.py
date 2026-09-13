@@ -48,6 +48,10 @@ STRUCTURED_FRAME_TYPES = frozenset(
 Deliver = Callable[[dict], Awaitable[None]]
 Broadcast = Callable[[dict], Awaitable[None]]
 
+# 提交成功后触发守秘人 Agent 运行的帧类型；free_roll_request（普通骰）
+# 与 keeper 自己的 command_request 按规格不触发剧情。
+_AGENT_TRIGGER_FRAMES = frozenset({"action_request", "check_response"})
+
 
 def world_modes(metadata: dict | None) -> tuple[str, str]:
     meta = metadata or {}
@@ -248,6 +252,22 @@ class StructuredGateway:
                     # 内部信封（含 audience）交给传输层：按各连接 principal
                     # 过滤后剥离 audience 再上线。
                     await broadcast(envelope)
+        # 玩家尝试/检定结算提交成功后，assisted/agent 世界调度一次守秘人运行。
+        # 普通骰（free_roll_request）按规格不触发剧情；human 模式在
+        # maybe_schedule_keeper_agent 内部直接返回 False。Agent 没有发起连接：
+        # 房间场景 deliver 置 None（事件只经 broadcast 按各连接 principal 过滤），
+        # 本地单连接场景沿用 deliver（本地操作者同时持有 keeper 与调查员身份）。
+        frame_type = str(frame.get("type") or "")
+        if frame_type in _AGENT_TRIGGER_FRAMES:
+            from .agent_runtime import maybe_schedule_keeper_agent
+
+            maybe_schedule_keeper_agent(
+                database_url=self.database_url,
+                world_id=world_id,
+                trigger_request_id=str(frame.get("request_id") or ""),
+                deliver=deliver if broadcast is None else None,
+                broadcast=broadcast,
+            )
 
     # ------------------------------------------------------------------
     # request_error：拒绝也落 outbox（真实 event_id 让前端游标正常去重），
