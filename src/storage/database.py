@@ -109,6 +109,8 @@ class WorldMember(Base):
     world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(20), default="player")
+    # 玩法授权与房间管理分离：keeper 能力独立授予，owner 不自动拥有。
+    can_keeper: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -540,6 +542,138 @@ class MemoryFact(Base):
     status: Mapped[str] = mapped_column(String(20), default="accepted", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# 结构化操作平台（structured_v1）持久化
+# 表名在 docs/STRUCTURED_PLAY_PROTOCOL_V1.md 第 6/8 节冻结；字段变更必须
+# 同步协议文档、schema 与 fixtures。
+# ---------------------------------------------------------------------------
+
+
+class PlayerRequest(Base):
+    """玩家结构化请求（action_request / free_roll_request / check_response）。
+
+    request_id 表示一次意图；同 (world_id, request_id) 同载荷重发返回原结果，
+    不同载荷拒绝。status 走协议状态机；outcome 是领域结果，与状态分层。
+    """
+
+    __tablename__ = "player_requests"
+    __table_args__ = (
+        UniqueConstraint("world_id", "request_id", name="uq_player_request_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    request_id: Mapped[str] = mapped_column(String(160))
+    request_type: Mapped[str] = mapped_column(String(32))
+    investigator_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    submitted_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    payload_digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    outcome: Mapped[str] = mapped_column(String(20), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GameCommand(Base):
+    """一次副作用命令（keeper/Agent 调用）。command_id 幂等；事务内随状态提交。"""
+
+    __tablename__ = "game_commands"
+    __table_args__ = (
+        UniqueConstraint("world_id", "command_id", name="uq_game_command_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    command_id: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    payload_digest: Mapped[str] = mapped_column(String(64))
+    principal: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    controller_epoch: Mapped[int] = mapped_column(BigInteger, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="committed")
+    result: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    error_code: Mapped[str] = mapped_column(String(60), default="")
+    cause_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CheckRequest(Base):
+    """持久待检定：创建即落库；恰好结算一次；断线/重启/接管可恢复。"""
+
+    __tablename__ = "check_requests"
+    __table_args__ = (
+        UniqueConstraint("world_id", "check_request_id", name="uq_check_request_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    check_request_id: Mapped[str] = mapped_column(String(160))
+    investigator_id: Mapped[str] = mapped_column(String(160), index=True)
+    skill: Mapped[str] = mapped_column(String(60))
+    difficulty: Mapped[str] = mapped_column(String(20), default="regular")
+    bonus_penalty: Mapped[int] = mapped_column(Integer, default=0)
+    attempt: Mapped[str] = mapped_column(Text, default="")
+    known_cost: Mapped[str] = mapped_column(Text, default="")
+    visibility: Mapped[str] = mapped_column(String(20), default="public")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    conditions: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    result: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    related_request_id: Mapped[str] = mapped_column(String(160), default="")
+    rule_version: Mapped[str] = mapped_column(String(40), default="coc7")
+    created_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EventOutbox(Base):
+    """待发布/已发布事件。event 在命令事务内写入，提交成功后才发布；
+
+    断线按 (world_id, sequence) 游标补发，推送失败只重放不重复结算。
+    """
+
+    __tablename__ = "event_outbox"
+    __table_args__ = (
+        UniqueConstraint("world_id", "sequence", name="uq_event_outbox_sequence"),
+    )
+
+    # SQLite 仅 INTEGER PRIMARY KEY 才是 rowid 别名（才会自增），
+    # Postgres 需要 BIGINT；with_variant 两者兼顾。
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    audience: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    cause_request_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KeeperControl(Base):
+    """单一活动主持控制权。接管递增 epoch；迟到旧 epoch 调用无权执行。"""
+
+    __tablename__ = "keeper_control"
+
+    world_id: Mapped[str] = mapped_column(
+        ForeignKey("worlds.id", ondelete="CASCADE"), primary_key=True
+    )
+    controller_kind: Mapped[str] = mapped_column(String(20), default="none")
+    controller_id: Mapped[str] = mapped_column(String(160), default="")
+    epoch: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 _ENGINES: dict[str, Engine] = {}

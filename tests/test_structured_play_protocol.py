@@ -75,6 +75,7 @@ EVENT_TYPES = {
     "keeper_draft_resolved",
     "keeper_control",
     "intent_pending",
+    "handout_presented",
 }
 
 SCHEMA_BY_DIR = {

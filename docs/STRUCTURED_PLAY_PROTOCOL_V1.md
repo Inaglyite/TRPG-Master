@@ -15,10 +15,10 @@
 | `schemas/structured-play/v1/free_roll_request.json` | 普通掷骰请求（受限表达式） |
 | `schemas/structured-play/v1/check_response.json` | 待检定卡回应（roll / decline，不携带参数） |
 | `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 14 种命令的严格载荷 |
-| `schemas/structured-play/v1/events.json` | 事件信封 + 19 种事件载荷（含 session_snapshot / server_capabilities） |
+| `schemas/structured-play/v1/events.json` | 事件信封 + 20 种事件载荷（含 session_snapshot / server_capabilities / handout_presented） |
 | `schemas/structured-play/v1/permission-matrix.json` | 权限矩阵机器可读正本 |
-| `schemas/structured-play/v1/fixtures/` | 46 个正例 + 7 个反例 |
-| `tests/test_structured_play_protocol.py` | 双向校验与一致性门禁（7 项 + 73 子项） |
+| `schemas/structured-play/v1/fixtures/` | 47 个正例 + 7 个反例 |
+| `tests/test_structured_play_protocol.py` | 双向校验与一致性门禁（7 项 + 74 子项） |
 
 校验方式：后端 `pytest tests/test_structured_play_protocol.py`；前端用同一目录的
 JSON Schema（Ajv 2020-12，需支持 `unevaluatedProperties`）或直接把 fixtures 与

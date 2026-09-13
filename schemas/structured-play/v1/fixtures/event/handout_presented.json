@@ -1,0 +1,14 @@
+{
+  "protocol_version": 1,
+  "event_id": 21,
+  "world_id": "world-fixture-1",
+  "sequence": 21,
+  "revision": 13,
+  "type": "handout_presented",
+  "cause_request_id": "req-present-describe",
+  "payload": {
+    "asset_id": "asset_autopsy_note",
+    "investigator_id": "inv-alice",
+    "caption": "惠特克罗夫特的验尸笔记（照片）"
+  }
+}

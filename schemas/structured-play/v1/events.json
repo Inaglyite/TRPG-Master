@@ -60,6 +60,9 @@
     },
     {
       "$ref": "#/$defs/intent_pending"
+    },
+    {
+      "$ref": "#/$defs/handout_presented"
     }
   ],
   "$defs": {
@@ -1072,6 +1075,12 @@
               }
             }
           }
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/public_target"
+          }
         }
       },
       "allOf": [
@@ -1361,6 +1370,49 @@
         "type",
         "payload"
       ]
+    },
+    "handout_presented": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "event_id",
+        "world_id",
+        "sequence",
+        "revision",
+        "type",
+        "payload"
+      ],
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "type": {
+          "const": "handout_presented"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "asset_id",
+            "investigator_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "caption": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      }
     }
   }
 }
