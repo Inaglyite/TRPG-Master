@@ -111,9 +111,7 @@ class StructuredWsSmokeTests(unittest.TestCase):
                     }
                 )
                 scene_changed = self._receive_until(ws, "scene_changed")
-                self.assertEqual(
-                    "grand_staircase", scene_changed["payload"]["scene"]["id"]
-                )
+                self.assertEqual("grand_staircase", scene_changed["payload"]["scene"]["id"])
                 status = self._receive_until(ws, "action_status")
                 self.assertEqual("smoke-cmd-1", status["payload"]["request_id"])
                 self.assertEqual("completed", status["payload"]["status"])
@@ -133,6 +131,15 @@ class StructuredWsSmokeTests(unittest.TestCase):
                 request_error = self._receive_until(ws, "request_error")
                 self.assertEqual("invalid_action", request_error["payload"]["code"])
                 self.assertGreater(request_error["event_id"], 0)
+
+                # M4：结构化世界读档走 restore_structured_save（CAS 回滚 +
+                # reconcile），不是 engine.load 的静默回滚。slot_000 存的是
+                # 门厅进度；读档后快照必须回到门厅。
+                ws.send_json({"type": "load"})
+                loaded = self._receive_until(ws, "loaded")
+                self.assertTrue(loaded["ok"])
+                restored = self._receive_until(ws, "session_snapshot")
+                self.assertEqual("entrance_hall", restored["payload"]["scene"]["id"])
 
 
 if __name__ == "__main__":

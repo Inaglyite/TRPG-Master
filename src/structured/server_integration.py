@@ -16,11 +16,12 @@ from .gateway import STRUCTURED_FRAME_TYPES, StructuredGateway
 
 # structured_v1 世界关闭旧文字回合入口（效果所有权：行动效果只走命令服务，
 # 防止新旧通路双结算；协议 §8）。
+# load/save_load 不在此列：它们走 restore_structured_save（CAS 回滚 +
+# 结构化表 reconcile），见 dispatch。
 _LEGACY_TURN_MESSAGES = {
     "start": "该世界使用结构化协议：无 AI 开场回合，由守秘人直接主持。",
     "action": "该世界使用结构化协议：请使用出示/使用/前往等结构化入口，自由叙述会进入守秘人待办。",
     "continue": "该世界使用结构化协议：恢复进度请重连获取快照，不产生 AI 续写回合。",
-    "save_load": "该世界使用结构化协议：恢复进度请重连获取快照，不产生 AI 续写回合。",
 }
 
 
@@ -50,13 +51,49 @@ class StructuredLocalWire:
 
     async def dispatch(self, router: Any, data: dict) -> DispatchResult:
         """代理路由分发：结构化世界的旧回合帧在此拦截并给出明确指引。"""
-        guidance = _LEGACY_TURN_MESSAGES.get(str(data.get("type") or ""))
+        msg_type = str(data.get("type") or "")
+        if msg_type in {"load", "save_load"} and self.gateway.is_structured(
+            self.engine.context.world_id
+        ):
+            await self._handle_structured_restore(data)
+            return DispatchResult(True, msg_type)
+        guidance = _LEGACY_TURN_MESSAGES.get(msg_type)
         if guidance is not None and self.gateway.is_structured(self.engine.context.world_id):
             await self.outbound.send(
                 {"type": "error", "code": "structured_required", "message": guidance}
             )
-            return DispatchResult(True, str(data.get("type") or ""))
+            return DispatchResult(True, msg_type)
         return await router.dispatch(data)
+
+    async def _handle_structured_restore(self, data: dict) -> None:
+        """结构化世界读档：CAS 回滚 + reconcile（绝不走 engine.load 静默回滚）。
+
+        恢复成功后下发 loaded 回执与全新 session_snapshot（世界 revision 已
+        回退，客户端必须以快照重同步，不能沿用旧游标）。
+        """
+        from src.app.game_application import SaveNotFoundError
+        from src.storage.database_store import StaleRevisionError
+
+        from .branch import restore_structured_save
+
+        slot_id = str(data.get("slot_id") or "") or None
+        try:
+            result = await asyncio.to_thread(restore_structured_save, self.engine.context, slot_id)
+        except SaveNotFoundError:
+            await self.outbound.send({"type": "error", "message": "未找到存档。", "terminal": True})
+            return
+        except StaleRevisionError as exc:
+            await self.outbound.send({"type": "error", "message": str(exc), "terminal": True})
+            return
+        await self.outbound.send(
+            {
+                "type": "loaded",
+                "ok": True,
+                "slot_id": result["slot_id"],
+                "count": 0,  # 结构化世界无消息历史；权威内容在快照里
+            }
+        )
+        await self.send_snapshot()
 
     async def send_snapshot(self) -> None:
         """structured_v1 世界：下发权威快照（含 capabilities/游标）。"""

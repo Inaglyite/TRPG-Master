@@ -266,3 +266,22 @@ M3 协议增补（zcode 侧需要跟进）：
 3. Agent 触发语义见 §2.2 末段：仅 action_request / check_response 触发；
    agent 运行产生的事件在房间场景只经 broadcast 按各连接 principal 过滤投递，
    不回溯发起玩家的连接。
+
+M4 协议增补（生命周期：分支 / 读档 / 续团）：
+
+1. 分支：本地 `turn_branch_create` 对 structured_v1 世界忽略 `turn_id`，
+   从**当前已提交状态**分叉（无 Turn 概念）。响应仍为 `turn_branched`
+   （`source_turn_id=""`、`history=[]`），随后必收到新的 `session_snapshot`。
+   分支复制控制面（execution_profile/keeper_mode/成员 can_keeper/调查员认领）、
+   非终态待办与幂等账本；**不复制** outbox（游标从 0，前端按快照重同步）与
+   keeper_control（分支以无人掌控开始，旧 agent epoch 不跨界）。
+2. 读档：本地 `load` / `save_load` 对结构化世界走 CAS 回滚 + 同事务 reconcile
+   （非终态请求一律 `failed` 可用原 request_id 重发、pending 检定做废、晚于
+   存档点的 outbox 事件删除），随后下发 `loaded` + 新 `session_snapshot`。
+   **不得**沿用读档前的 revision/游标。房间模式 `save_load` 仍拒绝
+   （`structured_required`），云端房间读档入口待与前端另行约定。
+3. 续团：结构化世界有任意结构化活动（请求/命令/检定）即在存档位列表
+   可见且 `resumable`（重连取快照即续团，不依赖 SaveSlot）；分支写入
+   slot_000 使时间线列表兼容旧 UI。
+4. `world_switch` 到结构化世界：`world_switched.history=[]`，随后收到
+   `session_snapshot`；不会有消息历史帧。

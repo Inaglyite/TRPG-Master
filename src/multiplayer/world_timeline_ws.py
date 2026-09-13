@@ -18,6 +18,27 @@ from src.app.runtime import RuntimeContext
 from src.multiplayer.ws_router import WsMessageRouter
 from src.storage.database import World, WorldMember, new_id, session_scope
 from src.storage.persistence import load_game
+from src.structured.branch import create_structured_branch
+from src.structured.gateway import StructuredGateway, world_modes
+
+
+def _world_is_structured(database_url: str, world_id: str) -> bool:
+    with session_scope(database_url) as session:
+        world = session.get(World, world_id)
+        return world is not None and world_modes(world.metadata_json)[0] == "structured_v1"
+
+
+async def _send_structured_snapshot(
+    outbound: Any, database_url: str, world_id: str, user_id: str | None
+) -> None:
+    """结构化世界的权威视图是 session_snapshot：分支/切换后主动重同步。"""
+    envelope = await asyncio.to_thread(
+        lambda: StructuredGateway(database_url).snapshot_envelope(
+            world_id=world_id, user_id=user_id
+        )
+    )
+    if envelope is not None:
+        await outbound.send(envelope)
 
 
 @dataclass(frozen=True)
@@ -57,6 +78,50 @@ def register_world_timeline_handlers(
     @router.handler("turn_branch_create")
     async def handle_turn_branch_create(data: dict) -> None:
         if not await reserve_turn():
+            return
+        # structured_v1：无 Turn 记录，从当前已提交状态分叉（M4）。
+        if await asyncio.to_thread(
+            _world_is_structured, dependencies.database_url, engine.context.world_id
+        ):
+            try:
+                branch = await asyncio.to_thread(
+                    create_structured_branch,
+                    engine.context,
+                    project_root=dependencies.world_branches.project_root,
+                    runtime_root=dependencies.world_branches.runtime_root,
+                    label=data.get("label", ""),
+                    user_id=user_id,
+                )
+                engine.switch_context(branch.context)
+                resolve_speaker.clear()
+                turn_gate.rebind_world(dependencies.world_turn_lock(branch.context))
+                dependencies.set_active_context(branch.context)
+            except Exception as exc:
+                release_turn()
+                await outbound.send(
+                    {
+                        "type": "turn_branch_failed",
+                        "message": str(exc) or "创建时间线分支失败",
+                    }
+                )
+                return
+            release_turn()
+            await outbound.send(
+                {
+                    "type": "turn_branched",
+                    "source_turn_id": "",
+                    "world_id": branch.context.world_id,
+                    "module_name": branch.context.module_name,
+                    "label": branch.label,
+                    "history": [],
+                }
+            )
+            await outbound.send(world_context_payload())
+            await outbound.send(world_list_payload())
+            await send_save_panels()
+            await _send_structured_snapshot(
+                outbound, dependencies.database_url, branch.context.world_id, user_id
+            )
             return
         turn_id = str(data.get("turn_id") or "")
         if not turn_id:
@@ -144,6 +209,7 @@ def register_world_timeline_handlers(
             return
         target_lock: threading.Lock | None = None
         target_lock_acquired = False
+        structured_target = False
         try:
             target_world_id = str(data.get("world_id") or "")
             if dependencies.auth_required():
@@ -157,20 +223,30 @@ def register_world_timeline_handlers(
             if not target_lock.acquire(blocking=False):
                 raise RuntimeError("目标时间线正在处理另一个回合，请稍后重试。")
             target_lock_acquired = True
-            messages, _snapshot = load_game(auto_save_slot, context=context)
-            if messages is None:
-                raise RuntimeError("目标时间线没有可继续的自动存档，无法从存档开始。")
+            structured_target = await asyncio.to_thread(
+                _world_is_structured, dependencies.database_url, target_world_id
+            )
+            if structured_target:
+                # 结构化世界无消息历史/自动存档文件；续团 = 切换后下发快照。
+                messages = None
+            else:
+                messages, _snapshot = load_game(auto_save_slot, context=context)
+                if messages is None:
+                    raise RuntimeError("目标时间线没有可继续的自动存档，无法从存档开始。")
             engine.switch_context(context)
             resolve_speaker.clear()
             if messages is not None:
                 engine.adopt_message_history(messages)
             turn_gate.rebind_world(target_lock)
             dependencies.set_active_context(context)
-            history = engine.turn_journal.public_history()
-            for turn in history:
-                enriched = public_chat_events(turn)
-                turn["narrative_segments"] = enriched
-                turn["chat_events"] = enriched
+            if structured_target:
+                history = []
+            else:
+                history = engine.turn_journal.public_history()
+                for turn in history:
+                    enriched = public_chat_events(turn)
+                    turn["narrative_segments"] = enriched
+                    turn["chat_events"] = enriched
             if user_id:
                 dependencies.audit(
                     dependencies.database_url,
@@ -203,6 +279,10 @@ def register_world_timeline_handlers(
         await outbound.send({"type": "theme", "theme": dependencies.load_theme(engine.context)})
         await send_save_panels()
         await send_character_state()
+        if structured_target:
+            await _send_structured_snapshot(
+                outbound, dependencies.database_url, engine.context.world_id, user_id
+            )
 
     @router.handler("world_rename")
     async def handle_world_rename(data: dict) -> None:

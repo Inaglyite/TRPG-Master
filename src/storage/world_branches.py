@@ -55,6 +55,33 @@ def _inherited_root(source_context: RuntimeContext) -> str:
     return source_context.world_id
 
 
+def _structured_activity(session, candidates: list[tuple[str, dict]]) -> set[str]:
+    """structured_v1 世界中有实际活动（请求/命令/检定）的 world_id 集合。
+
+    结构化世界没有 Turn/SaveSlot（除分支 slot_000）也能"已玩过"——
+    活动以结构化账本为准，让这些世界在列表中可见且可续（续团 =
+    重连取 session_snapshot，不依赖存档文件）。
+    """
+    from src.storage.database import CheckRequest, GameCommand, PlayerRequest
+
+    structured_ids = [
+        world_id
+        for world_id, metadata in candidates
+        if (metadata or {}).get("execution_profile") == "structured_v1"
+    ]
+    if not structured_ids:
+        return set()
+    active: set[str] = set()
+    for model in (PlayerRequest, GameCommand, CheckRequest):
+        active.update(
+            row[0]
+            for row in session.execute(
+                select(model.world_id).where(model.world_id.in_(structured_ids)).distinct()
+            )
+        )
+    return active
+
+
 class WorldBranchService:
     def __init__(self, project_root: Path, runtime_root: Path) -> None:
         self.project_root = Path(project_root).resolve()
@@ -84,9 +111,7 @@ class WorldBranchService:
         """
         with session_scope(source_context.database_url) as session:
             source_world = session.scalar(
-                select(World)
-                .where(World.id == source_context.world_id)
-                .with_for_update()
+                select(World).where(World.id == source_context.world_id).with_for_update()
             )
             if source_world is None:
                 raise FileNotFoundError(f"世界不存在: {source_context.world_id}")
@@ -136,6 +161,10 @@ class WorldBranchService:
             if session.query(Turn.id).filter_by(world_id=world_id).first() is not None:
                 return False
             if session.query(SaveSlot).filter_by(world_id=world_id).first() is not None:
+                return False
+            world = session.get(World, world_id)
+            metadata = dict(world.metadata_json or {}) if world is not None else {}
+            if _structured_activity(session, [(world_id, metadata)]):
                 return False
         return not (
             self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
@@ -550,6 +579,9 @@ class WorldBranchService:
         worlds: list[dict] = []
         records = self._tree_world_records(module_name, active_world_id)
         with session_scope(database_url(self.runtime_root)) as session:
+            structured_active = _structured_activity(
+                session, [(r["world_id"], r["metadata"]) for r in records]
+            )
             for record in records:
                 world_id = record["world_id"]
                 metadata = record["metadata"]
@@ -587,7 +619,9 @@ class WorldBranchService:
                         # ``load_game`` imports a legacy file slot on demand,
                         # so old desktop timelines remain selectable while a
                         # genuinely empty branch remains visibly non-resumable.
+                        # structured_v1：有结构化活动即可续（重连取快照）。
                         "resumable": save is not None
+                        or world_id in structured_active
                         or (
                             self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
                         ).is_file(),
@@ -659,6 +693,10 @@ class WorldBranchService:
 
             world_ids = list(rows_by_id)
             save_rows = session.query(SaveSlot).filter(SaveSlot.world_id.in_(world_ids)).all()
+            structured_active = _structured_activity(
+                session,
+                [(wid, dict(rows_by_id[wid][0].metadata_json or {})) for wid in world_ids],
+            )
             played_world_ids = {
                 row[0]
                 for row in (
@@ -713,6 +751,7 @@ class WorldBranchService:
                 "depth": depth_of(world_id),
                 "active": world_id == active_world_id,
                 "resumable": auto_save is not None
+                or world_id in structured_active
                 or (
                     self.worlds_dir / world_id / "saves" / AUTO_SAVE_SLOT / "messages.json"
                 ).is_file(),
@@ -727,7 +766,9 @@ class WorldBranchService:
             # 从未开始过的树（无回合、无存档）不是存档位：来自连接初始化或
             # switch_module 打开的空默认世界，直接隐藏，避免垃圾存档位。
             played = any(
-                world_id in played_world_ids or saves_by_world.get(world_id)
+                world_id in played_world_ids
+                or saves_by_world.get(world_id)
+                or world_id in structured_active
                 for world_id in member_ids
             )
             if not played:
