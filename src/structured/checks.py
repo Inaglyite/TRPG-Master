@@ -91,6 +91,35 @@ def _conditions_snapshot(state: dict, investigator_id: str, target: Any) -> dict
     }
 
 
+def _validate_push_eligible(
+    state: dict, original: CheckRequest, investigator_id: str, skill: str, target: Any
+) -> None:
+    """孤注一掷资格（与旧规则同源：check_context.can_push_skill）。
+
+    仅针对已失败的原检定；同调查员/技能/目标/场景；战斗中和 luck/sanity/
+    dodge/mythos/战斗技能不可；一张原卡同一时刻至多一张孤注一掷卡。
+    """
+    from src.gameplay.check_context import can_push_skill
+
+    if original.status != "resolved" or (original.result or {}).get("outcome") != "failure":
+        raise StructuredError("invalid_action", "孤注一掷只能针对已失败的原检定。")
+    if original.investigator_id != investigator_id or original.skill != skill:
+        raise StructuredError("invalid_action", "孤注一掷必须关联原调查员与原技能。")
+    if not can_push_skill(skill) or (state.get("combat_state") or {}).get("active"):
+        raise StructuredError("invalid_action", "此类检定不能孤注一掷。")
+    original_result = original.result or {}
+    if original_result.get("pushed") or original_result.get("push_pending"):
+        raise StructuredError("invalid_action", "该检定已使用或已有进行中的孤注一掷。")
+    original_conditions = original.conditions or {}
+    current_scene = str((state.get("current_scene") or {}).get("id") or "")
+    if str(original_conditions.get("scene_id") or "") != current_scene:
+        raise StructuredError("check_conditions_changed", "场景已变化，孤注一掷不再成立。")
+    original_target = original_conditions.get("target")
+    new_target = target if isinstance(target, dict) else None
+    if (original_target or None) != (new_target or None):
+        raise StructuredError("invalid_action", "孤注一掷必须关联原目标。")
+
+
 def _check_conditions(state: dict, row: CheckRequest) -> None:
     conditions = row.conditions or {}
     scene_id = conditions.get("scene_id")
@@ -129,7 +158,21 @@ def cmd_request_check(state: dict, payload: dict, ctx: CommandContext) -> Comman
     target = payload.get("target")
     # 权威角色状态取值：技能值在创建时就按卡校验，防止等待一张永远无法结算的卡。
     _skill_value(state, investigator_id, skill)
+    time_cost = payload.get("time_cost_minutes", 0)
+    if isinstance(time_cost, bool) or not isinstance(time_cost, int):
+        raise StructuredError("invalid_action", "time_cost_minutes 必须是整数。")
+    time_cost = max(0, min(10080, time_cost))
+    push_for = str(payload.get("push_for") or "")
+    push_original: CheckRequest | None = None
+    if push_for:
+        push_original = _get_check(ctx.session, ctx.world_id, push_for)
+        _validate_push_eligible(state, push_original, investigator_id, skill, target)
 
+    conditions = _conditions_snapshot(state, investigator_id, target)
+    if time_cost:
+        conditions["time_cost_minutes"] = time_cost
+    if push_for:
+        conditions["push_for"] = push_for
     check_request_id = new_stable_id("chk")
     row = CheckRequest(
         id=new_row_id("chkrow"),
@@ -143,12 +186,15 @@ def cmd_request_check(state: dict, payload: dict, ctx: CommandContext) -> Comman
         known_cost=str(payload.get("known_cost") or "")[:200],
         visibility=visibility,
         status="pending",
-        conditions=_conditions_snapshot(state, investigator_id, target),
+        conditions=conditions,
         result={},
         related_request_id=str(payload.get("related_request_id") or "")[:160],
         created_by=getattr(ctx.principal, "user_id", "") or None,
     )
     ctx.session.add(row)
+    if push_original is not None:
+        # 占位：孤注一掷卡结算或撤销前，原卡不得再生成第二张孤注一掷卡。
+        push_original.result = {**(push_original.result or {}), "push_pending": True}
     related = row.related_request_id
     if related:
         request = ctx.session.execute(
@@ -175,11 +221,44 @@ def cmd_request_check(state: dict, payload: dict, ctx: CommandContext) -> Comman
                     "attempt": attempt,
                     "known_cost": row.known_cost,
                     "visibility": visibility,
+                    **({"push_for": push_for} if push_for else {}),
                 },
                 audience,
             )
         ],
     )
+
+
+def _settle_push_link(session, world_id: str, row: CheckRequest, *, rolled: bool) -> None:
+    """孤注一掷卡结算/撤销时更新原卡标记：rolled=pushed 永久消耗；否则释放占位。"""
+    push_for = str((row.conditions or {}).get("push_for") or "")
+    if not push_for:
+        return
+    original = session.execute(
+        select(CheckRequest).where(
+            CheckRequest.world_id == world_id,
+            CheckRequest.check_request_id == push_for,
+        )
+    ).scalar_one_or_none()
+    if original is None:
+        return
+    result = dict(original.result or {})
+    result.pop("push_pending", None)
+    if rolled:
+        result["pushed"] = True
+    original.result = result
+
+
+def _settle_time_cost(state: dict, row: CheckRequest, events: list[EventSpec]) -> bool:
+    """尝试本身耗时（成败都结算）；返回是否改动了状态（需要推进 revision）。"""
+    minutes = int((row.conditions or {}).get("time_cost_minutes") or 0)
+    if minutes <= 0:
+        return False
+    from src.gameplay.world_time import advance_time as _advance_time
+
+    event = _advance_time(state, minutes, activity="check")
+    events.append(EventSpec("state_changed", {"clock": {"elapsed_minutes": event["after"]}}))
+    return True
 
 
 def resolve_pending_check(
@@ -215,6 +294,7 @@ def resolve_pending_check(
     row.status = "resolved"
     row.result = result
     row.resolved_at = datetime.now(UTC)
+    _settle_push_link(session, world_id, row, rolled=True)
     if row.related_request_id:
         related = session.execute(
             select(PlayerRequest).where(
@@ -226,24 +306,29 @@ def resolve_pending_check(
             related.status = "processing"
     session.flush()
     audience = dict(PUBLIC) if row.visibility == "public" else dict(KEEPER)
+    push_for = str((row.conditions or {}).get("push_for") or "")
+    events = [
+        EventSpec(
+            "check_resolved",
+            {
+                "check_request_id": check_request_id,
+                "investigator_id": row.investigator_id,
+                "skill": row.skill,
+                "target_value": threshold,
+                "roll": roll,
+                "level": _LEVEL_LABEL[level],
+                "outcome": outcome,
+                "detail": detail,
+                **({"push_for": push_for} if push_for else {}),
+            },
+            audience,
+        )
+    ]
+    bumped = _settle_time_cost(state, row, events)
     return row, CommandResult(
         result={"status": "success", "check_request_id": check_request_id, **result},
-        events=[
-            EventSpec(
-                "check_resolved",
-                {
-                    "check_request_id": check_request_id,
-                    "investigator_id": row.investigator_id,
-                    "skill": row.skill,
-                    "target_value": threshold,
-                    "roll": roll,
-                    "level": _LEVEL_LABEL[level],
-                    "outcome": outcome,
-                    "detail": detail,
-                },
-                audience,
-            )
-        ],
+        events=events,
+        bump_revision=bumped,
     )
 
 
@@ -265,6 +350,7 @@ def decline_pending_check(
         raise StructuredError("check_not_pending", f"该检定不在等待状态：{row.status}")
     row.status = "declined"
     row.resolved_at = datetime.now(UTC)
+    _settle_push_link(session, world_id, row, rolled=False)  # 放弃孤注一掷不消耗原卡
     if row.related_request_id:
         related = session.execute(
             select(PlayerRequest).where(

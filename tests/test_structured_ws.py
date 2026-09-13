@@ -392,7 +392,13 @@ class StructuredGatewayTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_frame_types_exported(self):
         self.assertEqual(
-            {"action_request", "free_roll_request", "check_response", "command_request"},
+            {
+                "action_request",
+                "free_roll_request",
+                "check_response",
+                "cancel_request",
+                "command_request",
+            },
             STRUCTURED_FRAME_TYPES,
         )
 

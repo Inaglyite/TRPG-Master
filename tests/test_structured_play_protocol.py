@@ -82,6 +82,7 @@ SCHEMA_BY_DIR = {
     "action_request": "action_request.json",
     "free_roll_request": "free_roll_request.json",
     "check_response": "check_response.json",
+    "cancel_request": "cancel_request.json",
     "command_request": "command_request.json",
     "event": "events.json",
 }

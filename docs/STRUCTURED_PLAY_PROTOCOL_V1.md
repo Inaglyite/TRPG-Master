@@ -12,6 +12,7 @@
 |---|---|
 | `schemas/structured-play/v1/common.json` | id/revision/target/audience/speaker/domain_outcome/error_code/dice_spec 公共定义 |
 | `schemas/structured-play/v1/action_request.json` | 玩家行动尝试请求（present_clue / use_item / move / freeform） |
+| `schemas/structured-play/v1/cancel_request.json` | 玩家取消自己 queued 的行动请求（M2 新增帧类型） |
 | `schemas/structured-play/v1/free_roll_request.json` | 普通掷骰请求（受限表达式） |
 | `schemas/structured-play/v1/check_response.json` | 待检定卡回应（roll / decline，不携带参数） |
 | `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 14 种命令的严格载荷 |
@@ -79,6 +80,12 @@ pending → resolved（服务端恰好结算一次）
 执行时复核控制权与相关条件：无关聊天不使检定失效；场景/物品等相关条件变化 ⇒
 `check_conditions_changed` 失效并由主持重新请求，不偷偷换参数。断线/重启/接管后可恢复。
 秘密检定（visibility=keeper）结果仅按权限投递。
+
+孤注一掷（M2）：主持对已失败的原卡发一张带 `push_for` 的新检定卡，写明升级代价
+（`known_cost`）。服务端强制：原卡必须已失败、同调查员/技能/目标/场景、非战斗、
+luck/sanity/dodge/克苏鲁神话/战斗技能不可；原卡同一时刻至多一张孤注一掷卡
+（`push_pending` 占位），玩家实际掷骰后原卡永久标记 `pushed`；放弃孤注一掷卡
+不消耗原卡。`time_cost_minutes` 在结算时（成败都）推进世界时钟并随 revision 落账。
 
 ### 3.3 命令（game_commands）
 
@@ -214,3 +221,14 @@ M1 实现期的两处 schema 修正（均为放宽/归位，已有 fixtures 不�
 另：上线信封不携带路由 `audience`（envelope_base 无此字段，且定向接收者列表本身
 即私密信息）；`message_started`/`message_completed` 载荷内的 `audience` 是消息自身
 属性，照常下发。
+
+M2 协议增补（zcode 侧需要跟进）：
+
+1. 新帧类型 `cancel_request`（玩家取消自己 queued 的请求）；前端无需新事件类型，
+   取消结果由既有 `action_status{cancelled}` 承载。
+2. `request_check` 载荷新增可选 `push_for`（孤注一掷）；`check_requested` /
+   `pending_check` / `check_resolved` 同步携带可选 `push_for`，前端检定卡可据此
+   显示“孤注一掷”徽标与升级代价。
+3. 出示 `presentation=image` 需要已授权素材（`presentation_requires_asset`）；
+   快照 `known_clue.presentation` 现在按接收者投放可用出示方式（describe 恒有，
+   image 仅在素材已授权后出现）。

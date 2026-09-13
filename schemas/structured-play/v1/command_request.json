@@ -153,6 +153,17 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 10080
+            },
+            "push_for": {
+              "oneOf": [
+                {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "孤注一掷：引用一张已失败的原检定卡。同调查员/技能/目标/场景，仅一次；known_cost 写明升级代价。"
             }
           }
         }

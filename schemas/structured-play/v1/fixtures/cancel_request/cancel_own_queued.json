@@ -1,0 +1,8 @@
+{
+  "type": "cancel_request",
+  "protocol_version": 1,
+  "request_id": "req-cancel-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "target_request_id": "req-action-9"
+}

@@ -322,16 +322,49 @@ class StructuredPlayService:
             _world, row, state = self._locked_world(session, world_id)
             existing = self._find_request(session, world_id, request_id)
             if existing is not None:
-                if existing.payload_digest == digest:
+                if existing.payload_digest != digest:
+                    raise StructuredError(
+                        "duplicate_request_conflict", "同一请求 ID 提交了不同内容，已拒绝。"
+                    )
+                if existing.status == "failed":
+                    # §3.1：failed 可恢复失败；客户端用同一 request_id 同载荷
+                    # 重发 ⇒ 回到 queued 重新进入待办（重新做事实检查）。
+                    self._check_revision(request.get("expected_revision"), int(row.revision))
+                    ensure_item_registry(state)
+                    ensure_clue_registry(state)
+                    self._fact_check_action(state, action, investigator_id)
+                    self._write_state(row, state, bump=False)
+                    existing.status = "queued"
+                    existing.updated_at = utcnow()
+                    envelopes = self._append_events(
+                        session,
+                        world_id,
+                        int(row.revision),
+                        request_id,
+                        [
+                            EventSpec("action_ack", {"request_id": request_id, "status": "queued"}),
+                            EventSpec(
+                                "intent_pending",
+                                {
+                                    "request_id": request_id,
+                                    "investigator_id": investigator_id,
+                                    "summary": self._request_summary(action),
+                                },
+                                {"kind": "keeper"},
+                            ),
+                        ],
+                    )
                     return {
                         "request_id": request_id,
-                        "status": existing.status,
-                        "events": [],
-                        "deduplicated": True,
+                        "status": "queued",
+                        "events": envelopes,
                     }
-                raise StructuredError(
-                    "duplicate_request_conflict", "同一请求 ID 提交了不同内容，已拒绝。"
-                )
+                return {
+                    "request_id": request_id,
+                    "status": existing.status,
+                    "events": [],
+                    "deduplicated": True,
+                }
             self._check_revision(request.get("expected_revision"), int(row.revision))
             # 事实检查用到的稳定 ID 注册表必须随状态持久化（不推进 revision），
             # 否则后续命令重新迁移会得到另一套随机 ID。
@@ -375,6 +408,84 @@ class StructuredPlayService:
                 ],
             )
         return {"request_id": request_id, "status": "queued", "events": envelopes}
+
+    def cancel_action_request(
+        self,
+        *,
+        world_id: str,
+        principal: Principal,
+        request: dict,
+    ) -> dict:
+        """玩家取消自己 queued 的行动请求（§3.1）；已被主持接管的请求拒绝。"""
+        request_id = str(request.get("request_id") or "")
+        target_id = str(request.get("target_request_id") or "")
+        if not request_id or not target_id:
+            raise StructuredError("invalid_action", "缺少 request_id / target_request_id。")
+        digest = canonical_digest(request)
+        with session_scope(self.database_url) as session:
+            _world, row, _state = self._locked_world(session, world_id)
+            existing = self._find_request(session, world_id, request_id)
+            if existing is not None:
+                if existing.payload_digest == digest:
+                    return {
+                        "request_id": request_id,
+                        "status": existing.status,
+                        "events": [],
+                        "deduplicated": True,
+                    }
+                raise StructuredError(
+                    "duplicate_request_conflict", "同一请求 ID 提交了不同内容，已拒绝。"
+                )
+            self._check_revision(request.get("expected_revision"), int(row.revision))
+            target = self._find_request(session, world_id, target_id)
+            if target is None or target.request_type != "action_request":
+                raise StructuredError("request_not_found", f"没有找到行动请求：{target_id}")
+            if target.investigator_id not in principal.investigator_ids:
+                raise StructuredError("not_investigator_controller", "只能取消自己调查员的请求。")
+            if target.status != "queued":
+                raise StructuredError(
+                    "invalid_action",
+                    f"请求已被主持接管（{target.status}），请等待处理或请守秘人收尾。",
+                )
+            target.status = "cancelled"
+            target.detail = "玩家取消"
+            target.updated_at = utcnow()
+            session.add(
+                PlayerRequest(
+                    id=new_row_id("req"),
+                    world_id=world_id,
+                    request_id=request_id,
+                    request_type="cancel_request",
+                    investigator_id=target.investigator_id,
+                    submitted_by=principal.user_id or None,
+                    payload=copy.deepcopy(request),
+                    payload_digest=digest,
+                    status="completed",
+                    outcome="not_executed",
+                    detail=f"取消 {target_id}",
+                    created_at=utcnow(),
+                    updated_at=utcnow(),
+                )
+            )
+            envelopes = self._append_events(
+                session,
+                world_id,
+                int(row.revision),
+                request_id,
+                [
+                    EventSpec(
+                        "action_status",
+                        {
+                            "request_id": target_id,
+                            "status": "cancelled",
+                            "outcome": "not_executed",
+                            "detail": "玩家取消",
+                        },
+                    ),
+                    EventSpec("action_ack", {"request_id": request_id, "status": "completed"}),
+                ],
+            )
+        return {"request_id": request_id, "status": "completed", "events": envelopes}
 
     def submit_free_roll(
         self,
@@ -508,8 +619,8 @@ class StructuredPlayService:
                 outcome = decline_pending_check(
                     session, world_id, check_request_id, reason="玩家放弃"
                 )
-            # 检定结算可能改动状态（目前不改动；保留写入以覆盖条件快照外的演进）。
-            self._write_state(row, state, bump=False)
+            # 检定结算可能改动状态（时间代价推进时钟）；按结果推进 revision。
+            self._write_state(row, state, bump=outcome.bump_revision)
             session.add(
                 PlayerRequest(
                     id=new_row_id("req"),
@@ -704,6 +815,8 @@ class StructuredPlayService:
                     or int(item.get("quantity") or 0) <= 0
                 ):
                     raise StructuredError("object_not_held", "你手上没有这件实物。")
+            if presentation == "image":
+                self._require_granted_clue_asset(state, clue_id, investigator_id)
             target = action.get("target") or {}
             self._fact_check_target(state, target)
             return
@@ -732,6 +845,34 @@ class StructuredPlayService:
             if target:
                 self._fact_check_target(state, target)
             return
+
+    @staticmethod
+    def _clue_asset_granted(state: dict, clue_id: str, investigator_id: str) -> bool:
+        """线索关联图片素材是否已获准该调查员查看（legacy 揭示记录 + 命令授权）。"""
+        from src.gameplay.handouts import resolve_handout_asset
+
+        asset_id, asset = resolve_handout_asset(state, "clue", clue_id)
+        if not asset_id or not isinstance(asset, dict) or not asset.get("file"):
+            return False
+        seen = state.get("seen_handout_assets") or {}
+        seen_clues = seen.get("clues", []) if isinstance(seen, dict) else []
+        if asset_id in seen_clues:
+            return True
+        for grant in state.get("asset_grants") or []:
+            if (
+                isinstance(grant, dict)
+                and grant.get("asset_id") == asset_id
+                and grant.get("investigator_id") == investigator_id
+            ):
+                return True
+        return False
+
+    def _require_granted_clue_asset(self, state: dict, clue_id: str, investigator_id: str) -> None:
+        if not self._clue_asset_granted(state, clue_id, investigator_id):
+            raise StructuredError(
+                "presentation_requires_asset",
+                "这条线索没有已获准你查看的图片素材；可改用说明方式出示。",
+            )
 
     def _fact_check_target(self, state: dict, target: dict) -> None:
         kind = target.get("kind")
@@ -778,12 +919,17 @@ class StructuredPlayService:
             category = str(entry.get("category") or "")
             if category not in {"investigation", "event", "task", "npc"}:
                 category = "investigation"  # schema 固定四类；未知类别降级，不泄露原始键
+            presentation = ["describe"]
+            if is_keeper or any(
+                self._clue_asset_granted(state, entry["clue_id"], own_id) for own_id in own
+            ):
+                presentation.append("image")
             clues.append(
                 {
                     "id": entry["clue_id"],
                     "category": category,
                     "text": str(entry.get("text") or "")[:500] or "（内容待守秘人补充）",
-                    "presentation": ["describe"],
+                    "presentation": presentation,
                 }
             )
         return sorted(clues, key=lambda clue: clue["id"])
@@ -798,6 +944,7 @@ class StructuredPlayService:
         return items
 
     def _check_projection(self, check: CheckRequest, is_keeper: bool) -> dict:
+        push_for = str((check.conditions or {}).get("push_for") or "")
         payload = {
             "check_request_id": check.check_request_id,
             "investigator_id": check.investigator_id,
@@ -807,6 +954,7 @@ class StructuredPlayService:
             "attempt": check.attempt,
             "known_cost": check.known_cost,
             "visibility": check.visibility,
+            **({"push_for": push_for} if push_for else {}),
         }
         return payload
 

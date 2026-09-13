@@ -438,7 +438,13 @@ def cmd_present_handout(state: dict, payload: dict, ctx: CommandContext) -> Comm
     if not isinstance(recipients, list) or not recipients:
         raise StructuredError("invalid_action", "recipient_investigator_ids 不能为空。")
     assets = state.get("assets") or state.get("handout_assets") or {}
-    if isinstance(assets, dict) and assets and asset_id not in assets:
+    asset_map = state.get("asset_map") or {}
+    known_asset_ids = set(assets) if isinstance(assets, dict) else set()
+    if isinstance(asset_map, dict):
+        for group_entries in asset_map.values():
+            if isinstance(group_entries, dict):
+                known_asset_ids.update(group_entries)
+    if known_asset_ids and asset_id not in known_asset_ids:
         raise StructuredError("object_not_found", f"素材不存在：{asset_id}")
     grants = state.setdefault("asset_grants", [])
     events: list[EventSpec] = []

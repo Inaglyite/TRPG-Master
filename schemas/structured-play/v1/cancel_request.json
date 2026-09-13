@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/cancel_request.json",
+  "title": "cancel_request：玩家取消自己的行动请求",
+  "description": "仅可取消自己控制的调查员、仍处于 queued（未被主持接手）的请求；processing/awaiting_player 等已被主持接管的请求只能由主持 resolve_intent 收尾。取消帧自身也是幂等请求（同一 request_id 重发返回原状态）。",
+  "type": "object",
+  "required": ["type", "protocol_version", "request_id", "world_id", "target_request_id"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "cancel_request"},
+    "protocol_version": {"const": 1},
+    "request_id": {"$ref": "common.json#/$defs/id_string"},
+    "world_id": {"$ref": "common.json#/$defs/id_string"},
+    "expected_revision": {"$ref": "common.json#/$defs/revision"},
+    "target_request_id": {
+      "$ref": "common.json#/$defs/id_string",
+      "description": "要取消的行动请求 ID。"
+    }
+  }
+}

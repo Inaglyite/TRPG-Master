@@ -36,7 +36,13 @@ from .service import StructuredPlayService, audience_visible, wire_envelope
 from .validation import validate_frame
 
 STRUCTURED_FRAME_TYPES = frozenset(
-    {"action_request", "free_roll_request", "check_response", "command_request"}
+    {
+        "action_request",
+        "free_roll_request",
+        "check_response",
+        "cancel_request",
+        "command_request",
+    }
 )
 
 Deliver = Callable[[dict], Awaitable[None]]
@@ -149,6 +155,10 @@ class StructuredGateway:
             self.service.submit_free_roll(world_id=world_id, principal=principal, request=frame)
         elif frame_type == "check_response":
             self.service.submit_check_response(
+                world_id=world_id, principal=principal, request=frame
+            )
+        elif frame_type == "cancel_request":
+            self.service.cancel_action_request(
                 world_id=world_id, principal=principal, request=frame
             )
         else:

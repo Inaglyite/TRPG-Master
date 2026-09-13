@@ -489,6 +489,16 @@
             "public",
             "keeper"
           ]
+        },
+        "push_for": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -583,7 +593,20 @@
           "const": "check_requested"
         },
         "payload": {
-          "$ref": "#/$defs/pending_check"
+          "$ref": "#/$defs/pending_check",
+          "properties": {
+            "push_for": {
+              "oneOf": [
+                {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "孤注一掷时引用原检定卡。"
+            }
+          }
         }
       },
       "allOf": [
@@ -651,6 +674,16 @@
             "detail": {
               "type": "string",
               "maxLength": 200
+            },
+            "push_for": {
+              "oneOf": [
+                {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
