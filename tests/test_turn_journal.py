@@ -309,6 +309,107 @@ class TurnJournalTests(unittest.TestCase):
             self.assertIn("钟摆", messages[-1]["content"])
             self.assertEqual("书房", snapshot["current_scene"]["name"])
 
+    def test_arrival_commit_failure_rolls_back_and_retry_settles_once(self):
+        """提交期故障：工作状态整体回滚，重试只结算一次。
+
+        对应 ADVISORY_TRANSITION_INDEPENDENT_REVIEW_20260913.md 的主要发现：
+        过渡节拍/handout 在 prepare 阶段经流式回调送出，而持久提交发生在
+        finalize 的 journal.complete——"先结算后宣布"只保证工作缓存内的顺序，
+        不保证提交成功后才公开。这里钉住当前边界下必须成立的补偿性质：
+        提交失败 ⇒ 持久状态不变、回合记录 failed、重试不重复结算。
+        """
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shutil.copytree(PROJECT_ROOT / "skills", root / "skills", dirs_exist_ok=True)
+            module_dir = root / "mod" / "test-module"
+            module_dir.mkdir(parents=True, exist_ok=True)
+            (module_dir / "module.md").write_text("# Test", encoding="utf-8")
+            (module_dir / "world_state_initial.json").write_text(
+                json.dumps(
+                    {
+                        "module": "test-module",
+                        "pc": {
+                            "name": "调查员",
+                            "hp": 10,
+                            "max_hp": 10,
+                            "san": 50,
+                            "max_san": 50,
+                            "inventory": [],
+                        },
+                        "current_scene": {"id": "study", "name": "书房"},
+                        "scene_catalog": {
+                            "study": {"id": "study", "name": "书房", "description": "堆满书。"},
+                            "library": {
+                                "id": "library",
+                                "name": "图书馆",
+                                "description": "安静的大厅。",
+                            },
+                        },
+                        "npcs": [],
+                        "clues_found": {
+                            "investigation": [],
+                            "event": [],
+                            "task": [],
+                            "npc": [],
+                        },
+                        "combat_state": {"active": False},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            context = RuntimeContext.create(
+                "journal-world",
+                "test-module",
+                project_root=root,
+                runtime_root=root,
+            )
+            with patch("src.app.engine.OpenAI", return_value=object()):
+                engine = GameEngine(context)
+            engine.prepare_session()
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "你推开图书馆的门。\n\n**你可以——**\n1. 查看书架",
+                [],
+            )
+            streamed: list[str] = []
+            handouts: list[dict] = []
+            engine.cb.on_narrative = lambda text, npc_id=None: streamed.append(text)
+            engine.cb.on_handout = lambda info: handouts.append(info)
+            from src.storage.database_store import DatabaseWorldStore
+
+            independent = DatabaseWorldStore(
+                context.database_url, "journal-world", context.world_dir
+            )
+            base_revision = independent.snapshot().revision
+
+            with patch.object(
+                engine.turn_journal,
+                "complete",
+                side_effect=TurnJournalError("simulated commit failure"),
+            ):
+                with self.assertRaises(TurnJournalError):
+                    engine.handle_action("我去图书馆")
+
+            # 已知限制（见独立复核）：赶路文本在提交前已经流出。
+            self.assertIn("你前往图书馆", "".join(streamed))
+            self.assertEqual(handouts, [])
+            # 但持久状态必须整体回滚：独立连接看到的仍是书房，revision 未动。
+            persisted = independent.snapshot()
+            self.assertEqual("study", persisted.state["current_scene"]["id"])
+            self.assertEqual(base_revision, persisted.revision)
+            self.assertEqual([], engine.turn_journal.list_completed())
+
+            # 重试：只提交一次，revision 恰好 +1，抵达图书馆。
+            engine.handle_action("我去图书馆")
+
+            persisted = independent.snapshot()
+            self.assertEqual("library", persisted.state["current_scene"]["id"])
+            self.assertEqual(base_revision + 1, persisted.revision)
+            records = engine.turn_journal.list_completed()
+            self.assertEqual(1, len(records))
+            _messages, snapshot = engine.turn_journal.load_artifacts(records[0]["turn_id"])
+            self.assertEqual("library", snapshot["current_scene"]["id"])
+
     def test_rewrite_replaces_only_prose_and_preserves_committed_state(self):
         with tempfile.TemporaryDirectory() as temp:
             engine = self.make_engine(Path(temp))

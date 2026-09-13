@@ -11,7 +11,9 @@ from datetime import datetime
 from pathlib import Path
 
 from src.app.config import DEFAULT_MODULE_NAME, PROJECT_ROOT, RUNTIME_ROOT
+from src.gameplay.action_preflight import upgrade_legacy_advisories
 from src.gameplay.handouts import refresh_static_handout_config
+from src.gameplay.transition_prelude import upgrade_legacy_entry_beats
 from src.modules.module_registry import ModuleRecord, ModuleRegistry
 from src.storage.database import World, database_url, initialize_database, session_scope, utcnow
 from src.storage.database_store import DatabaseWorldStore
@@ -210,16 +212,20 @@ class RuntimeContext:
         initial_state_revision = (
             _file_revision(self.initial_state_file) if self.initial_state_file.exists() else ""
         )
-        if initial_state_revision and (
-            metadata.get("initial_state_revision") != initial_state_revision
-        ):
+        if initial_state_revision:
             template = json.loads(self.initial_state_file.read_text(encoding="utf-8"))
-            with self.world_store.transaction() as state:
-                refresh_static_handout_config(state, template)
-            metadata["initial_state_revision"] = initial_state_revision
-            with session_scope(self.database_url) as session:
-                world = session.get(World, self.world_id)
-                world.metadata_json = metadata
+            if metadata.get("initial_state_revision") != initial_state_revision:
+                with self.world_store.transaction() as state:
+                    refresh_static_handout_config(state, template)
+                metadata["initial_state_revision"] = initial_state_revision
+                with session_scope(self.database_url) as session:
+                    world = session.get(World, self.world_id)
+                    world.metadata_json = metadata
+            # 静态刷新解决不了"记录版本已经一致"的世界：它们的状态可能来自
+            # 更早的分支快照（world_branches.seed_from_snapshot 直接覆盖整个
+            # 状态），所以过渡文案还要按条目再做一次幂等升级；没有需要升级的
+            # 条目时不会写盘、也不会推 revision。
+            self.sync_module_metadata(template)
 
         if migrate_legacy and not metadata.get("legacy_saves_migrated"):
             legacy_save_dirs = [
@@ -254,6 +260,25 @@ class RuntimeContext:
             atomic_write_json(self.metadata_file, metadata)
         self.world_store.load()
         return self
+
+    def sync_module_metadata(self, template: dict | None = None) -> list[str]:
+        """把模组当前的过渡文案补进这个世界（幂等，不动进度）。
+
+        处理两类迁移前形态：未声明 ``transition_text`` 的非阻塞行动预演
+        （``action_preflight.upgrade_legacy_advisories``），以及作者在模组里
+        用 ``supersedes`` 存档了旧措辞的入场节拍
+        （``transition_prelude.upgrade_legacy_entry_beats``）。
+        返回本次被升级的 ``scene_id/advisory_id`` 与 ``scene_id/entry_beat``
+        标识列表。
+        """
+        if template is None:
+            if not self.initial_state_file.exists():
+                return []
+            template = json.loads(self.initial_state_file.read_text(encoding="utf-8"))
+        with self.world_store.transaction() as state:
+            upgraded = upgrade_legacy_advisories(state, template)
+            upgraded.extend(upgrade_legacy_entry_beats(state, template))
+            return upgraded
 
     def reset_world(self) -> None:
         source = (

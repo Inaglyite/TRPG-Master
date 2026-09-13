@@ -531,9 +531,40 @@
           "title": "前往停尸房之前",
           "blocking": false,
           "npc_id": "bryce_fallon",
-          "npc_text": "想亲眼看看查尔斯？可以。不过遗体还在医学院的冷柜里，我得先替你知会惠特克罗夫特医生。那份死亡证明是他签的——进去之前，你也许愿意先听听我对这件事的看法。",
-          "keeper_text": "停尸房并非可以自由进出的地方，法伦需要先通知值班医生。",
-          "public_hint": "『你可以立即前往，也可以先向法伦了解更多情况。』",
+          "transition_text": "法伦听你说出\"医学院\"三个字，点了点头，取过听筒替你拨通医学院的内线，压低声音说明了你的来意；放下听筒，他示意惠特克罗夫特医生会在停尸房等候。\"死亡证明是他签的——见到他，你直接问查尔斯身上到底有什么不对劲。\"",
+          "supersedes": [
+            {
+              "id": "wright_body_handoff",
+              "destination_scene_id": "miskatonic_medical",
+              "transition_kinds": [
+                "discovery_target"
+              ],
+              "trigger_if": {
+                "always": true
+              },
+              "title": "前往停尸房之前",
+              "blocking": false,
+              "npc_id": "bryce_fallon",
+              "npc_text": "想亲眼看看查尔斯？可以。不过遗体还在医学院的冷柜里，我得先替你知会惠特克罗夫特医生。那份死亡证明是他签的——进去之前，你也许愿意先听听我对这件事的看法。",
+              "keeper_text": "停尸房并非可以自由进出的地方，法伦需要先通知值班医生。",
+              "public_hint": "『你可以立即前往，也可以先向法伦了解更多情况。』",
+              "continue_label": "请法伦联系医生，前往停尸房",
+              "continue_description": "按原定计划查看莱特教授的遗体",
+              "prepare_options": [
+                {
+                  "id": "ask_fallon_first",
+                  "label": "先问法伦为什么不相信死亡证明",
+                  "description": "留在办公室，先了解他的疑虑",
+                  "action_text": "我先留下来问法伦：你为什么不相信莱特的死亡证明？在我去看遗体之前，还有什么应该知道的？"
+                }
+              ],
+              "cancel_label": "暂时不去，调查其他线索",
+              "cancel_description": "保持当前场景与世界状态不变"
+            }
+          ],
+          "keeper_text": "停尸房不对外开放：按程序，你得先经院方值班人员许可才能查看遗体。",
+          "npc_text": "想亲眼看看查尔斯？可以。不过遗体还在医学院的冷柜里——进去之前，我得先替你知会惠特克罗夫特医生。",
+          "public_hint": "『进入停尸房需要院方值班医生的许可。』",
           "continue_label": "请法伦联系医生，前往停尸房",
           "continue_description": "按原定计划查看莱特教授的遗体",
           "prepare_options": [
@@ -572,7 +603,13 @@
       "npcs_present": ["john_whitcroft"],
       "entry_beat": {
         "npc_id": "john_whitcroft",
-        "public_text": "冷柜间门口，惠特克罗夫特医生正攥着病历夹等候。他显得疲惫而不安，却仍以职业性的克制向你示意。"
+        "public_text": "冷柜间门口，惠特克罗夫特医生攥着病历夹站在那里。他显得疲惫而不安，却仍以职业性的克制向你示意。",
+        "supersedes": [
+          {
+            "npc_id": "john_whitcroft",
+            "public_text": "冷柜间门口，惠特克罗夫特医生正攥着病历夹等候。他显得疲惫而不安，却仍以职业性的克制向你示意。"
+          }
+        ]
       }
     },
     "miskatonic_history": {

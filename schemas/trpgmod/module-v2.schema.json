@@ -80,6 +80,26 @@
           "title": "Enabled",
           "type": "boolean"
         },
+        "blocking": {
+          "default": true,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "transition_text": {
+          "default": "",
+          "maxLength": 1600,
+          "title": "Transition Text",
+          "type": "string"
+        },
+        "supersedes": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 3,
+          "title": "Supersedes",
+          "type": "array"
+        },
         "title": {
           "default": "",
           "maxLength": 120,
@@ -1360,6 +1380,15 @@
           "minLength": 1,
           "title": "Public Text",
           "type": "string"
+        },
+        "supersedes": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 3,
+          "title": "Supersedes",
+          "type": "array"
         }
       },
       "required": [

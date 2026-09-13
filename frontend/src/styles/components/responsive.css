@@ -360,29 +360,49 @@
 }
 
 @media (max-width: 520px) {
+  /* 窄屏放不下一行“标题 + 位置 + 工具栏”：顶栏改成两行，
+     位置行（以及云端的“离开冒险”）独占第一行，工具栏整行铺开在第二行。
+     这样位置行不会挤压按钮，长地名也只会自己省略。 */
+  #header {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 2px;
+  }
   #header h1 {
     display: none;
   }
-  /* 标题隐藏后，云端的“离开冒险”入口仍留在左上角 */
   .header-leading {
-    flex: 0 0 auto;
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  /* 标题连同烛火一起隐藏，位置行改由自己占位：去掉标题缩进、缩小字号。 */
+  .header-scene {
+    flex: 1 1 auto;
+    padding-left: 0;
+    max-width: none;
+    font-size: 11px;
+    letter-spacing: 0.04em;
   }
   #btn-solo-adventure-exit {
+    flex: 0 0 auto;
     margin-left: 0;
     font-size: 11px;
   }
-  #toolbar {
+  /* 工具栏独占整行后，云端也不再需要“让到右侧”的单行约定，统一居中。 */
+  #toolbar,
+  .header-leading:has(#btn-solo-adventure-exit) + #toolbar {
     width: 100%;
+    flex: 1 1 100%;
     justify-content: center;
   }
-  /* 只有云端（出口按钮存在）才把工具栏让到右侧，本地模式保持居中 */
-  .header-leading:has(#btn-solo-adventure-exit) + #toolbar {
-    width: auto;
-    flex: 1 1 auto;
-    justify-content: flex-end;
-  }
+  /* 按可用宽度均分，不再用 (100vw - 40px)/6 这类会忽略间距的算式，
+     避免整行溢出把按钮压在一起。 */
   #toolbar button {
-    width: calc((100vw - 40px) / 6);
+    width: auto;
+    flex: 1 1 0;
+    min-width: 0;
     max-width: 68px;
   }
   #utility-overlay {

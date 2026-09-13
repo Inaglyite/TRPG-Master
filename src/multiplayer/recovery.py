@@ -12,6 +12,7 @@ from src.gameplay.investigators import (
     public_investigator_roster,
     visible_clues_for_investigator,
 )
+from src.gameplay.scene_projection import player_scene_view
 from src.multiplayer.room_runtime import BufferedRoomEvent, GameRoom, RoomEventHub
 from src.storage.player_notes import PlayerNotesStore
 from src.web.asset_payload import asset_payload, enrich_pc_for_frontend
@@ -146,12 +147,16 @@ def recovery_messages(
         state = room.engine.context.world_store.load()
         investigators = public_investigator_roster(state)
         active_investigator_id = state.get("active_investigator_id")
+        scene_view = player_scene_view(state)
     except Exception:
         investigators = []
         active_investigator_id = None
+        scene_view = None
     pending = pending_reply_payload(room, user_id, events)
     full = {
         "type": "room_full_state",
+        "world_id": room.world_id,
+        "scene": scene_view,
         "status": room.status,
         "owner_user_id": room.owner_user_id,
         "current_actor_user_id": room.current_actor_user_id,

@@ -177,6 +177,10 @@ class WorldBranchService:
                 snapshot,
                 expected_revision=target_context.world_store.revision,
             )
+            # 分支直接继承了源回合快照的场景快照：模组后来改写的过渡文案
+            # （非阻塞预演）必须在这里补一次，否则旧分支会一直沿用迁移前的
+            # 卡片文案。该步骤幂等，只升级未改写的条目。
+            target_context.sync_module_metadata()
             target_journal = TurnJournal(
                 target_context.world_dir,
                 world_id=world_id,

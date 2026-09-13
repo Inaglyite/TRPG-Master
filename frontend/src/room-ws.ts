@@ -13,6 +13,7 @@ import {
   resetOnlineState,
   useOnlineStore,
 } from "./state/online-store";
+import { useSceneStore } from "./state/scene-store";
 import { useStartStore } from "./state/start-store";
 import {
   announceSoloWorldSwitch,
@@ -168,6 +169,8 @@ export function connectRoom(worldId: string): void {
   activeRoomTurnId = null;
   pendingRoomRecoveryTurnId = null;
   setActiveTransport({ send: (payload) => sendRaw(injectActionId(payload)) });
+  // 换房间/换世界先清空顶栏位置，等房间全量镜像带回权威场景。
+  useSceneStore.getState().setWorld(worldId);
   open();
 }
 
@@ -534,6 +537,10 @@ function handleRoomMessage(raw: unknown): void {
         lastEventId = message.latest_event_id;
       }
       applyRoomStateFields(message);
+      // 房间全量镜像携带权威世界标识与场景投影（重连后恢复地点；
+      // 若镜像来自另一个世界，store 会先清空再采纳，不残留旧地点）。
+      useSceneStore.getState().setWorld(String(message.world_id || ""));
+      useSceneStore.getState().applyScene(message.world_id, message.scene);
       const roomPlaying =
         (typeof message.status === "string"
           ? message.status

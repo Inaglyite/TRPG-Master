@@ -5,10 +5,24 @@ matching advisory is evaluated entirely from the authoritative action plan and
 the investigator's public sheet.  It never reads NPC secrets, private memory,
 or clue text, so the warning shown before a move cannot become an accidental
 walkthrough spoiler.
+
+An advisory has one of two shapes, and they must never be mixed:
+
+``blocking`` (default)
+    A decision card.  ``npc_text``/``keeper_text``/``public_hint`` and the
+    authored options are shown instead of moving, and the player decides.
+
+``blocking: false``
+    A transition beat.  There is no card and no decision — the player already
+    chose to leave.  Only ``transition_text`` (the departure beat) is used and
+    the action settles normally.  Card fields are ignored: replaying a held
+    back "do you still want to go?" prompt after the player has chosen is the
+    failure this split exists to prevent.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import secrets
@@ -42,6 +56,7 @@ class ActionPreview:
     options: tuple[ActionPreviewOption, ...]
     default_option: str
     blocking: bool = True
+    transition_text: str = ""
 
     def decision_payload(self) -> dict:
         import re
@@ -282,6 +297,35 @@ def match_action_preview(action: ActionResolution, world: dict) -> ActionPreview
         )
         present = {str(value) for value in runtime_present}
         npc_id = _bounded_text(raw.get("npc_id"), 80)
+        blocking = bool(raw.get("blocking", True))
+        # A declared NPC who is not actually in the runtime scene cannot perform
+        # the beat; the keeper fallback carries the same fact in prose instead.
+        npc_absent = bool(npc_id) and npc_id not in present
+        plan_digest = _plan_digest(action, advisory_id)
+
+        if not blocking:
+            # 非阻塞提醒不是决策卡：只使用作者声明的过渡节拍。旧条目没有
+            # transition_text，直接跳过——绝不把"劝留 + 再选一次"的卡片
+            # 文案当成出发素材回灌给故事模型。
+            beat = _bounded_text(
+                raw.get("keeper_text") if npc_absent else raw.get("transition_text"),
+                1600,
+            )
+            if not beat:
+                continue
+            return ActionPreview(
+                advisory_id=advisory_id,
+                plan_digest=plan_digest,
+                request_id=f"action-transition-{plan_digest}-{secrets.token_hex(6)}",
+                title=_bounded_text(raw.get("title"), 120),
+                narrative=beat,
+                npc_id=npc_id if not npc_absent else None,
+                options=(),
+                default_option="",
+                blocking=False,
+                transition_text=beat,
+            )
+
         npc_text = _bounded_text(raw.get("npc_text"), 1600)
         keeper_text = _bounded_text(raw.get("keeper_text"), 1600)
         hint = _bounded_text(raw.get("public_hint"), 500)
@@ -298,7 +342,6 @@ def match_action_preview(action: ActionResolution, world: dict) -> ActionPreview
             else ""
         )
         options = _preview_options(raw, destination_name)
-        plan_digest = _plan_digest(action, advisory_id)
         return ActionPreview(
             advisory_id=advisory_id,
             plan_digest=plan_digest,
@@ -311,6 +354,80 @@ def match_action_preview(action: ActionResolution, world: dict) -> ActionPreview
             options=options,
             # A timeout must never move the investigator or spend resources.
             default_option="cancel_action",
-            blocking=bool(raw.get("blocking", True)),
+            blocking=True,
         )
     return None
+
+
+def upgrade_legacy_advisories(state: dict, template: dict) -> list[str]:
+    """Upgrade unmodified pre-fix non-blocking advisories to the author's beat.
+
+    Before the card/beat split, a non-blocking advisory carried only decision
+    card text, which the engine handed to the story model as departure
+    material — so a player who chose to leave was shown the held-back "hear my
+    view first" line and asked to choose again.
+
+    An entry is replaced only when *all* of these hold:
+
+    * the world entry is non-blocking and still has no ``transition_text``;
+    * the module template carries the same advisory id with a ``transition_text``;
+    * the template declares that exact world entry in the advisory's
+      ``supersedes`` list — an author-declared copy of the shipped legacy
+      payload.
+
+    The last condition is the important one: ``supersedes`` is compared by full
+    structural equality, so any hand edit at all (a rewritten ``npc_text``, a
+    reworded ``keeper_text``, an extra key, a changed option) keeps the entry
+    untouched.  Blocking cards, entries the template does not declare, and
+    entries whose scene is missing are left alone too.  The replacement drops
+    the ``supersedes`` bookkeeping, which keeps the world copy clean and keeps
+    the step idempotent.  Only advisory text is rewritten: no progress,
+    history, flags or scene state is touched.
+    """
+
+    upgraded: list[str] = []
+    scenes = state.get("scene_catalog")
+    template_scenes = template.get("scene_catalog")
+    if not isinstance(scenes, dict) or not isinstance(template_scenes, dict):
+        return upgraded
+
+    for scene_id, scene in scenes.items():
+        if not isinstance(scene, dict):
+            continue
+        advisories = scene.get("action_advisories")
+        template_scene = template_scenes.get(scene_id)
+        if not isinstance(advisories, list) or not isinstance(template_scene, dict):
+            continue
+        authored = {
+            str(item.get("id") or ""): item
+            for item in template_scene.get("action_advisories", [])
+            if isinstance(item, dict)
+        }
+        for index, advisory in enumerate(advisories):
+            if not isinstance(advisory, dict):
+                continue
+            if bool(advisory.get("blocking", True)):
+                continue
+            if str(advisory.get("transition_text") or "").strip():
+                continue
+            replacement = authored.get(str(advisory.get("id") or ""))
+            if not isinstance(replacement, dict) or not str(
+                replacement.get("transition_text") or ""
+            ).strip():
+                continue
+            declared = replacement.get("supersedes")
+            if not isinstance(declared, list) or not any(
+                isinstance(payload, dict)
+                and payload
+                and advisory == payload
+                for payload in declared
+            ):
+                continue
+            migrated = {
+                key: copy.deepcopy(value)
+                for key, value in replacement.items()
+                if key != "supersedes"
+            }
+            advisories[index] = migrated
+            upgraded.append(f"{scene_id}/{advisory.get('id')}")
+    return upgraded

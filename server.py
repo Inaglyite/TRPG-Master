@@ -131,6 +131,7 @@ from src.gameplay.investigators import (
     initialize_investigator_roster,
     public_investigator_roster,
 )
+from src.gameplay.scene_projection import player_scene_view, player_scene_view_for
 from src.modules.editor_projects import EditorProjectStore
 from src.modules.module_registry import ModuleRegistry
 from src.multiplayer.http import (
@@ -672,6 +673,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             "type": "world_context",
             "world_id": engine.context.world_id,
             "module_name": engine.context.module_name,
+            "scene": player_scene_view_for(engine.context),
         }
 
     def allowed_world_ids() -> set[str] | None:
@@ -692,11 +694,8 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         allowed = allowed_world_ids()
         if allowed is not None:
             worlds = [world for world in worlds if world["world_id"] in allowed]
-        return {
-            "type": "world_list",
-            "active_world_id": engine.context.world_id,
-            "worlds": worlds,
-        }
+        # 单行收尾：server.py 有行数上限，这里留出后续改动的余量。
+        return {"type": "world_list", "active_world_id": engine.context.world_id, "worlds": worlds}
 
     def save_list_payload() -> dict:
         # 存档面板按“选一个存档 → 显示其时间线”浏览，因此本地会话的存档
@@ -1118,18 +1117,18 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
         try:
             world_state = engine.context.world_store.load()
             pc_data = enrich_pc_for_frontend(world_state.get("pc", {}), engine.context)
-            clues_data = enrich_clues_for_frontend(
-                world_state.get("clues_found", {}),
-                world_state,
-                engine.context,
-            )
+            clues = world_state.get("clues_found", {})
+            clues_data = enrich_clues_for_frontend(clues, world_state, engine.context)
+            scene_view = player_scene_view(world_state)
         except Exception:
-            pc_data, clues_data = {}, {}
+            pc_data, clues_data, scene_view = {}, {}, None
         await outbound.send(
             {
                 "type": "state_data",
+                "world_id": engine.context.world_id,
                 "data": json.dumps(pc_data, ensure_ascii=False),
                 "clues": json.dumps(clues_data, ensure_ascii=False),
+                "scene": scene_view,
             }
         )
 

@@ -1,6 +1,7 @@
 import { useAppStore } from "../../state/app-store";
 import { useModelStore } from "../../state/model-store";
 import { useOnlineStore } from "../../state/online-store";
+import { sceneLabel, useSceneStore } from "../../state/scene-store";
 import { returnToStartMenu } from "../../start";
 import { useStartStore } from "../../state/start-store";
 import { SoloAdventureExitControl } from "./online/SoloAdventureExitControl";
@@ -22,6 +23,11 @@ export function AppHeader() {
   const quickSaveState = useAppStore((state) => state.quickSaveState);
   const mode = useAppStore((state) => state.mode);
   const gameStarting = useStartStore((state) => state.gameStarting);
+  const gameStarted = useStartStore((state) => state.gameStarted);
+  // 当前场景来自服务端已提交的世界状态（只在回合外应用）：点击“前往”、
+  // 正文写到别处、玩家提到地名都不会改这一行；移动被拒绝或取消时保持原位置。
+  const sceneStatus = useSceneStore((state) => state.status);
+  const sceneName = useSceneStore((state) => state.name);
   // 多人房间中存档/读档为房主专属操作（服务端按 Session 再校验）；
   // selector 订阅成员/用户变化，房主移交后 UI 即时更新。
   const isOwner = useOnlineStore((state) => {
@@ -44,6 +50,8 @@ export function AppHeader() {
     else loadState();
   };
 
+  const sceneText = sceneLabel({ status: sceneStatus, name: sceneName });
+
   return (
     <>
       <div className="header-leading">
@@ -56,6 +64,18 @@ export function AppHeader() {
             title={connectionTitles[connection]}
           />
         </h1>
+        {/* 开局后持续显示“当前已结算位置”。地点名由服务端投影保证是玩家
+            可知的公开名称；超长时省略，完整名称放在 title 里。 */}
+        {gameStarted && (
+          <p
+            className="header-scene"
+            data-scene-status={sceneStatus}
+            title={`当前场景 · ${sceneText}`}
+            aria-label={`当前场景：${sceneText}`}
+          >
+            当前场景 · <span className="header-scene-name">{sceneText}</span>
+          </p>
+        )}
         {mode === "online" && <SoloAdventureExitControl />}
       </div>
       <div id="toolbar">

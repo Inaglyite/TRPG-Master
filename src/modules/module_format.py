@@ -268,11 +268,21 @@ class EncounterDefinition(StrictModel):
 class SceneEntryBeatDefinition(StrictModel):
     npc_id: str
     public_text: str = Field(min_length=1, max_length=1200)
+    # 作者在模组里存档的官方旧载荷（完整 entry_beat 对象）：旧快照里的世界
+    # 只有在与其中一项逐字一致时才按条目升级措辞，手改过的内容一律保留。
+    supersedes: list[dict[str, Any]] = Field(default_factory=list, max_length=3)
 
     @field_validator("npc_id")
     @classmethod
     def validate_npc_id(cls, value: str) -> str:
         return _validate_entity_id(value, "入场节拍 NPC ID")
+
+    @field_validator("supersedes")
+    @classmethod
+    def validate_supersedes(cls, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if any(not isinstance(payload, dict) or not payload for payload in values):
+            raise ValueError("入场节拍 supersedes 的每一项都必须是非空对象")
+        return values
 
 
 class ActionRouteDefinition(StrictModel):
@@ -345,6 +355,9 @@ class ActionAdvisoryDefinition(StrictModel):
     forbidden_flags: dict[str, bool | int | str] = Field(default_factory=dict)
     trigger_if: ActionPreviewTriggerDefinition | None = None
     enabled: bool = True
+    blocking: bool = True
+    transition_text: str = Field(default="", max_length=1600)
+    supersedes: list[dict[str, Any]] = Field(default_factory=list, max_length=3)
     title: str = Field(default="", max_length=120)
     npc_id: str | None = None
     npc_text: str = Field(default="", max_length=1600)
@@ -376,13 +389,24 @@ class ActionAdvisoryDefinition(StrictModel):
 
     @model_validator(mode="after")
     def validate_public_warning(self) -> ActionAdvisoryDefinition:
-        if self.npc_id and not self.npc_text:
-            raise ValueError("行动预演声明 npc_id 时必须提供 npc_text")
-        if not self.npc_text and not self.keeper_text and not self.public_hint:
-            raise ValueError("行动预演必须提供 NPC、守秘人提醒或公开提示")
+        if not self.blocking:
+            # 非阻塞提醒不弹卡：只有过渡节拍会被使用，卡片文案一律忽略。
+            # 强制声明 transition_text，避免作者以为"劝一句"还能照旧生效。
+            if not self.transition_text:
+                raise ValueError(
+                    "非阻塞行动预演必须提供 transition_text（出发过渡节拍），"
+                    "不得复用决策卡文案"
+                )
+        else:
+            if self.npc_id and not self.npc_text:
+                raise ValueError("行动预演声明 npc_id 时必须提供 npc_text")
+            if not self.npc_text and not self.keeper_text and not self.public_hint:
+                raise ValueError("行动预演必须提供 NPC、守秘人提醒或公开提示")
         option_ids = [option.id for option in self.prepare_options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError("行动预演准备选项 ID 不能重复")
+        if any(not isinstance(payload, dict) or not payload for payload in self.supersedes):
+            raise ValueError("行动预演 supersedes 的每一项都必须是非空对象")
         return self
 
 

@@ -184,6 +184,143 @@ class ModuleFormatTests(unittest.TestCase):
             or "目的地不存在" in str(raised.exception)
         )
 
+    def test_nonblocking_advisory_requires_a_transition_beat(self):
+        """非阻塞提醒只有过渡节拍会生效，必须显式声明 transition_text。"""
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        scene["action_advisories"] = [{
+            "id": "courtyard_reminder",
+            "destination_scene_id": "archive_courtyard",
+            "blocking": False,
+            "keeper_text": "庭院里的旧井并不安全。",
+        }]
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("transition_text", str(raised.exception))
+
+    def test_nonblocking_advisory_with_beat_compiles_without_card_fields(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        scene["action_advisories"] = [{
+            "id": "courtyard_handoff",
+            "destination_scene_id": "archive_courtyard",
+            "blocking": False,
+            "npc_id": scene["npcs_present"][0],
+            "transition_text": "管理员点了点头，先一步去开了庭院的门。",
+        }]
+        module = ModuleDefinition.model_validate(raw)
+        manifest, _template_module = load_template()
+
+        world = compile_world_state(manifest, module)
+
+        compiled = world["scene_catalog"]["archive_study"]["action_advisories"][0]
+        self.assertFalse(compiled["blocking"])
+        self.assertEqual(
+            compiled["transition_text"],
+            "管理员点了点头，先一步去开了庭院的门。",
+        )
+        self.assertEqual(compiled["npc_text"], "")
+        self.assertEqual(compiled["prepare_options"], [])
+
+    def test_advisory_supersedes_payloads_must_be_objects(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        scene["action_advisories"] = [{
+            "id": "courtyard_handoff",
+            "destination_scene_id": "archive_courtyard",
+            "blocking": False,
+            "transition_text": "管理员先一步去开了庭院的门。",
+            "supersedes": ["旧文案"],
+        }]
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("supersedes", str(raised.exception))
+
+    def test_advisory_supersedes_is_compiled_for_legacy_migration(self):
+        legacy = {
+            "id": "courtyard_handoff",
+            "destination_scene_id": "archive_courtyard",
+            "blocking": False,
+            "npc_text": "庭院里的旧井并不安全。",
+        }
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        scene = raw["scenes"]["archive_study"]
+        scene["action_advisories"] = [
+            {
+                "id": "courtyard_handoff",
+                "destination_scene_id": "archive_courtyard",
+                "blocking": False,
+                "transition_text": "管理员点了点头，先一步去开了庭院的门。",
+                "supersedes": [legacy],
+            }
+        ]
+        module = ModuleDefinition.model_validate(raw)
+        manifest, _template_module = load_template()
+
+        world = compile_world_state(manifest, module)
+
+        compiled = world["scene_catalog"]["archive_study"]["action_advisories"][0]
+        self.assertEqual(compiled["supersedes"], [legacy])
+
+        from src.gameplay.action_preflight import upgrade_legacy_advisories
+
+        stored = {"scene_catalog": {"archive_study": {"action_advisories": [dict(legacy)]}}}
+        self.assertEqual(
+            upgrade_legacy_advisories(stored, world),
+            ["archive_study/courtyard_handoff"],
+        )
+        migrated = stored["scene_catalog"]["archive_study"]["action_advisories"][0]
+        self.assertNotIn("supersedes", migrated)
+        self.assertEqual(migrated["transition_text"], compiled["transition_text"])
+
+    def test_entry_beat_supersedes_payloads_must_be_objects(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        raw["scenes"]["archive_study"]["entry_beat"] = {
+            "npc_id": raw["scenes"]["archive_study"]["npcs_present"][0],
+            "public_text": "管理员停在旧井外，谨慎地望向井口。",
+            "supersedes": ["旧文案"],
+        }
+
+        with self.assertRaises(ValidationError) as raised:
+            ModuleDefinition.model_validate(raw)
+
+        self.assertIn("supersedes", str(raised.exception))
+
+    def test_entry_beat_supersedes_is_compiled_for_legacy_migration(self):
+        raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
+        npc_id = raw["scenes"]["archive_study"]["npcs_present"][0]
+        legacy = {
+            "npc_id": npc_id,
+            "public_text": "管理员正站在旧井外等候。",
+        }
+        raw["scenes"]["archive_study"]["entry_beat"] = {
+            "npc_id": npc_id,
+            "public_text": "管理员停在旧井外，谨慎地望向井口。",
+            "supersedes": [legacy],
+        }
+        module = ModuleDefinition.model_validate(raw)
+        manifest, _template_module = load_template()
+
+        world = compile_world_state(manifest, module)
+
+        compiled = world["scene_catalog"]["archive_study"]["entry_beat"]
+        self.assertEqual(compiled["supersedes"], [legacy])
+
+        from src.gameplay.transition_prelude import upgrade_legacy_entry_beats
+
+        stored = {"scene_catalog": {"archive_study": {"entry_beat": dict(legacy)}}}
+        self.assertEqual(
+            upgrade_legacy_entry_beats(stored, world),
+            ["archive_study/entry_beat"],
+        )
+        migrated = stored["scene_catalog"]["archive_study"]["entry_beat"]
+        self.assertNotIn("supersedes", migrated)
+        self.assertEqual(migrated["public_text"], compiled["public_text"])
+
     def test_discovery_rule_rejects_unknown_npc_reveal(self):
         raw = json.loads((TEMPLATE / "module.json").read_text(encoding="utf-8"))
         raw["clues"]["well_paper_fragment"]["discovery_rules"][0][

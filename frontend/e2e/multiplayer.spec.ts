@@ -843,6 +843,16 @@ test("Electron 与浏览器真实双客户端完成联机回合并安全返回�
       await electronOpening.locator(".chat-event-list").innerText(),
     );
 
+    // 共享场景模式：两端顶栏显示同一个“当前已结算位置”，来自服务端状态。
+    const electronScene = page.locator(".header-scene");
+    const peerScene = peer.locator(".header-scene");
+    await expect(electronScene).toBeVisible({ timeout: turnTimeout });
+    await expect(peerScene).toBeVisible({ timeout: turnTimeout });
+    const sceneText = (await electronScene.innerText()).replace(/\s+/g, "");
+    expect(sceneText.startsWith("当前场景·")).toBe(true);
+    expect(sceneText.length).toBeGreaterThan("当前场景·".length);
+    expect((await peerScene.innerText()).replace(/\s+/g, "")).toBe(sceneText);
+
     const actionText = `Electron 双端行动-${runId}：我检查门锁和附近的脚印。`;
     await electronInput.fill(actionText);
     await page.locator("#btn-send").click();

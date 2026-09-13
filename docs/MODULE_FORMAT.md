@@ -293,7 +293,22 @@ Markdown（需声明 `scene_documents` capability）。
 仅在对应 NPC 抵达结算后确实在场时显示；随机遭遇失败或 NPC 已离开不会错误展示头像与接待。
 旧模组的 `entry_text` 仍作为抵达后的兼容文本，但新模组应使用语义明确的三个字段。
 
-行动不适合立即提交时，可在**出发场景**声明 `action_advisories`：
+执行顺序契约：引擎**先结算移动**（含遭遇与在场 NPC 落账），结算成功后才向玩家宣布
+过渡节拍与上述赶路/抵达文本；结算被拒绝时回合失败，任何节拍都不播。因此节拍文案可以
+安全地声明"已替你通知/安排"这类事实。
+
+`entry_beat` 同样支持 `supersedes`（可选，最多 3 条，每项是历史版本的完整
+`entry_beat` 对象）：从旧快照建分支的世界里，只有与其中一条**逐字一致**的入场节拍才会被
+替换成本条目，手改过的措辞一律保留。写法和含义与下文行动预演的 `supersedes` 一致。
+
+行动不适合立即提交时，可在**出发场景**声明 `action_advisories`。预演有两种形态，二者不得混用：
+
+* `blocking`（默认 `true`）：决策卡。`npc_text` / `keeper_text` / `public_hint` 与选项文案
+  在移动之前展示，由玩家决定继续、改用准备行动或取消。
+* `blocking: false`：过渡节拍。**不弹卡、不追问**——玩家已经决定出发。引擎只使用
+  `transition_text`，其余卡片字段一律忽略，行动照常结算。所以 `transition_text` 里不得再
+  要求玩家做一次选择，也不得写"要不要先听听我的看法"这类劝留；它应当是出发时已经成立的
+  事实（谁说了什么、联系了谁、随身带了什么）。
 
 ```json
 {
@@ -319,6 +334,26 @@ Markdown（需声明 `scene_documents` capability）。
         }
       ],
       "cancel_label": "暂时不去"
+    },
+    {
+      "id": "apothecary_handoff",
+      "destination_scene_id": "apothecary",
+      "transition_kinds": ["discovery_target"],
+      "blocking": false,
+      "npc_id": "john",
+      "transition_text": "约翰听你说明来意，先一步替你写了张字条，让你直接去找药剂师。",
+      "keeper_text": "药剂师不接待没有引荐的陌生人，你得先取得当地人的引荐。",
+      "supersedes": [
+        {
+          "id": "apothecary_handoff",
+          "destination_scene_id": "apothecary",
+          "transition_kinds": ["discovery_target"],
+          "blocking": false,
+          "npc_id": "john",
+          "npc_text": "药剂师不太好说话。你仍然可以去，不过要不要先听听我的建议？",
+          "public_hint": "『你可以立即前往，也可以先问约翰。』"
+        }
+      ]
     }
   ]
 }
@@ -328,12 +363,35 @@ Markdown（需声明 `scene_documents` capability）。
 `occupation_contains_any` 和 `traits_contain_any`；同一对象中的条件按“任一风险成立”触发。
 多个 advisory 按作者顺序匹配第一项，还可用 `route_ids`、`required_flags` 和
 `forbidden_flags` 缩小范围。阈值只参与服务端判断，不自动展示；玩家能看到的内容只能来自
-`npc_text`、`keeper_text`、`public_hint` 与选项文案，因此不得把秘密、准确成功条件或未发现
-线索写进这些公开字段。配置的 NPC 不在场时使用 `keeper_text`；两者都没有且不存在公开提示时
-模组校验失败。
+`npc_text`、`keeper_text`、`public_hint`、`transition_text` 与选项文案，因此不得把秘密、
+准确成功条件或未发现线索写进这些公开字段。声明了 `npc_id` 但该 NPC 不在场时：阻塞卡使用
+`keeper_text`，过渡节拍也改用 `keeper_text`——这种情况下要写"还没有安排、需要现场交涉"，
+不要断言一个并未发生的联系。阻塞卡必须提供 `npc_text`、`keeper_text` 或 `public_hint` 之一；
+过渡节拍必须提供 `transition_text`，否则模组校验失败。
 
-预演走普通聊天气泡和底部行动选项，不使用战斗确认弹窗。继续会执行最初冻结的行动计划；
+`transition_text` 是作者态文本，可用 `【npc:<id>】…【/npc】` 包裹其中的直接引语，引擎按节拍
+解析成对应的说话人气泡。
+
+`supersedes`（可选，最多 3 条）是**旧存档兼容声明**：把本条目历史版本的完整内容逐字列进去，
+引擎在打开已有世界或从旧回合建分支时，只有当世界里的同名条目与其中一条**完全一致**时才会
+替换成本条目，任何手改（改写 `npc_text`/`keeper_text`、改标题、增删字段）都会原样保留。
+因此它只服务于"官方模组升级自己发布的旧形态"，作者自定义模组不需要写；写的时候请从实际发布
+过的旧版本逐字复制，不要手打。
+
+阻塞预演走普通聊天气泡和底部行动选项，不使用战斗确认弹窗。继续会执行最初冻结的行动计划；
 准备选项执行其作者态 `action_text`；取消和 120 秒超时都保持场景、资源与发现状态不变。
+非阻塞过渡节拍在移动结算成功后播给玩家（先于赶路、抵达文本），故事模型随后从节拍之后
+继续叙述，不重复也不改写这些既成事实；移动结算被拒绝时回合失败，节拍不会宣布。
+
+旧模组的兼容：迁移前只写了卡片文案的 `blocking: false` 条目不会再被当作出发素材注入——
+引擎会跳过它（不弹卡、也不劝留）。已有世界按下面两条路径之一拿到新文案：
+
+| 世界状态 | 机制 | 保护范围 |
+| --- | --- | --- |
+| 记录的文件版本与当前模组文件不一致（直接续玩、恢复旧存档） | `refresh_static_handout_config` 把 `scene_catalog` 等静态模块元数据**整体替换**为模组当前内容 | 无条目级保护：世界内对场景目录的改写（含自写 advisory）会被覆盖 |
+| 版本已一致但状态来自更早快照（从旧回合建分支） | `upgrade_legacy_advisories` 与 `upgrade_legacy_entry_beats` 按条目升级：只替换与 `supersedes` **逐字一致**的非阻塞条目与入场节拍 | 手改过的条目、阻塞卡、模板未声明的条目全部保留 |
+
+两条路径的覆盖范围不同，不能互相代入。
 
 ### 5.3 初始状态
 

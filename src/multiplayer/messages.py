@@ -21,6 +21,7 @@ from src.auth.service import authorize_world, websocket_user
 from src.gameplay.characters import list_character_options
 from src.gameplay.combat import CombatError, assign_combat_actor
 from src.gameplay.investigators import investigator_entity, visible_clues_for_investigator
+from src.gameplay.scene_projection import player_scene_view
 from src.multiplayer.guards import (
     GUARDED_TURN_TYPES,
     USER_TURN_GUARD,
@@ -475,13 +476,16 @@ async def run_room_message_loop(
                     world_state,
                     room.engine.context,
                 )
+                scene_view = player_scene_view(world_state)
             except Exception:
-                pc_data, clues_data = {}, {}
+                pc_data, clues_data, scene_view = {}, {}, None
             await ws.send_json(
                 {
                     "type": "state_data",
+                    "world_id": world_id,
                     "data": json.dumps(pc_data, ensure_ascii=False),
                     "clues": json.dumps(clues_data, ensure_ascii=False),
+                    "scene": scene_view,
                 }
             )
             continue

@@ -1905,7 +1905,7 @@ class GameEngine:
                 )
             return
 
-        if name == "state_set" and args.get("path") == "current_scene":
+        if name == "state_set" and args.get("path") == "current_scene" and data.get("ok"):
             try:
                 scene = json.loads(args.get("value", "{}"))
             except (TypeError, json.JSONDecodeError):

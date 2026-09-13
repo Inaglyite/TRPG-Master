@@ -239,9 +239,13 @@ def _prepare_turn_inner(
         selected_preview_option = None
         preview_material = ""
         travel_material: list[str] = []
+        pending_transition_beat = ""
         if action_preview is not None and not action_preview.blocking:
-            # 非阻塞提醒：不弹卡打断，文案降级为模型素材，行动照常演出。
-            preview_material = action_preview.narrative
+            # 非阻塞过渡节拍：这里没有决策卡，玩家已经决定出发，不能再被要求
+            # 重新选一次。但节拍文案可能声明"已替你通知/安排"的事实，所以
+            # 宣布必须发生在移动结算之后——先记账，后播报（见下方
+            # transition_id 分支）。结算失败时节拍一律不播。
+            pending_transition_beat = action_preview.transition_text.strip()
         elif action_preview is not None:
             # 预演卡只做决策 UI：罐头文案不再直接播为最终叙事，
             # 玩家选择后由故事模型按 NPC 性格现场展开（见下方素材注入）。
@@ -288,21 +292,37 @@ def _prepare_turn_inner(
                 discovery_matches,
             )
         )
-        if transition_prelude:
-            if preview_material:
-                # 有预演的回合不预播赶路文本，交给模型按顺序演出。
-                travel_material.append(transition_prelude)
-            else:
-                prelude_parts.append(transition_prelude)
-                engine.cb.on_narrative(f"{transition_prelude}\n\n")
+
+        def _stream_transition_beats() -> None:
+            # 展示顺序固定：过渡节拍 → 赶路 →（遭遇 → 抵达接待由调用方接上）。
+            # 有预演卡的回合不预播赶路文本，交给模型按素材顺序演出。
+            if pending_transition_beat:
+                prelude_parts.append(pending_transition_beat)
+                _emit_authored_narrative(engine, pending_transition_beat)
+            if transition_prelude:
+                if preview_material:
+                    travel_material.append(transition_prelude)
+                else:
+                    prelude_parts.append(transition_prelude)
+                    engine.cb.on_narrative(f"{transition_prelude}\n\n")
+
         if transition_id:
-            engine._resolve_scene_transition(
+            # 先结算移动（含遭遇与在场 NPC 落账），再宣布任何过渡事实。
+            # _resolve_scene_transition 的拒绝路径（世界不可读、目的地不在
+            # 目录、state_set 未确认）都返回 None：此时节拍、赶路、抵达描述
+            # 一律不播，本回合按失败收口，玩家可原样重试——绝不能让
+            # "已通知"的文案站在一次没有发生的移动前面。
+            settled_scene_id = engine._resolve_scene_transition(
                 user_content,
                 destination_scene_id=transition_id,
             )
+            if settled_scene_id != transition_id:
+                log_error(f"场景移动未结算 | 计划抵达={transition_id} 结算结果={settled_scene_id}")
+                raise RuntimeError(f"场景移动未结算：计划抵达 {transition_id}，但结算被拒绝")
             ledger = getattr(engine, "_turn_mutations", None)
             if ledger is not None:
                 ledger.record_domain("scene_transition", {"scene_id": transition_id})
+            _stream_transition_beats()
             encounter_text = str(
                 getattr(engine, "_encounter_resolution", None).narrative_text
                 if getattr(engine, "_encounter_resolution", None)
@@ -322,6 +342,13 @@ def _prepare_turn_inner(
                 else:
                     prelude_parts.append(entry_text)
                     engine.cb.on_narrative(f"{entry_text}\n\n")
+        elif transition_prelude:
+            # 无移动的回合：过渡 prelude 只可能带 discovery 的接近提示。
+            if preview_material:
+                travel_material.append(transition_prelude)
+            else:
+                prelude_parts.append(transition_prelude)
+                engine.cb.on_narrative(f"{transition_prelude}\n\n")
 
         prelude = "\n\n".join(part for part in prelude_parts if part)
 
@@ -397,9 +424,11 @@ def _prepare_turn_inner(
             content += "\n\n" + "\n".join(lines)
         if prelude:
             content += (
-                "\n\n[本轮已向玩家展示的前置叙事]\n"
+                "\n\n[本轮已向玩家展示的前置叙事｜引擎已结算的既定事实]\n"
                 f"{prelude}\n"
-                "从此处之后继续叙述，不要重复赶路、抵达或揭示动作。"
+                "这些节拍已经成立并展示给玩家：不得改写或否认其中的既成事实"
+                "（谁在场、说没说过、联系没联系、去过哪里），不要重复赶路、"
+                "抵达或揭示动作，只从节拍之后继续叙述。"
             )
         if authority:
             content += f"\n\n{authority}"

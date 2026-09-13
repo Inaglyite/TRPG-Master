@@ -272,6 +272,7 @@ def test_room_recovery_payload_contains_only_requesting_players_private_state(
     context = SimpleNamespace(
         world_store=SimpleNamespace(load=lambda: state),
         world_dir=tmp_path,
+        world_id="world-private",
     )
     engine = SimpleNamespace(
         context=context,
@@ -332,6 +333,7 @@ def test_pending_decision_is_recovered_only_for_its_actor(tmp_path: Path):
     context = SimpleNamespace(
         world_store=SimpleNamespace(load=lambda: state),
         world_dir=tmp_path,
+        world_id="world-pending",
     )
     engine = SimpleNamespace(
         context=context,
@@ -437,6 +439,7 @@ def test_active_turn_recovery_keeps_pre_action_history_and_replays_live_events(
     context = SimpleNamespace(
         world_store=SimpleNamespace(load=lambda: state),
         world_dir=tmp_path,
+        world_id="world-active-recovery",
     )
     engine = SimpleNamespace(
         context=context,
@@ -3223,6 +3226,7 @@ def test_archived_world_http_claim_rejected_before_runtime_context_and_delete_id
 
 def test_settle_case_rejected_in_lobby_without_reserving_control():
     """lobby 中 settle_case 在 run_room_message_loop 协议边界被拒，不进入控制锁/引擎。"""
+
     class SettleSocket:
         def __init__(self):
             self.reads = 0
@@ -3287,6 +3291,7 @@ def test_settle_case_rejected_in_lobby_without_reserving_control():
 
 def test_settle_case_passes_through_when_room_is_playing():
     """playing 中 settle_case 沿用原有路径：预留控制行动并提交到房间驱动。"""
+
     class SettleSocket:
         def __init__(self):
             self.reads = 0

@@ -86,6 +86,7 @@ import {
 } from "./utility";
 import { parseServerMessage } from "./protocol/server-message";
 import { useOnlineStore, timelineCapabilities } from "./state/online-store";
+import { useSceneStore } from "./state/scene-store";
 
 // ---- 后端地址 ----
 const WS_BASE_URL = backendWebSocketUrl();
@@ -110,6 +111,9 @@ function rememberWorld(worldId: unknown, moduleName: unknown) {
   preferredWorldId = id;
   preferredWorldModule = module;
   useAppStore.getState().setWorld(id, module);
+  // 世界标识换了就立刻清掉旧地点（顶栏显示“正在同步位置…”），
+  // 不等新世界的第一条状态消息，避免把上一个世界的地点留在标题上。
+  useSceneStore.getState().setWorld(id);
   localStorage.setItem(WORLD_ID_KEY, id);
   localStorage.setItem(WORLD_MODULE_KEY, module);
 }
@@ -885,6 +889,8 @@ export function handleServerPayload(raw: unknown) {
       break;
     case "world_context":
       rememberWorld(data.world_id, data.module_name);
+      // 顶栏位置随世界切换立即复位；同一世界则用这份投影刷新（重连/换模组）。
+      useSceneStore.getState().applyScene(data.world_id, data.scene);
       onNotesWorldChanged();
       break;
     case "world_list":
@@ -1106,6 +1112,9 @@ export function handleServerPayload(raw: unknown) {
       if (recoveryPending && data.ok) {
         showConnectionNotice("进度已恢复，守秘人正在重建当前场景……");
       }
+      // 读档会替换世界状态（包括所在场景）。续团回合的模型响应可能要几秒，
+      // 这里先取一次权威状态，让顶栏位置立刻落到存档里的地点。
+      if (data.ok) safeSend(JSON.stringify({ type: "state" }));
       break;
     case "case_settled": {
       // 账号化多人房间不写本机长期履历（profile 是本地概念），
@@ -1133,6 +1142,11 @@ export function handleServerPayload(raw: unknown) {
       if (getGameStarted() && !gmTurnActive) {
         updateCharPanel(data.data);
         updateCluePanel(data.clues);
+      }
+      // 顶栏位置只认服务端已提交的场景，因此同样只在回合外应用：正文还在播
+      // 出发描写时不让标题跟着叙述跑。world_id 不匹配的迟到消息由 store 丢弃。
+      if (!gmTurnActive) {
+        useSceneStore.getState().applyScene(data.world_id, data.scene);
       }
       break;
     case "handout":
