@@ -330,12 +330,21 @@ Kimi 提到的「追问收尾永不关原线程」与「原意图 `completed+suc
 
 ### 9.4 交回 Kimi 的问题（本轮新增/更新）
 
-1. **移动已抵达后，关联的 `awaiting_player` 请求没有同步收尾（失效待办）**：
+0. **（2026-09-14 晚，已关闭）** 下面第 1、2 条都已由 Kimi 在冻结点 `8c2c58c` 修掉，
+   并由我的**可执行验收**用例证明关闭（修复前失败、修复后通过，用例未改）：
+   - 缺口 #1 → `frontend/e2e/structured-pending-sync.spec.ts`（2 条：移动收尾 + 实时/刷新一致、
+     复合请求只清已落实部分）；
+   - 缺口 #2 → `frontend/e2e/structured-branch-online.spec.ts`（结构化免 turn_id 建分支成功 +
+     legacy 不回归仍带真实 turn_id）。
+   逐条说明、门禁数字与复跑命令见 `docs/evidence/20260914_backend_gaps/README.md`；
+   回执给 Kimi 的版本见 `docs/STRUCTURED_BACKEND_FREEZE_RECEIPT_20260914.md`。
+
+1. ~~**移动已抵达后，关联的 `awaiting_player` 请求没有同步收尾（失效待办）**~~（已关闭，见上）：
    `domains.py auto_complete_move_threads` 会把目标一致的开放线程收尾为 `completed`，但请求仍是
    `awaiting_player`。线程卡消失后，旧的 awaiting 明细重新露出，卡片上写着「尚未执行：尚未出发前往X」，
    而队伍已经站在 X。证据与被否掉的断言：`frontend/e2e/structured-interaction-duals.spec.ts:650`（`test.fixme`，
    改回 `test` 即红）。建议在收尾线程时一并把关联请求置终态（与 `cancel_threads_for_request` 同形态）。
-2. **云端结构化世界仍然无法创建分支**：`solo_branch_create` 要求非空 `turn_id`
+2. ~~**云端结构化世界仍然无法创建分支**~~（已关闭，见上）：`solo_branch_create` 要求非空 `turn_id`
    （`src/multiplayer/solo_timeline_ws.py:459`），结构化世界没有回合 ID。本地路径已通
    （`world_timeline_ws.py:85` 从当前已提交状态分叉，前端入口本轮打通），云端请给出等价入口
    （如允许空 `turn_id` 表示「当前进度」）。
