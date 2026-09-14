@@ -1,15 +1,25 @@
 {
   "type": "command_request",
   "protocol_version": 1,
-  "command_id": "cmd-resolve-1",
+  "command_id": "cmd-resolve-thread-1",
   "world_id": "world-fixture-1",
-  "expected_revision": 12,
-  "cause_id": null,
+  "expected_revision": 22,
+  "cause_id": "req-go-morgue",
   "kind": "resolve_intent",
   "payload": {
-    "request_id": "req-present-describe",
+    "request_id": "req-ask-about-morgue",
     "resolution": "completed",
-    "outcome": "success",
-    "note": "医生认出了自己的签名。"
+    "outcome": "not_executed",
+    "note": "已说明医学院遗体的接待条件。",
+    "thread": {
+      "action": "open",
+      "pending_action": {
+        "kind": "move",
+        "destination_scene_id": "miskatonic_medical",
+        "note": "尚未出发前往医学院"
+      },
+      "disclosed": ["遗体已移交家属或殡葬方", "医学院或留有处理记录"],
+      "waiting_on": "pc"
+    }
   }
 }

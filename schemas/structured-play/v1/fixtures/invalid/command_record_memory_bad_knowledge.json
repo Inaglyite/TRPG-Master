@@ -1,0 +1,14 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-record-memory-bad",
+  "world_id": "world-fixture-1",
+  "expected_revision": 21,
+  "cause_id": null,
+  "kind": "record_memory",
+  "payload": {
+    "character_id": "bryce_fallon",
+    "knowledge_type": "fact",
+    "content": "传闻与推测不能被登记成事实——知识类型必须在四选一内。"
+  }
+}

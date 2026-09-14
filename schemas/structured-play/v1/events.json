@@ -63,6 +63,15 @@
     },
     {
       "$ref": "#/$defs/handout_presented"
+    },
+    {
+      "$ref": "#/$defs/interaction_updated"
+    },
+    {
+      "$ref": "#/$defs/memory_recorded"
+    },
+    {
+      "$ref": "#/$defs/memory_query_result"
     }
   ],
   "$defs": {
@@ -231,6 +240,13 @@
                   "minimum": 0
                 }
               }
+            },
+            "interactions": {
+              "description": "当前交互线程的公开投影（本人/主持可见；记录而非执行授权）。",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/interaction_state"
+              }
             }
           }
         }
@@ -303,6 +319,9 @@
           "type": "boolean"
         },
         "use_item": {
+          "type": "boolean"
+        },
+        "memory_query": {
           "type": "boolean"
         }
       }
@@ -437,6 +456,14 @@
         "summary": {
           "type": "string",
           "maxLength": 200
+        },
+        "awaiting": {
+          "description": "status=awaiting_player 时的公开待办明细（本人/主持可见）。",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "thread_id": {
+          "$ref": "common.json#/$defs/id_string"
         }
       }
     },
@@ -574,6 +601,11 @@
             "detail": {
               "type": "string",
               "maxLength": 500
+            },
+            "awaiting": {
+              "description": "status=awaiting_player 时的公开待办明细（玩家本人/主持可见）。",
+              "type": "object",
+              "additionalProperties": true
             }
           }
         }
@@ -1454,6 +1486,367 @@
           }
         }
       }
+    },
+    "interaction_state": {
+      "type": "object",
+      "required": [
+        "thread_id",
+        "status",
+        "investigator_id",
+        "pending_action",
+        "disclosed",
+        "waiting_on",
+        "origin_request_id",
+        "last_request_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "completed",
+            "cancelled",
+            "superseded"
+          ]
+        },
+        "investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "pending_action": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "freeform",
+                "move",
+                "present_clue",
+                "use_item",
+                "other"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "target": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "destination_scene_id": {
+              "type": "string",
+              "maxLength": 160
+            }
+          }
+        },
+        "disclosed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "waiting_on": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "origin_request_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "last_request_id": {
+          "$ref": "common.json#/$defs/id_string"
+        }
+      }
+    },
+    "memory_entry": {
+      "type": "object",
+      "required": [
+        "memory_id",
+        "character_id",
+        "character_kind",
+        "knowledge_type",
+        "content",
+        "scene_id",
+        "subjects",
+        "topics",
+        "status",
+        "source",
+        "created_sequence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "memory_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "character_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "character_kind": {
+          "enum": [
+            "investigator",
+            "npc"
+          ]
+        },
+        "knowledge_type": {
+          "enum": [
+            "experienced",
+            "told",
+            "rumor",
+            "belief"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "scene_id": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "active",
+            "superseded"
+          ]
+        },
+        "superseded_by": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "created_sequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "interaction_updated": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "interaction_updated"
+        },
+        "payload": {
+          "description": "交互线程变更（创建/延续/收尾）。audience 定向到所属调查员，主持可见。",
+          "type": "object",
+          "required": [
+            "thread_id",
+            "status",
+            "investigator_id",
+            "pending_action"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "thread_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "status": {
+              "enum": [
+                "open",
+                "completed",
+                "cancelled",
+                "superseded"
+              ]
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "pending_action": {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "freeform",
+                    "move",
+                    "present_clue",
+                    "use_item",
+                    "other"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "target": {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                "destination_scene_id": {
+                  "type": "string",
+                  "maxLength": 160
+                }
+              }
+            },
+            "disclosed": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "waiting_on": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "origin_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "last_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "memory_recorded": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "memory_recorded"
+        },
+        "payload": {
+          "description": "主持显式记录了一条角色记忆（keeper 定向，不进玩家投影）。",
+          "type": "object",
+          "required": [
+            "memory_id",
+            "character_id",
+            "character_kind",
+            "knowledge_type",
+            "content"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "memory_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "character_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "character_kind": {
+              "enum": [
+                "investigator",
+                "npc"
+              ]
+            },
+            "knowledge_type": {
+              "enum": [
+                "experienced",
+                "told",
+                "rumor",
+                "belief"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "scene_id": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "topics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "subjects": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "supersedes": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "memory_query_result": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "type": {
+          "const": "memory_query_result"
+        },
+        "payload": {
+          "description": "主持侧只读记忆查询的结果（keeper 定向）。",
+          "type": "object",
+          "required": [
+            "query_id",
+            "memories",
+            "truncated"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "query_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "memories": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/memory_entry"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
     }
   }
 }

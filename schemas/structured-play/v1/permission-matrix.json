@@ -255,6 +255,24 @@
       "conditions": [
         "agent_requires_current_epoch"
       ]
+    },
+    "command.record_memory": {
+      "roles": [
+        "keeper",
+        "agent"
+      ],
+      "conditions": [
+        "agent_requires_current_epoch"
+      ]
+    },
+    "memory_query.submit": {
+      "roles": [
+        "keeper"
+      ],
+      "conditions": [
+        "read_only",
+        "player_requests_denied"
+      ]
     }
   },
   "notes": [

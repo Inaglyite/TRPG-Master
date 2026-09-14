@@ -114,7 +114,8 @@
         "mode_unavailable",
         "budget_exceeded",
         "commit_failed",
-        "internal_error"
+        "internal_error",
+        "thread_not_found"
       ]
     },
     "dice_spec": {

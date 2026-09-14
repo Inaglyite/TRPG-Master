@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trpg-master.local/schemas/structured-play/v1/memory_query.json",
+  "title": "memory_query：主持侧只读记忆查询",
+  "description": "keeper/agent 专用：按角色/场景/主题/文本检索角色长期记忆。只读，不改变任何状态；结果以 memory_query_result 事件（keeper 定向）返回。玩家调用一律 not_authorized——玩家侧不提供全量记忆接口。查询有预算上限（limit ≤ 20、char_budget ≤ 4000）。",
+  "type": "object",
+  "required": [
+    "type",
+    "protocol_version",
+    "world_id",
+    "query_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "memory_query"
+    },
+    "protocol_version": {
+      "const": 1
+    },
+    "world_id": {
+      "$ref": "common.json#/$defs/id_string"
+    },
+    "query_id": {
+      "$ref": "common.json#/$defs/id_string",
+      "description": "请求方关联 ID；结果事件以它为 cause_request_id。"
+    },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "character_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "scene_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "topics": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "char_budget": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 4000
+        },
+        "include_history": {
+          "type": "boolean",
+          "description": "true 时含已被取代的历史记忆（默认只给 active）。"
+        }
+      }
+    }
+  }
+}

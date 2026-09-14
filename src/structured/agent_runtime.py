@@ -13,7 +13,7 @@ import logging
 
 from src.storage.database import World, session_scope
 
-from .agent import AgentBudget, KeeperAgentRunner, new_run_id
+from .agent import AgentBudget, EmptyModelOutput, KeeperAgentRunner, new_run_id
 from .errors import StructuredError
 from .gateway import StructuredGateway, world_modes
 from .principal import Principal
@@ -34,6 +34,10 @@ def build_byok_caller(database_url: str, world_id: str):
         routes = resolve_routes(settings)  # BYOK 缺绑定在此 fail-closed
         role = routes.narrative
 
+        # 生效预算：尊重房主配置（store 已校验 ≤131072），只做防御性封顶；
+        # 原先硬顶 4000 会静默忽略用户配置的更大值。
+        effective_max_tokens = min(role.max_output_tokens or 8000, 32768)
+
         def _call() -> str:
             response = role.client.chat.completions.create(
                 model=role.model_id,
@@ -43,9 +47,34 @@ def build_byok_caller(database_url: str, world_id: str):
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.4,
-                max_tokens=min(role.max_output_tokens or 4000, 4000),
+                max_tokens=effective_max_tokens,
             )
-            return str(response.choices[0].message.content or "")
+            choice = response.choices[0]
+            content = str(choice.message.content or "")
+            usage = {
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+                "completion_tokens": getattr(response.usage, "completion_tokens", None),
+                "total_tokens": getattr(response.usage, "total_tokens", None),
+            }
+            reasoning = getattr(choice.message, "reasoning_content", None)
+            logger.info(
+                "agent 模型调用 model=%s max_tokens=%s finish=%s usage=%s content_chars=%d reasoning_chars=%d",
+                role.model_id,
+                effective_max_tokens,
+                getattr(choice, "finish_reason", None),
+                usage,
+                len(content),
+                len(str(reasoning or "")),
+            )
+            if not content.strip():
+                # 空内容：把 finish_reason / 生效预算 / usage 交给运行器分类记录，
+                # 不在这里退化成「解析失败」。
+                raise EmptyModelOutput(
+                    finish_reason=getattr(choice, "finish_reason", None),
+                    max_tokens=effective_max_tokens,
+                    usage=usage,
+                )
+            return content
 
         return await asyncio.to_thread(_call)
 

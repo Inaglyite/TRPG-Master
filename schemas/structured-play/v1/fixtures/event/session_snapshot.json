@@ -42,7 +42,8 @@
       "check_request": true,
       "move_action": true,
       "present_clue": true,
-      "use_item": true
+      "use_item": true,
+      "memory_query": true
     },
     "keeper": {
       "user_id": "user-keeper",
@@ -103,6 +104,24 @@
       "event_id": 1,
       "revision": 12,
       "sequence": 1
-    }
+    },
+    "interactions": [
+      {
+        "thread_id": "thr_9f1c2ab4",
+        "status": "open",
+        "investigator_id": "pc",
+        "pending_action": {
+          "kind": "move",
+          "destination_scene_id": "miskatonic_medical",
+          "note": "尚未出发前往医学院"
+        },
+        "disclosed": [
+          "遗体已移交家属或殡葬方"
+        ],
+        "waiting_on": "pc",
+        "origin_request_id": "req-see-body",
+        "last_request_id": "req-ask-about-morgue"
+      }
+    ]
   }
 }

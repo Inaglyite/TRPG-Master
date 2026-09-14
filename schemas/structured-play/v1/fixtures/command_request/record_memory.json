@@ -1,0 +1,18 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-record-memory-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 21,
+  "cause_id": "req-ask-about-doctor",
+  "kind": "record_memory",
+  "payload": {
+    "character_id": "bryce_fallon",
+    "character_kind": "npc",
+    "knowledge_type": "told",
+    "content": "法伦得知调查员想去医学院查看莱特的遗体。",
+    "scene_id": "miskatonic_university",
+    "subjects": ["pc"],
+    "topics": ["npc", "conversation"]
+  }
+}

@@ -24,6 +24,7 @@ _FRAME_SCHEMAS = {
     "check_response": "check_response.json",
     "cancel_request": "cancel_request.json",
     "command_request": "command_request.json",
+    "memory_query": "memory_query.json",
 }
 
 _registry: Registry | None = None
@@ -68,6 +69,26 @@ def validate_frame(frame_type: str, payload: dict) -> None:
             f"请求不符合协议：{path or '根字段'} {error.message}"[:300],
             retryable=False,
         )
+
+
+def validate_command(kind: str, payload: dict) -> None:
+    """校验一条**程序化构造**的主持命令（Agent 生成 / 内部调用）与冻结 schema 一致。
+
+    客户端帧在网关已过 schema；Agent 生成的 payload 走的是同一条命令入口，
+    却没有帧校验——只靠提示词写枚举会让「错误类型进入执行层」（真实模型实测：
+    把自由文本写进 outcome、把 audience 写成字符串）。这里用同一份
+    command_request.json 校验，让执行层与模型可见定义严格一致。
+    """
+    envelope = {
+        "type": "command_request",
+        "protocol_version": 1,
+        "command_id": "command-validation",
+        "world_id": "command-validation",
+        "expected_revision": 0,
+        "kind": str(kind or ""),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+    validate_frame("command_request", envelope)
 
 
 def validate_event(envelope: dict) -> None:

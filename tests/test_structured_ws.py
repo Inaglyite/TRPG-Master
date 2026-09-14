@@ -398,6 +398,7 @@ class StructuredGatewayTests(unittest.IsolatedAsyncioTestCase):
                 "check_response",
                 "cancel_request",
                 "command_request",
+                "memory_query",
             },
             STRUCTURED_FRAME_TYPES,
         )

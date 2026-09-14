@@ -676,6 +676,74 @@ class KeeperControl(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class InteractionThread(Base):
+    """当前交互线程（第 2 层上下文）：跨请求存活的「已讨论/已约定目标」。
+
+    请求进入终态后线程仍可保留（玩家稍后的“那就过去”靠它承接）；线程只是
+    记录，不是执行授权——是否执行始终由主持按当时情境判断。读档 fail-closed：
+    存档点之后更新的线程一律 cancel，不做半吊子恢复。
+    """
+
+    __tablename__ = "interaction_threads"
+    __table_args__ = (
+        UniqueConstraint("world_id", "thread_id", name="uq_interaction_thread_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    thread_id: Mapped[str] = mapped_column(String(160))
+    investigator_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    pending_action: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    disclosed: Mapped[list] = mapped_column(JSON_VALUE, default=list)
+    waiting_on: Mapped[str] = mapped_column(String(160), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    origin_request_id: Mapped[str] = mapped_column(String(160), default="")
+    last_request_id: Mapped[str] = mapped_column(String(160), default="")
+    request_ids: Mapped[list] = mapped_column(JSON_VALUE, default=list)
+    created_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_sequence: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CharacterMemory(Base):
+    """角色长期记忆（第 4 层）：按角色归属的追加式日志。
+
+    knowledge_type 区分亲历/被告知/传闻/推测——传闻与推测永远不能被当成
+    已发生事实；superseded_by 承载更正关系（旧条目保留来源，检索默认只给
+    active）。derivation_key 让事件派生可幂等补建；created/updated_revision
+    是读档回滚截止依据（分支按行复制、按 world_id 隔离后续新增）。
+    """
+
+    __tablename__ = "character_memories"
+    __table_args__ = (
+        UniqueConstraint("world_id", "memory_id", name="uq_character_memory_id"),
+        UniqueConstraint("world_id", "derivation_key", name="uq_character_memory_derivation"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    memory_id: Mapped[str] = mapped_column(String(160))
+    character_id: Mapped[str] = mapped_column(String(160), index=True)
+    character_kind: Mapped[str] = mapped_column(String(20), default="investigator")
+    knowledge_type: Mapped[str] = mapped_column(String(20))
+    content: Mapped[str] = mapped_column(Text, default="")
+    scene_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    subjects: Mapped[list] = mapped_column(JSON_VALUE, default=list)
+    topics: Mapped[list] = mapped_column(JSON_VALUE, default=list)
+    derivation_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    superseded_by: Mapped[str] = mapped_column(String(160), default="")
+    created_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_revision: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_sequence: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 _ENGINES: dict[str, Engine] = {}
 _ENGINE_LOCK = threading.Lock()
 

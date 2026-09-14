@@ -220,7 +220,16 @@ class KeeperAgentTests(unittest.IsolatedAsyncioTestCase):
             [
                 _decision(
                     assessment=f"步骤{i}",
-                    commands=[{"kind": "record_fact", "payload": {"text": f"fact-{i}"}}],
+                    commands=[
+                        {
+                            "kind": "record_fact",
+                            # 冻结 schema 要求 audience 必填（目录与校验已对齐）
+                            "payload": {
+                                "text": f"fact-{i}",
+                                "audience": {"kind": "public"},
+                            },
+                        }
+                    ],
                 )
                 for i in range(3)
             ]
@@ -234,14 +243,19 @@ class KeeperAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(2, result.model_calls)
         self.assertEqual("paused", self.request_status("req-1"))
 
-    async def test_no_progress_stops_without_pause(self):
+    async def test_no_progress_parks_trigger_instead_of_dangling(self):
+        """空决策（无命令、无叙述）也要停在明确状态：不能把请求留在 queued。
+
+        真实模型验收实测：模型返回空决策时玩家侧一直看到「处理中」而没有任何
+        反馈；现在按 paused 收尾（可恢复、可接管），与其它无输出失败同类。
+        """
         self.submit_action()
         caller = _ScriptedCaller([_decision(assessment="没有需要处理的事")])
         runner = KeeperAgentRunner(self.db_url, caller=caller)
         result = await runner.run(world_id="sp-world", trigger_request_id="req-1")
-        self.assertEqual("done", result.status)
+        self.assertEqual("paused", result.status)
         self.assertEqual("no_progress", result.stop_reason)
-        self.assertEqual("queued", self.request_status("req-1"))
+        self.assertEqual("paused", self.request_status("req-1"))
 
     async def test_unparseable_decision_pauses_after_retries(self):
         self.submit_action()

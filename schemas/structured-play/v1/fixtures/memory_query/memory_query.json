@@ -1,0 +1,13 @@
+{
+  "type": "memory_query",
+  "protocol_version": 1,
+  "world_id": "world-fixture-1",
+  "query_id": "query-1",
+  "filters": {
+    "character_id": "bryce_fallon",
+    "topics": ["conversation"],
+    "text": "医学院",
+    "limit": 5,
+    "char_budget": 1200
+  }
+}

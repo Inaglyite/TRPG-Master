@@ -106,7 +106,7 @@ class TriggerSemanticsTests(unittest.IsolatedAsyncioTestCase):
                     "world_id": "sp-world",
                     "expected_revision": _revision(self.db_url),
                     "kind": "record_fact",
-                    "payload": {"text": "主持记录"},
+                    "payload": {"text": "主持记录", "audience": {"kind": "public"}},
                 },
                 deliver=_deliver(box),
             )

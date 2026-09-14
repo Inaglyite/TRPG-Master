@@ -48,6 +48,9 @@
     },
     {
       "$ref": "#/$defs/resolve_draft"
+    },
+    {
+      "$ref": "#/$defs/record_memory"
     }
   ],
   "$defs": {
@@ -590,7 +593,8 @@
                 "completed",
                 "declined",
                 "cancelled",
-                "paused"
+                "paused",
+                "awaiting_player"
               ]
             },
             "outcome": {
@@ -603,6 +607,114 @@
             "remaining_steps": {
               "type": "string",
               "maxLength": 500
+            },
+            "pending_action": {
+              "description": "awaiting_player：尚未执行的行动（只作记录，不构成执行授权）。",
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "freeform",
+                    "move",
+                    "present_clue",
+                    "use_item",
+                    "other"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "target": {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                "destination_scene_id": {
+                  "type": "string",
+                  "maxLength": 160
+                }
+              }
+            },
+            "disclosed": {
+              "description": "awaiting_player：本轮已告知玩家的重要条件（用于不重复劝留）。",
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "thread": {
+              "description": "交互线程操作（第 2 层上下文）：记录已讨论目标、关联追问、收尾或替换旧线程。线程是记录，不是执行授权。",
+              "type": "object",
+              "required": [
+                "action"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "open",
+                    "continue",
+                    "close",
+                    "replace"
+                  ]
+                },
+                "thread_id": {
+                  "$ref": "common.json#/$defs/id_string"
+                },
+                "pending_action": {
+                  "description": "尚未执行的行动（只作记录，不构成执行授权）。",
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "freeform",
+                        "move",
+                        "present_clue",
+                        "use_item",
+                        "other"
+                      ]
+                    },
+                    "note": {
+                      "type": "string",
+                      "maxLength": 300
+                    },
+                    "target": {
+                      "type": "string",
+                      "maxLength": 160
+                    },
+                    "destination_scene_id": {
+                      "type": "string",
+                      "maxLength": 160
+                    }
+                  }
+                },
+                "disclosed": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "waiting_on": {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              }
             }
           }
         }
@@ -799,6 +911,77 @@
             "note": {
               "type": "string",
               "maxLength": 500
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "record_memory": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "record_memory"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "character_id",
+            "knowledge_type",
+            "content"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "character_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "character_kind": {
+              "enum": [
+                "investigator",
+                "npc"
+              ]
+            },
+            "knowledge_type": {
+              "enum": [
+                "experienced",
+                "told",
+                "rumor",
+                "belief"
+              ],
+              "description": "亲历/被告知/传闻/推测；传闻与推测不得以事实口吻叙述。"
+            },
+            "content": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "scene_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "subjects": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "common.json#/$defs/id_string"
+              }
+            },
+            "topics": {
+              "type": "array",
+              "maxItems": 6,
+              "items": {
+                "type": "string",
+                "maxLength": 40
+              }
+            },
+            "supersedes": {
+              "$ref": "common.json#/$defs/id_string",
+              "description": "更正/取代的旧记忆 ID；旧条目保留在来源链里。"
             }
           }
         }

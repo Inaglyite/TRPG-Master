@@ -13,12 +13,13 @@
 | `schemas/structured-play/v1/common.json` | id/revision/target/audience/speaker/domain_outcome/error_code/dice_spec 公共定义 |
 | `schemas/structured-play/v1/action_request.json` | 玩家行动尝试请求（present_clue / use_item / move / freeform） |
 | `schemas/structured-play/v1/cancel_request.json` | 玩家取消自己 queued 的行动请求（M2 新增帧类型） |
+| `schemas/structured-play/v1/memory_query.json` | 主持侧只读记忆查询帧（keeper 专用；结果以 memory_query_result 事件返回） |
 | `schemas/structured-play/v1/free_roll_request.json` | 普通掷骰请求（受限表达式） |
 | `schemas/structured-play/v1/check_response.json` | 待检定卡回应（roll / decline，不携带参数） |
-| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 15 种命令的严格载荷（M3 新增 resolve_draft） |
-| `schemas/structured-play/v1/events.json` | 事件信封 + 20 种事件载荷（含 session_snapshot / server_capabilities / handout_presented） |
+| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 16 种命令的严格载荷（M3 新增 resolve_draft；上下文/记忆批新增 record_memory） |
+| `schemas/structured-play/v1/events.json` | 事件信封 + 23 种事件载荷（含 session_snapshot / server_capabilities / handout_presented；上下文/记忆批新增 interaction_updated / memory_recorded / memory_query_result） |
 | `schemas/structured-play/v1/permission-matrix.json` | 权限矩阵机器可读正本 |
-| `schemas/structured-play/v1/fixtures/` | 50 个正例 + 7 个反例 |
+| `schemas/structured-play/v1/fixtures/` | 55 个正例 + 9 个反例 |
 | `tests/test_structured_play_protocol.py` | 双向校验与一致性门禁（7 项 + 74 子项） |
 
 校验方式：后端 `pytest tests/test_structured_play_protocol.py`；前端用同一目录的
@@ -285,3 +286,54 @@ M4 协议增补（生命周期：分支 / 读档 / 续团）：
    slot_000 使时间线列表兼容旧 UI。
 4. `world_switch` 到结构化世界：`world_switched.history=[]`，随后收到
    `session_snapshot`；不会有消息历史帧。
+
+## 10. 当前交互与角色长期记忆（2026-09-14 扩展）
+
+背景与根因：`docs/evidence/transition_real_model/S3_ROOT_CAUSE_FOR_BACKEND.md`——
+请求进入终态后「已讨论的目标」消失，模型只能从自由文本重新推断。本扩展补第 2 层
+（当前交互）与第 4 层（角色长期记忆），均属**记录**，不构成执行授权。
+
+### 10.1 交互线程（interaction_threads）
+
+- 创建路径只有两条：`resolve_intent{resolution:"awaiting_player"}` 自动开/续线程
+  （awaiting 记录带 `thread_id`）；或任何 resolve_intent 显式携带
+  `thread{action:open|continue|close|replace, thread_id?, pending_action?, disclosed?, waiting_on?, note?}`。
+- `pending_action` 与 awaiting 同形（kind/note/target/destination_scene_id）；
+  `waiting_on` 为调查员 ID / `party` / `keeper` / 空。
+- 请求进入终态**不会**自动关闭线程（这是与 awaiting 待办的刻意差异）；
+  线程只能由主持显式收尾，或：移动命令抵达其 `destination_scene_id` 时自动
+  收尾为 completed（记录收尾，方向永远是命令→线程）；玩家取消请求时联动取消
+  其关联线程（状态联动，非文本推断）。
+- 写入线程的 resolve_intent 会推进世界 revision（读档截止依据）；不碰线程的
+  resolve_intent 维持不推进。
+- 事件：`interaction_updated`（audience 定向所属调查员，主持可见）。
+  快照 `session_snapshot.payload.interactions[]` 投影开放线程（本人/主持可见）。
+- 分支复制开放线程；读档 fail-closed——存档点后创建的线程删除，其余开放线程
+  一律 cancel（与 player_requests 的读档契约一致）。
+
+### 10.2 角色记忆（character_memories）
+
+- 每行 = 某角色的一条记忆：`character_id/character_kind(investigator|npc)` +
+  `knowledge_type(experienced|told|rumor|belief)` + 内容/场景/主题/来源 +
+  `superseded_by`（更正链）。**传闻与推测永远不是事实**。
+- 确定性派生：仅来自已提交的命令/事件（move_party→全员亲历抵达、
+  grant_clue→被授予者被告知、handout_presented→查看、check_resolved→检定经历、
+  use_item/transfer_item/adjust_stat→对应经历）。派生在命令事务提交后独立运行，
+  失败只记日志不丢已提交事实；`derivation_key` 幂等，可用
+  `memories.repair_derivation` 补建。未执行的计划、被拒命令、未落账叙述不进记忆。
+- 主持显式记录：`record_memory{character_id, knowledge_type, content, ...}`，
+  `supersedes` 更正旧记忆；事件 `memory_recorded` 为 keeper 定向（不进玩家投影）。
+- 主持侧只读查询：`memory_query` 帧（keeper 专用；玩家调用一律
+  `not_authorized`），结果以 `memory_query_result` 事件返回；
+  服务层 `query_memories` 对玩家仅放行其控制的调查员。
+- 读档：`created_revision` 晚于存档点的记忆删除（不泄漏未来知识）；存档点之后
+  被取代的记忆还原为 active（更正发生在被回滚的未来）。分支复制分叉点全部记忆，
+  之后按 world_id 隔离。
+
+### 10.3 Agent 上下文与预算
+
+Agent 上下文新增 `open_threads`（含 `candidate_for_trigger` 状态匹配候选）、
+`trigger_context`（无候选时 `candidate_thread_ids` 为显式空数组）与
+`character_memories`（自动小预算注入：在场角色 × 当前场景，≤8 条 ≤800 字符）。
+决策契约新增只读 `queries[{kind:"memory", ...}]`：每运行 ≤3 次、结果 ≤800 字符，
+超预算明确拒绝并回喂。必需区（权威状态/当前交互）不依赖检索、不被记忆挤占。

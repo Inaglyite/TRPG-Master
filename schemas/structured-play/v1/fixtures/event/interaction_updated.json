@@ -1,0 +1,24 @@
+{
+  "protocol_version": 1,
+  "event_id": 118,
+  "world_id": "world-fixture-1",
+  "sequence": 118,
+  "revision": 22,
+  "type": "interaction_updated",
+  "cause_request_id": "req-ask-about-morgue",
+  "payload": {
+    "thread_id": "thr_9f1c2ab4",
+    "status": "open",
+    "investigator_id": "pc",
+    "pending_action": {
+      "kind": "move",
+      "destination_scene_id": "miskatonic_medical",
+      "note": "尚未出发前往医学院"
+    },
+    "disclosed": ["遗体已移交家属或殡葬方", "医学院或留有处理记录"],
+    "waiting_on": "pc",
+    "note": "玩家表达了去医学院看遗体的意愿。",
+    "origin_request_id": "req-see-body",
+    "last_request_id": "req-ask-about-morgue"
+  }
+}

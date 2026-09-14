@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Callable
 
 from sqlalchemy import func, select
@@ -43,6 +44,8 @@ from .errors import StructuredError
 from .ids import canonical_digest, new_row_id
 from .principal import Principal, check_command_authority
 from .registries import ensure_clue_registry, ensure_item_registry
+
+logger = logging.getLogger("trpg.structured_service")
 
 _KIND_HANDLERS = {
     **COMMAND_HANDLERS,
@@ -215,6 +218,7 @@ class StructuredPlayService:
                 cause_id=cause_id,
                 session=session,
                 rng=self._rng,
+                revision=int(row.revision),
             )
             outcome = handler(state, payload, ctx)
             if not isinstance(outcome, CommandResult):
@@ -270,6 +274,22 @@ class StructuredPlayService:
             )
             revision_after = int(row.revision)
         # 事务在此已提交（session_scope 退出即 commit）；事件在提交成功后才返回发布。
+        # 记忆派生只在提交成功之后、独立事务里运行：派生失败只记日志，
+        # 绝不让已提交的游戏事件丢失（可用 memories.repair_derivation 幂等补建）。
+        try:
+            from . import memories
+
+            memories.derive_from_commit(
+                self.database_url,
+                world_id,
+                command_kind=kind,
+                command_payload=payload,
+                command_id=command_id,
+                events=envelopes,
+                revision_after=revision_after,
+            )
+        except Exception:
+            logger.exception("记忆派生失败（已提交命令不受影响）world=%s kind=%s", world_id, kind)
         return {
             "status": "committed",
             "command_id": command_id,
@@ -522,6 +542,15 @@ class StructuredPlayService:
             target.status = "cancelled"
             target.detail = "玩家取消"
             target.updated_at = utcnow()
+            # 状态联动（不是文本推断）：该请求关联的开放线程一并取消。
+            from . import interactions
+
+            thread_events = [
+                EventSpec(event_type, event_payload, audience)
+                for event_type, event_payload, audience in interactions.cancel_threads_for_request(
+                    session, world_id, request_id=target_id, revision=int(row.revision)
+                )
+            ]
             session.add(
                 PlayerRequest(
                     id=new_row_id("req"),
@@ -555,6 +584,7 @@ class StructuredPlayService:
                         },
                     ),
                     EventSpec("action_ack", {"request_id": request_id, "status": "completed"}),
+                    *thread_events,
                 ],
             )
         return {"request_id": request_id, "status": "completed", "events": envelopes}
@@ -713,6 +743,20 @@ class StructuredPlayService:
                 session, world_id, int(row.revision), request_id, outcome.events
             )
             result = outcome.result
+            revision_after = int(row.revision)
+        # 检定结算的玩家路径同样派生记忆（与 execute_command 同一钩子语义）：
+        # 提交后独立事务运行，失败只记日志。
+        try:
+            from . import memories
+
+            memories.derive_from_commit(
+                self.database_url,
+                world_id,
+                events=envelopes,
+                revision_after=revision_after,
+            )
+        except Exception:
+            logger.exception("记忆派生失败（已提交检定不受影响）world=%s", world_id)
         return {
             "request_id": request_id,
             "status": "completed",
@@ -776,6 +820,15 @@ class StructuredPlayService:
                 if control is not None and control.controller_kind in {"human", "agent"}
                 else None
             )
+            from . import interactions as _interactions
+
+            # 当前交互（第 2 层上下文）的公开投影：开放线程只对本人与主持可见；
+            # 线程是记录而非执行授权，投影只含「尚未执行/已告知/等待谁」。
+            open_threads = [
+                _interactions.public_projection(thread)
+                for thread in _interactions.list_open_threads(session, world_id)
+                if is_keeper or thread.investigator_id in own
+            ]
             # 投影必须在会话内完成：会话提交后 ORM 属性即过期，惰性结果集
             # 在块外迭代会撞上失效的 identity map。
             pending_checks = [
@@ -791,6 +844,14 @@ class StructuredPlayService:
                         str((req.payload or {}).get("draft", {}).get("summary") or "")[:200]
                         if req.request_type == "keeper_draft"
                         else self._request_summary((req.payload or {}).get("action") or {})
+                    ),
+                    # awaiting_player 的公开待办：刷新/重连后玩家仍知道自己原想
+                    # 做什么、哪项尚未执行、已被告知什么（仅本人或主持可见）。
+                    **(
+                        {"awaiting": copy.deepcopy((req.payload or {}).get("awaiting"))}
+                        if req.status == "awaiting_player"
+                        and (req.payload or {}).get("awaiting")
+                        else {}
                     ),
                 }
                 for req in requests
@@ -818,6 +879,7 @@ class StructuredPlayService:
             "clues": clues,
             "items": self._visible_items(state, own, is_keeper),
             "requests": request_entries,
+            "interactions": open_threads,
             "pending_checks": pending_checks,
             "cursor": {
                 "event_id": int(last_event_id or 0),
@@ -857,6 +919,106 @@ class StructuredPlayService:
                     }
                 )
         return envelopes
+
+    # ------------------------------------------------------------------
+    # 角色长期记忆：带权限检查的只读查询（协议 §10）
+    # ------------------------------------------------------------------
+
+    def query_memories(
+        self,
+        *,
+        world_id: str,
+        principal: Principal,
+        character_id: str = "",
+        scene_id: str = "",
+        topics: list[str] | None = None,
+        text: str = "",
+        limit: int = 8,
+        char_budget: int = 1200,
+        include_history: bool = False,
+    ) -> list[dict]:
+        """记忆检索。主持/Agent 可查全部；玩家只能查自己控制的调查员——
+        自填其他角色 ID 直接拒绝（越权不是空结果，是明确错误）。"""
+        from . import memories
+
+        if principal.kind in {"keeper", "agent"}:
+            character_ids = [character_id] if character_id else None
+        else:
+            own = set(principal.investigator_ids)
+            if not character_id:
+                character_ids = sorted(own)
+            elif character_id not in own:
+                raise StructuredError(
+                    "not_authorized", "只能查询自己控制的调查员的记忆。", retryable=False
+                )
+            else:
+                character_ids = [character_id]
+        with session_scope(self.database_url) as session:
+            return memories.retrieve(
+                session,
+                world_id,
+                character_ids=character_ids,
+                scene_id=scene_id or None,
+                topics=topics,
+                text=text,
+                limit=limit,
+                char_budget=char_budget,
+                include_history=include_history,
+            )
+
+    def execute_memory_query(
+        self,
+        *,
+        world_id: str,
+        principal: Principal,
+        frame: dict,
+    ) -> dict:
+        """主持侧只读记忆查询帧：结果作为 keeper 定向事件落 outbox 并返回。"""
+        if principal.kind not in {"keeper", "agent"}:
+            raise StructuredError(
+                "not_authorized", "记忆查询是主持侧能力。", retryable=False
+            )
+        query_id = str(frame.get("query_id") or "")
+        if not query_id:
+            raise StructuredError("invalid_action", "缺少 query_id。")
+        filters = frame.get("filters") or {}
+        if not isinstance(filters, dict):
+            raise StructuredError("invalid_action", "filters 必须是对象。")
+        results = self.query_memories(
+            world_id=world_id,
+            principal=principal,
+            character_id=str(filters.get("character_id") or ""),
+            scene_id=str(filters.get("scene_id") or ""),
+            topics=filters.get("topics") if isinstance(filters.get("topics"), list) else None,
+            text=str(filters.get("text") or ""),
+            limit=int(filters.get("limit") or 8),
+            char_budget=int(filters.get("char_budget") or 1200),
+            include_history=bool(filters.get("include_history")),
+        )
+        with session_scope(self.database_url) as session:
+            row = session.get(WorldState, world_id)
+            revision = int(row.revision) if row is not None else 0
+            from .domains import EventSpec as _EventSpec
+
+            envelopes = self._append_events(
+                session,
+                world_id,
+                revision,
+                query_id,
+                [
+                    _EventSpec(
+                        "memory_query_result",
+                        {
+                            "query_id": query_id,
+                            "memories": results,
+                            "truncated": len(results)
+                            >= min(max(int(filters.get("limit") or 8), 1), 20),
+                        },
+                        {"kind": "keeper"},
+                    )
+                ],
+            )
+        return {"query_id": query_id, "events": envelopes}
 
     # ------------------------------------------------------------------
     # 事实检查与投影（内部）
@@ -1066,6 +1228,7 @@ class StructuredPlayService:
             "present_handout",
             "set_npc_presence",
             "record_fact",
+            "record_memory",
         ]
         return {
             "protocol_version": 1,
@@ -1081,6 +1244,7 @@ class StructuredPlayService:
             "move_action": structured,
             "present_clue": structured,
             "use_item": structured,
+            "memory_query": structured,
         }
 
     @staticmethod

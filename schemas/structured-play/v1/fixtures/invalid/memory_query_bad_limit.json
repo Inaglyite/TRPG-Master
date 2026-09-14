@@ -1,0 +1,9 @@
+{
+  "type": "memory_query",
+  "protocol_version": 1,
+  "world_id": "world-fixture-1",
+  "query_id": "query-bad",
+  "filters": {
+    "limit": 999
+  }
+}

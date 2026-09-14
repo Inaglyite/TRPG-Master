@@ -27,9 +27,11 @@ from sqlalchemy import select
 from src.app.config import AUTO_SAVE_SLOT
 from src.app.runtime import RuntimeContext
 from src.storage.database import (
+    CharacterMemory,
     CheckRequest,
     EventOutbox,
     GameCommand,
+    InteractionThread,
     PlayerRequest,
     World,
     WorldInvestigator,
@@ -267,6 +269,73 @@ def create_structured_branch(
                         revision=int(command.revision),
                     )
                 )
+            # 当前交互线程：只复制开放线程（终态已是历史，由记忆覆盖）。
+            # 线程 ID 原样保留，分支内同一 thread_id 续接同一段交互。
+            threads = (
+                session.execute(
+                    select(InteractionThread).where(
+                        InteractionThread.world_id == source_context.world_id,
+                        InteractionThread.status == "open",
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for thread in threads:
+                session.add(
+                    InteractionThread(
+                        id=new_row_id("thr"),
+                        world_id=world_id,
+                        thread_id=thread.thread_id,
+                        investigator_id=thread.investigator_id,
+                        status=thread.status,
+                        pending_action=copy.deepcopy(thread.pending_action or {}),
+                        disclosed=copy.deepcopy(thread.disclosed or []),
+                        waiting_on=thread.waiting_on,
+                        note=thread.note,
+                        origin_request_id=thread.origin_request_id,
+                        last_request_id=thread.last_request_id,
+                        request_ids=copy.deepcopy(thread.request_ids or []),
+                        created_revision=int(thread.created_revision),
+                        updated_revision=int(thread.updated_revision),
+                        created_sequence=int(thread.created_sequence),
+                    )
+                )
+            # 角色记忆：分叉点的全部记忆（含已被取代的历史链）复制到分支——
+            # 分叉前的共同经历两边共享；分叉后各自新增按 world_id 隔离，
+            # 分支永远检索不到原世界后来的记忆。derivation_key 随行保留，
+            # 分支内补建/重跑派生不会重复写入。
+            memories = (
+                session.execute(
+                    select(CharacterMemory).where(
+                        CharacterMemory.world_id == source_context.world_id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for memory in memories:
+                session.add(
+                    CharacterMemory(
+                        id=new_row_id("mem"),
+                        world_id=world_id,
+                        memory_id=memory.memory_id,
+                        character_id=memory.character_id,
+                        character_kind=memory.character_kind,
+                        knowledge_type=memory.knowledge_type,
+                        content=memory.content,
+                        scene_id=memory.scene_id,
+                        subjects=copy.deepcopy(memory.subjects or []),
+                        topics=copy.deepcopy(memory.topics or []),
+                        derivation_key=memory.derivation_key,
+                        source=copy.deepcopy(memory.source or {}),
+                        status=memory.status,
+                        superseded_by=memory.superseded_by,
+                        created_revision=int(memory.created_revision),
+                        updated_revision=int(memory.updated_revision),
+                        created_sequence=int(memory.created_sequence),
+                    )
+                )
         # slot_000：让分支在列表中可见且可续（结构化"续团"= 重连取快照）。
         save_game([], AUTO_SAVE_SLOT, context=target_context)
         return StructuredBranch(target_context, branch_label, source_context.world_id)
@@ -356,6 +425,41 @@ def restore_structured_save(
         )
         for event in late_events:
             session.delete(event)
+        # 交互线程与角色记忆按同一存档点 reconcile（fail-closed，不泄漏未来）：
+        # - 存档点之后创建的线程/记忆直接删除（那是被回滚掉的未来）；
+        # - 存档点之后被更新过的线程一律 cancel（无法还原中途状态，与请求同契约）；
+        #   其余开放线程也一律 cancel（读档不是刷新，等待关系随存档结束）；
+        # - 存档点之后被取代/更正的记忆还原为 active（更正发生在被回滚的未来）。
+        threads = (
+            session.execute(
+                select(InteractionThread).where(InteractionThread.world_id == context.world_id)
+            )
+            .scalars()
+            .all()
+        )
+        for thread in threads:
+            if int(thread.created_revision) > restored_revision:
+                session.delete(thread)
+            elif int(thread.updated_revision) > restored_revision or thread.status == "open":
+                thread.status = "cancelled"
+                thread.note = (thread.note or "") or "读档回滚：交互线程已作废。"
+                thread.updated_revision = restored_revision
+                thread.updated_at = now
+        memories = (
+            session.execute(
+                select(CharacterMemory).where(CharacterMemory.world_id == context.world_id)
+            )
+            .scalars()
+            .all()
+        )
+        for memory in memories:
+            if int(memory.created_revision) > restored_revision:
+                session.delete(memory)
+            elif int(memory.updated_revision) > restored_revision:
+                memory.status = "active"
+                memory.superseded_by = ""
+                memory.updated_revision = restored_revision
+                memory.updated_at = now
     # 让 store 缓存失效（恢复是带外写入），下次读取以行为准。
     invalidate = getattr(context.world_store, "invalidate_cache", None)
     if callable(invalidate):

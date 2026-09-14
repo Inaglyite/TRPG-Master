@@ -42,6 +42,7 @@ STRUCTURED_FRAME_TYPES = frozenset(
         "check_response",
         "cancel_request",
         "command_request",
+        "memory_query",
     }
 )
 
@@ -85,7 +86,7 @@ class StructuredGateway:
             # 本地无账号模式：隐式 local 操作者，授权链路与云端同一套规则。
             ensure_local_operator(session, world_id)
             user_id = LOCAL_OPERATOR_USER_ID
-        if frame_type == "command_request":
+        if frame_type in {"command_request", "memory_query"}:
             return resolve_keeper_principal(session, world_id, user_id)
         principal = resolve_player_principal(session, world_id, user_id)
         if user_id == LOCAL_OPERATOR_USER_ID and not principal.investigator_ids:
@@ -165,6 +166,12 @@ class StructuredGateway:
             self.service.cancel_action_request(
                 world_id=world_id, principal=principal, request=frame
             )
+        elif frame_type == "memory_query":
+            # 主持侧只读记忆查询：principal 解析按 keeper 授权（与 command_request
+            # 同一入口），服务层再按角色过滤可见范围。
+            self.service.execute_memory_query(
+                world_id=world_id, principal=principal, frame=frame
+            )
         else:
             self.service.execute_command(
                 world_id=world_id,
@@ -181,7 +188,9 @@ class StructuredGateway:
 
     @staticmethod
     def _cause_id(frame: dict) -> str:
-        return str(frame.get("request_id") or frame.get("command_id") or "")
+        return str(
+            frame.get("request_id") or frame.get("command_id") or frame.get("query_id") or ""
+        )
 
     def _committed_events(self, world_id: str, frame: dict) -> list[dict]:
         cause_ids = {self._cause_id(frame)}

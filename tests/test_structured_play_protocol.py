@@ -53,6 +53,7 @@ COMMAND_KINDS = {
     "present_handout",
     "set_npc_presence",
     "record_fact",
+    "record_memory",
     "resolve_draft",
 }
 
@@ -77,6 +78,9 @@ EVENT_TYPES = {
     "keeper_control",
     "intent_pending",
     "handout_presented",
+    "interaction_updated",
+    "memory_recorded",
+    "memory_query_result",
 }
 
 SCHEMA_BY_DIR = {
@@ -85,6 +89,7 @@ SCHEMA_BY_DIR = {
     "check_response": "check_response.json",
     "cancel_request": "cancel_request.json",
     "command_request": "command_request.json",
+    "memory_query": "memory_query.json",
     "event": "events.json",
 }
 
@@ -142,6 +147,8 @@ class StructuredPlayProtocolTests(unittest.TestCase):
                         self._validator("check_response.json").validate(_load_json(path))
                     elif "command" in path.name:
                         self._validator("command_request.json").validate(_load_json(path))
+                    elif "memory_query" in path.name:
+                        self._validator("memory_query.json").validate(_load_json(path))
                     elif "event" in path.name:
                         self._validator("events.json").validate(_load_json(path))
                     else:  # pragma: no cover - 新增 invalid fixture 必须落入已知前缀
