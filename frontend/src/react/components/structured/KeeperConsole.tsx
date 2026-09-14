@@ -734,6 +734,37 @@ function KeeperField({
     );
   }
 
+  // 请求/线程 ID 的候选**天然不完整**（已终态、读档后按历史补记的对象不在当前列表里），
+  // 所以这两种用 input + datalist：可挑可填，既不用手抄也不剥夺自由输入。
+  // 其余候选（调查员/NPC/场景/线索/物品）是服务端完整投影，保持下拉。
+  const freeFormId =
+    field.candidate === "requests" || field.candidate === "threads";
+  if (options.length > 0 && freeFormId) {
+    const listId = `keeper-options-${field.name}`;
+    return withHint(
+      <label className="panel-action-field">
+        <span>{field.label}</span>
+        <input
+          id={`keeper-field-${field.name}`}
+          type="text"
+          list={listId}
+          value={String(values[field.name] ?? "")}
+          disabled={disabled}
+          placeholder="可直接输入 ID，或从候选里挑"
+          title={field.help ?? undefined}
+          onChange={(event) => onChange(field.name, event.target.value)}
+        />
+        <datalist id={listId}>
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {`${option.name}（${option.id}）`}
+            </option>
+          ))}
+        </datalist>
+      </label>,
+    );
+  }
+
   if (options.length > 0) {
     return withHint(
       <label className="panel-action-field">

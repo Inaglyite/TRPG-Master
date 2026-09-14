@@ -343,10 +343,11 @@ export function SavePanel() {
   const adventuresReady = useAppStore((state) => state.adventuresReady);
   const activeWorldId = useAppStore((state) => state.activeWorldId);
   const latestBranchTurnId = useAppStore((state) => state.latestBranchTurnId);
-  const structuredWorld =
-    useStructuredStore(
-      (state) => interactionPath(state.capabilities) === "structured",
-    ) && appMode === "local";
+  // 结构化世界没有旧回合，分支点是「当前已提交状态」：本地与云端单人房主都要能点到
+  // （云端是否允许仍由 caps.canCreateBranch 决定，权限契约不变）。
+  const structuredWorld = useStructuredStore(
+    (state) => interactionPath(state.capabilities) === "structured",
+  );
   const seededView = useAppStore((state) => state.savePanelView);
   const onlineCaps = useTimelineCapabilities();
   // 本地模式时间线能力全允许；联机按 timelineCapabilities（solo + 房主）。

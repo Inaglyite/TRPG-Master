@@ -235,32 +235,39 @@ export function consumeResumeAfterSwitch(): boolean {
   return pending;
 }
 
-/** 从当前进度的最近完成回合创建时间线分支。 */
+/** 从当前进度创建时间线分支（旧世界取最近完成回合；结构化世界取当前已提交状态）。 */
 export function createBranchFromCurrentTurn(label: string) {
   const turnId = useAppStore.getState().latestBranchTurnId;
+  const structuredState = useStructuredStore.getState();
   const structured =
-    interactionPath(useStructuredStore.getState().capabilities) ===
-    "structured";
+    interactionPath(structuredState.capabilities) === "structured";
   if (!turnId && !structured) return;
+  // 结构化世界没有回合 ID，就不带这个字段——不编造一个假 ID 去骗过校验。
+  const turnPayload = turnId ? { turn_id: turnId } : {};
+  // 结构化分支把分叉点钉在当前已提交 revision 上：客户端与服务端状态不一致时
+  // 服务端会拒绝（而不是让用户以为分叉的是旧状态）。旧世界不带这个字段。
+  const revision = structured ? structuredState.identity.revision : -1;
+  const revisionPayload =
+    structured && Number.isFinite(revision) && revision >= 0
+      ? { expected_revision: revision }
+      : {};
   if (useAppStore.getState().mode === "online") {
     if (!timelineCapabilities().canCreateBranch) return;
-    // 云端分支要具体的回合 ID：结构化世界没有回合，服务端会拒空 turn_id，
-    // 这里不猜 ID，交给本地路径（见交付记录里给后端的清单）。
-    if (!turnId) return;
     safeSend(
       JSON.stringify({
         type: "solo_branch_create",
-        turn_id: turnId,
+        ...turnPayload,
+        ...revisionPayload,
         label: label.trim(),
       }),
     );
     return;
   }
-  // 本地结构化世界从「当前已提交状态」分叉，不基于回合（服务端同样处理）。
   safeSend(
     JSON.stringify({
       type: "turn_branch_create",
-      turn_id: turnId,
+      ...turnPayload,
+      ...revisionPayload,
       label: label.trim(),
     }),
   );
