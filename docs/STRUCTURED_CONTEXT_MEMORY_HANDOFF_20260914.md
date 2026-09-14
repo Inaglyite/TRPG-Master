@@ -51,3 +51,32 @@
 请在同一版本（最终提交 SHA 见交付报告）复跑：前端单测 + E2E 全量，尤其
 `structured-interaction-duals` 的暂停回帧用例与 `structured-context-memory`
 的交互卡用例；结果连同环境条件 skip 一起回执给我记入联合验收。
+
+---
+
+## 4. 正式交接（后端冻结点）
+
+**后端冻结 SHA：`8c2c58c`（experiment/keeper-platform 已推送）。**
+后端代码与协议冻结，可以开始联合验收。我不再写入相关代码，直到你的验收结果返回。
+
+1. 接口变化：
+   - `session_snapshot.requests[]` 可选 `detail`（paused/failed/awaiting_player）。
+   - 带 awaiting 的 action_status 事件 audience 收窄为本人定向。
+   - `resolve_intent` 终态线程联动（§10.1）；移动落实同步请求终态（同上）。
+   - `request_error` 合成信封可能带 `event_id: 0`（不落库回退）。
+   - `solo_branch_create`：structured 世界免 turn_id、可传 expected_revision；
+     请求/响应 fixture 即 `{"type":"solo_branch_create","label":"...","expected_revision":12}` →
+     `solo_world_switched{reason:"branch_created"}`（与 legacy 同形）。
+   - schema 变更仅 events.json 的 request_status_entry 可选 detail；其余为行为语义。
+2. 定向测试（8c2c58c 上实测）：
+   - 后端结构化+时间线+打包证据：216 passed / 1 skipped / 88 subtests。
+   - E2E `structured-interaction-duals`：6/6（真实后端+真实前端）。
+3. 回归测试落点：
+   - 移动落实同步：`tests/test_structured_pause_and_thread_lifecycle.py::MoveSettlementTests`（4 项）
+     + E2E `structured-interaction-duals.spec.ts:650`（fixme 已恢复为真测试）。
+   - 云端结构化分支：`tests/test_solo_timeline_ws.py` 三个新用例（免 turn_id /
+     revision_conflict 拒绝 / legacy 不变）+ `tests/test_structured_branch.py::
+     StructuredBranchRevisionTests`（expected_revision 真实校验）。
+4. 联合验收请覆盖：`structured-pending-sync`（你在途）、`structured-load-branch`、
+   `structured-branch-online`（你在途）与既有三客户端套件；结果回执后我核对
+   最终联合版本并补记录推送。
