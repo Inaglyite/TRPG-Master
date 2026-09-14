@@ -903,6 +903,9 @@ class KeeperAgentRunner:
                 else:
                     empty_steps = 0
                 if not commands:
+                    if queries_this_step:
+                        # 纯查询步是合法进展：结果已进 run_log，让模型基于结果继续。
+                        continue
                     # 无进展保护：没有命令也没有叙述。停在明确状态上，不能让请求
                     # 永远停在 queued（真实模型实测：模型返回空决策时玩家什么都看不到）。
                     result.status = "paused"

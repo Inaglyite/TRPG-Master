@@ -845,6 +845,13 @@ class StructuredPlayService:
                         if req.request_type == "keeper_draft"
                         else self._request_summary((req.payload or {}).get("action") or {})
                     ),
+                    # 暂停/失败原因对本人与主持可见（可操作提示：缺 BYOK、被截断等），
+                    # 刷新后客户端不只能看到「已暂停」而不知道发生了什么。
+                    **(
+                        {"detail": str(req.detail)[:500]}
+                        if req.detail and req.status in {"paused", "failed", "awaiting_player"}
+                        else {}
+                    ),
                     # awaiting_player 的公开待办：刷新/重连后玩家仍知道自己原想
                     # 做什么、哪项尚未执行、已被告知什么（仅本人或主持可见）。
                     **(

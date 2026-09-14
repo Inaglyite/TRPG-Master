@@ -464,6 +464,11 @@
         },
         "thread_id": {
           "$ref": "common.json#/$defs/id_string"
+        },
+        "detail": {
+          "description": "暂停/失败/等待时的可操作原因（本人/主持可见）。",
+          "type": "string",
+          "maxLength": 500
         }
       }
     },

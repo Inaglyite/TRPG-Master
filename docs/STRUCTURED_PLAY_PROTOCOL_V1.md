@@ -300,14 +300,21 @@ M4 协议增补（生命周期：分支 / 读档 / 续团）：
   `thread{action:open|continue|close|replace, thread_id?, pending_action?, disclosed?, waiting_on?, note?}`。
 - `pending_action` 与 awaiting 同形（kind/note/target/destination_scene_id）；
   `waiting_on` 为调查员 ID / `party` / `keeper` / 空。
-- 请求进入终态**不会**自动关闭线程（这是与 awaiting 待办的刻意差异）；
-  线程只能由主持显式收尾，或：移动命令抵达其 `destination_scene_id` 时自动
-  收尾为 completed（记录收尾，方向永远是命令→线程）；玩家取消请求时联动取消
-  其关联线程（状态联动，非文本推断）。
+- 线程收尾是状态联动（不需要手动关闭按钮）：
+  - 发起意图的原请求收成 `completed+success` → 其线程自动 completed（意图已落实）；
+    `cancelled` → 自动 cancelled（明确取消）；`declined` 与
+    `completed+(failure|not_executed)` 不动线程（回答一次追问 ≠ 结束原交互）。
+  - 只关闭 `origin_request_id` 等于本请求且同一调查员的线程，不误关他人的。
+  - 移动命令抵达线程 `destination_scene_id` → 自动 completed（记录收尾，
+    方向永远是命令→线程）。
+  - 玩家取消请求只联动取消**由该请求发起**的线程（取消追问不放弃原交互）。
+  - 主持也可用 `thread{action:close|replace}` 显式收尾/替换。
 - 写入线程的 resolve_intent 会推进世界 revision（读档截止依据）；不碰线程的
   resolve_intent 维持不推进。
 - 事件：`interaction_updated`（audience 定向所属调查员，主持可见）。
   快照 `session_snapshot.payload.interactions[]` 投影开放线程（本人/主持可见）。
+  快照 `requests[]` 在 paused/failed/awaiting_player 时带可选 `detail`
+  （可操作原因，如「未配置模型服务（BYOK）」），本人/主持可见。
 - 分支复制开放线程；读档 fail-closed——存档点后创建的线程删除，其余开放线程
   一律 cancel（与 player_requests 的读档契约一致）。
 
@@ -337,3 +344,15 @@ Agent 上下文新增 `open_threads`（含 `candidate_for_trigger` 状态匹配�
 `character_memories`（自动小预算注入：在场角色 × 当前场景，≤8 条 ≤800 字符）。
 决策契约新增只读 `queries[{kind:"memory", ...}]`：每运行 ≤3 次、结果 ≤800 字符，
 超预算明确拒绝并回喂。必需区（权威状态/当前交互）不依赖检索、不被记忆挤占。
+
+
+## 11. 暂停/错误回帧（2026-09-14 修补）
+
+- 模型路由不可用（缺 BYOK）、模型失败、预算耗尽、空输出等所有暂停路径都必须
+  把 `action_status{paused}` 事件投递给连接（本地 deliver / 房间 broadcast），
+  不允许「提交成功但事件丢失」导致客户端永久等待。
+- `request_error` 优先落 outbox（真实 event_id）；世界不存在或存储故障写不进去时，
+  回退为合成信封（event_id=0、sequence=0、不落库）直接回给发起方——错误反馈
+  不依赖一个不存在世界的 outbox。权限与存储故障维持 fail-closed。
+- 对偶：认证非成员探测不存在的世界得到 `not_authorized`（不暴露世界存在性）；
+  本地隐式操作者路径由服务层给 `unknown_world`。

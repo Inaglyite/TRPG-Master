@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import func, select
@@ -34,6 +35,8 @@ from .errors import StructuredError
 from .principal import Principal, resolve_keeper_principal, resolve_player_principal
 from .service import StructuredPlayService, audience_visible, wire_envelope
 from .validation import validate_frame
+
+logger = logging.getLogger("trpg.structured_gateway")
 
 STRUCTURED_FRAME_TYPES = frozenset(
     {
@@ -84,6 +87,14 @@ class StructuredGateway:
     ) -> Principal:
         if user_id is None:
             # 本地无账号模式：隐式 local 操作者，授权链路与云端同一套规则。
+            # 世界不存在时必须先拦下：否则 ensure_local_operator 的成员落库会撞
+            # 外键，错误回帧的 outbox 写入也随之失败，客户端连错误都收不到。
+            # 认证用户的缺失世界由成员解析自然给出 not_authorized（不暴露世界
+            # 是否存在），两条路径分工不同是刻意的对偶。
+            if session.get(World, world_id) is None:
+                raise StructuredError(
+                    "unknown_world", f"世界不存在：{world_id}", retryable=False
+                )
             ensure_local_operator(session, world_id)
             user_id = LOCAL_OPERATOR_USER_ID
         if frame_type in {"command_request", "memory_query"}:
@@ -305,33 +316,50 @@ class StructuredGateway:
             audience = {"kind": "investigators", "investigator_ids": [investigator_id]}
         else:
             audience = {"kind": "keeper"}
-        with session_scope(self.database_url) as session:
-            row = session.get(WorldState, world_id)
-            revision = int(row.revision) if row is not None else 0
-            sequence = session.execute(
-                select(func.max(EventOutbox.sequence)).where(EventOutbox.world_id == world_id)
-            ).scalar_one()
-            event = EventOutbox(
-                world_id=world_id,
-                sequence=int(sequence or 0) + 1,
-                revision=revision,
-                event_type="request_error",
-                payload=payload,
-                audience=audience,
-                cause_request_id=cause_id,
+        envelope = {
+            "protocol_version": 1,
+            "world_id": world_id,
+            "type": "request_error",
+            "cause_request_id": request_id or None,
+            "payload": payload,
+        }
+        try:
+            with session_scope(self.database_url) as session:
+                row = session.get(WorldState, world_id)
+                revision = int(row.revision) if row is not None else 0
+                sequence = session.execute(
+                    select(func.max(EventOutbox.sequence)).where(
+                        EventOutbox.world_id == world_id
+                    )
+                ).scalar_one()
+                event = EventOutbox(
+                    world_id=world_id,
+                    sequence=int(sequence or 0) + 1,
+                    revision=revision,
+                    event_type="request_error",
+                    payload=payload,
+                    audience=audience,
+                    cause_request_id=cause_id,
+                )
+                session.add(event)
+                session.flush()
+                return {
+                    **envelope,
+                    "event_id": int(event.id),
+                    "sequence": int(event.sequence),
+                    "revision": revision,
+                }
+        except Exception:
+            # 世界不存在/存储故障时 outbox 写不进去（FK/连接错误）：错误反馈
+            # 不能依赖一个不存在世界的 outbox。回退为不落库的合成信封
+            # （event_id/sequence 为 0，客户端按 content 处理即可），错误本身
+            # 必须送达发起方；权限与存储故障维持 fail-closed。
+            logger.warning(
+                "request_error 无法落 outbox（world=%s code=%s），改用合成信封回帧",
+                world_id,
+                exc.code,
             )
-            session.add(event)
-            session.flush()
-            return {
-                "protocol_version": 1,
-                "event_id": int(event.id),
-                "world_id": world_id,
-                "sequence": int(event.sequence),
-                "revision": revision,
-                "type": "request_error",
-                "cause_request_id": request_id or None,
-                "payload": payload,
-            }
+            return {**envelope, "event_id": 0, "sequence": 0, "revision": 0}
 
     # ------------------------------------------------------------------
     # 快照（合成信封，不占 outbox；连接建立时全量重同步）

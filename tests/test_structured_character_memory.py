@@ -595,3 +595,105 @@ class MemoryQueryGatewayTests(unittest.IsolatedAsyncioTestCase):
         errors = [e for e in delivered if e.get("type") == "request_error"]
         self.assertEqual(1, len(errors), delivered)
         self.assertEqual("invalid_action", errors[0]["payload"]["code"])
+
+
+class MemoryQueryRunnerIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    """真实 runner 接线：查询结果进入后续上下文，且当前交互不被挤掉。"""
+
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.context = make_structured_world(self.root)
+        self.db_url = self.context.database_url
+        self.service = StructuredPlayService(self.db_url)
+        self.alice = Principal(kind="player", user_id="u-alice", investigator_ids=("inv-alice",))
+        self.keeper = Principal(kind="keeper", user_id="u-keeper")
+
+    def tearDown(self):
+        self._temp.cleanup()
+
+    async def test_query_results_reach_next_step_and_threads_survive(self):
+        from src.structured.agent import KeeperAgentRunner
+
+        # 一条记忆 + 一个开放线程 + 一个等待中的触发请求。
+        self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="record_memory",
+            payload={
+                "character_id": "inv-alice",
+                "knowledge_type": "told",
+                "content": "爱丽丝上周被告知图书馆的暗格在东侧书架。",
+            },
+            command_id="cmd-r1",
+            expected_revision=None,
+        )
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.alice,
+            request={
+                "request_id": "req-1",
+                "investigator_id": "inv-alice",
+                "action": {"kind": "freeform", "text": "去图书馆。"},
+            },
+        )
+        parked = self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="resolve_intent",
+            payload={
+                "request_id": "req-1",
+                "resolution": "awaiting_player",
+                "pending_action": {"kind": "move", "destination_scene_id": "library"},
+            },
+            command_id="cmd-park",
+            expected_revision=None,
+        )
+        thread_id = parked["result"]["awaiting"]["thread_id"]
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.alice,
+            request={
+                "request_id": "req-2",
+                "investigator_id": "inv-alice",
+                "action": {"kind": "freeform", "text": "暗格在哪来着？"},
+            },
+        )
+        # 让 Agent 能取得控制权。
+        from src.structured.principal import current_control
+
+        with session_scope(self.db_url) as session:
+            control = current_control(session, "sp-world")
+            control.controller_kind = "none"
+            control.controller_id = ""
+
+        caller = _ScriptedCaller(
+            [
+                _decision(
+                    assessment="先查记忆再回答",
+                    queries=[{"kind": "memory", "character_id": "inv-alice", "text": "暗格"}],
+                    commands=[],
+                    narration="",
+                ),
+                _decision(
+                    assessment="根据记忆回答并等待",
+                    narration="你想起上周听说的：暗格在东侧书架。",
+                    wait_for_player=True,
+                    awaiting={
+                        "pending_action": {"kind": "move", "destination_scene_id": "library"},
+                    },
+                    stop_reason="wait_player",
+                ),
+            ]
+        )
+        runner = KeeperAgentRunner(self.db_url, caller=caller)
+        result = await runner.run(world_id="sp-world", trigger_request_id="req-2")
+        self.assertEqual(2, result.model_calls)
+        # 第二次模型调用的上下文：查询结果在 run_log，且当前交互（线程）仍在。
+        second = json.loads(caller.calls[1])
+        self.assertTrue(
+            any("暗格在东侧书架" in line for line in second["run_log"]),
+            f"查询结果必须进入后续上下文：{second['run_log']}",
+        )
+        self.assertIn(thread_id, second["trigger_context"]["candidate_thread_ids"])
+        self.assertTrue(second["open_threads"], "当前交互不能被记忆查询挤掉")

@@ -128,7 +128,7 @@ async def _run_keeper_agent(
                 run_id = new_run_id()
                 with session_scope(database_url) as session:
                     bind_agent_control(session, world_id, run_id)
-                gateway.service.execute_command(
+                outcome = gateway.service.execute_command(
                     world_id=world_id,
                     principal=Principal(kind="agent", run_id=run_id),
                     kind="resolve_intent",
@@ -140,6 +140,16 @@ async def _run_keeper_agent(
                     command_id=f"unavailable-{trigger_request_id}",
                     expected_revision=None,
                 )
+                # 暂停事件必须真正投递给客户端（此前提交成功但事件被丢弃，
+                # 玩家卡片永久停在「处理中」）：本地 deliver / 房间 broadcast
+                # 按 principal 过滤，与其它暂停路径（模型失败/预算）一致。
+                from .service import wire_envelope
+
+                for envelope in outcome.get("events") or []:
+                    if deliver is not None:
+                        await deliver(wire_envelope(envelope))
+                    if broadcast is not None:
+                        await broadcast(envelope)
             except StructuredError:
                 pass
         return

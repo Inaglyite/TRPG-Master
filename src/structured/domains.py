@@ -701,7 +701,35 @@ def cmd_resolve_intent(state: dict, payload: dict, ctx: CommandContext) -> Comma
     thread_events: list[EventSpec] = []
     thread_row = None
     thread_spec = payload.get("thread")
-    writes_thread = resolution == "awaiting_player" or isinstance(thread_spec, dict)
+    # 意图的落实/明确取消自动收尾**由该请求发起**的开放线程（正确关联）：
+    # - completed + outcome=success：意图已落实 → 线程 completed；
+    # - cancelled：明确取消 → 线程 cancelled；
+    # declined、completed+(failure|not_executed)、paused 不动线程——
+    # 讨论过的目标不丢、未落实的意图仍悬着（回答一次追问 ≠ 结束原交互，
+    # 追问收尾时 origin_request_id 不匹配本请求，天然不会误关）。
+    auto_close_status = ""
+    if resolution == "completed" and outcome == "success":
+        auto_close_status = "completed"
+    elif resolution == "cancelled":
+        auto_close_status = "cancelled"
+    if auto_close_status and thread_spec is None:
+        linked_id = str((row.payload or {}).get("thread_id") or "")
+        if linked_id:
+            linked = interactions.get_thread(ctx.session, ctx.world_id, linked_id)
+            if (
+                linked is not None
+                and linked.status == "open"
+                and linked.origin_request_id == request_id
+                and linked.investigator_id == row.investigator_id
+            ):
+                interactions.close_thread(linked, status=auto_close_status, note=None, revision=revision + 1)
+                thread_row = linked
+                thread_events.append(
+                    EventSpec(*interactions.thread_event_with_audience(linked))
+                )
+    writes_thread = (
+        resolution == "awaiting_player" or isinstance(thread_spec, dict) or thread_row is not None
+    )
     if writes_thread:
         revision += 1
     if resolution == "awaiting_player":

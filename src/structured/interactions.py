@@ -199,7 +199,7 @@ def _touch_continue(
     row.updated_at = utcnow()
 
 
-def _close(row: InteractionThread, *, status: str, note: str | None, revision: int) -> None:
+def close_thread(row: InteractionThread, *, status: str, note: str | None, revision: int) -> None:
     if status not in TERMINAL:
         raise StructuredError("invalid_action", f"线程终态不合法：{status}")
     row.status = status
@@ -250,7 +250,7 @@ def apply_thread_action(
         row = _require_open(session, world_id, str(thread_spec.get("thread_id") or ""))
     if action == "close":
         status = "completed" if resolution == "completed" else "cancelled"
-        _close(row, status=status, note=note or None, revision=revision)
+        close_thread(row, status=status, note=note or None, revision=revision)
         events.append(_event_for(row))
         return events, row
     if action == "continue":
@@ -276,7 +276,7 @@ def apply_thread_action(
         events.append(_event_for(row))
         return events, row
     if action == "replace":
-        _close(row, status="superseded", note=note or None, revision=revision)
+        close_thread(row, status="superseded", note=note or None, revision=revision)
         events.append(_event_for(row))
     # open / replace 都创建新线程
     pending = normalize_pending_action(thread_spec.get("pending_action"))
@@ -354,7 +354,7 @@ def auto_complete_move_threads(
             str(pending.get("kind") or "") == "move"
             and str(pending.get("destination_scene_id") or "") == destination_scene_id
         ):
-            _close(row, status="completed", note="已抵达目的地。", revision=revision)
+            close_thread(row, status="completed", note="已抵达目的地。", revision=revision)
             events.append(_event_for(row))
     return events
 
@@ -362,10 +362,14 @@ def auto_complete_move_threads(
 def cancel_threads_for_request(
     session, world_id: str, *, request_id: str, revision: int
 ) -> list[tuple[str, dict, dict]]:
-    """玩家取消自己的请求时，其最近关联的开放线程一并取消（状态联动）。"""
+    """玩家取消自己的请求时，**该请求所发起**的开放线程一并取消（状态联动）。
+
+    只匹配 origin_request_id：取消一条追问（last_request_id）不等于放弃整个
+    交互——「回答/撤回一次追问不结束原行动」是线程生命周期的基本边界。
+    """
     events: list[tuple[str, dict, dict]] = []
     for row in list_open_threads(session, world_id):
-        if row.last_request_id == request_id or row.origin_request_id == request_id:
-            _close(row, status="cancelled", note="玩家取消了相关请求。", revision=revision)
+        if row.origin_request_id == request_id:
+            close_thread(row, status="cancelled", note="玩家取消了相关请求。", revision=revision)
             events.append(_event_for(row))
     return events

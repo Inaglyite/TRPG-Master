@@ -150,6 +150,24 @@ lorebook 检索是 legacy 回合管线的关键词注入，不适用于结构化
    新增契约，前端尚未实现；联调前本批不算端到端闭环。
 7. 工作区含过渡回合等**未提交的他人改动**，本批叠加其上，均未提交。
 
+## 7.5 第二轮修补（遗留收口）
+
+1. 交互线程生命周期（`src/structured/domains.py` resolve_intent、
+   `src/structured/interactions.py`）：原意图请求 completed+success → 线程自动
+   completed；cancelled → 自动 cancelled；declined / 未落实 / 追问收尾不动线程；
+   只关 origin+同调查员匹配者；玩家取消只联动其发起的线程。测试：
+   `tests/test_structured_pause_and_thread_lifecycle.py::ThreadLifecycleCloseTests`（6 项）。
+2. 暂停/错误回帧（`agent_runtime.py`、`gateway.py`、`service.py` 快照 detail）：
+   缺 BYOK 降级路径现在投递 `action_status{paused}`（此前提交成功但事件丢失，
+   客户端永久等待）；快照 requests[] 在 paused/failed/awaiting_player 带 detail；
+   request_error 在世界缺失/存储故障时回退合成信封（event_id=0，不落库），
+   不依赖不存在世界的 outbox；认证非成员/本地路径的对偶（not_authorized vs
+   unknown_world）保持 zcode 既有语义。测试：`PauseAndErrorFrameTests`（2 项）+
+   `tests/test_structured_world_probe_duals.py` 对偶回归通过。
+3. Agent 纯查询步不再误判 no_progress（查询是合法进展）；预算耗尽后的纯查询
+   决策仍会停在明确状态。测试：
+   `MemoryQueryRunnerIntegrationTests`（查询结果进后续上下文且当前交互不被挤掉）。
+
 ## 8. 事故记录
 
 交付过程中我一度用 `Write` 覆盖了 `tests/test_structured_memory.py`（H3 既有文件）。
