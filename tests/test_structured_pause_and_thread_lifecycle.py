@@ -451,3 +451,58 @@ class MoveSettlementTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).scalar_one()
             return row.status
+
+
+class AwaitingEventAudienceTests(unittest.TestCase):
+    """带 awaiting 明细的 action_status：线上过滤语义的对偶钉死。"""
+
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.context = make_structured_world(self.root)
+        self.db_url = self.context.database_url
+        self.service = StructuredPlayService(self.db_url)
+        self.alice = Principal(kind="player", user_id="u-alice", investigator_ids=("inv-alice",))
+        self.bob = Principal(kind="player", user_id="u-bob", investigator_ids=("inv-bob",))
+        self.keeper = Principal(kind="keeper", user_id="u-keeper")
+
+    def tearDown(self):
+        self._temp.cleanup()
+
+    def test_awaiting_action_status_audience_filtering(self):
+        from src.structured.service import audience_visible
+
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.alice,
+            request={
+                "request_id": "req-1",
+                "investigator_id": "inv-alice",
+                "action": {"kind": "freeform", "text": "去图书馆。"},
+            },
+        )
+        outcome = self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="resolve_intent",
+            payload={
+                "request_id": "req-1",
+                "resolution": "awaiting_player",
+                "pending_action": {"kind": "move", "destination_scene_id": "library"},
+                "disclosed": ["需要先打招呼"],
+            },
+            command_id="cmd-a1",
+            expected_revision=None,
+        )
+        awaiting_events = [
+            e
+            for e in outcome["events"]
+            if e["type"] == "action_status" and e["payload"].get("awaiting")
+        ]
+        self.assertEqual(1, len(awaiting_events))
+        audience = awaiting_events[0]["audience"]
+        # 授权主持（keeper/agent）可见——需要主持处理的待办不能对主持隐藏；
+        self.assertTrue(audience_visible(audience, self.keeper))
+        self.assertTrue(audience_visible(audience, self.alice), "本人可见自己的待办")
+        # 其他玩家收不到私密明细（实时帧层，不只是快照层）。
+        self.assertFalse(audience_visible(audience, self.bob))
