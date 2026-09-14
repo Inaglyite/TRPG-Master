@@ -306,7 +306,12 @@ M4 协议增补（生命周期：分支 / 读档 / 续团）：
     `completed+(failure|not_executed)` 不动线程（回答一次追问 ≠ 结束原交互）。
   - 只关闭 `origin_request_id` 等于本请求且同一调查员的线程，不误关他人的。
   - 移动命令抵达线程 `destination_scene_id` → 自动 completed（记录收尾，
-    方向永远是命令→线程）。
+    方向永远是命令→线程）；同时同步**该线程关联的** awaiting 请求：
+    `pending_action.kind=="move"` 且目的地一致（即「尚未执行的就是这次移动」）
+    → 请求置 completed+success、清除 awaiting 明细；待办被主持结构化为非
+    move 的剩余事项（如「前往并调查」→ pending 是调查）时，请求保持等待，
+    平台不解析自由文本、不替主持拆分意图。只认 `payload.thread_id` 的线程级
+    关联与同调查员匹配；碰巧处于同一目的地的他人/他事不动。
   - 玩家取消请求只联动取消**由该请求发起**的线程（取消追问不放弃原交互）。
   - 主持也可用 `thread{action:close|replace}` 显式收尾/替换。
 - 写入线程的 resolve_intent 会推进世界 revision（读档截止依据）；不碰线程的

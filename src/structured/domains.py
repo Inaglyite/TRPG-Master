@@ -788,6 +788,13 @@ def cmd_resolve_intent(state: dict, payload: dict, ctx: CommandContext) -> Comma
                     **({"detail": note} if note else {}),
                     **({"awaiting": awaiting} if awaiting else {}),
                 },
+                # awaiting 明细含「尚未执行/已告知」：只对本人与主持可见，
+                # 不能在 WS 上广播给其他玩家（快照投影本来就按人过滤）。
+                (
+                    {"kind": "investigators", "investigator_ids": [row.investigator_id]}
+                    if awaiting
+                    else dict(PUBLIC)
+                ),
             ),
             *thread_events,
         ],

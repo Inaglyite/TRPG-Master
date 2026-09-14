@@ -346,16 +346,73 @@ def auto_complete_move_threads(
 
     这只是记录收尾（事实已经发生，线程标记不再悬着），不是反过来用线程
     触发移动——方向永远是「命令改变世界，线程只记录」。
+
+    同时同步**关联请求**的待办投影（失效待办不能继续显示「尚未出发」）：
+    - 纯移动请求（action.kind=move 且目的地一致、同调查员、由该线程发起）：
+      请求置 completed+success，清除 awaiting 明细；
+    - 更宽意图（freeform「前往并调查」等）：请求保持 awaiting_player，
+      但已落实的移动部分从 pending_action 移除，换成「已抵达」的中性记录——
+      抵达不代表调查完成，剩余事项由主持继续。
+    关联性核对：只处理 payload.thread_id 指向**本次被收尾线程**的请求，
+    碰巧处于同一目的地或同一场景的他人/他事一律不动。
     """
+    from src.storage.database import PlayerRequest
+
     events: list[tuple[str, dict, dict]] = []
     for row in list_open_threads(session, world_id):
         pending = row.pending_action or {}
         if (
-            str(pending.get("kind") or "") == "move"
-            and str(pending.get("destination_scene_id") or "") == destination_scene_id
+            str(pending.get("kind") or "") != "move"
+            or str(pending.get("destination_scene_id") or "") != destination_scene_id
         ):
-            close_thread(row, status="completed", note="已抵达目的地。", revision=revision)
-            events.append(_event_for(row))
+            continue
+        close_thread(row, status="completed", note="已抵达目的地。", revision=revision)
+        events.append(_event_for(row))
+        linked_requests = (
+            session.execute(
+                select(PlayerRequest).where(
+                    PlayerRequest.world_id == world_id,
+                    PlayerRequest.status == "awaiting_player",
+                    PlayerRequest.investigator_id == row.investigator_id,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for request in linked_requests:
+            payload = dict(request.payload or {})
+            if str(payload.get("thread_id") or "") != row.thread_id:
+                continue  # 只认线程级关联，不按目的地碰巧匹配
+            awaiting = dict(payload.get("awaiting") or {})
+            pending_action = awaiting.get("pending_action") or {}
+            # 「尚未执行的就是这次移动」= 主持把待办结构化为 move 且目的地一致；
+            # 更宽的意图（前往并调查等）应被主持结构化为非 move 的剩余事项，
+            # 平台不解析自由文本、不替主持拆分意图。
+            settles = (
+                str(pending_action.get("kind") or "") == "move"
+                and str(pending_action.get("destination_scene_id") or "") == destination_scene_id
+            )
+            if settles:
+                request.status = "completed"
+                request.outcome = "success"
+                request.detail = "已抵达目的地。"
+                payload.pop("awaiting", None)
+                request.payload = payload
+                request.updated_at = utcnow()
+                events.append(
+                    (
+                        "action_status",
+                        {
+                            "request_id": request.request_id,
+                            "status": "completed",
+                            "outcome": "success",
+                            "detail": "已抵达目的地。",
+                        },
+                        {"kind": "public"},
+                    )
+                )
+            # 其余情况：请求保持 awaiting_player，由主持在下一轮更新剩余事项。
+            # 其 pending_action 若不含「尚未出发」措辞，投影不产生自相矛盾。
     return events
 
 

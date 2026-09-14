@@ -76,8 +76,13 @@ def create_structured_branch(
     runtime_root,
     label: object = "",
     user_id: str | None = None,
+    expected_revision: int | None = None,
 ) -> StructuredBranch:
-    """从源结构化世界的当前已提交状态创建分支。"""
+    """从源结构化世界的当前已提交状态创建分支。
+
+    expected_revision：调用方（云端入口）可钉住分叉点，防止用户以为分叉的是
+    旧状态而实际分叉了新状态；不匹配即 revision_conflict，不创建任何分支。
+    """
     from src.ai.skills.skill_pins import inherit_pins_for_branch
     from src.storage.world_branches import WorldBranchService, _inherited_root
 
@@ -101,6 +106,13 @@ def create_structured_branch(
         row = session.get(WorldState, source_context.world_id, with_for_update=True)
         if row is None:
             raise StructuredError("unknown_world", "世界状态缺失。")
+        if expected_revision is not None and int(row.revision) != int(expected_revision):
+            raise StructuredError(
+                "revision_conflict",
+                f"世界版本已从 {expected_revision} 变为 {int(row.revision)}；"
+                "分叉的是当前已提交状态，请刷新后重试。",
+                retryable=True,
+            )
         branch_state = copy.deepcopy(row.state or {})
         branch_revision = int(row.revision)
 

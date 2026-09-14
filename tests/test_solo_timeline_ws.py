@@ -611,3 +611,186 @@ def test_lobby_hides_branch_worlds_and_exposes_resume_target(tmp_path: Path):
         assert "world-branch" not in ids
         root_entry = next(item for item in listed if item["world_id"] == "world-root")
         assert root_entry["resume_world_id"] == "world-branch"
+
+
+def seed_structured_solo_world(tmp_path: Path, *, revision: int = 3):
+    """一个 structured_v1 的 solo 房间世界（无 legacy 回合）。"""
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    owner = create_user(url, "st_owner", "owner password 123")
+    with session_scope(url) as session:
+        session.add(
+            World(
+                id="world-structured",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={
+                    "name": "结构化单人世界",
+                    "room_status": "playing",
+                    "max_players": 1,
+                    "play_mode": "solo",
+                    "execution_profile": "structured_v1",
+                    "keeper_mode": "human",
+                },
+            )
+        )
+        session.add(
+            WorldState(
+                world_id="world-structured",
+                schema_version=1,
+                revision=revision,
+                state={"revision": revision, "current_scene": {"id": "hall", "name": "大厅"}},
+            )
+        )
+        session.add(
+            WorldMember(
+                id=new_id("member"),
+                world_id="world-structured",
+                user_id=owner.id,
+                role="owner",
+                can_keeper=True,
+            )
+        )
+        session.add(
+            WorldInvestigator(
+                id="wi-structured",
+                world_id="world-structured",
+                character_key="howard",
+                character_ref={"source": "module", "id": "howard"},
+                controller_user_id=owner.id,
+                status="claimed",
+            )
+        )
+        # 结构化分支函数复制成员/claim 后的分支世界（fake create 的落点）。
+        session.add(
+            World(
+                id="world-structured-branch",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={
+                    "display_name": "分支 · 大厅",
+                    "execution_profile": "structured_v1",
+                    "keeper_mode": "human",
+                    "branch": {"parent_world_id": "world-structured"},
+                },
+            )
+        )
+        session.add(
+            WorldMember(
+                id=new_id("member"),
+                world_id="world-structured-branch",
+                user_id=owner.id,
+                role="owner",
+                can_keeper=True,
+            )
+        )
+        session.add(
+            WorldInvestigator(
+                id="wi-structured-branch",
+                world_id="world-structured-branch",
+                character_key="howard",
+                character_ref={"source": "module", "id": "howard"},
+                controller_user_id=owner.id,
+                status="claimed",
+            )
+        )
+    return url, owner
+
+
+def test_solo_branch_create_structured_needs_no_turn_id(tmp_path: Path):
+    """structured_v1 世界：不要求 turn_id，从当前已提交状态分叉。"""
+    url, owner = seed_structured_solo_world(tmp_path)
+    captured: dict = {}
+
+    def fake_branch(source_context, *, project_root, runtime_root, label="", user_id=None, expected_revision=None):
+        captured["expected_revision"] = expected_revision
+        captured["user_id"] = user_id
+        return SimpleNamespace(
+            context=SimpleNamespace(
+                world_id="world-structured-branch", module_name="mansion_of_madness"
+            ),
+            label="分支 · 大厅",
+        )
+
+    room = _room("world-structured", owner.id)
+    room.action_status_callback = lambda wid, aid, status: finish_room_action(
+        url, wid, aid, status
+    )
+    socket = _QueueSocket(
+        [{"type": "solo_branch_create", "label": "", "expected_revision": 3}]
+    )
+    broadcasts = _spy_broadcasts(room)
+    # 处理函数内部 import：patch 源模块属性即可（调用时才取）。
+    with patch("src.structured.branch.create_structured_branch", fake_branch):
+        _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
+
+    assert not _rejections(socket), _rejections(socket)
+    switched = next(b for b in broadcasts if b["type"] == "solo_world_switched")
+    assert switched["world_id"] == "world-structured-branch"
+    assert captured["expected_revision"] == 3
+    with session_scope(url) as session:
+        branch = session.get(World, "world-structured-branch")
+        metadata = branch.metadata_json
+        assert metadata["play_mode"] == "solo"
+        assert metadata["execution_profile"] == "structured_v1"
+        # 成员/claim 由结构化分支复制，控制面不再重复添加/搬移
+        members = (
+            session.query(WorldMember)
+            .filter_by(world_id="world-structured-branch", user_id=owner.id)
+            .all()
+        )
+        assert len(members) == 1
+        claims = (
+            session.query(WorldInvestigator)
+            .filter_by(world_id="world-structured-branch")
+            .all()
+        )
+        assert len(claims) == 1
+        # 源世界的 claim 仍在（结构化复制而非搬走）
+        assert session.get(WorldInvestigator, "wi-structured").world_id == "world-structured"
+        root = session.get(World, "world-structured")
+        assert root.metadata_json[POINTER_KEY] == "world-structured-branch"
+
+
+def test_solo_branch_create_structured_revision_conflict_rejected(tmp_path: Path):
+    """expected_revision 不匹配：拒绝且不切换（防止用户以为分叉的是旧状态）。"""
+    from src.structured.errors import StructuredError
+
+    url, owner = seed_structured_solo_world(tmp_path)
+
+    def fake_branch(source_context, **kwargs):
+        raise StructuredError("revision_conflict", "世界版本已变化", retryable=True)
+
+    room = _room("world-structured", owner.id)
+    room.action_status_callback = lambda wid, aid, status: finish_room_action(
+        url, wid, aid, status
+    )
+    socket = _QueueSocket(
+        [{"type": "solo_branch_create", "label": "", "expected_revision": 99}]
+    )
+    with patch("src.structured.branch.create_structured_branch", fake_branch):
+        try:
+            _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
+        except RuntimeError as exc:
+            assert str(exc) == "test complete"
+    rejections = _rejections(socket)
+    assert len(rejections) == 1
+    assert rejections[0]["code"] == "branch_failed"
+    assert "版本" in rejections[0]["message"]
+    with session_scope(url) as session:
+        root = session.get(World, "world-structured")
+        assert POINTER_KEY not in (root.metadata_json or {})
+
+
+def test_solo_branch_create_legacy_still_requires_turn_id(tmp_path: Path):
+    """legacy 世界：缺 turn_id 仍然拒绝（结构化豁免不影响旧路径）。"""
+    url, owner, _ = seed_tree(tmp_path, pointer="world-root")
+    room = _room("world-root", owner.id)
+    socket = _QueueSocket([{"type": "solo_branch_create", "label": ""}])
+    try:
+        _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
+    except RuntimeError as exc:
+        assert str(exc) == "test complete"
+    rejections = _rejections(socket)
+    assert len(rejections) == 1
+    assert rejections[0]["code"] == "invalid_turn"

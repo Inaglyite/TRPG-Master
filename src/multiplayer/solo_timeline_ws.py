@@ -292,12 +292,16 @@ def _commit_branch_control_plane(
     room: GameRoom,
     user_id: str,
     branch_world_id: str,
+    structured: bool = False,
 ) -> None:
     """分支创建后的云端控制面补全（单事务）。
 
     ``WorldBranchService.create`` 是本地语义：不知道 play_mode、不建成员行、
     不搬 claim。solo 房间的分支世界要成为可独立连接的房间，必须继承 solo
     约束与房间状态，并把“当前时间线”指针与 claim 一起切到分支。
+
+    structured 分支的成员与 claim 已由 create_structured_branch 复制（含
+    can_keeper 授权）；这里只补 solo 元数据与指针，不再重复加成员或搬 claim。
     """
     with session_scope(db_url) as session:
         branch_world = (
@@ -320,15 +324,16 @@ def _commit_branch_control_plane(
             metadata["name"] = source_metadata["name"]
         branch_world.metadata_json = metadata
         branch_world.updated_at = utcnow()
-        session.add(
-            WorldMember(
-                id=new_id("member"),
-                world_id=branch_world_id,
-                user_id=user_id,
-                role="owner",
+        if not structured:
+            session.add(
+                WorldMember(
+                    id=new_id("member"),
+                    world_id=branch_world_id,
+                    user_id=user_id,
+                    role="owner",
+                )
             )
-        )
-        _move_claims(session, room.world_id, branch_world_id)
+            _move_claims(session, room.world_id, branch_world_id)
         _set_pointer(session, tree_root_id(session, room.world_id), branch_world_id)
 
 
@@ -457,10 +462,27 @@ async def _handle_branch_create(
     db_url: str,
     data: dict,
 ) -> str:
+    # structured_v1 世界没有 legacy 回合 ID：从当前已提交状态分叉（复用 M4 的
+    # 结构化分支实现：复制待办/记忆/线程/幂等账本，不带 event_outbox 与
+    # keeper_control，分支不继承源世界未来事件）。客户端可用 expected_revision
+    # 钉住分叉点，不一致即拒绝（防止用户以为分叉的是旧状态）。
+    from src.structured.gateway import world_modes as _world_modes
+
+    with session_scope(db_url) as session:
+        room_world = session.get(World, room.world_id)
+        room_metadata = dict(room_world.metadata_json or {}) if room_world else {}
+    is_structured = _world_modes(room_metadata)[0] == "structured_v1"
     turn_id = str(data.get("turn_id") or "").strip()
-    if not turn_id:
+    if not is_structured and not turn_id:
         await _reject(ws, "invalid_turn", "缺少分支回合 ID")
         return "handled"
+    expected_revision = data.get("expected_revision")
+    if expected_revision is not None:
+        try:
+            expected_revision = int(expected_revision)
+        except (TypeError, ValueError):
+            await _reject(ws, "invalid_action", "expected_revision 必须是整数")
+            return "handled"
     action_id = await _reserve(controller, ws, room, user.id, "solo_branch_create")
     if action_id is None:
         return "handled"
@@ -468,14 +490,27 @@ async def _handle_branch_create(
     branch_world_id = ""
     branch_label = ""
     try:
-        branch = await asyncio.to_thread(
-            _service(controller).create,
-            room.engine.context,
-            room.engine.turn_journal,
-            turn_id,
-            label=data.get("label", ""),
-            user_id=user.id,
-        )
+        if is_structured:
+            from src.structured.branch import create_structured_branch
+
+            branch = await asyncio.to_thread(
+                create_structured_branch,
+                room.engine.context,
+                project_root=controller.deps.project_root,
+                runtime_root=controller.deps.runtime_root,
+                label=data.get("label", ""),
+                user_id=user.id,
+                expected_revision=expected_revision,
+            )
+        else:
+            branch = await asyncio.to_thread(
+                _service(controller).create,
+                room.engine.context,
+                room.engine.turn_journal,
+                turn_id,
+                label=data.get("label", ""),
+                user_id=user.id,
+            )
         branch_world_id = branch.context.world_id
         branch_label = branch.label
         _commit_branch_control_plane(
@@ -483,6 +518,7 @@ async def _handle_branch_create(
             room=room,
             user_id=user.id,
             branch_world_id=branch_world_id,
+            structured=is_structured,
         )
         committed = True
     except Exception as exc:

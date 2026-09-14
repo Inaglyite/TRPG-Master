@@ -408,3 +408,50 @@ class StructuredListingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StructuredBranchRevisionTests(unittest.TestCase):
+    """expected_revision：云端入口钉住分叉点，防止用户以为分叉的是旧状态。"""
+
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.context = make_structured_world(self.root)
+        self.db_url = self.context.database_url
+
+    def tearDown(self):
+        self._temp.cleanup()
+
+    def _revision(self) -> int:
+        from src.storage.database_store import DatabaseWorldStore
+
+        return DatabaseWorldStore(self.db_url, "sp-world", self.context.world_dir).snapshot().revision
+
+    def test_expected_revision_match_creates_branch(self):
+        branch = create_structured_branch(
+            self.context,
+            project_root=self.root,
+            runtime_root=self.root,
+            label="钉版本分支",
+            expected_revision=self._revision(),
+        )
+        self.assertTrue(branch.context.world_id)
+
+    def test_expected_revision_mismatch_rejects_without_creating(self):
+        from src.structured.errors import StructuredError
+
+        with self.assertRaises(StructuredError) as caught:
+            create_structured_branch(
+                self.context,
+                project_root=self.root,
+                runtime_root=self.root,
+                label="过期分叉",
+                expected_revision=self._revision() + 99,
+            )
+        self.assertEqual("revision_conflict", caught.exception.code)
+        # 不得创建任何分支世界。
+        from src.storage.database import World, session_scope
+
+        with session_scope(self.db_url) as session:
+            worlds = session.execute(select(World)).scalars().all()
+        self.assertEqual(["sp-world"], [w.id for w in worlds])

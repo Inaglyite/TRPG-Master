@@ -31,6 +31,21 @@
 - 不需要在前端推断意图归属（候选绑定由后端 `candidate_thread_ids` 给出）；
 - 玩家侧仍无全量记忆接口（`memory_query` 维持 keeper 专用）。
 
+## 2.5 第二轮修复（本次提交新增）
+
+1. **移动落实同步请求终态**：`move_party` 抵达时，除线程自动 completed 外，
+   线程关联的 awaiting 请求在其待办「就是这次移动」（pending_action.kind=move
+   且目的地一致）时置 completed+success 并清除 awaiting 明细——你复位的
+   fixme 用例「移动已抵达后…」应直接通过。更宽意图（待办=调查等）保持等待，
+   由主持后续更新。带 awaiting 的 action_status 事件 audience 收窄为本人定向
+   （不再向其他玩家广播待办明细）。
+2. **云端 structured solo 分支**：`solo_branch_create` 对 structured_v1 世界
+   不再要求 turn_id，从当前已提交状态分叉；可传 `expected_revision` 钉住分叉点，
+   不匹配拒绝（branch_failed + 版本提示）。legacy 路径不变（仍需 turn_id）。
+   请求形态：`{"type":"solo_branch_create","label":"...","expected_revision":12}`
+   （structured 世界省略 turn_id）；响应/广播与 legacy 相同
+   （`solo_world_switched` reason=branch_created）。
+
 ## 3. 联合验收请求
 
 请在同一版本（最终提交 SHA 见交付报告）复跑：前端单测 + E2E 全量，尤其

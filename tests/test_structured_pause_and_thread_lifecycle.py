@@ -83,7 +83,8 @@ class PauseAndErrorFrameTests(unittest.IsolatedAsyncioTestCase):
         paused_frames = [
             e
             for e in delivered
-            if e.get("type") == "action_status" and (e.get("payload") or {}).get("status") == "paused"
+            if e.get("type") == "action_status"
+            and (e.get("payload") or {}).get("status") == "paused"
         ]
         self.assertEqual(1, len(paused_frames), f"暂停必须回帧：{delivered}")
         with session_scope(self.db_url) as session:
@@ -130,9 +131,11 @@ class PauseAndErrorFrameTests(unittest.IsolatedAsyncioTestCase):
         with session_scope(self.db_url) as session:
             from src.storage.database import EventOutbox
 
-            count = session.execute(
-                select(EventOutbox).where(EventOutbox.world_id == "world-missing")
-            ).scalars().all()
+            count = (
+                session.execute(select(EventOutbox).where(EventOutbox.world_id == "world-missing"))
+                .scalars()
+                .all()
+            )
             self.assertEqual([], count, "不存在的世界不产生 outbox 行")
 
 
@@ -268,3 +271,183 @@ class ThreadLifecycleCloseTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoveSettlementTests(unittest.IsolatedAsyncioTestCase):
+    """移动落实后同步关联 awaiting 请求（zcode fixme 对应的后端修复）。"""
+
+    def setUp(self):
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.context = make_structured_world(self.root)
+        self.db_url = self.context.database_url
+        self.service = StructuredPlayService(self.db_url)
+        self.alice = Principal(kind="player", user_id="u-alice", investigator_ids=("inv-alice",))
+        self.bob = Principal(kind="player", user_id="u-bob", investigator_ids=("inv-bob",))
+        self.keeper = Principal(kind="keeper", user_id="u-keeper")
+
+    def tearDown(self):
+        self._temp.cleanup()
+
+    def _park_request(self, request_id: str, action: dict, destination="library") -> str:
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.alice,
+            request={
+                "request_id": request_id,
+                "investigator_id": "inv-alice",
+                "action": action,
+            },
+        )
+        outcome = self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="resolve_intent",
+            payload={
+                "request_id": request_id,
+                "resolution": "awaiting_player",
+                "pending_action": {
+                    "kind": "move",
+                    "destination_scene_id": destination,
+                    "note": f"尚未出发前往{destination}",
+                },
+            },
+            command_id=f"park-{request_id}",
+            expected_revision=None,
+        )
+        return outcome["result"]["awaiting"]["thread_id"]
+
+    def _move(self, command_id="cmd-move", destination="library") -> dict:
+        return self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="move_party",
+            payload={"destination_scene_id": destination},
+            command_id=command_id,
+            expected_revision=None,
+        )
+
+    def _request(self, request_id: str) -> PlayerRequest:
+        with session_scope(self.db_url) as session:
+            return session.execute(
+                select(PlayerRequest).where(
+                    PlayerRequest.world_id == "sp-world",
+                    PlayerRequest.request_id == request_id,
+                )
+            ).scalar_one()
+
+    async def test_pure_move_request_settles_on_arrival(self):
+        thread_id = self._park_request(
+            "req-move", {"kind": "move", "destination_scene_id": "library"}
+        )
+        outcome = self._move()
+        row = self._request("req-move")
+        self.assertEqual("completed", row.status)
+        self.assertEqual("success", row.outcome)
+        self.assertNotIn("awaiting", row.payload or {}, "移动待办明细已清除")
+        self.assertEqual("completed", self._thread_status(thread_id))
+        # 事件一致：action_status completed + interaction_updated completed
+        types = [(e["type"], e["payload"].get("status")) for e in outcome["events"]]
+        self.assertIn(("action_status", "completed"), types)
+        self.assertIn(("interaction_updated", "completed"), types)
+        # 快照一致：不再有该请求的 awaiting 投影
+        snapshot = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        entry = [r for r in snapshot["requests"] if r["request_id"] == "req-move"]
+        self.assertEqual([], entry, "终态请求不再出现在待办投影")
+        self.assertEqual([], snapshot["interactions"])
+        # 重试幂等：同 command_id 重发不重复结算
+        again = self._move(command_id="cmd-move")
+        self.assertTrue(again.get("deduplicated"))
+        self.assertEqual("completed", self._request("req-move").status)
+
+    async def test_broader_intent_keeps_awaiting_after_arrival(self):
+        """「前往并调查」：抵达不代表调查完成；待办是主持结构化出来的剩余事项。
+
+        主持把「去图书馆调查暗格」挂起时，剩余事项是「调查暗格」（不是移动），
+        所以抵达只收尾移动线程，请求保持等待且待办不含「尚未出发」。
+        """
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.alice,
+            request={
+                "request_id": "req-investigate",
+                "investigator_id": "inv-alice",
+                "action": {"kind": "freeform", "text": "我想去图书馆调查暗格。"},
+            },
+        )
+        self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="resolve_intent",
+            payload={
+                "request_id": "req-investigate",
+                "resolution": "awaiting_player",
+                "pending_action": {"kind": "freeform", "note": "调查图书馆的暗格"},
+            },
+            command_id="park-req-investigate",
+            expected_revision=None,
+        )
+        self._move()
+        row = self._request("req-investigate")
+        self.assertEqual("awaiting_player", row.status, "调查未完成，请求仍等待")
+        awaiting = (row.payload or {}).get("awaiting") or {}
+        note = (awaiting.get("pending_action") or {}).get("note") or ""
+        self.assertIn("调查", note)
+        self.assertNotIn("尚未出发", note)
+
+    async def test_freeform_intent_with_move_pending_settles_on_arrival(self):
+        """待办本身就是「前往X」（kind=move）时，无论原请求是按钮还是自由文本，
+        抵达即落实——这正是 E2E 里『我想去X看看』的语义。"""
+        thread_id = self._park_request(
+            "req-wish", {"kind": "freeform", "text": "我想去图书馆看看。"}
+        )
+        self._move()
+        row = self._request("req-wish")
+        self.assertEqual("completed", row.status)
+        self.assertNotIn("awaiting", row.payload or {})
+        self.assertEqual("completed", self._thread_status(thread_id))
+
+    async def test_other_destination_and_other_investigator_untouched(self):
+        """核对行动关联与调查员：不同目的地/不同调查员的待办不动。"""
+        # 爱丽丝：前往图书馆（将被落实）
+        self._park_request("req-alice", {"kind": "move", "destination_scene_id": "library"})
+        # 鲍勃：自己的「回书房」意图（freeform，线程目的地 study）
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.bob,
+            request={
+                "request_id": "req-bob",
+                "investigator_id": "inv-bob",
+                "action": {"kind": "freeform", "text": "我想回书房拿东西。"},
+            },
+        )
+        self.service.execute_command(
+            world_id="sp-world",
+            principal=self.keeper,
+            kind="resolve_intent",
+            payload={
+                "request_id": "req-bob",
+                "resolution": "awaiting_player",
+                "pending_action": {
+                    "kind": "move",
+                    "destination_scene_id": "study",
+                    "note": "尚未出发前往书房",
+                },
+            },
+            command_id="park-req-bob",
+            expected_revision=None,
+        )
+        self._move(destination="library")
+        bob = self._request("req-bob")
+        self.assertEqual("awaiting_player", bob.status, "不同目的地的待办不受影响")
+        self.assertIn("尚未出发", str((bob.payload or {}).get("awaiting")))
+
+    def _thread_status(self, thread_id: str) -> str:
+        with session_scope(self.db_url) as session:
+            row = session.execute(
+                select(InteractionThread).where(
+                    InteractionThread.world_id == "sp-world",
+                    InteractionThread.thread_id == thread_id,
+                )
+            ).scalar_one()
+            return row.status
