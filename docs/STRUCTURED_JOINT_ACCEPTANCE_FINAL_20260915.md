@@ -47,6 +47,19 @@ E2E 三条 skip 均为环境条件：Electron 运行环境、外部 staging 服�
 （实时帧层）；快照层既有 `test_awaiting_todo_visible_only_to_owner_and_keeper`
 与房间帧用例继续通过。
 
+## 4.5 CI 状态（quality workflow，不提前报绿）
+
+- 本分支五次推送的 quality 运行**全部为红**（含最终 66a3da2，run 34874213367）：
+  backend 绿；frontend 的 E2E 步骤红。
+- 失败形态一致且与产品逻辑无关：6 条本地全绿的 structured spec 在 CI 里全部
+  停在开局引导 `module-select-trigger`（30s 默认超时）——真实后端+重量级模组
+  在共享 runner 上冷启动超过 30s，尚未执行到任何产品断言。master 最近的
+  quality 失败也是同类 E2E 环境性超时（model-settings-online 5 分钟超时）。
+- 结论：CI 红 = CI 环境的 E2E 启动预算不足，不是本轮代码缺陷；本地真实
+  前后端验收（双方实测，见 §2/§3）为准。
+- 待办（建议下一轮，不属本轮授权范围）：CI 的 E2E 开局引导超时从 30s 提到
+  60–90s 或加 retry；这是前端测试基建，留给 zcode 评估。
+
 ## 5. 未提交内容与剩余事项
 
 - 未提交：E2E 重渲染截图（`structured-*.png`/`scene-indicator-*.png`）——
