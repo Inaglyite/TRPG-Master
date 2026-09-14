@@ -1,0 +1,83 @@
+整仓 pytest 基线（2026-09-13 23:2x，HEAD=45a0352）：
+59 failed, 1213 passed, 7 skipped, 1 deselected, 116 subtests passed
+（另有 1 条被我显式 --deselect 的挂起用例，见下）
+
+## A. 陈旧 patch 目标 src.app.engine.OpenAI（M1 已迁到 engine_gate） —— 42 条
+    tests/test_action_adjudication.py::test_full_turn_executes_model_selected_difficulty_and_persists_outcome
+    tests/test_action_adjudication.py::test_time_settlement_is_announced_to_narrator
+    tests/test_context_compaction.py::test_summary_replace_mints_single_checkpoint_and_signs_save
+    tests/test_context_compaction.py::test_compaction_boundary_never_splits_tool_call_pairs
+    tests/test_context_compaction.py::test_summary_failure_keeps_original_surface_and_emits_no_checkpoint
+    tests/test_context_compaction.py::test_rebase_failure_never_replaces_live_surface
+    tests/test_context_compaction.py::test_compact_falls_back_to_rebase_when_projection_diverged
+    tests/test_context_compaction.py::test_compaction_resume_from_autosave_after_reload
+    tests/test_context_compaction.py::test_in_turn_compaction_updates_rollback_surface
+    tests/test_context_compaction.py::test_in_turn_compaction_refused_when_window_crosses_surface
+    tests/test_context_compaction.py::test_prune_old_tool_results_replaces_in_place_and_keeps_pairing
+    tests/test_context_compaction.py::test_prune_stale_authority_blocks_keeps_only_latest_snapshot
+    tests/test_context_compaction.py::test_prune_asset_payloads_strips_history_regardless_of_recency
+    tests/test_context_shadow.py::test_engine_manual_save_and_checkpoint_load_resume
+    tests/test_context_shadow.py::test_engine_completed_turn_writes_private_checkpoint_but_public_views_strip_it
+    tests/test_context_shadow.py::test_failed_engine_turn_restores_messages_and_hides_active_delta
+    tests/test_context_shadow.py::test_cancelled_preflight_note_is_saved_after_turn_rollback
+    tests/test_context_shadow.py::test_tier_reminder_is_append_only_context_injection
+    tests/test_context_shadow.py::test_shadow_store_failure_does_not_block_authoritative_save
+    tests/test_context_shadow.py::test_shadow_disabled_save_succeeds_without_context_rows
+    tests/test_model_timeout.py::test_engine_openai_client_uses_configured_timeout
+    tests/test_test_runtime_isolation.py::test_default_server_runtime_and_database_are_test_isolated
+    tests/test_turn_journal.py::TurnJournalTests::test_arrival_commit_failure_rolls_back_and_retry_settles_once
+    tests/test_turn_journal.py::TurnJournalTests::test_game_engine_finalizes_turn_record_with_graph_result
+    tests/test_turn_journal.py::TurnJournalTests::test_new_multiplayer_engine_restores_latest_committed_model_history
+    tests/test_turn_journal.py::TurnJournalTests::test_rewrite_rejects_turn_after_world_has_advanced
+    tests/test_turn_journal.py::TurnJournalTests::test_rewrite_replaces_only_prose_and_preserves_committed_state
+    tests/test_turn_journal.py::TurnJournalTests::test_rewrite_uses_narrative_route_slot
+    tests/test_world_branches.py::WorldBranchTests::test_archive_rejects_a_durably_active_turn
+    tests/test_world_branches.py::WorldBranchTests::test_archive_rejects_main_current_and_non_leaf_then_hides_leaf
+    tests/test_world_branches.py::WorldBranchTests::test_archive_tree_archives_whole_slot_and_protects_active
+    tests/test_world_branches.py::WorldBranchTests::test_branch_catalog_error_propagates_and_cleans_target_world
+    tests/test_world_branches.py::WorldBranchTests::test_branch_clones_lineage_and_keeps_worlds_independent
+    tests/test_world_branches.py::WorldBranchTests::test_branch_preserves_nonzero_fork_revision
+    tests/test_world_branches.py::WorldBranchTests::test_create_root_makes_independent_untouched_worlds
+    tests/test_world_branches.py::WorldBranchTests::test_legacy_auto_slot_is_still_marked_resumable
+    tests/test_world_branches.py::WorldBranchTests::test_list_adventures_filters_by_module_and_exposes_slot_name
+    tests/test_world_branches.py::WorldBranchTests::test_list_adventures_groups_timelines_under_one_save_container
+    tests/test_world_branches.py::WorldBranchTests::test_list_adventures_numbers_slots_by_creation_and_hides_untouched
+    tests/test_world_branches.py::WorldBranchTests::test_list_tree_saves_aggregates_tags_and_excludes_archived
+    tests/test_world_branches.py::WorldBranchTests::test_list_worlds_only_returns_the_current_branch_tree
+    tests/test_world_branches.py::WorldBranchTests::test_rename_branch_updates_display_name_and_compat_export
+
+## B. 世界探针崩溃导致连接循环结束（表现为挂起/取消） —— 1 条
+    tests/test_multiplayer_membership.py::test_opening_failures_return_room_to_lobby_and_allow_retry
+
+## B. 夹具库无表：世界探针抛错（no such table: worlds） —— 12 条
+    tests/test_multiplayer_combat_routing.py::test_combat_defender_can_reply_when_not_the_room_current_actor
+    tests/test_multiplayer_combat_routing.py::test_owner_skip_moves_room_and_combat_turn_to_online_bob_together
+    tests/test_multiplayer_membership.py::test_player_notes_internal_error_is_logged_but_not_sent_to_client
+    tests/test_multiplayer_membership.py::test_durable_reservation_failure_releases_in_memory_room_lock
+    tests/test_multiplayer_membership.py::test_unclaimed_owner_state_request_never_falls_back_to_active_player
+    tests/test_multiplayer_membership.py::test_settle_case_rejected_in_lobby_without_reserving_control
+    tests/test_multiplayer_membership.py::test_settle_case_passes_through_when_room_is_playing
+    tests/test_settlement_actor_reset.py::test_next_start_after_settlement_uses_owner_as_actor
+    tests/test_solo_play_mode.py::test_multiplayer_world_start_keeps_ready_and_claim_gates
+    tests/test_solo_play_mode.py::test_action_in_progress_rejects_second_turn_across_worlds
+    tests/test_solo_play_mode.py::test_action_rate_limit_rejects_burst
+    tests/test_solo_play_mode.py::test_daily_turn_quota_rejects_when_exhausted
+
+## B. 夹具库打不开：世界探针抛错 —— 1 条
+    tests/test_solo_play_mode.py::test_readiness_db_error_fails_closed
+
+## C. legacy 夹具库缺 0015 的 world_members.can_keeper 列 —— 1 条
+    tests/test_database_persistence.py::test_room_action_migration_fails_closed_for_legacy_accepted_rows
+
+## D. 打包 LATER_TABLES 缺 0015 表（产品缺陷） —— 1 条
+    tests/test_electron_packaging.py::test_packaged_migrations_upgrade_unversioned_revision_0002
+
+## E. 后端在途（当时正被后端负责人改写） —— 1 条
+    tests/test_structured_room.py::StructuredRoomStartTests::test_keeper_start_without_model_session
+
+合计（pytest 计数）: 59
+
+未计入 59 的额外 1 条（当时被 --deselect 掉，因为会永久挂起）：
+    tests/test_multiplayer_membership.py::test_start_revalidates_roster_after_room_action_lease
+    根因同 B：世界探针在无表夹具库上抛错 → 连接循环任务结束 → scenario 仍在 await lease_waiting
+    （证据：/tmp/taskdump.probe 的 asyncio 任务栈转储）

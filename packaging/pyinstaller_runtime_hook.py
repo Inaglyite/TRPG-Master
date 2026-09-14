@@ -31,6 +31,24 @@ LATER_TABLES = {
     "memory_fact_candidates",
     "memory_facts",
     "model_service_configs",
+    # 0015 结构化协议：旧的无版本号桌面库同样没有这些表，
+    # 由 upgrade head 建立；列入此处才不会被接管检查误判为残缺 schema。
+    "player_requests",
+    "game_commands",
+    "check_requests",
+    "event_outbox",
+    "keeper_control",
+    # 0016 上下文与记忆：交互线程与角色记忆（同样由 upgrade head 建立）
+    "interaction_threads",
+    "character_memories",
+}
+
+# Columns added by later migrations to tables that already exist in the
+# baseline fingerprint: an old unversioned database legitimately lacks them
+# until ``upgrade head`` runs.
+LATER_COLUMNS = {
+    "worlds": {"root_world_id"},  # 0010
+    "world_members": {"can_keeper"},  # 0015
 }
 
 
@@ -96,10 +114,12 @@ def detect_unversioned_revision(database_url: str) -> str | None:
                 "无法接管未版本化数据库：缺少基础表 " + ", ".join(missing_base)
             )
         for table in sorted(base_tables):
-            # ``worlds.root_world_id`` is added by 0010; an older unversioned
-            # database legitimately lacks it until ``upgrade head`` runs.
-            omit = {"root_world_id"} if table == "worlds" else set()
-            _validate_columns(db_inspector, metadata, table, omit=omit)
+            _validate_columns(
+                db_inspector,
+                metadata,
+                table,
+                omit=LATER_COLUMNS.get(table, set()),
+            )
 
         has_invites = "world_invites" in tables
         has_investigators = "world_investigators" in tables

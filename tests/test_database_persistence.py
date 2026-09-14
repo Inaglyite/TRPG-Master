@@ -626,13 +626,14 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
                 "VALUES ('legacy-action-world', 'legacy-module', '', '', 'active', '{}', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
             )
         )
-        session.add(
-            WorldMember(
-                id=new_id("member"),
-                world_id="legacy-action-world",
-                user_id=owner.id,
-                role="owner",
-            )
+        # 同样用原生 SQL：0004 的 world_members 还没有 0015 加的 can_keeper 列，
+        # ORM 模型插不进去（升到 head 后由迁移补默认值）。
+        session.execute(
+            text(
+                "INSERT INTO world_members (id, world_id, user_id, role, created_at) "
+                "VALUES (:id, 'legacy-action-world', :user_id, 'owner', '2026-01-01T00:00:00')"
+            ),
+            {"id": new_id("member"), "user_id": owner.id},
         )
         # These ORM models deliberately do not expose relationships. Flush the
         # parent rows before the RoomAction child so SQLite exercises the same

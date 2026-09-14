@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 
-import { sendAction, sendDecisionReply, sendSuggestReply } from "../../options";
+import {
+  sendAction,
+  sendDecisionReply,
+  sendPlayerText,
+  sendSuggestReply,
+} from "../../options";
 import { confirmEnding } from "../../panels";
+import { interactionPath } from "../../protocol/structured";
 import { useAppStore, type EndingProposal } from "../../state/app-store";
+import { useStructuredStore } from "../../state/structured-store";
 import { useOnlineStore } from "../../state/online-store";
 import { ContextSummaryButton } from "./ModelSettingsPanel";
+import { StructuredToolRow } from "./structured/StructuredToolRow";
 import { useDelayedClose } from "./transitions";
 
 export function GameControls() {
@@ -24,10 +32,19 @@ export function GameControls() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 多人进行中：只有当前行动者可以提交；其他人输入与选项均禁用并显示等待。
+  //
+  // 例外：结构化操作房间（structured_v1）没有“轮流行动”的语义——玩家的
+  // 请求直接进入主持待办队列（人工主持异步处理），因此不再按当前行动者
+  // 禁言。服务端仍然按 principal 与 revision 校验每一次提交。
+  const structuredAsync =
+    useStructuredStore(
+      (state) => interactionPath(state.capabilities) === "structured",
+    ) && roomStatus === "playing";
   const roomPlaying = mode === "online" && roomStatus === "playing";
   const myRole = members.find((member) => member.user_id === userId)?.role;
   const myTurn =
     mode !== "online" ||
+    structuredAsync ||
     (roomPlaying &&
       roomConnection === "connected" &&
       userId != null &&
@@ -65,8 +82,14 @@ export function GameControls() {
   const submit = () => {
     const action = text.trim();
     if (!enabled || !action) return;
+    // 结构化世界：文本作为 freeform 结构请求提交（失败保留草稿并说明原因）；
+    // 旧世界：仍然是原来的文字回合。
+    const result = sendPlayerText(action);
+    if (!result.ok) {
+      setText(action);
+      return;
+    }
     setText("");
-    void sendAction(action);
   };
 
   return (
@@ -124,6 +147,7 @@ export function GameControls() {
       <div id="context-summary-row">
         <ContextSummaryButton />
       </div>
+      <StructuredToolRow />
       <div id="input-bar">
         <input
           ref={inputRef}

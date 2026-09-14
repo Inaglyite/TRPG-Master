@@ -18,6 +18,7 @@ import {
   updateServiceDraft,
 } from "../../settings";
 import { useAppStore } from "../../state/app-store";
+import { useStructuredStore } from "../../state/structured-store";
 import { useOnlineStore } from "../../state/online-store";
 import {
   useModelStore,
@@ -85,12 +86,29 @@ export function ModelSettingsTrigger() {
 /** 房间拒绝为"模型未配置/被阻断"时渲染的引导按钮；其余情况不渲染。 */
 export function ModelSettingsGateButton() {
   const roomErrorCode = useOnlineStore((state) => state.roomErrorCode);
+  // 人类主持世界不需要模型配置：以**该世界当前的 keeper_mode** 为准
+  // （快照的 keeper_mode，M0 必填字段），而不是服务端“支持哪些模式”的能力列表
+  // ——服务端会同时声明 human/assisted/agent，用能力列表判断会把人类房间误判成
+  // 需要模型。满足条件时给出说明，而不是把玩家引到模型设置。
+  const humanHosted = useStructuredStore(
+    (state) => state.identity.keeperMode === "human",
+  );
+  const inStructuredGame = useStructuredStore(
+    (state) => state.identity.worldId !== "",
+  );
   if (
     roomErrorCode !== "model_not_configured" &&
     roomErrorCode !== "model_route_blocked" &&
     roomErrorCode !== "model_readiness_unavailable"
   ) {
     return null;
+  }
+  if (humanHosted && inStructuredGame) {
+    return (
+      <p className="online-hint" data-testid="human-hosted-note">
+        本场由人类主持，不需要模型配置。
+      </p>
+    );
   }
   return (
     <button

@@ -79,6 +79,34 @@ export const serverMessageTypes = [
   "investigator_roster",
   "protocol_error",
   "solo_world_switched",
+  // 结构化操作协议 v1（schemas/structured-play/v1）：信封由
+  // structured.ts 的 parseStructuredEvent 校验，这里只登记判别式，
+  // 否则未知 type 会被当成“无法识别的协议消息”直接丢掉。
+  "session_snapshot",
+  "action_ack",
+  "action_status",
+  "check_requested",
+  "check_resolved",
+  "check_cancelled",
+  "roll_resolved",
+  "message_started",
+  "message_chunk",
+  "message_completed",
+  "scene_changed",
+  "clue_granted",
+  "inventory_changed",
+  "state_changed",
+  "request_error",
+  "keeper_draft",
+  "keeper_draft_resolved",
+  "keeper_control",
+  "intent_pending",
+  // M5 上下文与记忆改造：交互线程、主持侧记忆记录与只读查询结果。
+  // 这里是**入口白名单**：漏登记会在 parseServerMessage 就被丢掉
+  //（handout_presented 与 interaction_updated 都踩过同一个坑）。
+  "interaction_updated",
+  "memory_recorded",
+  "memory_query_result",
 ] as const;
 
 const serverMessageSchema = z.looseObject({

@@ -77,7 +77,7 @@ def _game_engine(tmp_path: Path, world_id: str = "engine-shadow") -> GameEngine:
         project_root=PROJECT_ROOT,
         runtime_root=tmp_path,
     )
-    with patch("src.app.engine.OpenAI", return_value=object()):
+    with patch("src.structured.engine_gate.OpenAI", return_value=object()):
         engine = GameEngine(context)
     engine.prepare_session()
     return engine

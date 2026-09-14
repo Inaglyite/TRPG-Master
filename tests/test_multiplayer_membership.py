@@ -78,6 +78,15 @@ def _bypass_byok_readiness_gate():
         yield
 
 
+
+def _fixture_database_url(tmp_path: Path) -> str:
+    """门禁夹具库：连接循环会按 world 元数据探测结构化模式并放行帧，
+    需要能打开且有表的库（世界行缺失时按 legacy 处理，不必造世界）。"""
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    return url
+
+
 def test_multiplayer_diagnostics_remove_keeper_text_and_tool_arguments():
     secret = "真凶是布莱斯·法伦"
     report = {
@@ -825,7 +834,7 @@ def test_player_notes_internal_error_is_logged_but_not_sent_to_client(tmp_path, 
     )
     socket = NoteSocket()
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
     )
 
     with (
@@ -856,7 +865,7 @@ def test_player_notes_internal_error_is_logged_but_not_sent_to_client(tmp_path, 
     assert secret_detail in capsys.readouterr().err
 
 
-def test_durable_reservation_failure_releases_in_memory_room_lock():
+def test_durable_reservation_failure_releases_in_memory_room_lock(tmp_path: Path):
     class OneMessageSocket:
         def __init__(self):
             self.reads = 0
@@ -887,7 +896,7 @@ def test_durable_reservation_failure_releases_in_memory_room_lock():
     )
     socket = OneMessageSocket()
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
     )
 
     async def scenario():
@@ -915,7 +924,9 @@ def test_durable_reservation_failure_releases_in_memory_room_lock():
     assert socket.messages[-1]["code"] == "reservation_unavailable"
 
 
-def test_unclaimed_owner_state_request_never_falls_back_to_active_player():
+def test_unclaimed_owner_state_request_never_falls_back_to_active_player(
+    tmp_path: Path,
+):
     class OneStateSocket:
         def __init__(self):
             self.reads = 0
@@ -972,7 +983,7 @@ def test_unclaimed_owner_state_request_never_falls_back_to_active_player():
     socket = OneStateSocket()
     controller = SimpleNamespace(
         deps=SimpleNamespace(
-            database_url=lambda: "sqlite://",
+            database_url=lambda: _fixture_database_url(tmp_path),
             enrich_clues=lambda clues, _state, _context: clues,
         ),
         authoritative_investigator_id=lambda *_args: None,
@@ -1151,7 +1162,7 @@ def test_current_actor_member_mutation_is_serialized_with_turn_and_prompt(
     assert other_rejection is None
 
 
-def test_start_revalidates_roster_after_room_action_lease():
+def test_start_revalidates_roster_after_room_action_lease(tmp_path: Path):
     lease_waiting = asyncio.Event()
     continue_lease = asyncio.Event()
     submitted: list[dict] = []
@@ -1209,7 +1220,7 @@ def test_start_revalidates_roster_after_room_action_lease():
     room.reserve_action = blocked_reserve_action
     socket = StartSocket()
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
         room_roster=lambda _world_id: (
             list(roster_state["roster"]),
             {"owner", "player"},
@@ -1239,6 +1250,9 @@ def test_start_revalidates_roster_after_room_action_lease():
     with (
         patch("src.multiplayer.messages.websocket_user", return_value=object()),
         patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        # BYOK 就绪门禁排在租约之前：夹具库无表会 fail-closed 提前拒绝，
+        # 请求就到不了本用例要验证的租约边界（其余用例同样 stub 该项）。
+        patch("src.multiplayer.messages._room_model_readiness", return_value=None),
         patch("src.multiplayer.messages.reserve_room_action") as durable_reserve,
     ):
         asyncio.run(scenario())
@@ -1286,6 +1300,8 @@ def test_opening_failures_return_room_to_lobby_and_allow_retry(tmp_path: Path):
                 module_name="test-module",
                 runtime_root=tmp_path,
                 world_dir=tmp_path / "world-start",
+                # 会话建立时会构造结构化本地通路（需要 world 元数据与库）。
+                database_url=_fixture_database_url(tmp_path),
                 world_store=SimpleNamespace(load=lambda: {"pc": {"name": "Alice"}}),
             )
             self.narrative_model = "test-model"
@@ -3224,7 +3240,7 @@ def test_archived_world_http_claim_rejected_before_runtime_context_and_delete_id
                     fake_options.assert_not_called()
 
 
-def test_settle_case_rejected_in_lobby_without_reserving_control():
+def test_settle_case_rejected_in_lobby_without_reserving_control(tmp_path: Path):
     """lobby 中 settle_case 在 run_room_message_loop 协议边界被拒，不进入控制锁/引擎。"""
 
     class SettleSocket:
@@ -3258,7 +3274,7 @@ def test_settle_case_rejected_in_lobby_without_reserving_control():
     )
     socket = SettleSocket()
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
     )
 
     async def scenario():
@@ -3289,7 +3305,7 @@ def test_settle_case_rejected_in_lobby_without_reserving_control():
     assert room.control_action_active is False
 
 
-def test_settle_case_passes_through_when_room_is_playing():
+def test_settle_case_passes_through_when_room_is_playing(tmp_path: Path):
     """playing 中 settle_case 沿用原有路径：预留控制行动并提交到房间驱动。"""
 
     class SettleSocket:
@@ -3332,7 +3348,7 @@ def test_settle_case_passes_through_when_room_is_playing():
     room.driver_transport = driver
     socket = SettleSocket()
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
     )
 
     async def scenario():

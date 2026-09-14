@@ -43,6 +43,7 @@ export function SoloLobbyScreen() {
   const [moduleId, setModuleId] = useState("");
   const [worldName, setWorldName] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [structuredWorld, setStructuredWorld] = useState(false);
   // 「开始新冒险」CTA ↔ 创建卡成对换场：CTA 淡出下沉后创建卡弹入，
   // 「收起」反向播回；reduced-motion 由钩子直接落定。
   const createSwap = usePhaseTransition(
@@ -302,7 +303,9 @@ export function SoloLobbyScreen() {
                   className="btn-primary"
                   disabled={createBusy || !selectedModule}
                   onClick={() =>
-                    void createSoloWorld(selectedModule, worldName)
+                    void createSoloWorld(selectedModule, worldName, {
+                      structured: structuredWorld,
+                    })
                   }
                 >
                   {createBusy ? "创建中……" : "创建冒险"}
@@ -316,6 +319,17 @@ export function SoloLobbyScreen() {
                   收起
                 </button>
               </div>
+              <label className="online-inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={structuredWorld}
+                  disabled={createBusy}
+                  onChange={(event) => setStructuredWorld(event.target.checked)}
+                />
+                <span>
+                  结构化操作模式（人类主持）：按钮提交明确操作，不需要模型配置
+                </span>
+              </label>
               {createError && (
                 <p className="online-notice online-notice--error" role="alert">
                   {createError}

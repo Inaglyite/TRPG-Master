@@ -1,4 +1,9 @@
-import { useAppStore, type ClueItem } from "../../../state/app-store";
+import { type ClueItem } from "../../../state/app-store";
+import {
+  beginPresentClue,
+  presentUnavailableReason,
+} from "../../../investigator-structured-actions";
+import { usePanelClues } from "../../../investigator-panel-view";
 import { clueSummaryOf } from "../../../investigator-actions";
 import {
   useInvestigatorPanelStore,
@@ -82,9 +87,12 @@ function ClueRow({
   expanded: boolean;
   onToggleDetail: (key: string) => void;
   onImage: (src: string, alt: string) => void;
-  onPresent: (key: string, summary: string, text: string) => void;
+  onPresent: (key: string, summary: string, clueId: string | null) => void;
 }) {
   const summary = clueSummaryOf(item);
+  // 结构化模式下禁用原因直接写在按钮上：缺稳定 ID 或服务端未提供投影时，
+  // 按钮禁用而不是退回自然语言出示。
+  const presentBlocked = presentUnavailableReason(item.id);
   const src = item.asset?.asset_data_uri || item.asset?.asset_url || "";
   const alt = item.asset?.label || item.asset?.file || "线索图片";
   return (
@@ -141,7 +149,9 @@ function ClueRow({
         <button
           type="button"
           className="btn-ghost inv-row-btn inv-present-btn"
-          onClick={() => onPresent(clueKey, summary, item.text || "")}
+          disabled={presentBlocked !== null}
+          title={presentBlocked ?? "出示这条线索（不等于转交或消耗）"}
+          onClick={() => onPresent(clueKey, summary, item.id || null)}
         >
           出示
         </button>
@@ -155,7 +165,7 @@ export function ClueCard({
 }: {
   onImage: (src: string, alt: string) => void;
 }) {
-  const clues = useAppStore((state) => state.clues);
+  const { clues, path, ready } = usePanelClues();
   const prefs = useWorldPrefs();
   const toggleCard = useInvestigatorPanelStore((state) => state.toggleCard);
   const setClueFilter = useInvestigatorPanelStore(
@@ -182,7 +192,13 @@ export function ClueCard({
       : [],
   );
 
-  const openPresent = (key: string, summary: string) => {
+  const openPresent = (key: string, summary: string, clueId: string | null) => {
+    // 结构化模式：用服务端稳定 ID 构造结构请求；缺投影时按钮已禁用，
+    // 这里再兜一层，绝不退回自然语言通道。
+    if (path === "structured") {
+      if (clueId && beginPresentClue({ clueId, summary })) return;
+      return;
+    }
     openEditor({
       kind: "present",
       clueKey: key,
@@ -203,6 +219,11 @@ export function ClueCard({
       onToggle={() => toggleCard("clues")}
       summary={`共 ${total} 条`}
     >
+      {path === "structured" && (
+        <p className="inv-path-note" data-path="structured">
+          结构化模式：线索以服务端投影的稳定 ID 提交，出示不等于转交或消耗。
+        </p>
+      )}
       <div
         className="inv-clue-filters"
         role="tablist"
@@ -224,7 +245,14 @@ export function ClueCard({
 
       {/* key=filter：切换筛选时整组重挂载，容器淡入一次 */}
       <div className="inv-clue-groups" key={filter}>
-        {total === 0 && <div className="clue-empty">暂无记录</div>}
+        {total === 0 && path === "structured" && !ready && (
+          <div className="clue-empty">
+            等待服务端提供公开线索投影；结构化模式下不会用文本标签替代 ID。
+          </div>
+        )}
+        {total === 0 && (path === "legacy" || ready) && (
+          <div className="clue-empty">暂无记录</div>
+        )}
         {total > 0 && visibleGroups.length === 0 && (
           <div className="clue-empty">该分类暂无线索</div>
         )}

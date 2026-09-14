@@ -9,7 +9,13 @@
  *      ES 模块的 live binding 机制保证了模块初始化完成后值立即可用。
  */
 
+import {
+  STRUCTURED_EVENT_TYPES as STRUCTURED_PROTOCOL_EVENT_TYPES,
+  interactionPath,
+} from "./protocol/structured";
 import { useAppStore, type ConnectionState } from "./state/app-store";
+import { useMessageStore } from "./state/message-store";
+import { useStructuredStore } from "./state/structured-store";
 import {
   addMsg,
   attachTurnBranchAction,
@@ -85,6 +91,11 @@ import {
   onPlayerNotesError,
 } from "./utility";
 import { parseServerMessage } from "./protocol/server-message";
+import {
+  handleStructuredPayload,
+  rebindStructuredWorld,
+  setStructuredSender,
+} from "./structured-transport";
 import { useOnlineStore, timelineCapabilities } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
 
@@ -114,6 +125,9 @@ function rememberWorld(worldId: unknown, moduleName: unknown) {
   // 世界标识换了就立刻清掉旧地点（顶栏显示“正在同步位置…”），
   // 不等新世界的第一条状态消息，避免把上一个世界的地点留在标题上。
   useSceneStore.getState().setWorld(id);
+  // 结构化游标与请求绑定跟随世界切换：旧世界的迟到事件随后被判为
+  // foreign_world，不会写进新世界的状态与待办。
+  rebindStructuredWorld(id);
   localStorage.setItem(WORLD_ID_KEY, id);
   localStorage.setItem(WORLD_MODULE_KEY, module);
 }
@@ -147,6 +161,28 @@ let reconnectTimer: number | null = null;
 let noticeHideTimer: number | null = null;
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
+
+/**
+ * 结构化请求的出口：与旧文字通道共用 `safeSend`，因此单机与房间都走同一传输
+ * 适配（房间模式下 safeSend 会走 activeTransport，并在快照前排队）。
+ *
+ * 这个注入必须在连接建立时惰性执行：ws.ts ⇄ structured-transport 存在模块
+ * 循环，模块体里直接调用会撞上未初始化的 binding。任何结构化提交都要求
+ * connection === "connected"，所以连接建立时接线足够早。
+ */
+let structuredSenderWired = false;
+function wireStructuredSender(): void {
+  if (structuredSenderWired) return;
+  structuredSenderWired = true;
+  setStructuredSender((payload) => {
+    try {
+      safeSend(JSON.stringify(payload));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
 
 function setConn(connection: ConnectionState) {
   useAppStore.getState().setConnection(connection);
@@ -252,6 +288,7 @@ export type WsTransport = { send: (payload: string) => void };
 let activeTransport: WsTransport | null = null;
 
 export function setActiveTransport(transport: WsTransport | null) {
+  wireStructuredSender();
   activeTransport = transport;
 }
 
@@ -382,6 +419,7 @@ export function announceSoloWorldSwitch(label: string, reason: string): void {
 
 // ---- 连接 ----
 export function connect() {
+  wireStructuredSender();
   if (
     ws &&
     (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
@@ -637,6 +675,10 @@ function handleMessage(e: MessageEvent) {
  * 统一的服务端消息分发入口：单机 /ws 的 onmessage 与多人房间 WS
  * （room-ws.ts）共用。输入为原始 frame（string）或可解析对象。
  */
+// 结构化协议事件类型以协议层为唯一正本（此前这里有一份重复清单，
+// M5 新增 interaction_updated/memory_* 时正是它导致新事件被旧 switch 丢弃）。
+const STRUCTURED_EVENT_TYPES = new Set<string>(STRUCTURED_PROTOCOL_EVENT_TYPES);
+
 export function handleServerPayload(raw: unknown) {
   const parsed = parseServerMessage(raw);
   if (!parsed) {
@@ -644,6 +686,15 @@ export function handleServerPayload(raw: unknown) {
     return;
   }
   const data: any = parsed;
+  // 结构化事件优先：按 world + event_id 去重后投影到既有 UI。
+  // 版本不匹配时明确提示并停止结构化提交，不退回自然语言发送。
+  if (STRUCTURED_EVENT_TYPES.has(String(data.type))) {
+    const inbound = handleStructuredPayload(data);
+    if (inbound.kind === "protocol_mismatch") {
+      addMsg("error", "服务端使用了不同版本的协议，已停止结构化提交。", true);
+    }
+    return;
+  }
   if (!acceptTurnEvent(data)) return;
   if (
     [
@@ -1104,11 +1155,25 @@ export function handleServerPayload(raw: unknown) {
     case "save_available":
       onSaveAvailable(data);
       break;
-    case "loaded":
-      addMsg(
-        "system",
-        data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。",
-      );
+    case "loaded": {
+      // 结构化世界没有消息历史：读档是 CAS 回滚，存档点之后的聊天内容不再成立，
+      // 必须清空聊天区，否则玩家会看到「未来事件」与旧世界的对白。
+      const structuredLoad =
+        interactionPath(useStructuredStore.getState().capabilities) ===
+        "structured";
+      if (data.ok && structuredLoad) {
+        useMessageStore.getState().replaceMessages([]);
+        useMessageStore.getState().resetActionButtons();
+        addMsg(
+          "system",
+          "读档成功：已回到存档点，聊天区已重置（结构化世界的对话不进存档）。",
+        );
+      } else {
+        addMsg(
+          "system",
+          data.ok ? `读档成功，恢复了 ${data.count} 条消息。` : "未找到存档。",
+        );
+      }
       if (recoveryPending && data.ok) {
         showConnectionNotice("进度已恢复，守秘人正在重建当前场景……");
       }
@@ -1116,6 +1181,7 @@ export function handleServerPayload(raw: unknown) {
       // 这里先取一次权威状态，让顶栏位置立刻落到存档里的地点。
       if (data.ok) safeSend(JSON.stringify({ type: "state" }));
       break;
+    }
     case "case_settled": {
       // 账号化多人房间不写本机长期履历（profile 是本地概念），
       // 联机结案只说结算结果；本地模式保留长期履历语义。

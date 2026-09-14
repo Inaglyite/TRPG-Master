@@ -102,6 +102,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const players = members.filter((member) => member.role !== "viewer");
   const myReady = me ? readyUserIds.includes(me.user_id) : false;
   // 开局门禁：全员在线 + 全员准备 + 全员选角 + 房间连接正常（服务端 room_not_ready 兜底）。
+  //
+  // 例外：结构化人类主持房间（structured_v1）里**主持不必认领调查员**
+  // （平台设计 §7）。房主即该房间的 keeper（世界创建时授予 can_keeper），
+  // 因此这里不再要求房主选角；玩家仍然必须有角色。最终仍以服务端
+  // keeper_required / room_not_ready 为准。
+  const structuredRoom = roomMetadata?.execution_profile === "structured_v1";
   const startBlockers: string[] = [];
   for (const member of players) {
     if (!onlineUserIds.includes(member.user_id)) {
@@ -110,9 +116,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
     if (!readyUserIds.includes(member.user_id)) {
       startBlockers.push(`${member.username} 未准备`);
     }
-    if (!member.investigator) {
-      startBlockers.push(`${member.username} 未选择调查员`);
-    }
+    if (member.investigator) continue;
+    if (structuredRoom && member.role === "owner") continue;
+    startBlockers.push(`${member.username} 未选择调查员`);
   }
   if (roomConnection !== "connected") {
     startBlockers.push("房间连接已断开");

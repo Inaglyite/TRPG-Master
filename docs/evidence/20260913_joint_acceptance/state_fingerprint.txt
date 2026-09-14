@@ -1,0 +1,23 @@
+run_final2_start=00:42:29
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+status_lines=74
+diff_sha256=c288ca62d406ed9e167fb81ba3ba5e7cefdf808a96d7595d0226e0d417672248
+e05f5148109f896b  packaging/pyinstaller_runtime_hook.py
+a82745dc4a2048eb  requirements.txt
+8b06505314edc793  tests/test_structured_world_probe_duals.py
+f6c9d342084cfaff  tests/test_packaged_upgrade_evidence.py
+7ad87c346ca3fe0c  tests/test_solo_play_mode.py
+05c8108647b1d5ff  tests/test_multiplayer_membership.py
+68ce2f9fdf75abce  tests/test_multiplayer_combat_routing.py
+fa16d3de46607918  tests/test_settlement_actor_reset.py
+a2b973f23cfc5571  tests/test_database_persistence.py
+e000d00f1e7a6635  tests/test_world_branches.py
+f014fdc1ca6303bc  tests/test_turn_journal.py
+7a77f242c19cb951  tests/test_context_compaction.py
+54391d22e3116bcd  tests/test_context_shadow.py
+964c1cc7b3a4e5da  tests/test_action_adjudication.py
+b4318d21781ea7ef  tests/test_test_runtime_isolation.py
+4e621d1509d10dcc  tests/test_model_timeout.py
+diffstat= 38 files changed, 606 insertions(+), 125 deletions(-)
+untracked_new=46
+captured_at=2026-09-14 00:49:23 CST

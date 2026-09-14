@@ -302,6 +302,7 @@ export async function createRoom(
   module: string,
   name: string,
   maxPlayers: number,
+  options: { structured?: boolean } = {},
 ): Promise<void> {
   const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
@@ -309,6 +310,13 @@ export async function createRoom(
     const world = await createWorld(module, {
       ...(name.trim() ? { name: name.trim() } : {}),
       max_players: maxPlayers,
+      // 结构化操作模式：人类主持，不需要模型配置。
+      ...(options.structured
+        ? {
+            execution_profile: "structured_v1" as const,
+            keeper_mode: "human" as const,
+          }
+        : {}),
     });
     if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ createBusy: false });
@@ -329,6 +337,7 @@ export async function createRoom(
 export async function createSoloWorld(
   module: string,
   name: string,
+  options: { structured?: boolean } = {},
 ): Promise<void> {
   const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
@@ -337,6 +346,13 @@ export async function createSoloWorld(
       ...(name.trim() ? { name: name.trim() } : {}),
       max_players: 1,
       play_mode: "solo",
+      // 结构化操作模式：人类主持自己的单人冒险，不需要模型配置。
+      ...(options.structured
+        ? {
+            execution_profile: "structured_v1" as const,
+            keeper_mode: "human" as const,
+          }
+        : {}),
     });
     if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ createBusy: false });

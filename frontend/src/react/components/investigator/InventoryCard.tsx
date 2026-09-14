@@ -1,70 +1,99 @@
-import { useAppStore } from "../../../state/app-store";
+import { usePanelItems } from "../../../investigator-panel-view";
+import {
+  beginUseItem,
+  useUnavailableReason,
+} from "../../../investigator-structured-actions";
 import {
   useInvestigatorPanelStore,
   useWorldPrefs,
 } from "../../../state/investigator-panel-store";
 import { CollapsibleCard } from "./CollapsibleCard";
 
-// selector 必须返回稳定引用：无库存时复用同一空数组，避免无限重渲染。
-const EMPTY_INVENTORY: string[] = [];
-
 /**
- * 道具卡：权威库存是字符串数组，保留原始标签。
- * 相同标签聚合成一行显示“×N”，仅作展示合并，不冒充后端堆叠数量。
+ * 道具卡：
+ * - legacy 世界：权威库存是字符串数组，同标签合并显示“×N”（仅展示合并）。
+ * - structured_v1 世界：使用服务端投影的物品 ID、数量与可用操作，
+ *   提交结构化请求；标签不再作为实体标识。
+ * 两条路径都不在前端扣减数量。
  */
 export function InventoryCard() {
-  const inventory = useAppStore(
-    (state) => state.character?.inventory || EMPTY_INVENTORY,
-  );
+  const { path, items } = usePanelItems();
   const prefs = useWorldPrefs();
   const toggleCard = useInvestigatorPanelStore((state) => state.toggleCard);
   const openEditor = useInvestigatorPanelStore((state) => state.openEditor);
 
-  const grouped: { label: string; count: number }[] = [];
-  const indexByLabel = new Map<string, number>();
-  for (const label of inventory) {
-    const existing = indexByLabel.get(label);
-    if (existing == null) {
-      indexByLabel.set(label, grouped.length);
-      grouped.push({ label, count: 1 });
-    } else {
-      grouped[existing].count += 1;
-    }
-  }
+  const totalCount = items.reduce(
+    (sum, item) => sum + (item.quantity ?? item.legacyCount),
+    0,
+  );
 
   return (
     <CollapsibleCard
       cardId="items"
       title="道具"
       emblem="✦"
-      count={inventory.length}
+      count={totalCount}
       collapsed={prefs.collapsed.items}
       onToggle={() => toggleCard("items")}
-      summary={`共 ${inventory.length} 件`}
+      summary={`共 ${totalCount} 件`}
     >
-      {grouped.length === 0 && <div className="clue-empty">暂无随身道具</div>}
-      {grouped.map(({ label, count }) => (
-        <div className="inv-item-row" key={label} data-item={label}>
-          <span className="inv-item-label">
-            {label}
-            {count > 1 && <span className="inv-item-count">×{count}</span>}
-          </span>
-          <button
-            type="button"
-            className="btn-ghost inv-row-btn inv-use-btn"
-            onClick={() =>
-              openEditor({
-                kind: "use",
-                itemLabel: label,
-                usage: "",
-                target: "",
-              })
-            }
-          >
-            使用
-          </button>
+      {path === "structured" && (
+        <p className="inv-path-note" data-path="structured">
+          结构化模式：按物品 ID 与数量提交，前端不预扣，由服务端按规则结算。
+        </p>
+      )}
+      {items.length === 0 && (
+        <div className="clue-empty">
+          {path === "structured"
+            ? "等待服务端提供公开物品投影；结构化模式下不会用标签替代 ID。"
+            : "暂无随身道具"}
         </div>
-      ))}
+      )}
+      {items.map((item) => {
+        const blocked = useUnavailableReason(item.id);
+        return (
+          <div
+            className="inv-item-row"
+            key={item.id ?? item.label}
+            data-item={item.label}
+            data-item-id={item.id ?? undefined}
+          >
+            <span className="inv-item-label">
+              {item.label}
+              {(item.quantity ?? item.legacyCount) > 1 && (
+                <span className="inv-item-count">
+                  ×{item.quantity ?? item.legacyCount}
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              className="btn-ghost inv-row-btn inv-use-btn"
+              disabled={blocked !== null}
+              title={blocked ?? "提交一次使用请求（提交不等于扣减）"}
+              onClick={() => {
+                if (path === "structured") {
+                  beginUseItem({
+                    itemId: item.id,
+                    label: item.label,
+                    operations: item.operations,
+                    quantity: item.quantity,
+                  });
+                  return;
+                }
+                openEditor({
+                  kind: "use",
+                  itemLabel: item.label,
+                  usage: "",
+                  target: "",
+                });
+              }}
+            >
+              使用
+            </button>
+          </div>
+        );
+      })}
     </CollapsibleCard>
   );
 }

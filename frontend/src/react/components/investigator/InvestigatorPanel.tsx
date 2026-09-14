@@ -6,6 +6,7 @@ import { CharacterStatusCard } from "./CharacterStatusCard";
 import { ClueCard, groupClues } from "./ClueCard";
 import { InventoryCard } from "./InventoryCard";
 import { PanelActionDialog } from "./PanelActionDialog";
+import { StructuredActionDialog } from "./StructuredActionDialog";
 
 /**
  * 调查员侧栏三卡片组合：人物状态 / 线索 / 道具。
@@ -52,6 +53,7 @@ export function InvestigatorPanel() {
       <ClueCard onImage={(src, alt) => setImage({ src, alt })} />
       <InventoryCard />
       <PanelActionDialog />
+      <StructuredActionDialog />
       {image && (
         <div
           className="handout-overlay"

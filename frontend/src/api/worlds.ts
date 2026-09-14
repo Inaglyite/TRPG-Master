@@ -49,7 +49,17 @@ export type CreatedWorld = z.infer<typeof createdWorldSchema>;
 
 export function createWorld(
   module: string,
-  options: { name?: string; max_players?: number; play_mode?: string } = {},
+  options: {
+    name?: string;
+    max_players?: number;
+    play_mode?: string;
+    /**
+     * 世界执行档位（结构化协议 §2）。缺省不传 = legacy，保持既有节奏；
+     * `structured_v1` 才切换按钮/命令/待办语义。`keeper_mode` 目前固定 human。
+     */
+    execution_profile?: "legacy" | "structured_v1";
+    keeper_mode?: "human" | "assisted" | "agent";
+  } = {},
 ): Promise<CreatedWorld> {
   return apiFetch("/api/worlds", createdWorldSchema, {
     method: "POST",

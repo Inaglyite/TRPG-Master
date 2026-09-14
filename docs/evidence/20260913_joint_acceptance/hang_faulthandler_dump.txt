@@ -1,0 +1,45 @@
+Fatal Python error: Aborted
+
+Current thread 0x000076e0456ad080 (most recent call first):
+  File "/usr/lib/python3.12/selectors.py", line 468 in select
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 1949 in _run_once
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 641 in run_forever
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 674 in run_until_complete
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118 in run
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194 in run
+  File "/home/inaglyite/MyProjects/trpg-master/tests/test_multiplayer_membership.py", line 1244 in test_start_revalidates_roster_after_room_action_lease
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/python.py", line 166 in pytest_pyfunc_call
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/python.py", line 1720 in runtest
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 179 in pytest_runtest_call
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 245 in <lambda>
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 353 in from_call
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 244 in call_and_report
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 137 in runtestprotocol
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/runner.py", line 118 in pytest_runtest_protocol
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/main.py", line 396 in pytest_runtestloop
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/main.py", line 372 in _main
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/main.py", line 318 in wrap_session
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/main.py", line 365 in pytest_cmdline_main
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121 in _multicall
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120 in _hookexec
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512 in __call__
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 199 in main
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 223 in console_main
+  File "/home/inaglyite/MyProjects/trpg-master/.venv/lib/python3.12/site-packages/pytest/__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+
+Extension modules: zstandard.backend_c, charset_normalizer.md, charset_normalizer.cd, requests.packages.charset_normalizer.md, requests.packages.chardet.md, requests.packages.charset_normalizer.cd, requests.packages.chardet.cd, xxhash._xxhash, _cffi_backend, sqlalchemy.cyextension.collections, sqlalchemy.cyextension.immutabledict, sqlalchemy.cyextension.processors, sqlalchemy.cyextension.resultproxy, sqlalchemy.cyextension.util, greenlet._greenlet (total: 15)
+timeout: 被监视的命令已核心转储

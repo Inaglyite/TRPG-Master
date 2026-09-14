@@ -5,6 +5,7 @@ from __future__ import annotations
 import src.ai.model.llm as llm_module
 import src.app.config as config
 import src.app.engine as engine_module
+import src.structured.engine_gate as engine_gate_module
 
 
 def test_model_timeout_default_matches_sdk_behavior(monkeypatch) -> None:
@@ -30,7 +31,9 @@ def test_engine_openai_client_uses_configured_timeout(monkeypatch, tmp_path) -> 
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    monkeypatch.setattr(engine_module, "OpenAI", FakeOpenAI)
+    # 客户端构造已迁到 engine_gate.build_engine_client（structured_v1+human
+    # 世界返回 None，其余照常实例化）。
+    monkeypatch.setattr(engine_gate_module, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(engine_module, "TurnJournal", lambda *args, **kwargs: None)
     monkeypatch.setenv("TRPG_MODEL_TIMEOUT", "77")
     context = engine_module.RuntimeContext.local(runtime_root=tmp_path)

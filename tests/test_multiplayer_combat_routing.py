@@ -16,7 +16,16 @@ from src.gameplay.combat import combat_action, start_combat
 from src.gameplay.investigators import activate_investigator, sync_active_investigator
 from src.multiplayer.messages import run_room_message_loop
 from src.multiplayer.room_runtime import GameRoom, RoomEventHub
+from src.storage.database import Base, get_engine
 from src.storage.persistence import load_game, restore_snapshot, save_game
+
+
+def _fixture_database_url(tmp_path: Path) -> str:
+    """门禁夹具库：连接循环会按 world 元数据探测结构化模式并放行帧，
+    需要能打开且有表的库（世界行缺失时按 legacy 处理，不必造世界）。"""
+    url = f"sqlite:///{tmp_path / 'combat-routing.db'}"
+    Base.metadata.create_all(get_engine(url))
+    return url
 
 
 class ReplySocket:
@@ -55,7 +64,7 @@ class MemoryStore:
         return SimpleNamespace(state=self.load())
 
 
-def test_combat_defender_can_reply_when_not_the_room_current_actor():
+def test_combat_defender_can_reply_when_not_the_room_current_actor(tmp_path: Path):
     room = GameRoom(
         "world-defense-reply",
         SimpleNamespace(),
@@ -75,7 +84,7 @@ def test_combat_defender_can_reply_when_not_the_room_current_actor():
         }
     )
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://")
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path))
     )
 
     async def scenario() -> None:
@@ -274,7 +283,7 @@ def test_turn_tools_mutate_only_the_acting_multiplayer_investigator(tmp_path: Pa
     assert context.world_store.load()["pc"]["name"] == "Alice"
 
 
-def test_owner_skip_moves_room_and_combat_turn_to_online_bob_together():
+def test_owner_skip_moves_room_and_combat_turn_to_online_bob_together(tmp_path: Path):
     store = MemoryStore(
         {
             "active_investigator_id": "inv-alice",
@@ -348,7 +357,7 @@ def test_owner_skip_moves_room_and_combat_turn_to_online_bob_together():
         state_broadcasts.append(target_room.current_actor_user_id)
 
     controller = SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path)),
         room_control_change_blocked=lambda target_room: (
             target_room.action_active or target_room.pending_reply_kind is not None
         ),

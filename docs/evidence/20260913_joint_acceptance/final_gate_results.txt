@@ -1,0 +1,11 @@
+=== 最终定稿复跑（默认顺序）===
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1305 passed, 7 skipped, 1 warning, 116 subtests passed in 379.90s (0:06:19)
+
+=== 前端 E2E 定稿复跑 ===
+[21/21] e2e/structured-solo-online.spec.ts:156:1 › 云端单人结构化：勾选后无 Key 开局，按钮发结构请求且零模型调用
+  1 skipped
+  20 passed (5.5m)
+
+=== E2E 单测（vitest）定稿复跑 ===
+65 files / 715 tests passed

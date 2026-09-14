@@ -14,6 +14,7 @@ import {
   useOnlineStore,
 } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
+import { rebindStructuredWorld } from "./structured-transport";
 import { useStartStore } from "./state/start-store";
 import {
   announceSoloWorldSwitch,
@@ -417,6 +418,12 @@ async function refreshRoomMembers(): Promise<void> {
 
 /** room_state 与 room_full_state 共用的房间控制字段应用（字段存在才覆盖）。 */
 function applyRoomStateFields(message: Record<string, any>): void {
+  // 房间从大厅进入 playing（或回退到大厅）由 room_state 广播，不一定伴随
+  // room_full_state；gameStarted 必须跟着它走，否则开局后顶栏位置行、
+  // “前往…”等依赖“已开局”的入口不会出现。
+  if (typeof message.status === "string") {
+    useStartStore.setState({ gameStarted: message.status === "playing" });
+  }
   useOnlineStore.setState((state) => ({
     roomStatus:
       typeof message.status === "string" ? message.status : state.roomStatus,
@@ -541,6 +548,8 @@ function handleRoomMessage(raw: unknown): void {
       // 若镜像来自另一个世界，store 会先清空再采纳，不残留旧地点）。
       useSceneStore.getState().setWorld(String(message.world_id || ""));
       useSceneStore.getState().applyScene(message.world_id, message.scene);
+      // 房间重连/切世界同样重绑结构化游标。
+      rebindStructuredWorld(String(message.world_id || ""));
       const roomPlaying =
         (typeof message.status === "string"
           ? message.status

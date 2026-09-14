@@ -1,0 +1,49 @@
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+branch=experiment/keeper-platform
+worktree=/home/inaglyite/MyProjects/trpg-master
+dirty_files=96
+diff_sha256=889425c972505f1c39ae9b45afa5909d13c92f9bf8953f8f23e52e7aca228357
+untracked=65
+e35251be90fb8c95  frontend/src/state/structured-store.ts
+32b0105cc191686d  frontend/src/react/components/structured/StructuredCards.tsx
+9c89cc236995fb19  frontend/src/protocol/keeper-commands.ts
+b8e7d7531bc51e5f  frontend/e2e/structured-transition-turn.spec.ts
+d537d6c6a5978b5f  frontend/e2e/structured-transition-agent-live.spec.ts
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+dirty=104
+diff_sha256=1a28943e69b11809c350a639243f00207cf061ef561a666d2e0268ea414c3092
+== 收尾指纹（本轮所有改动之后）==
+2026-09-14 12:25:38
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+dirty=108
+diff_sha256=e7a15ca7790632ee9a75aa88ba20e162ca008df98627b56ce9eb66028e14865d
+9d14c0916ec65bab  frontend/src/ws.ts
+61ea92c83600e12e  frontend/src/state/structured-committed-projection.test.ts
+db911c991be7fad7  frontend/src/structured-load-reset.test.ts
+5261fc73f61431a0  frontend/e2e/structured-interaction-duals.spec.ts
+98f5e3b1a3a84b47  frontend/src/react/components/structured/StructuredCards.test.tsx
+08cfda5cb5253f2f  tools/transition_real_model_check.py
+== 最终指纹 ==
+2026-09-14 12:29:19
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+dirty=109
+diff_sha256=d97f80b22ac088c6eb5056c0d9b8edada4566c0926961aa1da1b37c3a9868fff
+9d14c0916ec65bab  frontend/src/ws.ts
+cb1d0cc8b19bf7ce  frontend/src/structured-effects.ts
+e59435ddf2510d6b  frontend/src/state/structured-store.ts
+5261fc73f61431a0  frontend/e2e/structured-interaction-duals.spec.ts
+== M5 联合验收指纹 ==
+2026-09-14 14:44:10
+head=75516a49677816ad63ba322f7f87ed3ae11962c3
+dirty=132
+diff_sha256=4a8cc6e79907eee1ee9f3442d37cde41e81d470077af544630007d7223bae350
+40d4ada96033811a  frontend/src/protocol/structured.ts
+1d02dbe45c5cadff  frontend/src/protocol/server-message.ts
+1e3d43fc7418bf3e  frontend/src/state/structured-store.ts
+c7a87a158b246004  frontend/src/structured-effects.ts
+ff4867b8697129bf  frontend/src/react/components/structured/StructuredCards.tsx
+57ccd89d3130a0b1  frontend/src/react/components/structured/KeeperConsole.tsx
+879d28b2845f84e9  frontend/src/protocol/keeper-commands.ts
+599500e618a08887  frontend/e2e/structured-context-memory.spec.ts
+78b0040c444134e3  packaging/pyinstaller_runtime_hook.py
+e6807d6594dd10b6  tests/test_packaged_upgrade_evidence.py

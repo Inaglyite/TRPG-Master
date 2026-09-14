@@ -1,7 +1,16 @@
+import { useState } from "react";
+
+import {
+  interactionPath,
+  structuredUnavailableReason,
+} from "../../protocol/structured";
+import { narrationGuardReason } from "../../investigator-structured-actions";
 import { useAppStore } from "../../state/app-store";
 import { useModelStore } from "../../state/model-store";
 import { useOnlineStore } from "../../state/online-store";
 import { sceneLabel, useSceneStore } from "../../state/scene-store";
+import { useStructuredStore } from "../../state/structured-store";
+import { MoveDialog } from "./structured/MoveDialog";
 import { returnToStartMenu } from "../../start";
 import { useStartStore } from "../../state/start-store";
 import { SoloAdventureExitControl } from "./online/SoloAdventureExitControl";
@@ -51,6 +60,25 @@ export function AppHeader() {
   };
 
   const sceneText = sceneLabel({ status: sceneStatus, name: sceneName });
+  // 「前往…」只在结构化协议世界出现；不可用时按钮禁用并写明原因。
+  const panelPath = useStructuredStore((state) =>
+    interactionPath(state.capabilities),
+  );
+  const submitReady = useAppStore(
+    (state) =>
+      state.connection === "connected" && !state.dialog && !state.ending,
+  );
+  const moveBlocked = useStructuredStore((state) => {
+    const unavailable = structuredUnavailableReason(
+      state.capabilities,
+      state.protocolNotice,
+    );
+    if (unavailable) return unavailable;
+    if (!state.capabilities.moveAction) return "服务端未开放移动命令。";
+    return narrationGuardReason();
+  });
+  const sceneMoveAvailable = panelPath === "structured" && gameStarted;
+  const [moveOpen, setMoveOpen] = useState(false);
 
   return (
     <>
@@ -65,7 +93,9 @@ export function AppHeader() {
           />
         </h1>
         {/* 开局后持续显示“当前已结算位置”。地点名由服务端投影保证是玩家
-            可知的公开名称；超长时省略，完整名称放在 title 里。 */}
+            可知的公开名称；超长时省略，完整名称放在 title 里。
+            结构化模式下右侧提供“前往…”入口：只列服务端公开目的地，
+            只有已提交的场景事件会改这一行。 */}
         {gameStarted && (
           <p
             className="header-scene"
@@ -73,11 +103,28 @@ export function AppHeader() {
             title={`当前场景 · ${sceneText}`}
             aria-label={`当前场景：${sceneText}`}
           >
-            当前场景 · <span className="header-scene-name">{sceneText}</span>
+            <span className="header-scene-label">
+              当前场景 · <span className="header-scene-name">{sceneText}</span>
+            </span>
+            {sceneMoveAvailable && (
+              <button
+                type="button"
+                className="btn-ghost header-scene-move"
+                data-testid="btn-move"
+                title={
+                  moveBlocked ?? "选择目的地（表示现在出发；抵达不等于调查）"
+                }
+                disabled={moveBlocked !== null}
+                onClick={() => setMoveOpen(true)}
+              >
+                前往…
+              </button>
+            )}
           </p>
         )}
         {mode === "online" && <SoloAdventureExitControl />}
       </div>
+      {moveOpen && <MoveDialog onClose={() => setMoveOpen(false)} />}
       <div id="toolbar">
         {saveOpsVisible && (
           <>

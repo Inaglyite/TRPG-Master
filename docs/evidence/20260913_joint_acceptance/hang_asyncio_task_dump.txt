@@ -1,0 +1,8 @@
+=== task Task-1 <coroutine object test_start_revalidates_roster_after_room_action_lease.<locals>.scenario at 0x749a6a7d6c30>
+  frame /home/inaglyite/MyProjects/trpg-master/tests/test_multiplayer_membership.py:1231 scenario
+    local task: done=True cancelled=False
+      exception=OperationalError('(sqlite3.OperationalError) no such table: worlds')
+    local room status='lobby' action_active=False
+    local socket messages=[]
+    room-loop exception=OperationalError('(sqlite3.OperationalError) no such table: worlds')
+=== END ===

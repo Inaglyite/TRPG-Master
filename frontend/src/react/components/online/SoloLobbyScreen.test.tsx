@@ -190,7 +190,21 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "选择模组" }));
     fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
-    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查");
+    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查", {
+      structured: false,
+    });
+  });
+
+  it("勾选结构化操作模式后创建云端单人冒险会带上 execution_profile", async () => {
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
+    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
+    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
+      structured: true,
+    });
   });
 
   it("开始新冒险换场：CTA 先播 leaving，创建卡再播 entering，收起反向播回", () => {

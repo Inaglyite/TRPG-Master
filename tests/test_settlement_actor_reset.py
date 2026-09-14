@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +10,15 @@ import pytest
 
 from src.multiplayer.messages import run_room_message_loop
 from src.multiplayer.room_runtime import GameRoom, RoomDriverTransport, RoomEventHub
+from src.storage.database import Base, get_engine
+
+
+def _fixture_database_url(tmp_path: Path) -> str:
+    """门禁夹具库：连接循环会按 world 元数据探测结构化模式并放行帧，
+    需要能打开且有表的库（世界行缺失时按 legacy 处理，不必造世界）。"""
+    url = f"sqlite:///{tmp_path / 'settlement.db'}"
+    Base.metadata.create_all(get_engine(url))
+    return url
 
 
 class _QueueSocket:
@@ -41,8 +51,8 @@ class _Driver:
 class _Controller:
     """Minimal room controller; roster is mutable so the test can re-claim."""
 
-    def __init__(self, roster: list[dict], playable_members: set[str]):
-        self.deps = SimpleNamespace(database_url=lambda: "sqlite://")
+    def __init__(self, roster: list[dict], playable_members: set[str], database_url: str):
+        self.deps = SimpleNamespace(database_url=lambda: database_url)
         self.roster = roster
         self.playable_members = set(playable_members)
 
@@ -56,7 +66,7 @@ class _Controller:
         pass
 
 
-def test_next_start_after_settlement_uses_owner_as_actor():
+def test_next_start_after_settlement_uses_owner_as_actor(tmp_path: Path):
     """成功结案后旧 actor 释放 claim 不再卡住下一次 start（最小回归）。
 
     结案前 current_actor_user_id 是上一局的 player。旧 actor 在 lobby 释放
@@ -111,7 +121,9 @@ def test_next_start_after_settlement_uses_owner_as_actor():
         # 里只剩 owner 的认领。
         room.set_ready("owner", True)
         room.set_ready("player", True)
-        controller = _Controller([owner_claim], {"owner", "player"})
+        controller = _Controller(
+            [owner_claim], {"owner", "player"}, _fixture_database_url(tmp_path)
+        )
         calls = {"count": 0}
 
         def re_claim_player() -> None:

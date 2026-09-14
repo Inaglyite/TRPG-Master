@@ -56,7 +56,7 @@ class WorldBranchTests(unittest.TestCase):
             project_root=root,
             runtime_root=root,
         )
-        with patch("src.app.engine.OpenAI", return_value=object()):
+        with patch("src.structured.engine_gate.OpenAI", return_value=object()):
             engine = GameEngine(context)
         engine.prepare_session()
         return engine
@@ -112,7 +112,7 @@ class WorldBranchTests(unittest.TestCase):
             history = branch.context.world_dir / "turns" / "index.json"
             self.assertTrue(history.is_file())
 
-            with patch("src.app.engine.OpenAI", return_value=object()):
+            with patch("src.structured.engine_gate.OpenAI", return_value=object()):
                 branch_engine = GameEngine(branch.context)
             branch_engine.prepare_session()
             branch_engine.adopt_message_history(branch.messages)

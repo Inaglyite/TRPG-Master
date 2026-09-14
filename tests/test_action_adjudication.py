@@ -166,7 +166,7 @@ def test_full_turn_executes_model_selected_difficulty_and_persists_outcome(tmp_p
     context = RuntimeContext(PROJECT_ROOT, tmp_path, "adjudication-test", "mansion_of_madness").ensure_initialized()
     context.world_store.restore(world())
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response(proposal()))))
-    with patch("src.app.engine.OpenAI", return_value=client):
+    with patch("src.structured.engine_gate.OpenAI", return_value=client):
         engine = GameEngine(context)
     engine._retrieve_lore_context = lambda *_: None
     engine._detect_content_skill_hint = lambda *_: None
@@ -260,7 +260,7 @@ def test_time_settlement_is_announced_to_narrator(tmp_path, monkeypatch):
     context.world_store.restore(world())
     timed = {**proposal(), "time_minutes": 30}
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response(timed))))
-    with patch("src.app.engine.OpenAI", return_value=client):
+    with patch("src.structured.engine_gate.OpenAI", return_value=client):
         engine = GameEngine(context)
     engine._retrieve_lore_context = lambda *_: None
     engine._detect_content_skill_hint = lambda *_: None

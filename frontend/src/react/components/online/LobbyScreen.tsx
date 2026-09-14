@@ -41,6 +41,7 @@ export function LobbyScreen() {
   const [moduleId, setModuleId] = useState("");
   const [roomName, setRoomName] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(4);
+  const [structuredRoom, setStructuredRoom] = useState(false);
   const [token, setToken] = useState("");
 
   const moduleTitle = (id: string) =>
@@ -234,12 +235,25 @@ export function LobbyScreen() {
             className="btn-primary"
             disabled={createBusy || !selectedModule}
             onClick={() =>
-              void createRoom(selectedModule, roomName, maxPlayers)
+              void createRoom(selectedModule, roomName, maxPlayers, {
+                structured: structuredRoom,
+              })
             }
           >
             {createBusy ? "创建中……" : "创建房间"}
           </button>
         </div>
+        <label className="online-inline-toggle">
+          <input
+            type="checkbox"
+            checked={structuredRoom}
+            disabled={createBusy}
+            onChange={(event) => setStructuredRoom(event.target.checked)}
+          />
+          <span>
+            结构化操作模式（人类主持）：按钮提交明确操作，不需要模型配置
+          </span>
+        </label>
         {createError && (
           <p className="online-notice online-notice--error" role="alert">
             {createError}

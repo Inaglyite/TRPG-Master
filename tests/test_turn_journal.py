@@ -58,7 +58,7 @@ class TurnJournalTests(unittest.TestCase):
             project_root=root,
             runtime_root=root,
         )
-        with patch("src.app.engine.OpenAI", return_value=object()):
+        with patch("src.structured.engine_gate.OpenAI", return_value=object()):
             engine = GameEngine(context)
         engine.prepare_session()
         return engine
@@ -364,7 +364,7 @@ class TurnJournalTests(unittest.TestCase):
                 project_root=root,
                 runtime_root=root,
             )
-            with patch("src.app.engine.OpenAI", return_value=object()):
+            with patch("src.structured.engine_gate.OpenAI", return_value=object()):
                 engine = GameEngine(context)
             engine.prepare_session()
             engine._stream_llm = lambda *_args, **_kwargs: (

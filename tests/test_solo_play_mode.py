@@ -797,11 +797,19 @@ class _Driver:
         self.submitted.append(json.loads(payload))
 
 
-def _guard_controller(roster: list[dict], members: set[str]):
+def _guard_controller(roster: list[dict], members: set[str], database_url: str):
+    """门禁夹具：连接循环会按 world 元数据判定结构化模式与帧放行，
+    需要能打开的真实库（世界行缺失时按 legacy 处理，不需要造世界）。"""
     return SimpleNamespace(
-        deps=SimpleNamespace(database_url=lambda: "sqlite://"),
+        deps=SimpleNamespace(database_url=lambda: database_url),
         room_roster=lambda _world_id: (list(roster), set(members)),
     )
+
+
+def _fixture_db(tmp_path: Path) -> str:
+    url = sqlite_url(tmp_path)
+    Base.metadata.create_all(get_engine(url))
+    return url
 
 
 def test_solo_start_skips_ready_gates_and_auto_claims_investigator(tmp_path: Path):
@@ -903,7 +911,7 @@ def test_multiplayer_world_start_keeps_ready_and_claim_gates(tmp_path: Path):
     async def scenario():
         with pytest.raises(RuntimeError, match="test complete"):
             await run_room_message_loop(
-                _guard_controller(roster, {"owner", "player"}),
+                _guard_controller(roster, {"owner", "player"}, _fixture_db(tmp_path)),
                 socket,
                 room,
                 SimpleNamespace(id="owner"),
@@ -928,7 +936,9 @@ def test_multiplayer_world_start_keeps_ready_and_claim_gates(tmp_path: Path):
     assert room.status == "lobby"
 
 
-def test_action_in_progress_rejects_second_turn_across_worlds():
+def test_action_in_progress_rejects_second_turn_across_worlds(
+    tmp_path: Path,
+):
     """同一账号在别的世界已有生成中回合时，新 action 被拒 action_in_progress。"""
     roster = [
         {
@@ -954,7 +964,7 @@ def test_action_in_progress_rejects_second_turn_across_worlds():
     async def scenario():
         with pytest.raises(RuntimeError, match="test complete"):
             await run_room_message_loop(
-                _guard_controller(roster, {"owner"}),
+                _guard_controller(roster, {"owner"}, _fixture_db(tmp_path)),
                 socket,
                 room,
                 SimpleNamespace(id="owner"),
@@ -975,7 +985,9 @@ def test_action_in_progress_rejects_second_turn_across_worlds():
     assert driver.submitted == []
 
 
-def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
+def test_action_rate_limit_rejects_burst(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """超过 TRPG_ACTION_RATE_PER_MINUTE 的行动被拒 rate_limited。"""
     monkeypatch.setenv("TRPG_ACTION_RATE_PER_MINUTE", "2")
     roster = [
@@ -1007,7 +1019,7 @@ def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
     async def scenario():
         with pytest.raises(RuntimeError, match="test complete"):
             await run_room_message_loop(
-                _guard_controller(roster, {"owner"}),
+                _guard_controller(roster, {"owner"}, _fixture_db(tmp_path)),
                 socket,
                 room,
                 SimpleNamespace(id="owner"),
@@ -1029,7 +1041,9 @@ def test_action_rate_limit_rejects_burst(monkeypatch: pytest.MonkeyPatch):
     assert rejection["code"] == "rate_limited"
 
 
-def test_daily_turn_quota_rejects_when_exhausted(monkeypatch: pytest.MonkeyPatch):
+def test_daily_turn_quota_rejects_when_exhausted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """超过 TRPG_DAILY_TURN_QUOTA 的行动被拒 daily_quota_exceeded。"""
     monkeypatch.setenv("TRPG_ACTION_RATE_PER_MINUTE", "10")
     monkeypatch.setenv("TRPG_DAILY_TURN_QUOTA", "1")
@@ -1062,7 +1076,7 @@ def test_daily_turn_quota_rejects_when_exhausted(monkeypatch: pytest.MonkeyPatch
     async def scenario():
         with pytest.raises(RuntimeError, match="test complete"):
             await run_room_message_loop(
-                _guard_controller(roster, {"owner"}),
+                _guard_controller(roster, {"owner"}, _fixture_db(tmp_path)),
                 socket,
                 room,
                 SimpleNamespace(id="owner"),
@@ -1228,16 +1242,18 @@ def test_start_passes_gate_when_byok_configured(tmp_path: Path):
     assert room.status == "starting"
 
 
-def test_readiness_db_error_fails_closed():
-    """配置存储故障时门禁 fail-closed：拒绝但保留房间连接与 lobby 状态。"""
+def test_readiness_db_error_fails_closed(tmp_path: Path):
+    """配置存储故障时门禁 fail-closed：拒绝但保留房间连接与 lobby 状态。
 
-    class BrokenDeps:
-        @staticmethod
-        def database_url() -> str:
-            return "sqlite:////nonexistent-dir/broken.db"
+    连接循环与世界探针需要 ``worlds`` 表可读，因此这里建一个只含 worlds 的
+    库：世界元数据读得到（按 legacy 放行），而模型配置存储的表缺失 —— 正是
+    本用例要覆盖的「配置存储故障」。
+    """
+    url = sqlite_url(tmp_path)
+    World.__table__.create(get_engine(url))
 
     controller = SimpleNamespace(
-        deps=BrokenDeps(),
+        deps=SimpleNamespace(database_url=lambda: url),
         room_roster=lambda _world_id: ([], set()),
     )
     room, driver = _solo_start_room("owner")

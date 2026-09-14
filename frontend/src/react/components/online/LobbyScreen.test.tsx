@@ -93,6 +93,21 @@ describe("LobbyScreen 房间列表", () => {
     expect(enterRoom).toHaveBeenCalledWith("world-1");
   });
 
+  it("勾选结构化操作模式后创建房间会带上 execution_profile", () => {
+    render(<LobbyScreen />);
+    fireEvent.change(screen.getByLabelText("选择模组"), {
+      target: { value: "example.whispering-archive@1.0.0" },
+    });
+    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.click(screen.getByRole("button", { name: "创建房间" }));
+    expect(createRoom).toHaveBeenCalledWith(
+      "example.whispering-archive@1.0.0",
+      "",
+      4,
+      { structured: true },
+    );
+  });
+
   it("无房间名称时回退模组标题", () => {
     useOnlineStore.setState({
       worldsStatus: "ready",
@@ -152,10 +167,12 @@ describe("LobbyScreen 创建与加入", () => {
       target: { value: "2" },
     });
     fireEvent.click(screen.getByRole("button", { name: "创建房间" }));
+    // 第 4 个参数是结构化操作开关：默认关闭，不改变既有房间节奏。
     expect(createRoom).toHaveBeenCalledWith(
       "example.whispering-archive@1.0.0",
       "周末跑团",
       2,
+      { structured: false },
     );
   });
 

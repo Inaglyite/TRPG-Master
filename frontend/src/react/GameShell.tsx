@@ -3,6 +3,8 @@ import { AppHeader } from "./components/AppHeader";
 import { ConnectionNotice } from "./components/ConnectionNotice";
 import { DecisionModal, GameControls } from "./components/GameControls";
 import { MessageList } from "./components/MessageList";
+import { KeeperConsole } from "./components/structured/KeeperConsole";
+import { StructuredDock } from "./components/structured/StructuredCards";
 import { ModeSelectScreen } from "./components/ModeSelectScreen";
 import { ModelSettingsPanel } from "./components/ModelSettingsPanel";
 import { OnlineShell } from "./components/online/OnlineShell";
@@ -27,6 +29,8 @@ export function GameShell() {
         <main id="main">
           <div id="chat-panel">
             {mode === "online" && <OnlineRoomDock />}
+            <StructuredDock />
+            <KeeperConsole />
             <HandoutLayer />
             <ConnectionNotice />
             <MessageList />
