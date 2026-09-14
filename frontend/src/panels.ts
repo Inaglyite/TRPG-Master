@@ -16,6 +16,8 @@ import {
   useOnlineStore,
 } from "./state/online-store";
 import { useStartStore } from "./state/start-store";
+import { interactionPath } from "./protocol/structured";
+import { useStructuredStore } from "./state/structured-store";
 import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
 import { safeSend } from "./ws";
@@ -236,9 +238,15 @@ export function consumeResumeAfterSwitch(): boolean {
 /** 从当前进度的最近完成回合创建时间线分支。 */
 export function createBranchFromCurrentTurn(label: string) {
   const turnId = useAppStore.getState().latestBranchTurnId;
-  if (!turnId) return;
+  const structured =
+    interactionPath(useStructuredStore.getState().capabilities) ===
+    "structured";
+  if (!turnId && !structured) return;
   if (useAppStore.getState().mode === "online") {
     if (!timelineCapabilities().canCreateBranch) return;
+    // 云端分支要具体的回合 ID：结构化世界没有回合，服务端会拒空 turn_id，
+    // 这里不猜 ID，交给本地路径（见交付记录里给后端的清单）。
+    if (!turnId) return;
     safeSend(
       JSON.stringify({
         type: "solo_branch_create",
@@ -248,6 +256,7 @@ export function createBranchFromCurrentTurn(label: string) {
     );
     return;
   }
+  // 本地结构化世界从「当前已提交状态」分叉，不基于回合（服务端同样处理）。
   safeSend(
     JSON.stringify({
       type: "turn_branch_create",

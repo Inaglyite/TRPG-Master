@@ -339,9 +339,10 @@ function applyRequestUpdate(
 ): PendingRequest {
   const status = asStatus(payload.status);
   const parsed = readAwaitingTodo(payload.awaiting);
-  // 终态时清掉待办：已收尾的请求不能留着「尚未执行」的指纹。
+  // 「尚未执行」只属于 awaiting_player：服务端在其余终态/暂停时就把 awaiting
+  // 从记录里弹掉，前端若继续留着，就会和刷新后的快照投影不一致。
   const awaiting =
-    parsed ?? (isTerminalActionStatus(status) ? null : request.awaiting);
+    parsed ?? (status === "awaiting_player" ? request.awaiting : null);
   return {
     ...request,
     status,
@@ -566,7 +567,15 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           const id = str(record.request_id);
           if (!id) continue;
           const status = asStatus(record.status ?? "queued");
-          const awaiting = readAwaitingTodo(record.awaiting);
+          // 与实时路径同一条规则：只有 awaiting_player 才有「尚未执行」明细，
+          // 别的状态即便载荷里带着也不恢复（否则终态请求会复活一条待办）。
+          const awaiting =
+            status === "awaiting_player"
+              ? readAwaitingTodo(record.awaiting)
+              : null;
+          // 快照里的 `detail` 是可操作原因（暂停/失败/等待）：刷新后玩家仍要看到
+          // 「为什么停下了、能不能接管」，不能只说一句「已暂停」。
+          const detail = str(record.detail);
           const existing = requests[id];
           if (!existing) {
             requestOrder.push(id);
@@ -577,7 +586,7 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               status,
               awaiting,
               outcome: null,
-              detail: "",
+              detail,
               errorCode: null,
               errorMessage: null,
               payload: null,
@@ -594,7 +603,8 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             status,
             awaiting:
               awaiting ??
-              (isTerminalActionStatus(status) ? null : existing.awaiting),
+              (status === "awaiting_player" ? existing.awaiting : null),
+            detail: detail || existing.detail,
             updatedAt: Date.now(),
           };
         }

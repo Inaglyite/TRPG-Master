@@ -30,6 +30,7 @@ import { structuredUnavailableReason } from "../../../protocol/structured";
 import { sendMemoryQuery } from "../../../structured-transport";
 import {
   activeRequests,
+  openInteractions,
   useStructuredStore,
 } from "../../../state/structured-store";
 import { useOnlineStore } from "../../../state/online-store";
@@ -67,6 +68,10 @@ export function KeeperConsole() {
   const keeperMaterial = useStructuredStore((state) => state.keeperMaterial);
   const requestsMap = useStructuredStore((state) => state.requests);
   const requestOrder = useStructuredStore((state) => state.requestOrder);
+  const interactionMap = useStructuredStore((state) => state.interactions);
+  const interactionOrder = useStructuredStore(
+    (state) => state.interactionOrder,
+  );
   const currentUserId = useOnlineStore((state) => state.user?.id ?? null);
 
   const [open, setOpen] = useState(false);
@@ -111,6 +116,16 @@ export function KeeperConsole() {
     (state) => state.characterOptions,
   );
   const roomMembers = useOnlineStore((state) => state.members);
+  // 候选列表要在 candidates 之前算：主持台里 request_id / thread_id 都是稳定 ID，
+  // 只能从服务端投影里挑，不能手抄。
+  const pendingRequests = useMemo(
+    () => activeRequests({ requests: requestsMap, requestOrder }),
+    [requestsMap, requestOrder],
+  );
+  const openThreads = useMemo(
+    () => openInteractions({ interactions: interactionMap, interactionOrder }),
+    [interactionMap, interactionOrder],
+  );
   const candidates: KeeperCandidates = useMemo(
     () => ({
       // 房间调查员名单来自房间镜像与成员信息：keeper 需要它指定线索接收者、
@@ -158,16 +173,35 @@ export function KeeperConsole() {
         id: item.id,
         name: `${item.label} ×${item.quantity}`,
       })),
-      // 素材与玩家请求由服务端投影；M0 未提供时保持空列表并说明。
+      // 素材由服务端投影；M0 未提供时保持空列表并说明。
       assets: [],
-      requests: [],
+      // 玩家请求与「当前交互」线程：主持收尾/关线程都要用稳定 ID，
+      // 不能让主持手抄卡片上根本不显示的值（猜错 ID 服务端必拒）。
+      requests: pendingRequests.map((request) => ({
+        id: request.requestId,
+        name: `${request.kind || "请求"} · ${request.detail || request.requestId}`.slice(
+          0,
+          80,
+        ),
+      })),
+      threads: openThreads.map((thread) => ({
+        id: thread.threadId,
+        name: `${thread.pendingAction.note || thread.status} · ${thread.threadId}`.slice(
+          0,
+          80,
+        ),
+      })),
     }),
-    [targets, destinations, clues, items, roomInvestigators, roomMembers],
-  );
-
-  const pending = useMemo(
-    () => activeRequests({ requests: requestsMap, requestOrder }),
-    [requestsMap, requestOrder],
+    [
+      targets,
+      destinations,
+      clues,
+      items,
+      roomInvestigators,
+      roomMembers,
+      pendingRequests,
+      openThreads,
+    ],
   );
 
   const spec = findKeeperCommand(activeKind);
@@ -264,11 +298,11 @@ export function KeeperConsole() {
 
               <section aria-label="待处理行动">
                 <h4 className="keeper-section-title">待处理行动</h4>
-                {pending.length === 0 ? (
+                {pendingRequests.length === 0 ? (
                   <p className="clue-empty">暂无待处理请求</p>
                 ) : (
                   <ul className="keeper-pending-list">
-                    {pending.map((request) => (
+                    {pendingRequests.map((request) => (
                       <li key={request.requestId}>
                         <span className="keeper-pending-label">
                           {request.label}

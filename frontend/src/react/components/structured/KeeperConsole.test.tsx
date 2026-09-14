@@ -234,6 +234,50 @@ describe("KeeperConsole", () => {
     expect(screen.getByText("待处理行动")).toBeInTheDocument();
   });
 
+  it("收尾表单的 request_id / thread_id 提供候选，不允许主持手抄 ID", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.getState().registerOutgoing({
+      requestId: "req-player-1",
+      kind: "move",
+      label: "前往",
+      payload: {},
+      digest: "",
+    });
+    useStructuredStore.getState().applySnapshot(
+      {
+        ...EVENT_FIXTURES.snapshot.payload,
+        interactions: [
+          {
+            thread_id: "thr_open_1",
+            status: "open",
+            investigator_id: "inv-alice",
+            pending_action: { kind: "move", note: "尚未出发前往医学院" },
+            disclosed: [],
+            waiting_on: "inv-alice",
+            origin_request_id: "req-player-1",
+            last_request_id: "req-player-1",
+          },
+        ],
+      } as Record<string, unknown>,
+      WORLD_ID,
+    );
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-resolve_intent"));
+
+    const requestOptions = Array.from(
+      document.querySelectorAll('[data-field="request_id"] option'),
+    ).map((option) => (option as HTMLOptionElement).value);
+    expect(requestOptions).toContain("req-player-1");
+
+    const threadOptions = Array.from(
+      document.querySelectorAll('[data-field="thread_id"] option'),
+    ).map((option) => (option as HTMLOptionElement).value);
+    expect(threadOptions).toContain("thr_open_1");
+    // 已关闭的线程不再出现在候选里（不会误关）
+    expect(threadOptions).not.toContain("thr_closed");
+  });
+
   it("授权资料：keeper 看到完整线索登记表；未提供主持资料时如实说明", () => {
     enableStructured({ user_id: null, mode: "human" });
     render(<KeeperConsole />);

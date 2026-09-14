@@ -749,10 +749,19 @@ export class StructuredEventSequencer {
     // 下发（M1 gateway：快照不是新事件）。按 event_id 去重会把开局后的首份
     // 快照当成重复丢掉，客户端就会一直拿着过期 revision 提交并被拒。快照
     // 因此不参与去重，只推进游标；重复应用同一份快照是幂等的。
-    if (!envelope.isSnapshot && envelope.event_id <= this.lastEventId) {
+    // 合成信封（世界不存在/存储故障时的回退 `request_error`）可能带
+    // event_id=0：它不是库里的事件，既不能按 event_id 去重（游标已经 ≥0 时
+    // 会被判成重复而丢掉，错误提示就永远到不了界面），也不能推进游标
+    // （会把断线补发的起点拉回去）。这类信封只按内容处理。
+    const synthetic = !envelope.isSnapshot && !(envelope.event_id > 0);
+    if (
+      !envelope.isSnapshot &&
+      !synthetic &&
+      envelope.event_id <= this.lastEventId
+    ) {
       return "duplicate";
     }
-    this.lastEventId = envelope.event_id;
+    if (!synthetic) this.lastEventId = envelope.event_id;
     // revision 与 sequence 只前进，不倒退；不用于丢弃事件。
     this.lastRevision = Math.max(this.lastRevision, envelope.revision);
     if (typeof envelope.sequence === "number") {

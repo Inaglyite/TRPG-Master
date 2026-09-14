@@ -424,6 +424,35 @@ describe("事件解析与游标", () => {
     );
     expect(sequencer.cursor.revision).toBe(1);
   });
+
+  it("event_id=0 的合成信封不会被去重丢掉，也不推进/回退游标", () => {
+    const sequencer = new StructuredEventSequencer();
+    sequencer.accept({ world_id: "w1", event_id: 7, revision: 4 });
+    // 世界不存在/存储故障时的回退 request_error：合成信封，不在库里
+    expect(
+      sequencer.accept({ world_id: "w1", event_id: 0, revision: 0 }),
+      "合成信封必须按内容处理（否则错误提示到不了界面）",
+    ).toBe("apply");
+    expect(sequencer.cursor.eventId, "不能把游标拉回 0").toBe(7);
+    expect(sequencer.cursor.revision).toBe(4);
+    // 之后正常事件照旧按 event_id 去重
+    expect(sequencer.accept({ world_id: "w1", event_id: 7, revision: 5 })).toBe(
+      "duplicate",
+    );
+    expect(sequencer.accept({ world_id: "w1", event_id: 8, revision: 5 })).toBe(
+      "apply",
+    );
+  });
+
+  it("同一份合成信封重复到达时都按内容处理（不因去重而丢第一条）", () => {
+    const sequencer = new StructuredEventSequencer();
+    expect(sequencer.accept({ world_id: "w1", event_id: 0, revision: 0 })).toBe(
+      "apply",
+    );
+    expect(sequencer.accept({ world_id: "w1", event_id: 0, revision: 0 })).toBe(
+      "apply",
+    );
+  });
 });
 
 describe("capability 类型与常量", () => {

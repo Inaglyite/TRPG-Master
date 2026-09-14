@@ -571,6 +571,115 @@ test("对偶：换目的地 / 普通直接移动 / 取消", async ({ page }) => 
   expect(modelRequests.length).toBe(boot.modelCallsAfterBoot);
 });
 
+test("追问：正常回答并等待是合法完成，原交互保持存活，直到原动作真的执行", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  page.setDefaultTimeout(30_000);
+  const frames = collectFrames(page);
+  const boot = await bootStructuredWorld(page, frames, "human");
+  // 目的地从「前往」对话框实时挑（快照列表在移动后会滞后）
+  const dialogDestinations = await openMoveDialog(page);
+  const target = dialogDestinations[0];
+  await page.getByRole("button", { name: "取消" }).click();
+  const sceneBefore = await page.locator(".header-scene-name").innerText();
+  const movesBefore = eventPayload(frames.received, "scene_changed").length;
+
+  // 1) 玩家表达意愿 → 主持记录「尚未出发」（线程 open，位置不变）
+  const wishId = await playerTextRequest(
+    page,
+    frames,
+    `我想去${target.name}看看。`,
+  );
+  await keeperPark(page, wishId, target.id, `尚未出发前往${target.name}`);
+  await expect(waitingCard(page)).toBeVisible();
+  const threadBefore = openThreadId(frames);
+  expect(await page.locator(".header-scene-name").innerText()).toBe(
+    sceneBefore,
+  );
+
+  // 2) 玩家追问细节 —— 这只是普通对话，不是「执行原动作」
+  const followUpId = await playerTextRequest(
+    page,
+    frames,
+    "那边现在有人值班吗？会不会吃闭门羹？",
+  );
+  expect(followUpId).not.toBe(wishId);
+
+  // 3) 主持正常回答并等待：只给叙事，不移动，也不动线程
+  await keeperResolve(page, followUpId, "completed");
+  await expect(waitingCard(page)).toBeVisible();
+  await expect(waitingCard(page)).toContainText("尚未执行");
+  await expect(waitingCard(page)).toContainText(target.name);
+  // 同一线程仍然存活：位置没变、线程 id 没换、没有新的场景事件
+  expect(await page.locator(".header-scene-name").innerText()).toBe(
+    sceneBefore,
+  );
+  expect(openThreadId(frames)).toBe(threadBefore);
+  expect(
+    eventPayload(frames.received, "scene_changed").length,
+    "回答追问不应改变场景",
+  ).toBe(movesBefore);
+  await page.screenshot({
+    path: `${screenshotsDir}/structured-dual-followup-alive.png`,
+  });
+
+  // 4) 原动作真的执行（换场景）→ 目标一致的开放线程自动收尾
+  await keeperMove(page, target.id);
+  await expect
+    .poll(() => page.locator(".header-scene-name").innerText(), {
+      timeout: 30_000,
+    })
+    .toBe(target.name);
+  await expect(page.getByTestId("structured-interaction-card")).toHaveCount(0);
+
+  // 全流程零模型调用（人类主持）
+  expect(modelRequests.length).toBe(boot.modelCallsAfterBoot);
+});
+
+/**
+ * 已知后端缺陷：移动命令把目标一致的开放线程收尾为 completed（domains.py
+ * `auto_complete_move_threads`），但**没有**同步那条 `awaiting_player` 请求。
+ * 结果是：人已经到达目的地，玩家卡片上仍留着「尚未执行：尚未出发前往X」——
+ * 世界状态与待办自相矛盾（失效待办）。线程卡消失后，这条 awaiting 明细会
+ * 重新以旧卡片形式露出来（见本文件上一用例第 4 步之后）。
+ *
+ * 分类：要么在收尾线程时一并把关联请求置终态，要么让前端不显示「已抵达」的
+ * 待办——前者才是权威侧，所以登记给后端，断言先以 fixme 保留。
+ */
+test.fixme("移动已抵达后：关联请求的「尚未执行」明细必须同时消失（等后端同步请求终态）", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  page.setDefaultTimeout(30_000);
+  const frames = collectFrames(page);
+  await bootStructuredWorld(page, frames, "human");
+  const dialogDestinations = await openMoveDialog(page);
+  const target = dialogDestinations[0];
+  await page.getByRole("button", { name: "取消" }).click();
+
+  const wishId = await playerTextRequest(
+    page,
+    frames,
+    `我想去${target.name}看看。`,
+  );
+  await keeperPark(page, wishId, target.id, `尚未出发前往${target.name}`);
+  await expect(waitingCard(page)).toBeVisible();
+
+  await keeperMove(page, target.id);
+  await expect
+    .poll(() => page.locator(".header-scene-name").innerText(), {
+      timeout: 30_000,
+    })
+    .toBe(target.name);
+  expect(await page.locator(".header-scene-name").innerText()).toBe(
+    target.name,
+  );
+  // 人已经到达：任何「尚未执行：尚未出发」都不该还在（当前会失败）
+  await expect(waitingCard(page)).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByText(/尚未执行：尚未出发/)).toHaveCount(0);
+});
+
 test("刷新不丢公开待办，且同一动作只落账一次", async ({ page }) => {
   test.setTimeout(300_000);
   page.setDefaultTimeout(30_000);
@@ -637,12 +746,8 @@ test("agent 缺 BYOK：请求明确暂停、输入可用、无永久转圈、可
   await page.locator("#user-input").fill("说实话，我想先看看莱特教授的尸体。");
   await page.locator("#btn-send").click();
 
-  // 已知后端缺陷（证据见 docs/evidence/transition_real_model/
-  // BYOK_PAUSE_EVENT_DROPPED_FOR_BACKEND.md）：agent 世界缺 BYOK 时后端把请求
-  // 置为 paused，但 `_run_keeper_agent` 的该分支丢弃了 resolve_intent 的事件，
-  // 客户端收不到 → 卡片一直停在「已提交，等待服务端确认」。
-  // 这里先断言「刷新后能恢复出暂停态 + 输入可用 + 可接管」这一半；
-  // 实时回帧那半用 fixme 登记，后端修复后改回 test。
+  // 缺 BYOK 的暂停在 Kimi 的 552672c 之后有实时帧与快照 detail；这条用例负责
+  // 「刷新/重连」那一半：暂停态 + 可操作原因都要能从快照恢复出来，输入仍可用。
   await expect(page.locator("#user-input")).toBeEnabled();
   await expect(page.getByTestId("btn-keeper-console")).toBeVisible();
   await page.reload();
@@ -650,8 +755,10 @@ test("agent 缺 BYOK：请求明确暂停、输入可用、无永久转圈、可
   await expect(page.getByText("已暂停（可恢复）")).toBeVisible({
     timeout: 60_000,
   });
-  // 暂停原因（detail）目前不在快照 requests[] 投影里，刷新后看不到；
-  // 已登记给后端（见交付记录「给后端的清单」），这里只断言可见的暂停态与可用性。
+  // 刷新后不能只知道「暂停了」，还要知道为什么、能不能接管（快照 detail）
+  await expect(page.getByText(/BYOK|未配置模型服务/)).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.locator("#user-input")).toBeEnabled();
   await page.screenshot({
     path: `${screenshotsDir}/structured-agent-paused.png`,
@@ -660,9 +767,11 @@ test("agent 缺 BYOK：请求明确暂停、输入可用、无永久转圈、可
   expect(modelRequests.length).toBe(boot.modelCallsAfterBoot);
 });
 
-test.fixme("agent 缺 BYOK：实时帧必须让请求离开「处理中」（等后端补事件投递）", async ({
-  page,
-}) => {
+// Kimi 在途修复（`agent_runtime._run_keeper_agent` 的 BYOK 分支此前只提交命令、
+// 丢弃 resolve_intent 事件，玩家卡片永久停在「已提交，等待服务端确认」）：
+// 该修复把暂停事件按 deliver/broadcast 投递出去。此用例即原来的 fixme，
+// 后端修复落地后改回真测试；若所在版本尚无该修复，这里会红——那就是回归信号。
+test("agent 缺 BYOK：实时帧必须让请求离开「处理中」", async ({ page }) => {
   test.setTimeout(300_000);
   page.setDefaultTimeout(30_000);
   const frames = collectFrames(page);
@@ -679,4 +788,8 @@ test.fixme("agent 缺 BYOK：实时帧必须让请求离开「处理中」（等
       { timeout: 120_000 },
     )
     .toBe("paused");
+  // 暂停是实时到达的：不需要刷新就能看到可读原因，输入仍可用
+  await expect(page.locator("#user-input")).toBeEnabled();
+  await expect(page.getByText("已暂停（可恢复）")).toBeVisible();
+  expect(modelRequests.length).toBe(boot.modelCallsAfterBoot);
 });

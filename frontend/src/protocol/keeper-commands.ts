@@ -39,7 +39,8 @@ export type CandidateSource =
   | "clues"
   | "items"
   | "assets"
-  | "requests";
+  | "requests"
+  | "threads";
 
 export type CommandField = {
   name: string;
@@ -573,6 +574,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         label: "线程 ID（continue/close/replace 时填）",
         kind: "id",
         required: false,
+        candidate: "threads",
       },
       {
         name: "waiting_on",
@@ -769,6 +771,7 @@ export type KeeperCandidates = {
   items: { id: string; name: string }[];
   assets: { id: string; name: string }[];
   requests: { id: string; name: string }[];
+  threads: { id: string; name: string }[];
 };
 
 export function candidatesFor(

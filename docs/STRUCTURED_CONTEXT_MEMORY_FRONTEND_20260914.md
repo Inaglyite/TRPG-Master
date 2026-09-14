@@ -252,3 +252,119 @@ F401）。不是我的文件，未改动；**CI 的 quality 门禁会因此变�
 
 - E2E 全量：`npx playwright test` → **29 收集 / 25 passed / 4 skipped / 0 failed**（见 §8.4）。
 - HEAD 与未提交指纹：见 `docs/evidence/transition_real_model/BASELINE_20260914.txt` 的最后一节。
+
+## 9. 第二轮联合验收：提交授权后的协作与冻结版本（2026-09-14）
+
+### 9.1 交付与提交（Part 一）
+
+- 开发检查点 **`96ce488`**（同一共享分支 `experiment/keeper-platform`，**无需 cherry-pick**）：
+  113 个文件 / +27962 −130，基线 `75516a4`。
+- 范围：前端适配 + 验收测试 + 文档证据 + 两处**跨边界**改动（`packaging/pyinstaller_runtime_hook.py` 补
+  0016 两张表、`requirements.txt` 补 `jsonschema`/`referencing`）+ 12 个共享测试文件的夹具修正。
+- 边界纪律：**没有提交任何 Kimi 的在途文件**（`src/**`、`schemas/**`、迁移、她的 docs 与测试全部留在工作区）；
+  未入库 `Key`/`.env.json`/真实存档/数据库/未脱敏轨迹（暂存前逐项扫过，证据目录为脱敏后副本）。
+- 提交信息写明「真实模型专项未执行」，**不写「全部完成」**。
+
+### 9.2 协作验收（Part 二）
+
+六个协作行为，前端这一侧改为可执行的断言（`frontend/src/state/structured-interaction-behaviors.test.ts`，12 条）：
+
+| 行为 | 断言位置 | 结果 |
+|---|---|---|
+| 追问不打断原交互（正常回答并等待是合法完成） | 单测 ①② + E2E `interaction-duals:574` | 通过 |
+| 原动作完成/取消/替换只关「对应那一条」线程 | 单测（三种终态 + 多线程） | 通过 |
+| 其他玩家/其他动作的线程不受影响 | 单测（三条线程只关一条） | 通过 |
+| 刷新（快照）与实时投影逐字段一致、无幽灵待办 | 单测（快照 vs 实时 deep-equal） | 通过 |
+| 暂停/失败离开「处理中」、给出原因与重试入口 | 单测 + E2E `interaction-duals:738/776` | 通过 |
+| 线程是记录不是执行授权（卡片无执行入口） | 单测 + 卡片组件测试 | 通过 |
+
+本轮前端侧修掉的漂移（都是对账出来的，不是猜测后端状态）：
+
+1. **`awaiting` 的存活条件与后端不一致**：后端只在 `awaiting_player` 时保留 `awaiting`，前端原先只在终态清掉 →
+   暂停/失败后实时态与刷新态不一致（刷新后为空、实时留着）。已按后端同一规则对齐（`structured-store.ts` 两处）。
+2. **主持台的候选 ID 一直是空的**：`request_id`/`thread_id` 字段声明了候选来源，但 `requests: []` 是硬编码 →
+   主持只能手抄卡片上不显示的 ID。已接上真实投影（待处理请求 + 开放线程），并新增 `threads` 候选源；
+   `thread_id` 现在可在控制台直接挑（§8.5 第 2 条的一半由此关闭：ID 可挑，但仍不在玩家卡片上显示）。
+3. **结构化世界没有分支入口**：控件要求 `latestBranchTurnId`，结构化世界恒为 null（详见 §9.4.2）。
+
+### 9.3 冻结版本联合验收（Part 三）
+
+**验收复核过两次版本**（Kimi 在我跑门禁期间又落了 `cae8900`，按「后端有改动就记录并复跑」的要求重跑）：
+
+| 轮次 | 版本 | 结果 |
+|---|---|---|
+| 第一次 | HEAD `552672c` + 她在途改动（聚合指纹 `c5191e40…`） | pytest 1376/7/0；E2E 33→29+4；`ruff` 有 1 error（她的在途新文件） |
+| 第二次（认证版本） | **HEAD `cae8900`**（她的「交互线程生命周期收口 + 暂停/错误回帧」提交，聚合指纹 `f111a7d6…`）+ 我这轮未提交的前端改动 | 见下表，全绿 |
+
+第二次（认证）结果：
+
+| 门禁 | 结果 |
+|---|---|
+| 后端 `pytest -q` | **1376 passed / 7 skipped / 0 failed**（214s） |
+| 后端 `ruff check .` | **All checks passed**（第一次跑出的那 1 个 error 是她在途文件，她已在 `cae8900` 修掉） |
+| 后端架构门禁 | `tools/check_architecture.py` 通过 |
+| 前端单测 | **763 passed / 70 files**（+12 行为断言 +1 主持台候选 +2 合成信封 +2 快照 detail/awaiting） |
+| 前端类型/格式/构建 | `tsc --noEmit`、`prettier --check src e2e`、`npm run build` 全通过 |
+| 前端 E2E 全量 | **33 收集 → 29 passed / 4 skipped / 0 failed**（7.2m） |
+
+四条 skip 的分类（**不折叠成「零失败即完成」**）：
+
+| skip | 类别 | 原因 |
+|---|---|---|
+| `staging-recovery` | 环境跳过 | 需要外部 staging 环境 |
+| `multiplayer:890` | 环境跳过 | 需要 Electron 源码进程环境 |
+| `transition-agent-live` | 未执行的真实模型 | 需 `TRPG_LIVE_MODEL=1` 与单独授权 |
+| `interaction-duals:650` | **已知缺陷 fixme** | 移动已抵达后关联请求的「尚未执行」明细仍挂着（§9.4.1），等后端同步请求终态 |
+
+**真实模型专项（A–F）本轮仍未执行**：提交/推送授权不包含真实模型调用额度，未因提交授权自动开跑。
+
+按 Kimi 的《给 zcode：后端接口增量与前端待适配点》，本轮又适配了两处（都属我的区域，且都有测试）：
+
+| 接口变化 | 我的改动 | 断言 |
+|---|---|---|
+| 快照 `requests[]` 新增可选 `detail`（暂停/失败/等待的可操作原因） | 快照恢复路径读 `detail`；与实时路径统一「只有 `awaiting_player` 才有尚未执行明细」的规则（两处） | 单测（暂停原因刷新后仍在、终态不复活明细）+ E2E：BYOK 暂停刷新后能看到原因 |
+| `request_error` 可能带 `event_id: 0, sequence: 0`（合成信封，不落库） | 定序器把 `event_id <= 0` 视为合成信封：**不参与去重**（否则游标 ≥0 时会被判重复而丢掉，错误提示到不了界面）、**不推进游标**（否则断线补发起点被拉回） | 单测两条（合成信封必到达、不移动游标、之后正常事件照旧去重） |
+
+Kimi 提到的「追问收尾永不关原线程」与「原意图 `completed+success`/`cancelled` 自动收尾」两条语义，
+本轮的追问 E2E 与单测正好覆盖（追问的 `origin_request_id` 不匹配，天然不关）。
+
+### 9.4 交回 Kimi 的问题（本轮新增/更新）
+
+1. **移动已抵达后，关联的 `awaiting_player` 请求没有同步收尾（失效待办）**：
+   `domains.py auto_complete_move_threads` 会把目标一致的开放线程收尾为 `completed`，但请求仍是
+   `awaiting_player`。线程卡消失后，旧的 awaiting 明细重新露出，卡片上写着「尚未执行：尚未出发前往X」，
+   而队伍已经站在 X。证据与被否掉的断言：`frontend/e2e/structured-interaction-duals.spec.ts:650`（`test.fixme`，
+   改回 `test` 即红）。建议在收尾线程时一并把关联请求置终态（与 `cancel_threads_for_request` 同形态）。
+2. **云端结构化世界仍然无法创建分支**：`solo_branch_create` 要求非空 `turn_id`
+   （`src/multiplayer/solo_timeline_ws.py:459`），结构化世界没有回合 ID。本地路径已通
+   （`world_timeline_ws.py:85` 从当前已提交状态分叉，前端入口本轮打通），云端请给出等价入口
+   （如允许空 `turn_id` 表示「当前进度」）。
+3. ~~`tests/test_structured_pause_and_thread_lifecycle.py:27` 的 `StructuredError` 未使用 → `ruff` 红~~：
+   你在 `cae8900` 已修，`ruff check .` 现在全绿。
+6. **「抵达」只覆盖了线程，没覆盖请求**：你的交接文档写「状态联动已覆盖落实/取消/替换/抵达」，
+   但实测「抵达」只把**线程**收尾，关联的 `awaiting_player` 请求仍悬着 → 玩家卡片继续显示
+   「尚未执行：尚未出发前往X」（§9.4.1，fixme 已实测确实失败，复现证据在
+   `docs/evidence/20260914_load_branch/probe_fixme_awaiting/`）。这条需要你确认是后端补收尾，
+   还是协议上认定「抵达不等于请求终态」——若是后者，请给前端一个可见信号（例如请求也进终态、
+   或在快照里明确该请求已由世界事实满足），否则界面会一直自相矛盾。
+4. **§8.5 第 1 条的关闭确认**：`cancel_threads_for_request` 已有调用方（你在 `552672c` 补的玩家取消路径），
+   该条关闭。剩余的是「主持把请求置终态时不自动收尾线程」，与第 1 条同源。
+5. §8.5 第 2 条部分关闭：`thread_id` 现在可在控制台候选里直接挑（不再需要手抄），但公开卡片仍不展示 ID。
+
+### 9.5 本轮新增用例与证据
+
+| 产物 | 说明 |
+|---|---|
+| `frontend/e2e/structured-load-branch.spec.ts` | 读档回滚 / 重连 ≠ 读档 / 分支与记忆隔离（2 条，真实后端、零模型） |
+| `frontend/src/state/structured-interaction-behaviors.test.ts` | 六个协作行为的前端契约（12 条） |
+| `frontend/e2e/structured-interaction-duals.spec.ts` | 新增「追问保活」；BYOK 实时回帧由 fixme 改回真测试；新增失效待办 fixme |
+| `docs/evidence/20260914_load_branch/` | README（逐项断言说明与问题分类）+ 版本指纹 + `probe_fixme_awaiting/`（fixme 确实失败的复现证据） |
+| `frontend/src/protocol/structured.ts` | 合成信封（`event_id=0`）不进去重、不动游标（+2 单测） |
+| `frontend/src/state/structured-store.ts` | 快照 `detail` 恢复；快照与实时统一「仅 awaiting_player 有尚未执行明细」 |
+| 截图 | `structured-load-before/after.png`、`structured-branch-created.png`、`structured-dual-followup-alive.png` |
+
+### 9.6 剩余未完成（不许并入「完成」）
+
+- 真实模型 A–F（短期衔接 / 长期回忆 / 知识隔离 / 传闻与事实 / 缺失信息 / 无关记忆）：等单独授权与额度。
+- 上面 §9.4.1 的失效待办、§9.4.2 的云端分支：后端未修前对应的 E2E 保持 fixme / 未覆盖。
+- ~~BYOK 暂停原因不在快照投影里~~：后端已补 `detail`，前端已恢复显示（本轮关闭，E2E 断言刷新后可见原因）。

@@ -13,6 +13,8 @@ import {
 } from "../../state/online-store";
 import { CharacterPanelContent } from "./CharacterPanelContent";
 import { useDelayedClose, usePhaseTransition } from "./transitions";
+import { interactionPath } from "../../protocol/structured";
+import { useStructuredStore } from "../../state/structured-store";
 
 function panelCommand(name: string, ...args: unknown[]) {
   const command = (panels as Record<string, (...values: any[]) => void>)[name];
@@ -341,6 +343,10 @@ export function SavePanel() {
   const adventuresReady = useAppStore((state) => state.adventuresReady);
   const activeWorldId = useAppStore((state) => state.activeWorldId);
   const latestBranchTurnId = useAppStore((state) => state.latestBranchTurnId);
+  const structuredWorld =
+    useStructuredStore(
+      (state) => interactionPath(state.capabilities) === "structured",
+    ) && appMode === "local";
   const seededView = useAppStore((state) => state.savePanelView);
   const onlineCaps = useTimelineCapabilities();
   // 本地模式时间线能力全允许；联机按 timelineCapabilities（solo + 房主）。
@@ -778,29 +784,32 @@ export function SavePanel() {
             >
               新建存档点
             </button>
-            {latestBranchTurnId && caps.canCreateBranch && (
-              <span className="timeline-branch-form">
-                <input
-                  className="timeline-branch-input"
-                  maxLength={50}
-                  placeholder="分支名（可留空）"
-                  value={branchLabel}
-                  onChange={(event) => setBranchLabel(event.target.value)}
-                />
-                <button
-                  className="timeline-branch-create"
-                  onClick={() => {
-                    void panelCommand(
-                      "createBranchFromCurrentTurn",
-                      branchLabel,
-                    );
-                    setBranchLabel("");
-                  }}
-                >
-                  从当前进度创建分支
-                </button>
-              </span>
-            )}
+            {/* 结构化世界没有旧回合，分支点是「当前已提交状态」；
+                旧世界仍要求最近完成回合，避免分叉到一个半成品回合。 */}
+            {(latestBranchTurnId || structuredWorld) &&
+              caps.canCreateBranch && (
+                <span className="timeline-branch-form">
+                  <input
+                    className="timeline-branch-input"
+                    maxLength={50}
+                    placeholder="分支名（可留空）"
+                    value={branchLabel}
+                    onChange={(event) => setBranchLabel(event.target.value)}
+                  />
+                  <button
+                    className="timeline-branch-create"
+                    onClick={() => {
+                      void panelCommand(
+                        "createBranchFromCurrentTurn",
+                        branchLabel,
+                      );
+                      setBranchLabel("");
+                    }}
+                  >
+                    从当前进度创建分支
+                  </button>
+                </span>
+              )}
           </div>
         )}
       </div>
