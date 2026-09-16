@@ -424,6 +424,9 @@
 @media (max-width: 1199px) {
   #char-panel {
     width: 300px;
+    /* 中屏同样要给下限：见 char-panel.css 顶部关于 auto 轨道被 min-content
+       （可任意断行的文本）压塌的说明。 */
+    min-width: 300px;
     padding: 14px;
   }
 }
@@ -437,6 +440,9 @@
     bottom: 0;
     z-index: 95;
     width: min(380px, 100vw);
+    /* 抽屉已脱离网格（fixed），不再有 auto 轨道问题：下限交还给宽度本身，
+       否则小屏会被 min-width 顶出视口。 */
+    min-width: 0;
     max-width: none;
     flex-basis: auto;
     padding: 18px;
@@ -444,6 +450,7 @@
   }
   #char-panel.collapsed {
     width: 0;
+    min-width: 0;
     padding: 0;
   }
 }
@@ -452,6 +459,7 @@
 @media (max-width: 640px) {
   #char-panel {
     width: 100vw;
+    min-width: 0;
   }
   #char-content .inv-row-btn {
     min-height: 44px;

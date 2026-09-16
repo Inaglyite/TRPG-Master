@@ -209,6 +209,27 @@ test("三卡片布局、折叠、出示与使用行动编辑器全流程", async
   await expect(itemsToggle).toBeVisible();
   await expect(statusToggle).toHaveAttribute("aria-expanded", "true");
 
+  // 回归：侧栏是 #main 网格里 auto 轨道的那一项，网格项默认 min-width:auto
+  // 时轨道下限取内容的 min-content —— 面板里可任意断行的文本（中文按字断行）
+  // 只有一两个字宽，轨道会被压到 ~1px，面板连同线索行整体竖排（每行一个字）。
+  // 这里断言面板有真实宽度、线索正文不是竖排，避免这类塌陷再次悄悄上线。
+  const panelBox = await page.locator("#char-panel").boundingBox();
+  expect(
+    panelBox?.width ?? 0,
+    "侧栏被压塌（网格 auto 轨道被 min-content 挤没）",
+  ).toBeGreaterThan(280);
+  const firstSummary = page
+    .locator('[data-clue^="investigation:"] .inv-clue-summary-text')
+    .first();
+  const summaryBox = await firstSummary.boundingBox();
+  expect(summaryBox?.width ?? 0, "线索正文宽度过窄（竖排）").toBeGreaterThan(
+    100,
+  );
+  expect(
+    summaryBox?.height ?? 0,
+    "线索正文高度远超宽度：正在按字竖排",
+  ).toBeLessThan((summaryBox?.width ?? 1) * 3);
+
   // 线索卡：猩红文档开局的死亡通告线索在“探案”分组；筛选可切换。
   await expect(
     page.locator('[data-clue^="investigation:"]').first(),

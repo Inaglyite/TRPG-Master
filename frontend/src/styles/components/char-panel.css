@@ -1,6 +1,17 @@
 /* ---- 角色面板 ---- */
+/*
+ * 侧栏是 #main 网格里 `auto` 轨道的那一项（layout.css：
+ * grid-template-columns: minmax(0, 1fr) auto）。网格项默认 `min-width: auto`
+ * 时，轨道下限取内容的 min-content；面板里可任意断行的文本
+ * （investigator-panel.css 的 `overflow-wrap: anywhere`，中文按字断行）
+ * min-content 只有一两个字宽，轨道就会被压到 ~1px —— 面板连同线索行整体
+ * 竖排（实测 grid 轨道 1179px + 1px、面板 1px，强制 !important 或加
+ * min-width 立刻恢复 340px）。所以这里必须给出真实的下限，
+ * 并让 `.collapsed` 把它归零。
+ */
 #char-panel {
   width: 340px;
+  min-width: 340px;
   max-width: 360px;
   flex: 0 0 auto;
   border-left: 1px solid var(--border);
@@ -14,6 +25,7 @@
 }
 #char-panel.collapsed {
   width: 0;
+  min-width: 0;
   padding: 0;
   border: none;
   overflow: hidden;
