@@ -124,6 +124,37 @@ describe("preloadImages", () => {
     await preloadImages([], onProgress);
     expect(onProgress).not.toHaveBeenCalled();
   });
+
+  it("返回失败计数，供启动屏给出可见反馈", async () => {
+    FakeImage.fail.add("bad.png");
+    await expect(preloadImages(["bad.png", "ok.png"])).resolves.toEqual({
+      failed: 1,
+    });
+    await expect(preloadImages(["ok.png"])).resolves.toEqual({ failed: 0 });
+  });
+
+  it("单张图片 decode 长时间不落定，也不拖住整批（有上限）", async () => {
+    vi.useFakeTimers();
+    class StallingImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_url: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+      // 永不落定：旧实现会一直等它，启动屏跟着卡住
+      decode() {
+        return new Promise<void>(() => {});
+      }
+    }
+    vi.stubGlobal("Image", StallingImage);
+    try {
+      const done = preloadImages(["stall.png"]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(done).resolves.toEqual({ failed: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("waitForModuleBgUrl", () => {

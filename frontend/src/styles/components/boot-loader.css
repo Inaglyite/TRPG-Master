@@ -72,6 +72,17 @@
   letter-spacing: 0.1em;
 }
 
+/* 资源没落定时的说明：可读、不阻断（加载屏照常退场，界面可操作）。 */
+.boot-loader-notice {
+  max-width: 320px;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim, #9a8c74);
+  letter-spacing: 0.05em;
+}
+
 @keyframes boot-loader-pulse {
   0%,
   100% {

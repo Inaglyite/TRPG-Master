@@ -62,6 +62,10 @@ type StartScreenState = {
   overlayClass: string;
   readyState: string;
   inputEnabled: boolean;
+  /** 启动覆盖层是否还挂在 DOM 上（真实状态，不是「不可见」虚判据）。 */
+  bootLoaderPresent: boolean;
+  /** 覆盖层是否还在拦指针事件（命中测试穿透到它）。 */
+  bootLoaderBlocksPointer: boolean;
 };
 
 async function readStartScreenState(page: Page): Promise<StartScreenState> {
@@ -78,6 +82,19 @@ async function readStartScreenState(page: Page): Promise<StartScreenState> {
       inputEnabled: !(
         document.querySelector("#user-input") as HTMLTextAreaElement | null
       )?.disabled,
+      bootLoaderPresent: Boolean(document.querySelector(".boot-loader")),
+      bootLoaderBlocksPointer: (() => {
+        const loader = document.querySelector(".boot-loader");
+        if (!loader) return false;
+        // 命中测试：开局按钮中心的元素若落在覆盖层内，说明这一层正在拦点击。
+        const box = loader.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) return false;
+        const hit = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+        return Boolean(hit && loader.contains(hit));
+      })(),
     };
   });
 }
@@ -100,10 +117,15 @@ export async function waitForStartScreen(
 
   while (Date.now() < deadline) {
     last = await readStartScreenState(page);
+    // ① 先等启动覆盖层真实卸载：它还在的时候任何点击都可能被拦（CI 上就是
+    //    这样），所以不在这一层上 force click，也不把「能看见按钮」当成能点。
+    if (last.bootLoaderPresent) {
+      await page.waitForTimeout(100);
+      continue;
+    }
+    // ② 再看界面状态：开局页可用即就绪；已在游戏中则走产品入口回开局页。
     if (last.startScreen) return sink;
     if (last.inGame) {
-      // 已在游戏中（结构化世界随快照自动续上）：用产品自带的入口回开局页，
-      // 而不是和自动续上的时序抢跑。
       await page.locator("#btn-new").click();
       await expect(page.locator(".module-select-trigger")).toBeVisible({
         timeout: 15_000,
