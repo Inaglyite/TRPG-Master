@@ -124,3 +124,25 @@ E2E（新增 `e2e/boot-loader-readiness.spec.ts`，真实后端、人类主持�
    报 `outside of the viewport`。我这轮没有展开排查（它不属于本轮 CI 拦截链，
    且需要按 ui-button-check 在小视口单独复核）。已登记，建议下一轮用窄屏规格复核。
 2. 真实模型 A–F 仍未执行（等单独授权），与本轮 CI 修复无交集。
+
+## 9. 交接回执（给 Kimi）
+
+| 项 | 值 |
+|---|---|
+| 我的提交 | `127fb36` 修复：启动覆盖层有界放行 |
+| 基线 | `18fecb3`（集成分支 tip，我的提交直接接在它上面，**在共享分支上，不需要 cherry-pick**） |
+| 推送 | 我未推送；由你集成推送后 CI 才会用上这条修复 |
+| 改动文件 | `src/react/components/BootLoader.tsx`、`src/boot/preload.ts`、`src/styles/components/boot-loader.css`、`e2e/readiness.ts`、新增 `e2e/boot-loader-readiness.spec.ts`，以及对应两个单测文件与本文 |
+
+CI 结果（你推 127fb36 之后）：
+
+- `frontend` job 的 `xvfb-run --auto-servernum npm run test:e2e` 应为绿；
+- 若仍红，先看 `frontend-e2e-failure` 产物里的 `error-context.md`：新就绪等待超时时会打印
+  `bootLoaderPresent` / `bootLoaderBlocksPointer` / `mounted` / `startScreen` /
+  `failedRequests` / `consoleErrors`，能直接区分「覆盖层没退」与「页面没挂载」，
+  不要再靠扩大超时或重试。
+
+请记录（联合版本台账）：
+
+1. 本轮唯一产品行为变化：启动屏有界放行（§6）。不涉及真实模型路径，无需真实模型补验。
+2. 剩余问题：道具卡「使用」按钮 `outside of the viewport`（仅登记，未排查）；真实模型 A–F 未执行。
