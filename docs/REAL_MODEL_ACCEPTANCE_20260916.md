@@ -219,7 +219,7 @@ structured_v1 命令目录（schemas/structured-play/v1/command_request.json）�
 
 ## 10. 交付与回滚
 
-- 最终提交 SHA：见本节末尾（提交后回填）。
+- 最终提交 SHA：`528ed7b`（本报告与证据即包含于该提交）。
 - 测试（最终联合版本）：
   - 后端全量：**1401 passed / 7 skipped**（较基线 +16 项，全部是本轮回归测试）。
   - 架构门禁 `tools/check_architecture.py`：通过；ruff：通过。
