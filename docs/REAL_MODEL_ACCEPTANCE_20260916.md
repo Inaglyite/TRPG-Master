@@ -214,8 +214,11 @@ structured_v1 命令目录（schemas/structured-play/v1/command_request.json）�
   关闭定时器清掉重新编辑的草稿——UI 生命周期修复，不触协议/模型路径）。
   根因与证据见 `docs/evidence/20260914_ci_module_select_timeout/README.md`。
   其本机 CI 条件复跑：37 收集 → 35 passed / 2 skipped / 0 failed。
-- 待办（推送后由 Kimi 在 CI 确认）：quality 的 frontend E2E 是否变绿；
-  若仍红，新就绪等待会直接抛出页面现场证据。
+- **CI 实证结果（35058831650 / 35059395902）：仍红**，backend 绿、frontend 红。
+  失败签名已变：按钮在 DOM 但 `boot-loader` 覆盖层拦截点击（CI 上首次预载
+  超过 30s 点击超时；loader 预载兜底 180s）。这正是新就绪判据缺的一层：
+  「页面已挂载」≠「覆盖层已退场」。修复建议与产品层判断已交 zcode：
+  `docs/CI_BOOT_LOADER_HANDOFF_20260916.md`。
 
 ## 10. 交付与回滚
 
@@ -252,8 +255,9 @@ structured_v1 命令目录（schemas/structured-play/v1/command_request.json）�
    开放本地结构化入口之前必须先接通。
 3. 模型在边界措辞上的判断方差仍在（§3.2）：D3 类「愿望式表达」偶尔被直接
    执行。机制兜底（待办记录、取消、纠正）都在，但真实玩家会遇到。
-4. CI quality 在本分支历史上因环境问题全红；zcode 的就绪判据修复需推送后
-   在 CI 实测确认（§9）。**quality 未绿之前不得推 master。**
+4. CI quality 实证仍红（backend 绿）：boot-loader 覆盖层在 CI 慢机上拦截开局
+   点击（E2E 设施问题，非产品逻辑缺陷；修复建议已交 zcode，见 §9）。**quality
+   未绿之前不得推 master。**
 5. 云端 BYOK-only 强制与注册开放属另一条发布线（另有安全清单），不在本轮范围。
 
 不建议的事：直接开放注册 / 直接推 master / 把 structured 当完整模式宣传。
