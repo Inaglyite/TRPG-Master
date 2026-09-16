@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   EVENT_FIXTURES,
@@ -382,5 +382,67 @@ describe("结构化出示编辑器", () => {
     render(<StructuredActionDialog />);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("重新打开与延迟关闭的竞态", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * 回归：提交成功后会先关掉编辑器，再排一个 150ms 的退出动画定时器；
+   * 如果玩家在这段窗口里点「重新编辑」，那个遗留定时器会把刚恢复的草稿清掉
+   * （CI 上定时器更晚触发，必现）。重新打开必须撤销上一次的延迟关闭。
+   */
+  it("提交后立刻重新打开：遗留的关闭定时器不得清掉刚恢复的草稿", () => {
+    structuredClueStore();
+    useStructuredEditorStore.getState().openPresent({
+      clueId: "clue_death_certificate",
+      subject: "死亡证书",
+      presentations: ["describe"],
+      allowedPhysicalItemIds: [],
+      worldId: WORLD_ID,
+    });
+    useStructuredEditorStore.getState().update({
+      targetKind: "npc",
+      targetId: "john_whitcroft",
+      question: "你认得这份证明吗？",
+    });
+    render(<StructuredActionDialog />);
+    expect(screen.getByLabelText("想询问什么（可选）")).toHaveValue(
+      "你认得这份证明吗？",
+    );
+
+    // 提交 → 立即 close() 并排下 150ms 的退出定时器
+    fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+    expect(sent).toHaveLength(1);
+    expect(useStructuredEditorStore.getState().draft).toBeNull();
+
+    // 玩家在退出动画窗口内重新打开（等价于测试里的「重新编辑」）
+    act(() => {
+      useStructuredEditorStore.getState().openPresent({
+        clueId: "clue_death_certificate",
+        subject: "死亡证书",
+        presentations: ["describe"],
+        allowedPhysicalItemIds: [],
+        worldId: WORLD_ID,
+      });
+    });
+
+    // 重新打开后草稿必须在（中间断言：确认重开本身成功）
+    expect(
+      useStructuredEditorStore.getState().draft,
+      "重新打开后草稿应存在",
+    ).not.toBeNull();
+    // 让遗留定时器到点：它不该再把刚打开的草稿关掉
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(useStructuredEditorStore.getState().draft).not.toBeNull();
+    expect(screen.getByLabelText("想询问什么（可选）")).toBeInTheDocument();
   });
 });

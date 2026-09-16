@@ -93,6 +93,60 @@ CI 目前**不保留任何失败产物**（`gh api .../artifacts` → `total_cou
 为此在 workflow 里补一个**失败时上传 `frontend/test-results`**（trace / 截图 / error-context）的步骤：
 以后再红，日志里就有页面证据，不用再靠推断。这是取证能力的补齐，不改变任何判定。
 
-## 6. 本地复跑结果（修复后）
+## 6. 第二个真实缺陷：提交后遗留的关闭定时器会清掉刚重新打开的草稿
 
-见本文件末尾的「修复后门禁」一节（全量 E2E + 单测 + 类型/格式/构建）。
+排查就绪判据时，在 CI 条件下（2 vCPU + xvfb）本地复现出另一条**产品级**竞态，
+它和上面那条超时无关，但同样会让 CI 红：
+
+```
+structured-play.spec.ts:269 › 提交冲突：位置不变、可同 ID 重试、拒绝后草稿仍可编辑
+  2 vCPU 下 --repeat-each=4 → 3/4 失败（普通机器上通常不出现）
+  Error: expect(locator).toHaveValue(expected) failed
+  Locator: dialog "出示线索" → label "想询问什么（可选）"
+  Error: element(s) not found
+```
+
+定位手段与证据（临时插桩后从 Playwright trace 读回，插桩已撤销）：
+
+```
+[editor] openPresent        ← 出示编辑器打开
+[dialog] submit clicked     ← 提交请求
+[editor] close  (submit)    ← submitStructuredEditor → editor.close()（草稿置空）
+[dialog] requestClose called ← 提交成功后 dialog 再排一个 150ms 的退出动画定时器
+[editor] openPresent        ← 玩家点「重新编辑」，草稿恢复
+[dialog] close timer fired  ← 那个遗留定时器到点
+[editor] close              ← 把刚恢复的草稿清掉
+```
+
+机制：提交成功 → 立刻关编辑器 → 再排 150ms 退出定时器；玩家在这段窗口内重新打开
+（「重新编辑」）时，遗留定时器仍会执行关闭，**把刚恢复的草稿连同玩家改到一半的内容一起清掉**。
+窗口是 150ms 的固定值，但定时器在慢机器/受限 CPU 上会被推迟触发（CI 上就这样），
+所以本地快机难复现、CI 必现。
+
+修复（产品代码，UI 生命周期，不涉及协议/模型路径）：
+`StructuredActionDialog` 在编辑器**重新打开**时撤销上一次的延迟关闭
+（清掉定时器 + 复位 `closing`），与其它浮层的既有约定一致（「退出途中重新打开：取消退出」）。
+
+回归测试（确定性、可双向验证）：
+`src/react/components/investigator/StructuredActionDialog.test.tsx` →
+「提交后立刻重新打开：遗留的关闭定时器不得清掉刚恢复的草稿」。
+把修复停用后该用例**必红**，恢复后**必绿**（两个方向都跑过）。
+
+E2E 侧验证：`structured-play.spec.ts:269` 在 2 vCPU 下 `--repeat-each=4` →
+修复前 3/4 失败，**修复后 4/4 通过**。
+
+## 7. 本地复跑结果（修复后）
+
+- 前端单测：**767 passed**（新增 1 条竞态回归）。
+- `tsc --noEmit`、`prettier --check src e2e`、`npm run build`：通过。
+- E2E（CI 条件：2 vCPU + xvfb + `CI=1`，全量）：**37 收集 → 35 passed / 2 skipped / 0 failed**（9.6m）。
+  其中 `structured-play.spec.ts:269`（第二条竞态的用例）在修复前 3/4 失败，修复后通过。
+  2 条 skip 是环境/未授权：`staging-recovery`（需外部 staging）、`transition-agent-live`
+  （需 `TRPG_LIVE_MODEL=1`）。
+
+## 8. 需要 Kimi 知道的两点
+
+1. **本轮改了产品行为一处**（`StructuredActionDialog` 的关闭定时器竞态修复）。
+   它只影响对话框生命周期，不触碰协议、命令、模型调用路径，因此**不需要**真实模型补验；
+   但按约定登记在此，供你在联合版本记录里核对。
+2. CI 产物上传步骤是 workflow 级改动（`.github/workflows/quality.yml`），不影响产品。

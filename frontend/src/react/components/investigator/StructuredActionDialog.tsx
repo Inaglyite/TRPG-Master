@@ -81,6 +81,19 @@ export function StructuredActionDialog() {
 
   const open = draft !== null;
 
+  // 重新打开（例如「重新编辑」）必须撤销上一次的延迟关闭：提交成功后会先关掉
+  // 编辑器，再排一个 150ms 的退出动画定时器；如果玩家在这段窗口里重新打开，
+  // 那个遗留定时器会把刚恢复的草稿清掉（机器越慢窗口越大）。定时器只有在
+  // 编辑器仍然关着的时候才该真正执行关闭。
+  useEffect(() => {
+    if (!open) return;
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setClosing(false);
+  }, [open, draft]);
+
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = document.activeElement;
