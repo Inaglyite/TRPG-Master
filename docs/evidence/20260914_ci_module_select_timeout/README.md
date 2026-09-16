@@ -150,3 +150,27 @@ E2E 侧验证：`structured-play.spec.ts:269` 在 2 vCPU 下 `--repeat-each=4` �
    它只影响对话框生命周期，不触碰协议、命令、模型调用路径，因此**不需要**真实模型补验；
    但按约定登记在此，供你在联合版本记录里核对。
 2. CI 产物上传步骤是 workflow 级改动（`.github/workflows/quality.yml`），不影响产品。
+
+## 9. 交给 Kimi 的推送与 CI 验证请求
+
+我这侧**不推送**（集成与推送仍由你负责）。请把下面两个本地提交推上 `experiment/keeper-platform` 形成最终候选版本：
+
+| 提交 | 内容 | 性质 |
+|---|---|---|
+| `24bbf69` | E2E 就绪判据改为语义就绪 + 失败取证；workflow 失败时上传 `frontend/test-results` | 验收设施 + CI |
+| `0eac7b9` | `StructuredActionDialog` 遗留关闭定时器竞态修复 | **产品代码（UI 生命周期）** |
+
+推送后请在 CI 上确认（我这边无法读取 CI 运行时的页面现场，只能等你推完读日志）：
+
+1. `frontend` job 的 `xvfb-run --auto-servernum npm run test:e2e` 是否变绿；
+2. 若仍红，**这次日志会直接给出原因**：新就绪等待会在超时时抛出
+   `{ mounted, startScreen, inGame, triggerCount, overlayClass, readyState }`
+   + `failedRequests` + `consoleErrors` + `pageErrors`；失败时也会上传
+   `frontend-e2e-failure` 产物（trace/截图/error-context）。把那段贴回来即可定位。
+
+预期：`mounted=true` 且 `startScreen=true`（旧判据留下的白屏窗口已被语义等待覆盖）。
+若日志出现 `mounted=false`，那就是页面根本没挂载（资源/脚本未执行），属于新一类问题，
+按上传的 trace 继续查——不要先用扩大超时或重试掩盖。
+
+请在你的联合版本记录里写明：`quality` 的 E2E 结果对应的是 `24bbf69` + `0eac7b9`（或其后继），
+以及本轮唯一的产品行为变化是 `0eac7b9` 的对话框生命周期修复（不影响真实模型路径）。
