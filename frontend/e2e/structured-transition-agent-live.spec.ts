@@ -19,6 +19,8 @@ import { join, resolve } from "node:path";
 
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 const port = 8773;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -196,8 +198,7 @@ test.describe("真实模型 live（需 TRPG_LIVE_MODEL=1）", () => {
         .length;
 
     // 1) 开局（旧路径拿世界 ID）→ 切成 structured_v1 + agent + BYOK → 重连
-    await page.goto(`${baseUrl}/?mode=local`);
-    await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+    await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
     await page.locator(".module-select-trigger").click();
     await page.getByRole("option", { name: new RegExp(MODULE) }).click();
     await page.locator("#btn-start").click();

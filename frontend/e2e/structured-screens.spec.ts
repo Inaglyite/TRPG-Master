@@ -10,6 +10,8 @@ import { resolve } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 const require = createRequire(import.meta.url);
 const { startServer } = require("./helpers/structured-stub-server.cjs") as {
   startServer: (options: { port: number; scenario?: string }) => Promise<{
@@ -32,8 +34,10 @@ test.afterAll(async () => {
 });
 
 async function enterGame(page: Page, role = "player-a") {
-  await page.goto(`http://127.0.0.1:${port}/?mode=local&role=${role}`);
-  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+  await openLocalStartScreen(
+    page,
+    `http://127.0.0.1:${port}/?mode=local&role=${role}`,
+  );
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   await page.locator("#btn-start").click();

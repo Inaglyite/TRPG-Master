@@ -64,3 +64,13 @@ jobs:
         working-directory: frontend
       - run: xvfb-run --auto-servernum npm run test:e2e
         working-directory: frontend
+      # E2E 失败时保留现场：trace / 截图 / error-context 是判断「页面没挂载还是
+      # 状态不对」的唯一直接证据（此前 workflow 不留任何产物，只能靠推断）。
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-e2e-failure
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7

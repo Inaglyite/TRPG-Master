@@ -25,6 +25,8 @@ import { join, resolve } from "node:path";
 
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 const port = 8781;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -264,8 +266,7 @@ async function bootWorld(
   page: Page,
   frames: Frames,
 ): Promise<{ worldId: string; modelCallsAfterBoot: number }> {
-  await page.goto(`${baseUrl}/?mode=local`);
-  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: new RegExp(MODULE) }).click();
   await page.locator("#btn-start").click();

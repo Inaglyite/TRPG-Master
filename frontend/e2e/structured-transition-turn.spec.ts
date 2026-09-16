@@ -18,6 +18,8 @@ import { join, resolve } from "node:path";
 
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 const port = 8771;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -276,8 +278,7 @@ test("过渡回合：意愿→叙事等待→追问→决定→执行（人类�
   page.setDefaultTimeout(30_000);
 
   // 1) 先用旧路径开局拿到世界 ID，再切成 structured_v1 + human 主持。
-  await page.goto(`${baseUrl}/?mode=local`);
-  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   await page.locator("#btn-start").click();

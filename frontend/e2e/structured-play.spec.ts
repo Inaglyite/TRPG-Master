@@ -13,6 +13,8 @@ import { createRequire } from "node:module";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 // 替身后端是 CommonJS（直接 Node 运行，便于用 ws 库起真实 WS）。
 const require = createRequire(import.meta.url);
 const { startServer } = require("./helpers/structured-stub-server.cjs") as {
@@ -46,8 +48,10 @@ async function enterStructuredGame(
   role = "player-a",
   port = stubPort,
 ) {
-  await page.goto(`http://127.0.0.1:${port}/?mode=local&role=${role}`);
-  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+  await openLocalStartScreen(
+    page,
+    `http://127.0.0.1:${port}/?mode=local&role=${role}`,
+  );
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   await page.locator("#btn-start").click();

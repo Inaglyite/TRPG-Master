@@ -18,6 +18,8 @@ import { join, resolve } from "node:path";
 
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { openLocalStartScreen } from "./readiness";
+
 const port = 8769;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -224,8 +226,7 @@ test("真实后端 + structured_v1：快照驱动界面、结构请求落账、�
   const frames = collectFrames(page);
 
   // 1) 先用旧路径开局（世界此时还是 legacy），拿到世界 ID。
-  await page.goto(`${baseUrl}/?mode=local`);
-  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   await page.locator("#btn-start").click();
