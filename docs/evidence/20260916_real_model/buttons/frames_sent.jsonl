@@ -1,0 +1,12 @@
+{"type":"ping"}
+{"type":"state"}
+{"type":"switch_module","module":"猩红文档"}
+{"type":"start","character_ref":{"source":"default","file":"霍华德.json","path":"characters/default/霍华德.json"}}
+{"type":"state"}
+{"type":"ping"}
+{"type":"state"}
+{"type":"state"}
+{"type":"action_request","protocol_version":1,"request_id":"274b5370-1595-4fb2-aeba-8c5600f60364","world_id":"local-猩红文档-20260916-050005-1fa5","expected_revision":4,"investigator_id":"pc","action":{"kind":"present_clue","clue_id":"clue_001","presentation":"describe","physical_item_id":null,"target":{"kind":"npc","id":"bryce_fallon"}}}
+{"type":"action_request","protocol_version":1,"request_id":"d3f29ca7-d436-4ebe-b63a-84d53fb9177c","world_id":"local-猩红文档-20260916-050005-1fa5","expected_revision":8,"investigator_id":"pc","action":{"kind":"use_item","item_id":"item_e244d459b938","quantity":1,"operation":"custom","approach":"把黄铜钥匙出示给法伦看，确认它能开莱特办公室的门"}}
+{"type":"action_request","protocol_version":1,"request_id":"b0a96e1d-495b-46b0-9e52-50de4f826e9a","world_id":"local-猩红文档-20260916-050005-1fa5","expected_revision":8,"investigator_id":"pc","action":{"kind":"freeform","text":"我仔细检查法伦的办公桌，找找抽屉里有没有藏起来的东西"}}
+{"type":"check_response","protocol_version":1,"request_id":"ee2677ae-1081-4fb7-9421-0ff765d22a48","world_id":"local-猩红文档-20260916-050005-1fa5","check_request_id":"chk_b7750a9f4ec9","decision":"roll"}

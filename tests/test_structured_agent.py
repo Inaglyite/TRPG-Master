@@ -153,6 +153,91 @@ class KeeperAgentTests(unittest.IsolatedAsyncioTestCase):
         for envelope in delivered:
             self.assertNotIn("audience", envelope)
 
+    async def test_awaiting_resolve_stops_run_without_wait_flag(self):
+        # 模型正式提交 resolve_intent(awaiting_player) 但忘记设置 wait_for_player：
+        # 运行必须随挂起结束，不能继续空调用模型（2026-09-16 A 组 D2 实测：
+        # 挂起后空转 6 步重复 resolve 直至预算耗尽）。
+        self.submit_action()
+        caller = _ScriptedCaller(
+            [
+                _decision(
+                    assessment="需要先澄清",
+                    commands=[
+                        {"kind": "publish_message", "payload": {
+                            "speaker": {"kind": "keeper"},
+                            "audience": {"kind": "public"},
+                            "text": "你打算怎么去？",
+                        }},
+                        {"kind": "resolve_intent", "payload": {
+                            "request_id": "req-1",
+                            "resolution": "awaiting_player",
+                            "pending_action": {"kind": "move",
+                                               "destination_scene_id": "library",
+                                               "note": "前往图书馆"},
+                        }},
+                    ],
+                )
+            ]
+        )
+        runner = KeeperAgentRunner(self.db_url, caller=caller)
+        result = await runner.run(world_id="sp-world", trigger_request_id="req-1")
+        self.assertEqual("done", result.status)
+        self.assertEqual("wait_player", result.stop_reason)
+        self.assertEqual(1, len(caller.calls))  # 没有空调用第二次
+        self.assertEqual("awaiting_player", self.request_status("req-1"))
+
+    async def test_await_with_same_step_rejection_continues_run(self):
+        # 挂起与命令拒绝发生在同一步时不得结束运行：否则玩家会永远等一张
+        # 没创建成功的检定卡（2026-09-16 按钮级实测：request_check 被拒，
+        # resolve_intent(awaiting) 已提交，玩家端无任何可点的检定）。
+        from src.storage.database import CheckRequest
+
+        self.submit_action()
+        caller = _ScriptedCaller(
+            [
+                _decision(
+                    commands=[
+                        {"kind": "request_check", "payload": {
+                            # 缺 skill/attempt：必被 schema 拒绝
+                            "investigator_id": "inv-alice",
+                        }},
+                        {"kind": "resolve_intent", "payload": {
+                            "request_id": "req-1",
+                            "resolution": "awaiting_player",
+                            "pending_action": {"kind": "other", "note": "等待检定"},
+                        }},
+                    ],
+                ),
+                _decision(
+                    commands=[
+                        {"kind": "request_check", "payload": {
+                            "investigator_id": "inv-alice",
+                            "skill": "侦查",
+                            "difficulty": "regular",
+                            "attempt": "翻检书桌抽屉找藏匿物",
+                            "visibility": "public",
+                        }},
+                        {"kind": "resolve_intent", "payload": {
+                            "request_id": "req-1",
+                            "resolution": "awaiting_player",
+                            "pending_action": {"kind": "other", "note": "等待检定"},
+                        }},
+                    ],
+                ),
+            ]
+        )
+        runner = KeeperAgentRunner(self.db_url, caller=caller)
+        result = await runner.run(world_id="sp-world", trigger_request_id="req-1")
+        self.assertEqual("done", result.status)
+        self.assertEqual(2, len(caller.calls))  # 第一步没停，带驳回理由续跑了一步
+        with session_scope(self.db_url) as session:
+            checks = session.execute(
+                select(CheckRequest).where(CheckRequest.world_id == "sp-world")
+            ).scalars().all()
+        self.assertEqual(1, len(checks))
+        self.assertEqual("pending", checks[0].status)
+        self.assertEqual("awaiting_player", self.request_status("req-1"))
+
     async def test_agent_model_failure_pauses_trigger_and_keeps_commits(self):
         self.submit_action()
         caller = _ScriptedCaller(
@@ -383,6 +468,97 @@ class KeeperAgentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(StructuredError) as raised:
             self._resolve_draft(draft_id, "maybe")
         self.assertEqual("invalid_action", raised.exception.code)
+
+
+class NormalizeCommandsTests(unittest.TestCase):
+    """模型输出形态归一化：扁平 {kind, ...字段} 与嵌套 {kind, payload} 等价。
+
+    2026-09-16 真机验收：deepseek-flash 在两种形态间摇摆，扁平形态被整条
+    跳过导致移动落空、整轮空转暂停。
+    """
+
+    def test_flat_form_fields_lifted_into_payload(self):
+        commands = [
+            {"kind": "move_party", "command_id": "c1", "destination_scene_id": "s2",
+             "travel_minutes": 15},
+            {"kind": "resolve_intent", "request_id": "r1", "resolution": "completed"},
+        ]
+        lifted = KeeperAgentRunner._normalize_commands(commands)
+        self.assertEqual(2, lifted)
+        self.assertEqual(
+            {"destination_scene_id": "s2", "travel_minutes": 15},
+            commands[0]["payload"],
+        )
+        self.assertEqual(
+            {"request_id": "r1", "resolution": "completed"}, commands[1]["payload"]
+        )
+        # 顶层不再残留载荷字段
+        self.assertNotIn("destination_scene_id", commands[0])
+
+    def test_nested_form_untouched_and_explicit_payload_wins(self):
+        commands = [
+            {"kind": "move_party",
+             "payload": {"destination_scene_id": "s9"},
+             "destination_scene_id": "s2"},
+        ]
+        lifted = KeeperAgentRunner._normalize_commands(commands)
+        self.assertEqual(1, lifted)
+        # 显式 payload 的同名字段优先，多余顶层键被收编后清除
+        self.assertEqual({"destination_scene_id": "s9"}, commands[0]["payload"])
+        self.assertNotIn("destination_scene_id", commands[0])
+
+        clean = [{"kind": "publish_message", "payload": {"text": "x"},
+                  "command_id": "c9"}]
+        self.assertEqual(0, KeeperAgentRunner._normalize_commands(clean))
+        self.assertEqual({"text": "x"}, clean[0]["payload"])
+
+    def test_non_dict_and_kindless_entries_left_for_downstream_rejection(self):
+        commands = ["junk", {"payload": {"text": "x"}}]
+        self.assertEqual(0, KeeperAgentRunner._normalize_commands(commands))
+        self.assertEqual("junk", commands[0])
+        self.assertNotIn("kind", commands[1])
+
+    def test_flat_awaiting_resolve_intent_still_parks(self):
+        # 扁平 resolve_intent(awaiting_player) 归一化后仍被排序器识别为屏障：
+        # 其后的命令丢弃，narration 插在屏障前。
+        commands = [
+            {"kind": "resolve_intent", "request_id": "r1",
+             "resolution": "awaiting_player"},
+            {"kind": "move_party", "destination_scene_id": "s2"},
+        ]
+        KeeperAgentRunner._normalize_commands(commands)
+        ordered = KeeperAgentRunner._order_commands(commands, "叙事")
+        kinds = [c["kind"] for c in ordered]
+        self.assertIn("publish_message", kinds)  # narration 提升为消息
+        self.assertIn("resolve_intent", kinds)
+        self.assertNotIn("move_party", kinds)  # 屏障之后的一律丢弃
+
+    def test_awaiting_payload_string_shapes_normalized(self):
+        # 真实模型验收实测：模型把 pending_action 写成裸字符串、disclosed 写成
+        # 单条字符串，连撞 schema 后整轮空转暂停。这两种写法在 Agent 边界归一。
+        commands = [
+            {
+                "kind": "resolve_intent",
+                "payload": {
+                    "request_id": "r1",
+                    "resolution": "awaiting_player",
+                    "pending_action": "决定是否请法伦代为询问",
+                    "disclosed": "遗体不在校内",
+                    "thread": {"action": "open", "pending_action": "去医学院"},
+                },
+            }
+        ]
+        KeeperAgentRunner._normalize_commands(commands)
+        payload = commands[0]["payload"]
+        self.assertEqual(
+            {"kind": "freeform", "note": "决定是否请法伦代为询问"},
+            payload["pending_action"],
+        )
+        self.assertEqual(["遗体不在校内"], payload["disclosed"])
+        self.assertEqual(
+            {"kind": "freeform", "note": "去医学院"},
+            payload["thread"]["pending_action"],
+        )
 
 
 if __name__ == "__main__":

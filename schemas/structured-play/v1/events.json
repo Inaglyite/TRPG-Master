@@ -436,6 +436,10 @@
             "type": "string",
             "maxLength": 60
           }
+        },
+        "holder_id": {
+          "$ref": "common.json#/$defs/id_string",
+          "description": "仅 keeper/agent 投影携带：当前持有该物品的调查员。玩家投影不带此字段（自己身上的物品无需标注，也不会看到他人持有物）。"
         }
       }
     },

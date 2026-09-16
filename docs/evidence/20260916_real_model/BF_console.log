@@ -1,0 +1,86 @@
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050713-e2c4 | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4665, 'completion_tokens': 64, 'total_tokens': 4729} content_chars=161 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4718, 'completion_tokens': 162, 'total_tokens': 4880} content_chars=391 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4705, 'completion_tokens': 88, 'total_tokens': 4793} content_chars=213 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4740, 'completion_tokens': 67, 'total_tokens': 4807} content_chars=181 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050713-e2c4 mode=agent status=paused reason=repeated_rejections commands=2
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050720-1574 | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4243, 'completion_tokens': 296, 'total_tokens': 4539} content_chars=706 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050720-1574 mode=agent status=done reason=wait_player commands=3
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050723-0a7f | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4488, 'completion_tokens': 336, 'total_tokens': 4824} content_chars=720 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4595, 'completion_tokens': 186, 'total_tokens': 4781} content_chars=368 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4764, 'completion_tokens': 413, 'total_tokens': 5177} content_chars=813 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4989, 'completion_tokens': 294, 'total_tokens': 5283} content_chars=578 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050723-0a7f mode=agent status=done reason=wait_player commands=5
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050734-5a4b | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4236, 'completion_tokens': 48, 'total_tokens': 4284} content_chars=119 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4275, 'completion_tokens': 182, 'total_tokens': 4457} content_chars=418 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4339, 'completion_tokens': 64, 'total_tokens': 4403} content_chars=175 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4374, 'completion_tokens': 65, 'total_tokens': 4439} content_chars=175 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050734-5a4b mode=agent status=paused reason=repeated_rejections commands=2
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050739-8a03 | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5091, 'completion_tokens': 50, 'total_tokens': 5141} content_chars=122 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5159, 'completion_tokens': 325, 'total_tokens': 5484} content_chars=621 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5349, 'completion_tokens': 331, 'total_tokens': 5680} content_chars=633 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050739-8a03 mode=agent status=done reason=wait_player commands=3
+
+=== B_long_term_recall｜长期回忆：事实挤出近期窗口后凭记忆回答 ===
+玩家：回想起来……法伦之前有没有提过，他自己害怕什么地方？
+请求 completed｜模型调用 4｜tokens 19209｜判定 PASS 
+  守秘人：你努力回想与布莱斯·法伦的每一次交谈。有一件事浮了上来——法伦曾在私下里向你承认过：他害怕医学院的地下室，天黑之后从不靠近那里。他说这话时的语气不像随口一提，倒像是某种根深蒂固的回避。
+
+=== C_knowledge_isolation｜知识隔离：不在场 NPC 的私密记忆不泄漏 ===
+玩家：法伦，验尸的时候有没有发现过一只蓝釉小瓶？
+请求 completed｜模型调用 1｜tokens 4539｜判定 PASS 
+  守秘人：蓝釉小瓶？……不，验尸报告里没有提到任何这类东西。查尔斯的死因被写成严重突发心力衰竭，遗体上也没有发现什么异常的物件。你怎么会问起一只小瓶？
+
+=== D_rumor_vs_fact｜传闻与事实：传闻带不确定性，事实可直接陈述 ===
+玩家：法伦，莱特死前那个周末去了哪儿？他的死亡证明是谁签的？
+请求 completed｜模型调用 4｜tokens 20065｜判定 PASS 
+  守秘人：法伦主任把双手交叠在桌面上，沉吟了一下。
+
+「那个周末……我手头没有他行程的正式记录。我只听到过一些说法——有人说他去了港口区的一场私人拍卖会。但这只是传闻，我没有亲眼见过，也没法向你保证。」
+
+他顿了顿，语气变得确定起来。
+
+「死亡证明的事我可以明确告诉你：是惠特克罗夫特签的。这一点我核对过。」
+法伦主任把双手交叠在桌面上，沉吟了一下。
+
+「那个周末……我手头没有他行程的正式记录。我只听到过一些
+
+=== E_missing_info_query｜缺失信息：查无依据时承认不确定，不编造 ===
+玩家：我们之前有没有听说过一个叫「银钥集会」的组织？
+请求 completed｜模型调用 4｜tokens 17583｜判定 PASS 
+  守秘人：你翻检自己的记忆——旧金山唐人街的茶馆里、渡轮上的闲谈、阿卡姆这几日的见闻——「银钥集会」这个名字对你而言完全陌生。你从未在任何场合听人提起过它，笔记本上也没有相关记载。
+
+（主持提示：这只是一个名字，目前你没有任何关于它的来源、成员或活动的信息。）
+
+=== F_budget_irrelevant｜预算与无关记忆：必需区不被挤掉，相关记忆靠检索找回 ===
+玩家：法伦，关于莱特的事，你还记得什么？
+请求 completed｜模型调用 3｜tokens 16305｜判定 PASS 
+  守秘人：（法伦主任在办公桌后坐下，双手交叠，神色疲惫）莱特的事……你问我还记得什么。让我想想。
+
+他生前跟我提过一句话，我到现在都忘不掉——他说办公室里总有股「墨香混着铁锈」的味道，深夜加班时尤其明显。我当时只当他熬夜熬糊涂了，还笑他是不是墨水打翻在暖气片上。
+
+还有一件事。他跟我说过，他把一枚徽章锁进了自己办公室的抽屉里，说那东西「不该跟文档放在一起」。他没细讲是什么徽章，我也没多问——现在想来，我该多
+
+报告：/tmp/accept-20260916/BF8_memory_trace.json
+总 tokens：77701
+总判定：{'B_long_term_recall': 'PASS', 'C_knowledge_isolation': 'PASS', 'D_rumor_vs_fact': 'PASS', 'E_missing_info_query': 'PASS', 'F_budget_irrelevant': 'PASS'}

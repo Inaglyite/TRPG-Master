@@ -3,12 +3,17 @@
 
 一次运行内按固定顺序走过：
 
-    S1 意愿（我想先看看莱特教授的尸体）
-    S2 追问（那位医生和我们熟吗）
-    S3 明确出发（那麻烦你联系一下，我现在过去）
-    S4 换说法（换个说法：我想去莱特的办公室看看）
-    S5 取消（算了，医学院先不去了）
-    S6 普通直接移动（我们现在就出发去莱特的办公室）
+    C1 意愿（我想先看看莱特教授的尸体）→ 不移动
+    C2 追问（那位值班医生和我们熟吗）→ 不移动
+    C3 明确出发（那麻烦你联系一下，我现在过去）→ 承接已约定目的地并移动
+    D1 普通直接移动（我们现在就出发去医学院）→ 移动
+    D2 提议句（要不我们直接过去莱特的办公室？）→ 澄清/承接，不移动
+    D3 意愿式说法（我想回医学院再看看）→ 澄清/承接，不移动
+    D4 取消（算了，医学院先不去了）→ 不移动、旧待办取消
+
+    chain 组（C1–C3）共享同一世界——「同一世界连续承接」正是验收点；
+    对偶组（D1–D4）每个用例一个隔离世界——移动会改变起点，共享世界会
+    让后续用例的起点偏离剧本假设。
 
 对每一次模型调用记录：system 提示词、发给模型的上下文（含最新玩家消息、待办状态、
 最近对话）、请求参数（含**实际生效** max_tokens）、原始响应、finish_reason、usage；
@@ -90,11 +95,11 @@ SCENARIO_GROUPS: list[dict[str, Any]] = [
             },
             {
                 "key": "D2_rephrase",
-                "label": "换说法：要不我们直接过去莱特的办公室",
+                "label": "换说法（提议句）：要不我们直接过去莱特的办公室",
                 "text": "要不我们直接过去莱特的办公室？",
-                "expect_movement": True,
-                "expect_destination": "wright_office",
-                "require_different_scene": "wright_office",
+                # 提议句（「要不……？」）的正确行为是承接讨论/确认一次，而不是
+                # 直接移动（主规格：歧义时澄清；明确出发指令才移动）。
+                "expect_movement": False,
             },
             {
                 "key": "D3_wish_no_move",
@@ -496,9 +501,15 @@ async def run_trace(*, report_path: Path, timeout: float, verbose: bool) -> dict
     print(f"起始场景 {report['start_scene']}｜目的地 {[d['name'] for d in destinations][:6]}")
 
     index = 0
-    for group in SCENARIO_GROUPS:
+    # 展平为 (group, scenario) 序列：对偶用例各自一个隔离世界。移动会改变
+    # 起点，共享世界会让后续用例的起点偏离剧本假设（2026-09-16 D2：D1 已
+    # 移到医学院，莱特办公室不再是相邻目的地，模型没移动被误记 FAIL）；
+    # chain 组保持同一世界——「同一世界连续承接」正是该组验收点。
+    flat: list[tuple[dict, dict]] = [
+        (group, scenario) for group in SCENARIO_GROUPS for scenario in group["scenarios"]
+    ]
+    for group, scenario in flat:
         if group["world"] != "chain":
-            # 对偶组换一个隔离世界：保证每个用例起点 ≠ 目标、目标已知可达、无障碍。
             context, world_id, byok = build_agent_world()
             gateway = StructuredGateway(context.database_url)
             snapshot = gateway.snapshot_envelope(world_id=world_id, user_id=None)
@@ -506,14 +517,13 @@ async def run_trace(*, report_path: Path, timeout: float, verbose: bool) -> dict
             destinations = snapshot["payload"].get("destinations") or []
             report["worlds"].append(
                 {
-                    "world": group["world"],
+                    "world": f"{group['world']}:{scenario['key']}",
                     "world_id": world_id,
                     "runtime_root": str(RUNTIME_ROOT),
                     "destinations": destinations,
                 }
             )
-            print(f"\n### 对偶组新世界 {world_id}｜起始场景 {_scene_of(context)}")
-    for scenario in group["scenarios"]:
+            print(f"\n### 对偶新世界 {world_id}（{scenario['key']}）｜起始场景 {_scene_of(context)}")
         index += 1
         collector = _Collector()
         request_id = f"trace-{group['world'][0]}-{index}"
@@ -579,7 +589,16 @@ async def run_trace(*, report_path: Path, timeout: float, verbose: bool) -> dict
             "pending_after": _pending_requests(context.database_url, world_id),
         }
         expect_destination = scenario.get("expect_destination")
-        if scenario["expect_movement"] is None:
+        request_status = str(entry["request"].get("status") or "")
+        if request_status in {"paused", "failed"}:
+            # 运行未正常结束（模型截断/缺 BYOK 等）：玩家没得到回应，不能因为
+            # 「碰巧没移动」记 PASS。先修运行健康，再谈行为判定。
+            entry["verdict"] = "FAIL"
+            entry["verdict_note"] = (
+                f"运行未正常结束：请求 {request_status}"
+                f"（{str(entry['request'].get('detail') or '')[:120]}）"
+            )
+        elif scenario["expect_movement"] is None:
             entry["verdict"] = "RECORDED"
         elif bool(scenario["expect_movement"]) == moved:
             if moved and expect_destination and scene_after != expect_destination:

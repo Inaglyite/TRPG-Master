@@ -210,6 +210,8 @@ class KeeperAgentRunner:
             )
         context = {
             "snapshot": snapshot,
+            "scene_notes": self.service.scene_notes_for_agent(world_id),
+            "investigator_sheets": self.service.investigator_sheets_for_agent(world_id),
             "open_threads": open_threads,
             "trigger_context": {
                 "request_id": trigger_request_id or None,
@@ -281,6 +283,70 @@ class KeeperAgentRunner:
         if not isinstance(commands, list):
             raise ValueError("commands 必须是数组")
         return data
+
+    @staticmethod
+    def _normalize_commands(commands: object) -> int:
+        """把模型输出的扁平形态命令归一为 {kind, payload, command_id?}。
+
+        真实模型验收（2026-09-16，deepseek-flash）：模型在扁平形态
+        {"kind": "move_party", "destination_scene_id": ...} 与嵌套形态
+        {"kind": "move_party", "payload": {...}} 之间摇摆；扁平形态此前被
+        整条跳过——移动落空而叙事照常，随后整轮空转暂停。归一化只搬字段
+        位置：kind/payload/command_id 之外的顶层键收进 payload（显式
+        payload 的同名字段优先）；schema 校验与领域校验照常把关，不放宽
+        任何字段检查。返回收编的命令数。
+        """
+        if not isinstance(commands, list):
+            return 0
+        lifted = 0
+        for command in commands:
+            if not isinstance(command, dict):
+                continue
+            extras = {
+                key: value
+                for key, value in command.items()
+                if key not in {"kind", "payload", "command_id"}
+            }
+            if extras:
+                payload = command.get("payload")
+                if not isinstance(payload, dict):
+                    command["payload"] = dict(extras)
+                else:
+                    for key, value in extras.items():
+                        payload.setdefault(key, value)
+                for key in extras:
+                    command.pop(key, None)
+                lifted += 1
+            payload = command.get("payload")
+            if str(command.get("kind") or "") == "resolve_intent" and isinstance(
+                payload, dict
+            ):
+                KeeperAgentRunner._normalize_awaiting_shapes(payload)
+        return lifted
+
+    @staticmethod
+    def _normalize_awaiting_shapes(payload: dict) -> None:
+        """resolve_intent 的形状容错：pending_action 必须是对象、disclosed 必须是数组。
+
+        真实模型验收（2026-09-16 A 组）：模型把 pending_action 写成字符串、
+        disclosed 写成单条字符串，连撞 schema 三次后整轮被空转保护暂停——
+        玩家什么都看不到。这两种写法语义无歧义，在 Agent 边界归一；线协议
+        与 schema 保持严格。
+        """
+        pending = payload.get("pending_action")
+        if isinstance(pending, str) and pending.strip():
+            payload["pending_action"] = {"kind": "freeform", "note": pending.strip()[:300]}
+        disclosed = payload.get("disclosed")
+        if isinstance(disclosed, str) and disclosed.strip():
+            payload["disclosed"] = [disclosed.strip()[:200]]
+        thread = payload.get("thread")
+        if isinstance(thread, dict):
+            thread_pending = thread.get("pending_action")
+            if isinstance(thread_pending, str) and thread_pending.strip():
+                thread["pending_action"] = {
+                    "kind": "freeform",
+                    "note": thread_pending.strip()[:300],
+                }
 
     # ------------------------------------------------------------------
     # 按需查询（记忆检索）：只读、有预算、结果回喂到下一步上下文
@@ -369,6 +435,8 @@ class KeeperAgentRunner:
             command_id = (
                 str(command.get("command_id") or "") or f"{run_id}-s{step}-c{index}"
             )
+            if isinstance(payload, dict):
+                payload = self._repair_audience(world_id, payload)
             try:
                 # Agent 生成的命令与客户端帧共用同一份冻结 schema：payload 字段与
                 # 枚举在这里就拦住，不让「错误类型」进入执行层再靠各领域函数兜。
@@ -408,12 +476,43 @@ class KeeperAgentRunner:
                 result.awaiting_parked = True
                 spent.append(f"{kind} committed: awaiting_player")
                 await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
+                if rejected:
+                    # 同步有命令被拒（例如 request_check 没过 schema）：挂起已生效，
+                    # 但模型还没看到驳回理由；就此结束会让玩家永远等一张不存在
+                    # 的检定卡（2026-09-16 按钮级实测）。本轮不停在 await——让模型
+                    # 下一步带着驳回修正后重新收尾。
+                    spent.append(
+                        f"注意：本步有 {rejected} 条命令被拒（原因见上），但请求已挂起；"
+                        "请先修正被拒命令重新提交，再 resolve_intent 收尾。"
+                    )
+                    return None, rejected
                 return "await", rejected
             spent.append(
                 f"{kind} committed: {json.dumps(outcome['result'], ensure_ascii=False)[:200]}"
             )
             await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
         return None, rejected
+
+    def _repair_audience(self, world_id: str, payload: dict) -> dict:
+        """把「{"kind":"investigators"} 省略 ids」补全为当前全体调查员。
+
+        模型常这样写（意为「全体玩家」），而线协议要求 investigator_ids 必填；
+        真实模型验收（2026-09-16 E 组）里该形态被 schema 连拒三次，消息始终
+        没有落地，玩家端静默。补全发生在 Agent 边界，协议本身保持严格。
+        """
+        audience = payload.get("audience")
+        if (
+            isinstance(audience, dict)
+            and audience.get("kind") == "investigators"
+            and not audience.get("investigator_ids")
+        ):
+            ids = self.service.claimed_investigator_ids(world_id)
+            if ids:
+                return {
+                    **payload,
+                    "audience": {"kind": "investigators", "investigator_ids": ids},
+                }
+        return payload
 
     @staticmethod
     def _order_commands(commands: list[dict], narration: str) -> list[dict]:
@@ -659,6 +758,7 @@ class KeeperAgentRunner:
             result.stop_reason = f"draft_unavailable:{type(exc).__name__}"
             return result
         commands = []
+        self._normalize_commands(decision.get("commands"))
         for command in decision.get("commands") or []:
             kind = str(command.get("kind") or "")
             payload = command.get("payload")
@@ -766,6 +866,11 @@ class KeeperAgentRunner:
                 try:
                     decision = self._parse_decision(raw)
                     parse_failures = 0
+                    lifted = self._normalize_commands(decision.get("commands"))
+                    if lifted:
+                        run_log.append(
+                            f"归一化 {lifted} 条扁平形态命令（字段已收进 payload）。"
+                        )
                 except EmptyDecision:
                     # caller 直接返回空串（例如自定义 caller）：同样不重试。
                     result.status = "paused"
@@ -822,6 +927,12 @@ class KeeperAgentRunner:
                 if stop == "takeover":
                     result.status = "takeover_stopped"
                     result.stop_reason = "controller_epoch_stale"
+                    return result
+                if stop == "await":
+                    # resolve_intent(awaiting_player) 已在命令层挂起并发布事件；
+                    # 不能因模型没同步设置 wait_for_player 就继续空转（2026-09-16
+                    # A 组 D2：挂起后又跑了 6 步重复 resolve，直至预算耗尽暂停）。
+                    result.stop_reason = "wait_player"
                     return result
                 if stop == "budget":
                     break

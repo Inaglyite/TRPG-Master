@@ -355,5 +355,72 @@ class RoomAgentBroadcastTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], hub.direct)
 
 
+class _RecordingCompletions:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        message = type("M", (), {"content": "{}", "reasoning_content": None})()
+        choice = type("C", (), {"message": message, "finish_reason": "stop"})()
+        usage = type(
+            "U", (), {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+        )()
+        return type("R", (), {"choices": [choice], "usage": usage})()
+
+
+class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
+    """结构化 Agent 的 BYOK caller：DeepSeek 必须显式关 thinking。
+
+    deepseek-flash 默认开启 thinking，推理 token 计入 max_tokens 预算，
+    曾把 JSON 决策正文挤没（finish=length、content 空 → 运行暂停）。
+    其他服务商不认识该参数，不得发送。
+    """
+
+    async def _capture(self, provider_kind: str, base_url_host: str) -> dict:
+        from src.ai.model.route_service import ModelRoutes, ResolvedRole
+        from src.structured.agent_runtime import build_byok_caller
+
+        completions = _RecordingCompletions()
+        client = type(
+            "C", (), {"chat": type("H", (), {"completions": completions})()}
+        )()
+        role = ResolvedRole(
+            client=client,
+            model_id="deepseek-flash",
+            window_tokens=None,
+            window_source="manual",
+            max_output_tokens=8000,
+            provider_kind=provider_kind,
+            binding_id="b1",
+            base_url_host=base_url_host,
+            config_revision=1,
+        )
+        routes = ModelRoutes(narrative=role, judgement=role, revision=1)
+        with (
+            patch(
+                "src.storage.model_config_store.room_route_resolver",
+                lambda *args: lambda: None,
+            ),
+            patch("src.ai.model.route_service.resolve_routes", lambda *args: routes),
+        ):
+            caller = build_byok_caller("sqlite:///:memory:", "w1")
+            await caller("system", "user")
+        return completions.kwargs
+
+    async def test_deepseek_disables_thinking(self):
+        kwargs = await self._capture("deepseek", "api.deepseek.com")
+        self.assertEqual({"thinking": {"type": "disabled"}}, kwargs.get("extra_body"))
+
+    async def test_deepseek_by_host_also_disabled(self):
+        # server_default 指向 DeepSeek 时同样关闭（按 host 兜底判定）
+        kwargs = await self._capture("server_default", "api.deepseek.com")
+        self.assertEqual({"thinking": {"type": "disabled"}}, kwargs.get("extra_body"))
+
+    async def test_other_provider_untouched(self):
+        kwargs = await self._capture("openai_compatible", "example.com")
+        self.assertNotIn("extra_body", kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()

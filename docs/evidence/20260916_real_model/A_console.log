@@ -1,0 +1,55 @@
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050710-f8ba | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4224, 'completion_tokens': 320, 'total_tokens': 4544} content_chars=667 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050710-f8ba mode=agent status=done reason=wait_player commands=2
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5172, 'completion_tokens': 320, 'total_tokens': 5492} content_chars=688 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050710-f8ba mode=agent status=done reason=wait_player commands=2
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5286, 'completion_tokens': 347, 'total_tokens': 5633} content_chars=811 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4795, 'completion_tokens': 178, 'total_tokens': 4973} content_chars=388 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4916, 'completion_tokens': 281, 'total_tokens': 5197} content_chars=590 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5057, 'completion_tokens': 276, 'total_tokens': 5333} content_chars=532 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050710-f8ba mode=agent status=done reason=wait_player commands=8
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050726-f0f7 | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4224, 'completion_tokens': 242, 'total_tokens': 4466} content_chars=576 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4389, 'completion_tokens': 249, 'total_tokens': 4638} content_chars=500 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4585, 'completion_tokens': 370, 'total_tokens': 4955} content_chars=732 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4793, 'completion_tokens': 412, 'total_tokens': 5205} content_chars=786 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 5029, 'completion_tokens': 329, 'total_tokens': 5358} content_chars=669 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050726-f0f7 mode=agent status=done reason=wait_player commands=7
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050739-1062 | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4221, 'completion_tokens': 273, 'total_tokens': 4494} content_chars=547 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050739-1062 mode=agent status=done reason=wait_player commands=2
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050743-06df | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4212, 'completion_tokens': 239, 'total_tokens': 4451} content_chars=475 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050743-06df mode=agent status=done reason=wait_player commands=2
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20260916-050746-674e | 模组=猩红文档
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4223, 'completion_tokens': 140, 'total_tokens': 4363} content_chars=294 reasoning_chars=0
+INFO httpx: HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+INFO trpg.structured_agent: agent 模型调用 model=deepseek-flash max_tokens=16000 finish=stop usage={'prompt_tokens': 4285, 'completion_tokens': 231, 'total_tokens': 4516} content_chars=440 reasoning_chars=0
+INFO trpg.structured_agent: keeper agent run 结束 world=local-猩红文档-20260916-050746-674e mode=agent status=done reason=wait_player commands=3
+世界 local-猩红文档-20260916-050710-f8ba（临时）｜模型 deepseek-flash｜生效预算 max_tokens=16000
+起始场景 miskatonic_university｜目的地 ['密斯卡托尼克大学医学院', '莱特的办公室']
+
+### 对偶新世界 local-猩红文档-20260916-050726-f0f7（D1_plain_move）｜起始场景 miskatonic_university
+
+### 对偶新世界 local-猩红文档-20260916-050739-1062（D2_rephrase）｜起始场景 miskatonic_university
+
+### 对偶新世界 local-猩红文档-20260916-050743-06df（D3_wish_no_move）｜起始场景 miskatonic_university
+
+### 对偶新世界 local-猩红文档-20260916-050746-674e（D4_cancel）｜起始场景 miskatonic_university
+
+报告：/tmp/accept-20260916/A9_transition_trace.json
+总判定：{'C1_intent': 'PASS', 'C2_follow_up': 'PASS', 'C3_go': 'PASS', 'D1_plain_move': 'PASS', 'D2_rephrase': 'PASS', 'D3_wish_no_move': 'PASS', 'D4_cancel': 'PASS'}

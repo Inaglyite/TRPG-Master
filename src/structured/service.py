@@ -21,6 +21,7 @@ from src.storage.database import (
     GameCommand,
     PlayerRequest,
     World,
+    WorldInvestigator,
     WorldState,
     session_scope,
     utcnow,
@@ -781,6 +782,16 @@ class StructuredPlayService:
             if row is None:
                 raise StructuredError("unknown_world", f"世界状态缺失：{world_id}")
             state, _ = migrate_world_state(copy.deepcopy(row.state))
+            # 稳定 ID 注册表「首迁移必须落库」：快照只在内存迁移会生成一套随机
+            # item_id 展示给前端，首个命令/请求再迁移又生成另一套——前端按旧
+            # ID 提交必被拒（2026-09-16 按钮级实测：快照里钥匙的 ID 在提交时
+            # 不存在 → object_not_held）。不推进 revision（纯迁移持久化）。
+            if "item_registry" not in state or "clue_registry" not in state:
+                from .registries import ensure_clue_registry, ensure_item_registry
+
+                ensure_item_registry(state)
+                ensure_clue_registry(state)
+                self._write_state(row, state, bump=False)
             meta = world.metadata_json or {}
             from src.storage.database import KeeperControl
 
@@ -931,6 +942,103 @@ class StructuredPlayService:
     # 角色长期记忆：带权限检查的只读查询（协议 §10）
     # ------------------------------------------------------------------
 
+    def claimed_investigator_ids(self, world_id: str) -> list[str]:
+        """当前被认领的调查员 ID（Agent 边界补全 audience 等内部用途）。"""
+        with session_scope(self.database_url) as session:
+            rows = (
+                session.execute(
+                    select(WorldInvestigator.character_key).where(
+                        WorldInvestigator.world_id == world_id,
+                        WorldInvestigator.status == "claimed",
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return sorted(str(row) for row in rows)
+
+    def scene_notes_for_agent(self, world_id: str) -> list[dict]:
+        """当前场景与已知目的地的模组描述（主持级 grounding，不进公开投影）。
+
+        公开快照的 destinations 只带 id+名称；模型看不到「那里有什么」就会
+        编造模组事实（2026-09-16 A 组：场景描述写明遗体在医学院冷柜，模型
+        却叙述「已下葬」）。这里把模组描述提供给 Agent 上下文——它是主持
+        可见的模组事实，不构成对玩家的额外披露（公开与否仍由叙事纪律约束）。
+        """
+        from .domains import _known_destinations
+
+        with session_scope(self.database_url) as session:
+            row = session.get(WorldState, world_id)
+            if row is None:
+                return []
+            state, _ = migrate_world_state(copy.deepcopy(row.state))
+        catalog = state.get("scene_catalog") or {}
+        if not isinstance(catalog, dict):
+            return []
+        notes: list[dict] = []
+        seen: set[str] = set()
+
+        def note(scene_id: str, *, current: bool) -> None:
+            if not scene_id or scene_id in seen:
+                return
+            seen.add(scene_id)
+            entry = catalog.get(scene_id) or {}
+            if not isinstance(entry, dict):
+                return
+            description = str(entry.get("description") or "")[:300]
+            notes.append(
+                {
+                    "scene_id": scene_id,
+                    "name": str(entry.get("name") or scene_id),
+                    "description": description,
+                    **({"current": True} if current else {}),
+                }
+            )
+
+        current = state.get("current_scene") or {}
+        note(str(current.get("id") or ""), current=True)
+        for scene_id in sorted(_known_destinations(state)):
+            note(scene_id, current=False)
+        return notes
+
+    def investigator_sheets_for_agent(self, world_id: str) -> list[dict]:
+        """调查员状态与技能表（主持级，不进公开投影）。
+
+        Agent 发起 request_check 需要权威角色卡上的精确技能键：看不到角色卡
+        就只能猜技能名（2026-09-16 按钮级实测：模型写「侦查」被确定性拒绝，
+        真实键是 spot_hidden），拒绝—重试—再拒绝直至空转暂停。
+        """
+        with session_scope(self.database_url) as session:
+            row = session.get(WorldState, world_id)
+            if row is None:
+                return []
+            state, _ = migrate_world_state(copy.deepcopy(row.state))
+
+        def sheet_of(investigator_id: str, sheet: dict) -> dict:
+            skills = sheet.get("skills") if isinstance(sheet.get("skills"), dict) else {}
+            return {
+                "investigator_id": investigator_id,
+                "name": str(sheet.get("name") or investigator_id),
+                "hp": int(sheet.get("hp", 0) or 0),
+                "max_hp": int(sheet.get("max_hp", 0) or 0),
+                "san": int(sheet.get("san", 0) or 0),
+                "max_san": int(sheet.get("max_san", 0) or 0),
+                "skills": {str(k): int(v) for k, v in skills.items()
+                           if isinstance(v, (int, float))},
+            }
+
+        sheets: list[dict] = []
+        investigators = state.get("investigators")
+        if isinstance(investigators, dict):
+            for investigator_id, sheet in sorted(investigators.items()):
+                if isinstance(sheet, dict):
+                    sheets.append(sheet_of(str(investigator_id), sheet))
+        pc = state.get("pc")
+        if isinstance(pc, dict) and (pc.get("name") or pc.get("skills")):
+            pc_id = str(pc.get("id") or pc.get("stable_id") or "pc")
+            sheets.append(sheet_of(pc_id, pc))
+        return sheets
+
     def query_memories(
         self,
         *,
@@ -1054,7 +1162,11 @@ class StructuredPlayService:
             entry = registry["clues"].get(clue_id)
             if entry is None:
                 raise StructuredError("object_not_found", "这条线索不在你的已知列表里。")
-            if investigator_id not in entry.get("granted_to", []):
+            # granted_to 为空 = 全队共享的已知线索（legacy clues_found 的默认语义，
+            # 模组初始线索即如此）；快照投影按同一口径展示，行动校验必须一致，
+            # 否则 UI 给得出示按钮、提交却被拒（2026-09-16 按钮级真机验收实测）。
+            granted_to = entry.get("granted_to") or []
+            if granted_to and investigator_id not in granted_to:
                 raise StructuredError("not_authorized", "你并不知道这条线索。")
             presentation = action.get("presentation")
             if presentation == "original":
@@ -1194,6 +1306,28 @@ class StructuredPlayService:
     def _visible_items(self, state: dict, own: set[str], is_keeper: bool) -> list[dict]:
         from .domains import _inventory_projection
 
+        if is_keeper:
+            # 主持/Agent 需要看到全队持有物及持有人——否则裁决时对「玩家身上
+            # 有什么」是盲的（2026-09-16 真机验收：Agent 因上下文物品为空，
+            # 错误断言玩家没有起始钥匙）。物品持有不是秘密；私密信息仍由
+            # 线索/记忆可见性通道控制。
+            from .registries import ensure_item_registry
+
+            registry = ensure_item_registry(state)
+            return sorted(
+                (
+                    {
+                        "id": entry["item_id"],
+                        "label": entry["label"],
+                        "quantity": int(entry["quantity"]),
+                        "holder_id": str((entry.get("holder") or {}).get("id") or ""),
+                        "operations": [],
+                    }
+                    for entry in registry["items"].values()
+                    if (entry.get("holder") or {}).get("kind") == "investigator"
+                ),
+                key=lambda item: (item["holder_id"], item["id"]),
+            )
         items: list[dict] = []
         for investigator_id in sorted(own):
             for item in _inventory_projection(state, investigator_id):

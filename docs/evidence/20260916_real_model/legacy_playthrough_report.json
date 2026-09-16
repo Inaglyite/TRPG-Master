@@ -1,0 +1,5246 @@
+{
+  "world_id": "local-猩红文档-20260916-030406-2024",
+  "module": "猩红文档",
+  "started_at": "2026-09-16 11:04:06",
+  "beats": [
+    {
+      "key": "B0_opening",
+      "title": "开局：法伦办公室",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 miskatonic_university",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "开场拿到莱特办公室/小屋钥匙",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B1_morgue",
+      "title": "停尸房：惠特克罗夫特与验尸",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 miskatonic_medical",
+          "pass": true
+        },
+        {
+          "area": 2,
+          "desc": "惠特克罗夫特在场",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "handout 发放（john_whitcroft）",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 wright_body_evidence",
+          "pass": true
+        },
+        {
+          "area": 1,
+          "desc": "验尸/侦查检定有执行",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B1b_threat",
+      "title": "威胁无辜者确认门（威胁后放弃）",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 4,
+          "desc": "威胁无辜 NPC 触发确认门",
+          "pass": true
+        },
+        {
+          "area": 4,
+          "desc": "放弃确认后无战斗状态",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B2_students",
+      "title": "两个研究生（历史系/学生公社）",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "到达过历史系或学生公社",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B3a_office",
+      "title": "莱特办公室：私人日记（模组 source=wright_office）",
+      "goal_met": false,
+      "turns": 10,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 wright_office",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 wright_private_diary",
+          "pass": false
+        }
+      ]
+    },
+    {
+      "key": "B3b_cottage",
+      "title": "莱特小屋：双重生活",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 wright_cottage",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "小屋搜查完成（cottage_searched）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B4_sanatorium",
+      "title": "精神病院：塞西尔·亨特与三个买家",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 arkham_sanatorium",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 hunter_copy",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B5_buyers",
+      "title": "分别调查三个买家",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "调查过至少两个买家相关地点",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B5b_clock",
+      "title": "时间推进：多日监视古董店（案件时钟发酵）",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "多日调查中案件时钟有推进（beat 内差值 >0）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6a_basement",
+      "title": "古董店：找到并进入地下室",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "古董店搜查推进（wicks_shop_searched / 显形 / 开战其一）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6b_fight",
+      "title": "古董店：战斗（弹药消耗）",
+      "goal_met": true,
+      "turns": 7,
+      "checks": [
+        {
+          "area": 1,
+          "desc": "终局危机成立（战斗 / 显形 / 怪物被解决其一）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_read",
+      "title": "当面阅读：记住内容但不取得原件",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 witch_trial_documents_read",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "只读不取得文档或完成找回目标",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_documents",
+      "title": "古董店：找回女巫审判文档",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 witch_trial_documents",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_badge",
+      "title": "取得实物：搜查楼上办公室的锡盒",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 abner_seal",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6d_seal",
+      "title": "封印怪物：银质徽章关闭通道",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 5,
+          "desc": "银质徽章封印落定（monster_defeated）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B7_madness",
+      "title": "疯狂注入验证",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 10,
+          "desc": "SAN 被压低",
+          "pass": true
+        },
+        {
+          "area": 10,
+          "desc": "疯狂症状写入心理特质",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B8_ending",
+      "title": "结局：truth_and_seal",
+      "goal_met": true,
+      "turns": 4,
+      "checks": [
+        {
+          "area": 5,
+          "desc": "结局触发",
+          "pass": true
+        },
+        {
+          "area": 5,
+          "desc": "结局为 truth_and_seal（good：真相大白，怪物被制伏）",
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "global_checks": [
+    {
+      "area": 9,
+      "desc": "枪械弹药随射击递减",
+      "pass": true,
+      "ammo_seq": [
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        5,
+        4,
+        3,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "area": 7,
+      "desc": "叙事未泄露 NPC secret 原文",
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "area": 8,
+      "desc": "叙事不提前说出未知线索原文",
+      "pass": true,
+      "early": []
+    },
+    {
+      "area": 6,
+      "desc": "结局结算触发（profile 写入已回滚）",
+      "pass": true
+    }
+  ],
+  "anomalies": [
+    {
+      "kind": "adjudication_fallback",
+      "turn": 9,
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 10,
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 11,
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 13,
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层"
+    },
+    {
+      "kind": "beat_goal_not_met",
+      "beat": "B3a_office",
+      "turn": 15
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 26,
+      "input": "继续向地下室深处搜查，留意任何非人的动静，手按在枪柄上保持警戒"
+    },
+    {
+      "kind": "turn_error",
+      "turn": 27,
+      "input": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+      "errors": [
+        "（叙述过长被截断，请重试或继续）"
+      ]
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 36,
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印"
+    }
+  ],
+  "turn_snapshots": [
+    {
+      "scene": "miskatonic_university",
+      "npcs_present": [
+        "bryce_fallon"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": false,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 0
+      },
+      "combat_active": false,
+      "world_clock": {},
+      "last_action_outcome": null,
+      "input": null,
+      "narrative": "秋雨从阿卡姆镇上空落下来，细密、耐心，像是要把整座城都泡进一层灰蓝色的水汽里。密斯卡托尼克大学的哥特式石砌建筑群在雨幕中显得比照片上更沉、更旧，尖顶与拱窗的轮廓被水痕泡得有些发软。你撑伞走过湿漉漉的方庭，脚下的石板路映着几盏昏黄的灯，偶尔有学生抱着书从你身边匆匆跑过，衣角带起一阵凉意。\n\n行政楼里比外面安静得多。深色地毯吞掉了你的脚步声，走廊两侧的橡木门一扇扇紧闭着，皮革与旧纸的味道从门缝里渗出来。你经过时，一间办公室里传来打字机断续的敲击声——它停了一下，又响起来，像某个人在斟酌措辞。二楼尽头，一扇门半开着，门牌上刻着“布莱斯·法伦，行政处主任”。\n\n法伦主任正站在窗边，背对着门，手里端着一只已经凉了的茶杯。听见你的脚步，他转过身来。五十岁出头，衣着光鲜，领结打得一丝不苟，脸上带着一种训练有素的温和。他放下茶杯，绕过书桌向你伸出手，动作不急不缓，像是一个习惯了接待各种来客的人。\n\n“黄先生，感谢你冒雨前来。请坐。”\n\n他示意你在书桌对面的皮椅上坐下，自己则回到桌后，双手交叠搁在桌面上。窗外雨声连绵，衬得屋里的沉默格外清晰。他沉默了几秒，像是在决定从哪里开始。\n\n“查尔斯·莱特教授死了。校方对外说的是严重突发心力衰竭——意外，令人惋惜，仅此而已。”\n\n他顿了顿，目光落在桌角一份摊开的文件上，却没有去翻它。\n\n“可我不相信事情这么简单。他死在自己的办公室里，门是从里面锁上的。一个心力衰竭的人，不会先把门锁好再倒下。”\n\n他抬起眼，看着你，语气仍旧平稳，但语速比刚才慢了一些。\n\n“更麻烦的是，他生前正在评估一批文档——霍布豪斯家族捐赠的阿卡姆女巫审判档案。他死后，那批文档不见了。柯布家族的人已经在不停地打电话来问，措辞一次比一次不客气。校园里流言四起，再这样下去，受伤害的不只是某一个人的名声。”\n\n他从抽屉里取出两把黄铜钥匙，放在桌面上，朝你推过来。钥匙在台灯下泛着暗淡的光，一把齿纹较新，一把边缘磨得发亮。\n\n“这是莱特办公室的钥匙，这是他住处的钥匙。我希望你尽快、低调地把事情查清楚——他究竟是怎么死的，文档又去了哪里。”\n\n他靠回椅背，手指在桌沿轻轻敲了一下，像是终于把一件压了很久的东西交了出去。\n\n“黄先生，我请你来，是因为你查事情不看表面。这桩案子，表面上的说法已经够多了。”\n\n**你可以——**\n1. 收下钥匙，前往莱特教授的校内办公室查看死亡现场。\n2. 收下钥匙，先去莱特在校外的小屋，看看他的私人生活留下了什么。\n3. 暂不收钥匙，继续追问法伦：还有谁接触过那批文档，校方又隐瞒了什么。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 7324,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_medical",
+      "npcs_present": [
+        "john_whitcroft"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": false,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 0
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 15
+      },
+      "last_action_outcome": {
+        "resolution_id": "db1d42bd1b12953f7af4b9f5e53f774a6b2da067",
+        "success": true,
+        "status": "executed_success",
+        "description": "你撑伞穿过雨中的方庭，沿湿滑的石板路走向医学院。灰白色的解剖楼在雨幕里显得格外冷清，门厅里飘着消毒水与福尔马林的气味。值班的校工核对过法伦主任的名头后，领你走向停尸间——莱特教授的遗体就停在里面。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 0,
+            "after": 15
+          }
+        ]
+      },
+      "input": "我想先看看莱特教授的尸体。",
+      "narrative": "法伦听你说出\"医学院\"三个字，点了点头，取过听筒替你拨通医学院的内线，压低声音说明了你的来意；放下听筒，他示意惠特克罗夫特医生会在停尸房等候。\"死亡证明是他签的——见到他，你直接问查尔斯身上到底有什么不对劲。\"\n\n你前往密斯卡托尼克大学医学院。医学院地下的冰冷停尸房，莱特的遗体被锁在冷柜中。\n\n冷柜间门口，惠特克罗夫特医生攥着病历夹站在那里。他显得疲惫而不安，却仍以职业性的克制向你示意。\n\n医学院地下这一层比楼上冷得多，石墙渗着一股洗不净的潮气，消毒水和福尔马林的味道混在一起，贴在鼻腔里久久不散。走廊尽头没有窗，只有一盏吊灯在头顶嗡嗡作响，把惠特克罗夫特医生的影子拉得又长又薄。\n\n他站在冷柜间门口，指节泛白地攥着病历夹，像是在那里站了有一阵子了。见你走近，他微微颔首，动作礼貌却僵硬。他比法伦年长不少，浮肿的眼皮底下透着没睡好的青影，海象似的胡子有一角被他自己捻得翘了起来。\n\n“黄先生。法伦主任说你要来。”\n\n他侧身让开半步，却没有立刻去开冷柜。钥匙串在他手里轻轻碰响了一下，他又停住了。\n\n“在开门之前，我想先跟你说清楚一件事。”他的目光落在你脸上，又很快移开，落到你身后空荡荡的走廊上，“死亡证明是我签的。上面写的是严重突发心力衰竭——这是校方希望的说法，也是我签下的字。”\n\n他顿了顿，喉结动了一下。\n\n“但我签那张纸的时候，手是抖的。我当内科医生四十年，见过太多心力衰竭的死者，没有一个是那样的。”\n\n他说完这句，像是用掉了不少力气，转过身，把钥匙插进冷柜的锁孔。锁芯发出一声干涩的轻响。他抽出抽屉的动作很慢，滑轨摩擦的声音在安静的房间里格外刺耳。金属托盘上覆着一层白布，边角压得整整齐齐。他核对了一遍抽屉上挂着的标签，逐字念出了上面的名字，然后把手搭在白布边缘，却没有掀开。\n\n“你想看，就自己看。我只能告诉你——别指望能睡好觉。”\n\n他退开一步，把位置让给你，手里的病历夹抱得更紧了些。",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "我想先看看莱特教授的尸体。",
+        "approach": "玩家想查看莱特教授的遗体，遗体停放在密斯卡托尼克大学医学院（miskatonic_medical）。本轮只结算从行政楼前往医学院的行程，抵达后不立即展开尸检调查。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_medical",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "你撑伞穿过雨中的方庭，沿湿滑的石板路走向医学院。灰白色的解剖楼在雨幕里显得格外冷清，门厅里飘着消毒水与福尔马林的气味。值班的校工核对过法伦主任的名头后，领你走向停尸间——莱特教授的遗体就停在里面。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2249,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5375,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_medical",
+      "npcs_present": [
+        "john_whitcroft"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 35
+      },
+      "last_action_outcome": {
+        "resolution_id": "f77bb8bddac00257d79cf37445d235368bbfa439",
+        "success": true,
+        "status": "executed_success",
+        "description": "白布掀开，莱特的遗体呈现在冷光下。你注意到与\"心力衰竭\"不符的细节：面部肌肉凝固着一种极度惊骇的扭曲，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么灼过的痕迹。惠特克罗夫特在一旁低声补充他签证明时的疑虑，你确认了官方说法与尸体实况之间的裂痕。",
+        "npc_direction": "惠特克罗夫特已主动坦白自己签下不实死亡证明，内心愧疚而恐惧。若调查员表现出专业与克制，他愿意补充他所见的异常；若调查员显得鲁莽或想把他拖进麻烦，他会退缩、含糊其辞，并催促尽快结束这次查看。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 15,
+            "after": 35
+          }
+        ]
+      },
+      "input": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+      "narrative": "惠特克罗夫特医生带你进入地下停尸房，拉开冰冷的金属冷柜。白布掀起，莱特教授的遗体显露在冷白灯光下。\n\n冷柜的金属把手贴上手心的那一刻，你感到一股凉意顺着指骨爬上来，比这间地下室本身还要低几度。惠特克罗夫特把白布从遗体脸上掀开，折到肩头，动作轻得像是在替什么人掖被角。冷白色的灯光从头顶压下来，照在白瓷托盘上，反出一层硬邦邦的光。\n\n莱特教授的脸先映入你的眼睛——不是安详，也不是痛苦，而是一种**凝固了的极度惊骇**。眉骨高高吊起，眼睑张着，嘴角向下扯到几乎扭曲的地步，面部的肌肉在死亡那一刻仿佛被什么从内部攥紧过，之后再没有松开。那不是一颗衰竭的心脏能留下的表情。\n\n你俯身细看。他的眼眶周围——尤其是眼睑内侧和眼球表面——呈现出一种不自然的暗红与浑浊，像是被高温从内部烘烤过。指尖与唇色发暗发紫，皮肤上散布着一些极细的、针尖大小的灼痕，零落得像被什么热源在很近的距离掠过。你伸手碰了碰他的下颌，肌肉僵直得异常。没有外伤，没有挣扎的痕迹，可这具身体里似乎同时发生了好几件不该同时发生的事。\n\n惠特克罗夫特站在你斜后方，没有看遗体，目光一直落在墙上那排标签上。他声音压得很低，像是怕被谁听见。\n\n\"眼部的损伤——我第一眼就看见了。像是被热从里面烧过。可他的皮肤没有烧伤，衣服也是完好的。还有，你摸他的四肢，冰的，可器官不该是那样一起停的。心、肝、肾，像是同一刻被掐灭了，没有先后。\"\n\n他停了一下，捏着病历夹的手指关节又白了一层。\n\n\"我签那张纸，是因为法伦主任说学校经不起第二桩丑闻。可我知道那不是心力衰竭。黄先生，我看得出来，你也看得出来。\"\n\n他说完这句，往后退了半步，像是把话交出去之后，就等着看你打算怎么处理。房间里只剩下冷柜低沉的嗡鸣，以及那股消毒水也压不住的、说不清来路的潮味。",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+        "approach": "请惠特克罗夫特医生掀开白布，对莱特教授的遗体做一次仔细的目视检查：观察面部与手部的异常、皮肤与指甲的状态、有无非心力衰竭所能解释的痕迹，并留意尸体周围的气味与细节。医生在场，可随时询问他签死亡证明时的疑虑。",
+        "target_npc_id": "john_whitcroft",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "wright_body_evidence:0"
+        ],
+        "check": null,
+        "time_minutes": 20,
+        "success_description": "白布掀开，莱特的遗体呈现在冷光下。你注意到与\"心力衰竭\"不符的细节：面部肌肉凝固着一种极度惊骇的扭曲，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么灼过的痕迹。惠特克罗夫特在一旁低声补充他签证明时的疑虑，你确认了官方说法与尸体实况之间的裂痕。",
+        "failure_description": "冷柜的寒气与福尔马林的气味让你一时难以集中，白布下的细节在你眼前模糊成一片。你只看出死者面容扭曲、不像安详离世，却说不清具体异常在哪里。惠特克罗夫特见你迟疑，把病历夹抱得更紧，没有主动多说。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特已主动坦白自己签下不实死亡证明，内心愧疚而恐惧。若调查员表现出专业与克制，他愿意补充他所见的异常；若调查员显得鲁莽或想把他拖进麻烦，他会退缩、含糊其辞，并催促尽快结束这次查看。",
+        "sanity_source_id": "wright_body_seen",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3739,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 6250,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_medical",
+      "npcs_present": [
+        "john_whitcroft"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 35
+      },
+      "last_action_outcome": {
+        "resolution_id": "f77bb8bddac00257d79cf37445d235368bbfa439",
+        "success": true,
+        "status": "executed_success",
+        "description": "白布掀开，莱特的遗体呈现在冷光下。你注意到与\"心力衰竭\"不符的细节：面部肌肉凝固着一种极度惊骇的扭曲，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么灼过的痕迹。惠特克罗夫特在一旁低声补充他签证明时的疑虑，你确认了官方说法与尸体实况之间的裂痕。",
+        "npc_direction": "惠特克罗夫特已主动坦白自己签下不实死亡证明，内心愧疚而恐惧。若调查员表现出专业与克制，他愿意补充他所见的异常；若调查员显得鲁莽或想把他拖进麻烦，他会退缩、含糊其辞，并催促尽快结束这次查看。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 15,
+            "after": 35
+          }
+        ]
+      },
+      "input": "我拔出左轮指着惠特克罗夫特，威胁他说出真相",
+      "narrative": "你真的要用武力威胁约翰·惠特克罗夫特医生吗？\n\n约翰·惠特克罗夫特医生目前并未主动敌对，并且与你的关系是“内疚”；这里是密斯卡托尼克大学医学院。调查员通常只在认为必要时诉诸武力，这一次是否必要仍由你决定。 人物记录为信念：“行动是最好的回击。破解被草草了结的案子，本身就是对偏见的响亮耳光。坚信东方智慧在推理中常有效。”；特质：“敏锐的观察者、沉默的骄傲、于偏见中坚守正义。冷静的蔑视——面对蔑称不会动怒，用无可挑剔的推理让对方无地自容。”。即使不开枪，这也可能破坏关系、引来报警或改变案件走向。\n\n",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+        "approach": "请惠特克罗夫特医生掀开白布，对莱特教授的遗体做一次仔细的目视检查：观察面部与手部的异常、皮肤与指甲的状态、有无非心力衰竭所能解释的痕迹，并留意尸体周围的气味与细节。医生在场，可随时询问他签死亡证明时的疑虑。",
+        "target_npc_id": "john_whitcroft",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "wright_body_evidence:0"
+        ],
+        "check": null,
+        "time_minutes": 20,
+        "success_description": "白布掀开，莱特的遗体呈现在冷光下。你注意到与\"心力衰竭\"不符的细节：面部肌肉凝固着一种极度惊骇的扭曲，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么灼过的痕迹。惠特克罗夫特在一旁低声补充他签证明时的疑虑，你确认了官方说法与尸体实况之间的裂痕。",
+        "failure_description": "冷柜的寒气与福尔马林的气味让你一时难以集中，白布下的细节在你眼前模糊成一片。你只看出死者面容扭曲、不像安详离世，却说不清具体异常在哪里。惠特克罗夫特见你迟疑，把病历夹抱得更紧，没有主动多说。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特已主动坦白自己签下不实死亡证明，内心愧疚而恐惧。若调查员表现出专业与克制，他愿意补充他所见的异常；若调查员显得鲁莽或想把他拖进麻烦，他会退缩、含糊其辞，并催促尽快结束这次查看。",
+        "sanity_source_id": "wright_body_seen",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_history",
+      "npcs_present": [
+        "emilia_court"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 50
+      },
+      "last_action_outcome": {
+        "resolution_id": "dcae7ad2496b534f393ee2da2d8c6ef87aeba9ab",
+        "success": true,
+        "status": "executed_success",
+        "description": "",
+        "npc_direction": "惠特克罗夫特留在停尸房，不会阻拦或跟随；他刚把话交出去，处于等待调查员如何处置的沉默状态。抵达历史系后，考特是否在场、态度如何由抵达后的场景处理，本回合不预设。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 35,
+            "after": 50
+          }
+        ]
+      },
+      "input": "前往历史系找艾米莉亚·考特，询问她和莱特教授的往来",
+      "narrative": "你前往密斯卡托尼克大学历史系研究生自习室。主楼西翼三层靠近楼梯的研究生自习室，旧书、论文和地板蜡的气味混在一起。艾米莉亚·考特通常在靠窗书桌前工作。\n\n你前往密斯卡托尼克大学历史系研究生自习室。主楼西翼三层靠近楼梯的研究生自习室，旧书、论文和地板蜡的气味混在一起。艾米莉亚·考特通常在靠窗书桌前工作。\n\n自习室的门虚掩着，走廊里那盏楼梯灯的暖光从门缝漏进来，落在磨得发亮的地板上。屋里比走廊暗一些，只有靠窗的位置亮着一盏绿罩台灯，光晕里浮着细小的纸尘。四周的书架顶到天花板，论文与旧刊按年份摞成高矮不一的塔，空气里是纸张、皮革和地板蜡混成的、让人犯困的暖味。\n\n靠窗那张书桌前坐着一个人。艾米莉亚·考特穿着深色、剪裁拘谨的上衣，头发一丝不苟地挽在脑后，样式朴素得像是刻意要把什么藏起来。听见脚步声，她抬起头，目光从面前摊开的稿纸移到你身上，停了一瞬，像是在快速判断你是什么人。她没有立刻起身，只是把手里的钢笔搁下，笔尖朝外，摆得整整齐齐。“自习室不对外。若你是来找人的，请说明来意。”她的语气平稳、克制，带着一种研究生面对陌生人时惯有的防备。她扫了一眼你被雨打湿的衣角，又看回你的脸，等你说下去。台灯的光把她半边脸照得清楚，另半边沉在阴影里——那双眼睛很专注，却不带什么温度。\n\n屋外雨势未歇，偶尔有学生从楼梯口经过，脚步声在木地板上咚咚响过两下，又消失。",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往历史系找艾米莉亚·考特，询问她和莱特教授的往来",
+        "approach": "从医学院地下停尸房离开，穿过校园前往主楼西翼三层的历史系研究生自习室，去找艾米莉亚·考特，打算当面询问她与莱特教授之间的往来。本回合只结算赶路与抵达，见到考特后的交谈留待抵达之后。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_history",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特留在停尸房，不会阻拦或跟随；他刚把话交出去，处于等待调查员如何处置的沉默状态。抵达历史系后，考特是否在场、态度如何由抵达后的场景处理，本回合不预设。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2441,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4248,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 0,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 65
+      },
+      "last_action_outcome": {
+        "resolution_id": "24e392cde94339e09997c7f9fcc0900476528c45",
+        "success": true,
+        "status": "executed_success",
+        "description": "",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 50,
+            "after": 65
+          }
+        ]
+      },
+      "input": "前往莱特教授的办公室，用黄铜钥匙开门",
+      "narrative": "你前往莱特的办公室。狭小的教职办公室，书桌、文件柜、壁炉和一面部分熔化的裂镜构成了主要现场。\n\n你前往莱特的办公室。狭小的教职办公室，书桌、文件柜、壁炉和一面部分熔化的裂镜构成了主要现场。\n\n黄铜钥匙插进锁孔时几乎没有阻力，锁芯转得很顺——这扇门自从上一次被打开后，大概就没再上过别的锁。你推门进去，一股滞闷的空气迎面扑来，像是这间屋子很久没有换过气。屋里没人，窗帘半拉着，外面灰蒙蒙的天光从缝里漏进来，把浮尘照成一片缓慢游动的细屑。\n\n办公室不大。一张书桌，一只金属文件柜，一座砖砌壁炉，还有靠墙的一面穿衣镜。你注意到椅子略微偏离桌面，像是有人起身时推开的，之后就再没人坐回去。桌上的纸张压在一方玻璃镇纸下，其中一页的边角微微翘起，随着门缝里钻进来的气流轻轻颤动，发出极细的窸窣声。\n\n壁炉里堆着烧过的残骸——灰烬、卷曲的纸灰、几块没有烧透的硬纸板边角。炉膛里的灰被翻动过，像是有人急着把什么喂进火里。书桌右侧的抽屉半掩着，锁扣完好，没有被撬开的痕迹。文件柜的门关得很严，金属外壳上凝着一层薄薄的凉意。\n\n真正让这间屋子显得不对劲的，是那面镜子。它挂在对门那面墙上，本该映出书桌和你的身影，此刻却有一部分彻底失去了光泽——镜面中段有一片熔化后重新凝固的痕迹，边缘发黑起泡，像被什么从内侧灼烧过。那片区域歪斜地扭曲着，映出的影像在靠近它时会被拉长、变形，仿佛照进去的不是光，而是别的什么东西。\n\n屋里很静。走廊那头不知哪扇门被合上了，一声沉闷的回响顺着楼层传过来，在这间小办公室里绕了一圈才散掉。",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往莱特教授的办公室，用黄铜钥匙开门",
+        "approach": "从历史系研究生自习室离开，前往莱特教授的办公室。本回合只结算抵达路程，用黄铜钥匙开门留待抵达后处理。",
+        "target_npc_id": "",
+        "destination_scene_id": "wright_office",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 1275,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4698,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 1,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 95
+      },
+      "last_action_outcome": {
+        "resolution_id": "3de625577c875eb7e4594aaff0790b52a425804c",
+        "success": false,
+        "status": "executed_failure",
+        "description": "你翻遍抽屉与文件柜，只找到些无关的讲义、账单和旧信，夹层与暗格一时没能摸出来。搜查耗去半小时，屋里依旧静得发闷，而走廊尽头似乎有脚步声停了一下又走开。 本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 65,
+            "after": 95
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 0,
+            "after": 1
+          }
+        ]
+      },
+      "input": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一拉开书桌的抽屉，把文件柜也翻了一遍。抽屉里是些寻常的东西：几叠讲义、一沓摞得整齐的账单、几封无关紧要的信件，纸角都压得平平整整。你把底板摸过去，指腹在木纹里来回蹭了几遍，没有摸到任何松动的夹层或暗格。文件柜的三层抽屉同样干净，锁扣完好，没有任何被撬动过的迹象。\n\n半小时过去，你重新站直身子，脖子有些发酸。你确实找到了莱特留下的东西——但那些东西没有一样能告诉你他为什么会在紧锁的房间里那样死去。你翻过的那叠讲义里夹着一张便条，字迹潦草，日期是九月下旬，可内容只是关于某次系务会议的提醒，和文档、和死亡都扯不上关系。\n\n窗外的天光偏了一些，冷白的光线斜切过桌面，把你翻动过的纸张边缘照得发亮，那里留着几枚模糊的指印——是你自己按上去的，还是之前就有的，你一时分不清。壁炉里的灰烬层次深浅不一，底层的灰压得很实，上层的却蓬松，像是被人翻动过又重新拨平。你盯着看了一会儿，没有从中看出更多东西。\n\n就在你收起最后一份文件的时候，走廊尽头传来一阵脚步声。那声音不急不缓，走到你这扇门外似乎停了一下，又继续往前去了。你没有听到敲门。等声音彻底消失在楼梯口，办公室里又只剩下你自己的呼吸，以及那面熔化镜面里被扭曲拉长的、你自己的影子。",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+        "approach": "在莱特的办公室内系统搜查书桌抽屉、抽屉夹层与文件柜，寻找被藏起的私人日记。抽屉锁扣完好、文件柜紧闭，需要靠观察与手感找出隐藏的夹层或暗格。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "wright_private_diary:0",
+          "wright_private_diary:1"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特办公室书桌抽屉与文件柜暗格",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "抽屉与文件柜外观完好、无撬痕，日记若被藏起必然在夹层或暗格中，需要细致搜查才能发现；无额外加成或惩罚。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 30,
+        "success_description": "你逐层拉开抽屉、敲击柜壁听声，在书桌抽屉底板下摸到一处松动的夹层，从中取出一本用旧皮包着的私人日记——莱特亲笔，字迹与桌上文件一致。",
+        "failure_description": "你翻遍抽屉与文件柜，只找到些无关的讲义、账单和旧信，夹层与暗格一时没能摸出来。搜查耗去半小时，屋里依旧静得发闷，而走廊尽头似乎有脚步声停了一下又走开。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "office_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+            "reason": "玩家完成对莱特办公室的系统搜查并取得私人日记，落定场景完成标记。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+            "reason": "在死者办公室长时间翻找，若被人注意到会引来关注；作为拖延与动静的后果推进一级。"
+          }
+        ],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3521,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4863,
+          "error": null
+        },
+        {
+          "role": "narrative_consistency",
+          "status": "completed",
+          "elapsed_ms": 2183,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "cd4f9cd547cc254e786348fe768cc4a00899dc61",
+        "success": false,
+        "status": "executed_failure",
+        "description": "你把每一本笔记都翻遍了，纸页翻得起了毛边，抽屉夹层也重新摸过一遍，指腹蹭得发红。除了讲义、账单和几封无关紧要的信件，什么也没有。长时间的翻检让你有些烦躁，窗外天光又暗了一分——你隐约觉得，在这间屋子里耗得越久，走廊那头盯着这扇门的目光就越多。 本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 95,
+            "after": 140
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 1,
+            "after": 2
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你把每一本笔记都翻遍了。纸页翻得起了毛边，抽屉夹层重新摸过一遍，指腹在木板上蹭得发红，甚至连文件柜后壁和书桌背面都用手电筒照过。你找到的还是那些东西——讲义、账单、几封无关紧要的信件，边角整齐，内容枯燥，和这桩死亡扯不上任何关系。\n\n四十五分钟就这么过去了。你重新站直身子的时候，后背有些发僵，袖口蹭上了灰。窗外灰蒙蒙的天光又暗了一分，雨似乎还在下，只是不再敲窗，变成了更细更密的背景声。桌面上那页被镇纸压着的纸，边角还在轻轻颤动，一下，又一下，规律得让人心烦。\n\n你隐约察觉到一件事：你在这间屋子里待得太久了。走廊上刚才那阵脚步声之后再没回来，但某种感觉没有散去——像是有一双眼睛隔着门板，在你翻动纸张的窸窣声里，安静地记着时间。你说不清那是错觉，还是这栋楼里确实有人注意到了这扇一直亮着、被人翻找的门。\n\n办公室的座椅仍旧略微偏离桌面，仿佛莱特起身离开后就再没回来坐过。你站在屋子中央，手边的抽屉半开着，里面摊着你翻乱又没能完全归位的纸张。这间小房间里，能给你答案的东西似乎并没有藏在你想找的地方。\n\n**你可以——**\n1. 把注意力从书桌移开，去检查壁炉里那堆烧过的灰烬残骸。\n2. 靠近那面部分熔化的镜子，仔细查看它熔毁的痕迹。\n3. 就此离开办公室，改去莱特在校外的小屋继续调查。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+        "approach": "玩家在莱特办公室内继续系统搜查：逐本翻开笔记、检查抽屉夹层与文件柜，寻找此前遗漏的藏匿物。此前同一做法（spot_hidden 对书桌抽屉与文件柜暗格）已失败，本次改为逐页翻检笔记与夹层这一更细致的新做法，属可再检定范畴，但难度提高。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "wright_private_diary:0",
+          "wright_private_diary:1"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特办公室笔记与抽屉夹层（逐页翻检）",
+          "required_success_level": "hard",
+          "bonus_dice": 0,
+          "penalty_dice": 1,
+          "reason": "此前对抽屉与文件柜的粗查已失败，本次改为逐页翻检笔记与夹层，做法不同可再检定；因目标更隐蔽且已翻动过一遍，难度提升为 hard。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 45,
+        "success_description": "你耐着性子把每一本笔记从头翻到尾，指腹沿着纸页边缘一页页捻过去。在一本装订松散的讲义夹里，你摸到两页之间夹着的东西——不是纸，而是一本薄薄的、没有署名的皮面笔记本，被压在最不起眼的夹层里。莱特的私人日记。",
+        "failure_description": "你把每一本笔记都翻遍了，纸页翻得起了毛边，抽屉夹层也重新摸过一遍，指腹蹭得发红。除了讲义、账单和几封无关紧要的信件，什么也没有。长时间的翻检让你有些烦躁，窗外天光又暗了一分——你隐约觉得，在这间屋子里耗得越久，走廊那头盯着这扇门的目光就越多。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "office_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+            "reason": "玩家完成对莱特办公室的系统搜查，落定场景完成标记。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+            "reason": "在办公室长时间翻检、滞留，符合 human_pressure 的 advance_when（拖延过久，让其他势力有时间行动）。"
+          }
+        ],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3927,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5053,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "cd4f9cd547cc254e786348fe768cc4a00899dc61",
+        "success": false,
+        "status": "executed_failure",
+        "description": "你把每一本笔记都翻遍了，纸页翻得起了毛边，抽屉夹层也重新摸过一遍，指腹蹭得发红。除了讲义、账单和几封无关紧要的信件，什么也没有。长时间的翻检让你有些烦躁，窗外天光又暗了一分——你隐约觉得，在这间屋子里耗得越久，走廊那头盯着这扇门的目光就越多。 本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 95,
+            "after": 140
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 1,
+            "after": 2
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记一本本抽出来翻。纸页还是那些纸页，讲义还是那些讲义。指腹沿着抽屉底板的木纹摸过去，还是那块实心的木头，没有松动，没有缝隙。文件柜的三层抽屉你重新拉了一遍，柜门背后也照过——冷硬的白铁皮，反着一点窗外的光。\n\n你停下来，意识到自己已经在这几件家具之间重复了同样的动作。第一遍翻找没有结果，第二遍更细致地翻，仍然没有结果。现在你做的，是第三遍。\n\n有什么东西在阻碍你——不是锁，不是机关，而是这间屋子本身的结构。莱特把东西藏在了某个你还没想到去碰的地方，或者，他根本没有把你要找的东西留在这里。窗外灰蒙蒙的光线又一次偏斜，切过桌面，把你翻动过的纸页照得发白。那些纸张边缘的指印，此刻看起来格外扎眼，分不清是莱特留下的，还是你自己按上去的。\n\n你在这间屋子里花掉的时间已经太多了。走廊那头很安静，安静得反常——刚才还有脚步声经过，现在连一点动静都没有了。某种直觉告诉你，继续用同样的方式在这里翻下去，只会把时间白白耗掉。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 就此离开办公室，前往莱特在校外的小屋。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 搜查模组声明的线索必须提出对应检定（或 discovery_refs）；没有检定就不能给出搜查结论，也不能断言目标不存在或已移走"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 7040,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "cd4f9cd547cc254e786348fe768cc4a00899dc61",
+        "success": false,
+        "status": "executed_failure",
+        "description": "你把每一本笔记都翻遍了，纸页翻得起了毛边，抽屉夹层也重新摸过一遍，指腹蹭得发红。除了讲义、账单和几封无关紧要的信件，什么也没有。长时间的翻检让你有些烦躁，窗外天光又暗了一分——你隐约觉得，在这间屋子里耗得越久，走廊那头盯着这扇门的目光就越多。 本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 95,
+            "after": 140
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 1,
+            "after": 2
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n你已经用完全一样的办法把这几件家具翻了三遍。第一遍没有，第二遍没有，第三遍——不会有。这不是运气的问题，是方法的问题。如果东西真在这张桌子或这只柜子里，前两遍就该摸到了；如果摸不到，第三遍也不会多出什么。\n\n你直起身，环顾这间狭小的办公室。书桌、文件柜、壁炉、镜子——还有窗帘、书架、地板、天花板。你一直盯着桌子，却从没真正看过别的地方。窗外灰蒙蒙的天光又暗了一层，雨声变得细而密，像一层蒙在玻璃上的纱。桌面上那页纸的边角仍在镇纸下轻轻颤动，一下，又一下。\n\n走廊外很安静。安静得让你怀疑，是不是有人正站在门外，听着你在这间屋子里反复翻找的动静。你已经耗掉了太多时间，而收获仍然是零。\n\n**你可以——**\n1. 改变方法，去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 就此离开办公室，前往莱特在校外的小屋。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 搜查模组声明的线索必须提出对应检定（或 discovery_refs）；没有检定就不能给出搜查结论，也不能断言目标不存在或已移走"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3446,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "cd4f9cd547cc254e786348fe768cc4a00899dc61",
+        "success": false,
+        "status": "executed_failure",
+        "description": "你把每一本笔记都翻遍了，纸页翻得起了毛边，抽屉夹层也重新摸过一遍，指腹蹭得发红。除了讲义、账单和几封无关紧要的信件，什么也没有。长时间的翻检让你有些烦躁，窗外天光又暗了一分——你隐约觉得，在这间屋子里耗得越久，走廊那头盯着这扇门的目光就越多。 本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 95,
+            "after": 140
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 1,
+            "after": 2
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n你已经用完全一样的办法把这几件家具翻了三遍。第一遍没有，第二遍没有，第三遍——不会有。这不是运气的问题，是方法的问题。如果东西真在这张桌子或这只柜子里，前两遍就该摸到了；如果摸不到，第三遍也不会多出什么。\n\n你直起身。手边还是那些纸页，讲义、账单、信件，边角被你反复翻动，已经起了毛边。你意识到自己正站在同一处，重复着同一套动作，而答案不会从这套动作里长出来。\n\n要做的事只有一件：换一种做法。或者，明确地再赌一次。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 不再翻箱倒柜，改用更彻底的方式拆检书桌本身（孤注一掷）。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 搜查模组声明的线索必须提出对应检定（或 discovery_refs）；没有检定就不能给出搜查结论，也不能断言目标不存在或已移走"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3075,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "33eeaf24010a2a058d453e0b4ddf60b01fd31eae",
+        "success": true,
+        "status": "not_executed",
+        "description": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 140,
+            "after": 140
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n你已经用完全一样的办法把这几件家具翻了三遍。第一遍没有，第二遍没有，第三遍——不会有。这不是运气的问题，是方法的问题。如果东西真在这张桌子或这只柜子里，前两遍就该摸到了；如果摸不到，第三遍也不会多出什么。\n\n你直起身。手边还是那些纸页，讲义、账单、信件，边角被你反复翻动，已经起了毛边。你意识到自己正站在同一处，重复着同一套动作，而答案不会从这套动作里长出来。\n\n要做的事只有一件：换一种做法。或者，明确地再赌一次。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 不再翻箱倒柜，改用更彻底的方式拆检书桌本身（孤注一掷）。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "decline",
+        "input_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+        "approach": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "repeat_refused",
+          "elapsed_ms": null,
+          "error": "RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4057,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "33eeaf24010a2a058d453e0b4ddf60b01fd31eae",
+        "success": true,
+        "status": "not_executed",
+        "description": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 140,
+            "after": 140
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n同样的动作，同样的结果。\n\n这不是运气的问题。你已经用完全一样的方式把这张桌子和这只文件柜翻了三遍，甚至更多。第一遍没有，第二遍没有，第三遍也不会有。答案不会从这套重复的动作里长出来。你站在同一处，做着同一件事，时间在流逝，而你什么也没有得到。\n\n外面走廊里很安静。安静得让你开始怀疑，是不是有人在门外站了很久，听着你在这间屋子里反复翻找、却始终一无所获的动静。\n\n要做的事只有一件：换一种做法。或者，明确地再赌一次。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 不再翻箱倒柜，改用更彻底的方式拆检书桌本身（孤注一掷）。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 搜查模组声明的线索必须提出对应检定（或 discovery_refs）；没有检定就不能给出搜查结论，也不能断言目标不存在或已移走"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3408,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "5ec94f2cb6943f578eb07010d0f99336cc250bb3",
+        "success": true,
+        "status": "not_executed",
+        "description": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 140,
+            "after": 140
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n同样的动作，同样的结果。\n\n你已经在同一张桌子、同一只文件柜上重复了同样的翻检——这一次的动作，和上一次、上上次一模一样。答案不会从这套重复里长出来。你站在屋子中央，手边的纸张被翻得起了毛边，指腹发红，而收获仍然是零。\n\n要做的事只有一件：换一种做法。或者，明确地再赌一次。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 不再翻箱倒柜，改用更彻底的方式拆检书桌本身（孤注一掷）。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "decline",
+        "input_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+        "approach": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "repeat_refused",
+          "elapsed_ms": null,
+          "error": "RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 2913,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_office",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 140
+      },
+      "last_action_outcome": {
+        "resolution_id": "dc519c2eafae7fc068c93e1b43aa46e4cd5a3aa2",
+        "success": true,
+        "status": "not_executed",
+        "description": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 140,
+            "after": 140
+          }
+        ]
+      },
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "narrative": "你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你逐一检查书桌的抽屉与夹层，在抽屉底板的暗格里摸到一本没有署名的皮面笔记本——正是莱特的私人日记。\n\n你又一次拉开抽屉，把笔记抽出来翻，指腹沿着底板摸过去。这一次，你的手停在了半空。\n\n同样的抽屉。同样的木板。同样的实心木头。\n\n同样的动作，同样的结果。\n\n你已经在同一张桌子、同一只文件柜上重复了同样的翻检——这一次的动作，和上一次、上上次一模一样。答案不会从这套重复里长出来。你站在屋子中央，手边的纸张被翻得起了毛边，指腹发红，而收获仍然是零。\n\n要做的事只有一件：换一种做法。或者，明确地再赌一次。\n\n**你可以——**\n1. 换一个地方下手：去检查壁炉里那堆烧过的灰烬残骸。\n2. 去查看那面部分熔化的镜子，它熔毁的痕迹或许另有原因。\n3. 不再翻箱倒柜，改用更彻底的方式拆检书桌本身（孤注一掷）。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "decline",
+        "input_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+        "approach": "重复检定未执行：RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "repeat_refused",
+          "elapsed_ms": null,
+          "error": "RepeatCheckError: 相同做法的检定已失败：改变具体做法，或由玩家明确要求孤注一掷"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3062,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_cottage",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": false,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 185
+      },
+      "last_action_outcome": {
+        "resolution_id": "2067368137cd87594fc4f665a1449d940b6e4ebf",
+        "success": true,
+        "status": "executed_success",
+        "description": "你穿过校园与镇子边缘的小路，来到莱特那座孤零零的小屋前。黄铜钥匙在锁孔里转动，锁舌咔哒一声退开，门向内推开，一股陈旧的、混着煤灰与纸张的气味涌出来。屋内昏暗，你站在门口，尚未踏进去细看。",
+        "npc_direction": "小屋此刻无人。若玩家在屋内久留或夜间独处，可考虑推进怪物显形时钟。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 140,
+            "after": 185
+          }
+        ]
+      },
+      "input": "前往镇外莱特的小屋，用黄铜钥匙开门进去",
+      "narrative": "你前往莱特的小屋。校园附近一座整理到一半的两层教职员住宅，莱特似乎原本准备匆忙离开。\n\n你前往莱特的小屋。校园附近一座整理到一半的两层教职员住宅，莱特似乎原本准备匆忙离开。\n\n你前往莱特的小屋。校园附近一座整理到一半的两层教职员住宅，莱特似乎原本准备匆忙离开。\n\n你穿过校园与镇子边缘的小路，来到莱特那座孤零零的小屋前。黄铜钥匙在锁孔里转动，锁舌咔哒一声退开，门向内推开，一股陈旧的、混着煤灰与纸张的气味涌出来。屋内昏暗，你站在门口，尚未踏进去细看。\n\n小屋是一栋两层的教职员住宅，外墙爬着枯藤，窗户关得很严。你站在门口，眼睛慢慢适应屋里的暗度。前厅不大，一张小桌上的茶杯还在原位，杯底结着一圈深褐色的茶渍，已经干透。衣帽架上挂着几件外套，其中两件的间隔明显空着——像是主人取走了什么，匆匆出门，又或者是别人替他取走了。\n\n楼梯口的扶手边靠着一只半开的旅行箱，箱子里的衣物叠得不算整齐，几件衬衣的袖子搭在箱沿外面。走廊尽头的墙上，钉着一排挂钩，挂钩上原本挂东西的位置留着一圈圈浅色的痕迹，物件却不在了。屋子里很静，只有你的呼吸和门轴偶尔的吱呀声。楼上的方向传来一点极轻的、说不清来路的响动，也许是风，也许是木头在凉气里收缩。\n\n这栋屋子里没有人。至少，此刻你没有看到任何人。你要不要进去，从哪一间屋子开始看，都由你自己决定。\n\n**你可以——**\n1. 先查看前厅和楼梯口那只半开的旅行箱。\n2. 直接上楼，检查卧室和莱特的私人空间。\n3. 先找一找有没有信件、日程本或账目之类的纸面线索。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往镇外莱特的小屋，用黄铜钥匙开门进去",
+        "approach": "玩家从莱特的办公室出发，前往镇外的莱特小屋，并打算用随身携带的莱特小屋黄铜钥匙开门进入。本回合只结算抵达与开门，不进行屋内搜查。",
+        "target_npc_id": "",
+        "destination_scene_id": "wright_cottage",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 45,
+        "success_description": "你穿过校园与镇子边缘的小路，来到莱特那座孤零零的小屋前。黄铜钥匙在锁孔里转动，锁舌咔哒一声退开，门向内推开，一股陈旧的、混着煤灰与纸张的气味涌出来。屋内昏暗，你站在门口，尚未踏进去细看。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "小屋此刻无人。若玩家在屋内久留或夜间独处，可考虑推进怪物显形时钟。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2309,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4217,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "wright_cottage",
+      "npcs_present": [],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 230
+      },
+      "last_action_outcome": {
+        "resolution_id": "08234be812a05ef8905cceb1a445b6bd23b8518e",
+        "success": true,
+        "status": "executed_success",
+        "description": "你从书桌抽屉的夹层与床铺下的空隙里翻出莱特匆忙收拾时遗漏的纸面线索——信件、账目或日程记录，指向他离开前的行踪与往来。",
+        "npc_direction": "屋内无人在场；楼上的轻微响动可继续作为氛围铺垫，不主动现身。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 185,
+            "after": 230
+          },
+          {
+            "type": "flag_set",
+            "target": "cottage_searched"
+          }
+        ]
+      },
+      "input": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+      "narrative": "你从书桌抽屉的夹层与床铺下的空隙里翻出莱特匆忙收拾时遗漏的纸面线索——信件、账目或日程记录，指向他离开前的行踪与往来。\n\n你从书桌抽屉的夹层与床铺下的空隙里翻出莱特匆忙收拾时遗漏的纸面线索——信件、账目或日程记录，指向他离开前的行踪与往来。\n\n你从书桌的抽屉夹层入手。抽屉拉出来时卡了一下，木底板上贴着一层薄薄的衬纸，边缘翘起，你顺着缝隙摸进去，指尖碰到几页折得发皱的纸。床铺底下也没放过——床架和地板之间积着一层灰，你蹲下身，从床板横档的缝隙里抽出另外几张散落的单据。\n\n这些东西显然不是随手丢下的，而是被有意塞在了翻找时容易忽略的地方。你坐在地板上，借着从窗帘缝里漏进来的灰白天光，一张一张看过去。\n\n有一页是行程记录，潦草的字迹标着几个日期和地名，其中反复出现同一个名字，写得比别处都用力；旁边还有几笔金额和往返的记号。另有几张像是收据或凭条的东西，纸面已经发脆，边角卷起，上面的数字不小。还有一封没有寄出的信，信纸折痕很深，像是被人反复展开又折回去过，开头的称呼写了一半就被划掉，纸面留着几道压痕。\n\n屋外风压过窗台下的灌木，发出细碎的摩擦声。楼上那点轻微的响动又出现了，一下，又停住。你翻动纸张时，木地板在身下发出受潮后的轻响。这些纸页落在你手里，拼出一小段莱特离开前的行踪——他要去哪里、和谁有过往来、手头又是什么状况，都留了一点影子，却还没有连成一条完整的线。\n\n**你可以——**\n1. 把这些纸页按日期和金额仔细整理，弄清莱特离开前的行踪与往来。\n2. 上楼检查卧室和莱特的私人空间，看看还有什么被匆忙收拾的东西。\n3. 带着这些线索离开小屋，去追查上面反复出现的那个名字。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+        "approach": "调查员在莱特的小屋内系统搜查书桌、抽屉、床铺及可能的藏匿处，寻找信件、日程本、账目或隐藏物品。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特小屋的书桌与床铺藏匿处",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "在整理到一半、物品被取走过的住宅中系统翻找藏匿物，属于搜查隐藏物品的检定；小屋无人干扰，无加减骰。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 45,
+        "success_description": "你从书桌抽屉的夹层与床铺下的空隙里翻出莱特匆忙收拾时遗漏的纸面线索——信件、账目或日程记录，指向他离开前的行踪与往来。",
+        "failure_description": "你翻遍了书桌、抽屉和床铺，只找到些无关紧要的旧账单与衣物。翻找耗去不少时间，屋子里的静默让你越发不安，而楼上传来的那点轻响似乎又响了一次。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "cottage_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+            "reason": "玩家完成对莱特小屋的系统搜查。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "flag_set",
+            "target": "cottage_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+            "reason": "玩家已彻底搜查小屋各处，搜查动作完成，只是本次未有所获。"
+          }
+        ],
+        "npc_direction": "屋内无人在场；楼上的轻微响动可继续作为氛围铺垫，不主动现身。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3258,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 11136,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "arkham_sanatorium",
+      "npcs_present": [
+        "cecil_hunter"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 1
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 275
+      },
+      "last_action_outcome": {
+        "resolution_id": "31bb869eb777633988616f32ee8d32b9494fbca6",
+        "success": true,
+        "status": "executed_success",
+        "description": "你离开莱特的小屋，沿镇外小路折回阿卡姆城区，再往疗养院方向走去。灰白的天光下，疗养院那排整齐的窗子渐渐出现在视野里，铁栅门与门房就在前方。你抵达了阿卡姆疗养院门口，尚未进去探视。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 230,
+            "after": 275
+          }
+        ]
+      },
+      "input": "前往阿卡姆疗养院，看望被开除的学生塞西尔·亨特",
+      "narrative": "你前往阿卡姆疗养院。收治塞西尔·亨特的阴郁医疗设施。\n\n你前往阿卡姆疗养院。收治塞西尔·亨特的阴郁医疗设施。\n\n你前往阿卡姆疗养院。收治塞西尔·亨特的阴郁医疗设施。\n\n你离开莱特的小屋，沿镇外小路折回阿卡姆城区，再往疗养院方向走去。灰白的天光下，疗养院那排整齐的窗子渐渐出现在视野里，铁栅门与门房就在前方。你抵达了阿卡姆疗养院门口，尚未进去探视。\n\n疗养院坐落在城郊一片修剪得过分整齐的草地上，主楼是灰砖砌的，窗子一排排排列得笔直，每扇都只推开一条窄缝。你走到铁栅门前时，门房里值班的人抬起头，隔着玻璃打量你，随后问明来意，登记了姓名。大门内侧的空气里飘着一股肥皂和药水混在一起的味道，暖气管道在墙里断续地响，像是有人在很远的地方敲管子。\n\n值班的看护领你穿过一条铺着软胶地板的长走廊。走廊两侧是关着的病房门，门上各有一块小小的观察窗。经过其中一扇时，你听见里面传来低低的、不成句的呢喃，很快又停了。看护没有停步，只是轻声说了句探视有规定，不能太久，也不能带任何尖锐的东西进去。\n\n他把你带到走廊尽头的一间单人病房前，透过观察窗往里看了一眼，然后推开门。病房里陈设简单，一张床，一张小桌，窗子同样只开一条缝。床上的人被束缚衣裹着，瘦削的身体靠在床头，脸形窄长，满脸雀斑，蓬松的金发有些发红，乱蓬蓬地贴在额角。他听见门响，慢慢转过头来，眼睛在你脸上停住，却没有立刻说话。\n\n看护站在门口，没有走远。屋子里安静得能听见暖气管道里断续的敲击声。塞西尔·亨特望着你，嘴唇动了动，像是在辨认你是谁，又像什么都没在想。\n\n**你可以——**\n1. 先试着和亨特搭话，看他是否认得人、能否说出什么。\n2. 直接问他关于莱特教授和那份文档的事。\n3. 先向看护打听亨特入院时的情形和他目前的状况。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往阿卡姆疗养院，看望被开除的学生塞西尔·亨特",
+        "approach": "调查员离开莱特的小屋，前往阿卡姆疗养院，打算探视被开除的学生塞西尔·亨特。本回合只结算抵达与路途时间，抵达后的探视与调查留待下一回合。",
+        "target_npc_id": "",
+        "destination_scene_id": "arkham_sanatorium",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 45,
+        "success_description": "你离开莱特的小屋，沿镇外小路折回阿卡姆城区，再往疗养院方向走去。灰白的天光下，疗养院那排整齐的窗子渐渐出现在视野里，铁栅门与门房就在前方。你抵达了阿卡姆疗养院门口，尚未进去探视。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2524,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 7037,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "arkham_sanatorium",
+      "npcs_present": [
+        "cecil_hunter"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 290
+      },
+      "last_action_outcome": {
+        "resolution_id": "721707cb77d46844129fee9b95bec2ebb1b231f4",
+        "success": true,
+        "status": "executed_success",
+        "description": "你放轻声音，顺着亨特零碎的情绪慢慢接话，不去逼问。他的目光渐渐聚焦，喉咙里挤出断续的句子——他提到那份文档、提到自己一遍遍抄写时手不受控制地画出的东西，还提到抄本后来去了哪里。看护在门口皱了皱眉，但没有打断。",
+        "npc_direction": "亨特精神错乱、被束缚，情绪在恍惚与惊恐间摇摆。若被温和对待，他会断续吐露关于文档与复制件的记忆；若感到逼迫，则激动抗拒。看护在门口监视，限制探视时长与内容。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 275,
+            "after": 290
+          },
+          {
+            "type": "npc_reaction",
+            "target": "cecil_hunter",
+            "value": "cooperative"
+          }
+        ]
+      },
+      "input": "安抚亨特，请他讲述文档和他复制的内容",
+      "narrative": "你放轻声音，顺着亨特零碎的情绪慢慢接话，不去逼问。他的目光渐渐聚焦，喉咙里挤出断续的句子——他提到那份文档、提到自己一遍遍抄写时手不受控制地画出的东西，还提到抄本后来去了哪里。看护在门口皱了皱眉，但没有打断。\n\n你没有急着问，而是先顺着他的目光，把语气压得很低，像是在跟一个受惊的人说话。亨特起初只是看着你，眼神空着，过了一阵，他的呼吸慢慢平了些，目光从你脸上落下来，停在束缚衣的袖口上——那里露着几根手指，指尖有些发红。“你……不是他们的人。”他说得很慢，声音哑，字与字之间空着，“他们来问过。问我在哪儿画的东西。我不知道该怎么说。”他忽然抬起一点头，眼睛亮了一下，又暗下去。“那份文档……我抄过。很多遍。莱特先生让我抄——他说只是复制，只是给买家看的样子货。可抄到那些图的时候，我的手不听使唤。”他的手指在束缚衣里动了动，像是想抓住什么。“线条会自己接下去。我画着画着，纸上就多出我没打算画的东西。夜里点着蜡烛看，那些墨……是活的。它们在烛火底下动。我盯着看，看着看着，就再也睡不着了。”看护在门口轻轻咳了一声，像是提醒时间。亨特没有理他，声音更低了。“后来我抄完那一份，把它交出去。交出去的时候我数过——它不该那么轻。像是纸里头空了。那之后我就……记不太清了。他们把我带到这里，说我病了。”他停住，眼睛又变得有些散。你能看出来，他此刻愿意说，但每说一句都像要从很深的地方捞上来。看护站在门口，眉头皱着，没有打断，却一直看着墙上的挂钟。\n\n**你可以——**\n1. 继续顺着他的话，追问他抄的那份复制件最后交给了谁、现在在哪里。\n2. 问他在烛光下看到的墨迹到底是什么样子，有没有留下抄本或草图。\n3. 就此打住，先向看护打听亨特入院时的情况和他随身物品的去向。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "安抚亨特，请他讲述文档和他复制的内容",
+        "approach": "在病房内放缓语气、放低姿态，先顺着亨特的情绪安抚他，再引导他讲述那份审判文档以及他亲手复制的内容。看护在门口旁观，时间有限。",
+        "target_npc_id": "cecil_hunter",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "hunter_copy:3"
+        ],
+        "check": {
+          "skill": "psychology",
+          "target": "cecil_hunter",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "亨特处于精神错乱状态且被束缚，要让他放下戒备、愿意开口讲述文档与复制内容，需要读懂他的情绪并加以安抚，属于有不确定性与代价的社交检定。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 15,
+        "success_description": "你放轻声音，顺着亨特零碎的情绪慢慢接话，不去逼问。他的目光渐渐聚焦，喉咙里挤出断续的句子——他提到那份文档、提到自己一遍遍抄写时手不受控制地画出的东西，还提到抄本后来去了哪里。看护在门口皱了皱眉，但没有打断。",
+        "failure_description": "你的安抚没能穿透他的恍惚。亨特忽然激动起来，挣动束缚衣，含混地重复几个词又缩回床头，不再看你。看护上前一步提醒探视时间，你只来得及听清几个不成句的音节。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "cecil_hunter",
+            "value": "cooperative",
+            "source_id": "",
+            "evidence_quote": "安抚亨特，请他讲述文档和他复制的内容",
+            "reason": "安抚奏效，亨特愿意配合讲述文档与复制内容。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "cecil_hunter",
+            "value": "nervous",
+            "source_id": "",
+            "evidence_quote": "安抚亨特，请他讲述文档和他复制的内容",
+            "reason": "安抚失败，亨特情绪失控、戒备加深，探视被看护催促。"
+          }
+        ],
+        "npc_direction": "亨特精神错乱、被束缚，情绪在恍惚与惊恐间摇摆。若被温和对待，他会断续吐露关于文档与复制件的记忆；若感到逼迫，则激动抗拒。看护在门口监视，限制探视时长与内容。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 8767,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 6623,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "sheb_tavern",
+      "npcs_present": [
+        "lucy_stone",
+        "ox_and_shanassy"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 335
+      },
+      "last_action_outcome": {
+        "resolution_id": "cf16f8b9fefb00469507e48b6d7725126aba466b",
+        "success": true,
+        "status": "executed_success",
+        "description": "你离开疗养院，沿城郊小路折回阿卡姆城区，穿过几条渐次热闹起来的街道，来到希布酒馆门前。推门进去，酒气、烟味和低低的谈话声扑面而来，吧台后有人擦着杯子，角落里几桌客人各自低声说着话。你刚在门边站定，还没开口打听。",
+        "npc_direction": "",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 290,
+            "after": 335
+          }
+        ]
+      },
+      "input": "前往希布酒馆，打听想买莱特文档的买家消息",
+      "narrative": "你前往希布酒馆。镇郊一处以餐馆掩护非法酒水生意的高档场所。\n\n你前往希布酒馆。镇郊一处以餐馆掩护非法酒水生意的高档场所。\n\n你前往希布酒馆。镇郊一处以餐馆掩护非法酒水生意的高档场所。\n\n你前往希布酒馆。镇郊一处以餐馆掩护非法酒水生意的高档场所。\n\n你离开疗养院，沿城郊小路折回阿卡姆城区，穿过几条渐次热闹起来的街道，来到希布酒馆门前。推门进去，酒气、烟味和低低的谈话声扑面而来，吧台后有人擦着杯子，角落里几桌客人各自低声说着话。你刚在门边站定，还没开口打听。\n\n门里的暖气混着酒气和烟味，比街上暖得多。墙上挂着几幅褪色的画，靠里的几张桌子用屏风隔开，灯光压得很低。你站定的时候，离门最近的一桌客人谈笑声明显顿了一下，有人用杯沿挡住半张脸，目光从杯子上沿扫过来，又移开。吧台后擦杯子的男人没有抬头，只是手上的动作慢了半拍。\n\n靠窗的位置坐着一个年轻女人。二十五六岁，头发漂染成金色，梳得蓬松，身上是酒馆女服务员的装束，可坐姿和神情不太像在等客人——她一只手支着下巴，眼睛望着窗外渐暗的天色，面前那杯酒几乎没动过。你进门时，她的目光也转过来，在你身上停了一瞬，随即收回。\n\n靠里侧那张用屏风隔开的桌子旁坐着两个人。肩膀宽阔，身材壮实，穿着不太合身的灰色西装，软呢帽压得很低。他们没有喝酒，面前的杯子干干净净。你进来的时候，其中一个——年纪稍长的那个——抬起眼皮看了你一眼，又低下头去，像是把你记在了什么册子以外的地方。\n\n后门不知被谁推开又合上，一股冷风灌进来，穿过整个屋子，把烟味搅散了一瞬。屋里又恢复了刚才的低语声，只是比你先前进门时，安静了一点点。\n\n**你可以——**\n1. 走向吧台，点一杯东西，顺便向酒保打听最近有没有人问起莱特教授或一批旧文档。\n2. 走向靠窗那位女服务员，试着和她搭话。\n3. 留意屏风后那两个人，先观察他们的动静。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往希布酒馆，打听想买莱特文档的买家消息",
+        "approach": "离开阿卡姆疗养院，返回阿卡姆城区，前往希布酒馆。本回合只结算赶路与抵达，进入酒馆后的打听留待抵达之后。",
+        "target_npc_id": "",
+        "destination_scene_id": "sheb_tavern",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 45,
+        "success_description": "你离开疗养院，沿城郊小路折回阿卡姆城区，穿过几条渐次热闹起来的街道，来到希布酒馆门前。推门进去，酒气、烟味和低低的谈话声扑面而来，吧台后有人擦着杯子，角落里几桌客人各自低声说着话。你刚在门边站定，还没开口打听。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2274,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5114,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_lodge_office",
+      "npcs_present": [
+        "harland_lodge"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 360
+      },
+      "last_action_outcome": {
+        "resolution_id": "d3e3ab9399269a9c98bd3081c876adc47f39f41c",
+        "success": true,
+        "status": "executed_success",
+        "description": "你离开希布酒馆，穿过渐暗的城区街道回到密斯卡托尼克大学，沿主楼东翼的楼梯上到二层，找到哈兰德·洛奇的历史系办公室。门牌上刻着他的名字，走廊里安静，只有远处教室传来的零星声响。",
+        "npc_direction": "洛奇此刻不在办公室（若在，则对不速之客保持戒备、礼貌而回避）。奥克斯与肖纳西注意到你离开酒馆，可能有人跟出来。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 335,
+            "after": 360
+          }
+        ]
+      },
+      "input": "前往洛奇办公室，调查哈兰德·洛奇与文档收购的关系",
+      "narrative": "你前往哈兰德·洛奇的历史系办公室。历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。\n\n你前往哈兰德·洛奇的历史系办公室。历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。\n\n你前往哈兰德·洛奇的历史系办公室。历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。\n\n你前往哈兰德·洛奇的历史系办公室。历史系教师走廊里一间被书籍、未归档论文和私人文件挤满的办公室。\n\n你离开希布酒馆，穿过渐暗的城区街道回到密斯卡托尼克大学，沿主楼东翼的楼梯上到二层，找到哈兰德·洛奇的历史系办公室。门牌上刻着他的名字，走廊里安静，只有远处教室传来的零星声响。\n\n门虚掩着，缝里透出一线灯光。你推门进去，屋里没有人。这间办公室比莱特那间大些，却更乱——书架顶到天花板，书脊歪斜地挤在一起；桌面上摊着未归档的论文，纸角卷起；地板上也摞着几沓文件，像是随手放下的。空气里有一股旧纸和烟草混在一起的味道。\n\n你注意到几件与这间屋子不太相称的东西。靠墙的柜子上有一叠用细绳捆好的信件，绳结打得很紧，压在最上面的一封露出半截信封，字迹工整，不像洛奇本人那种潦草的笔迹。桌角压着一张便条，上面的字迹被划掉又重写，只剩下几个能辨认的词。桌边的抽屉拉开着一条缝，里面塞着几份文件，最上面那份的标题字样被翻得朝下。\n\n走廊里很安静。远处教室的声响停了一阵，又断断续续响起来。你没有听到脚步声往这边来，但洛奇本人此刻不在屋里——他去了哪里、什么时候回来，你不知道。这间屋子此刻只属于你和你自己的判断。\n\n**你可以——**\n1. 翻看柜子上那叠捆好的信件，弄清是谁写给洛奇的。\n2. 查看桌边抽屉里那份被翻面放置的文件。\n3. 先不碰东西，退到走廊里等洛奇回来，直接和他对质。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往洛奇办公室，调查哈兰德·洛奇与文档收购的关系",
+        "approach": "玩家从希布酒馆出发，前往密斯卡托尼克大学东翼二层的哈兰德·洛奇历史系办公室。本回合只结算抵达与路程时间，调查与线索留待抵达后处理。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_lodge_office",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 25,
+        "success_description": "你离开希布酒馆，穿过渐暗的城区街道回到密斯卡托尼克大学，沿主楼东翼的楼梯上到二层，找到哈兰德·洛奇的历史系办公室。门牌上刻着他的名字，走廊里安静，只有远处教室传来的零星声响。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "洛奇此刻不在办公室（若在，则对不速之客保持戒备、礼貌而回避）。奥克斯与肖纳西注意到你离开酒馆，可能有人跟出来。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2489,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 14899,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 2,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 390
+      },
+      "last_action_outcome": {
+        "resolution_id": "f7cc3334815a8075831b42bd2bfbf8f5c09c6efe",
+        "success": true,
+        "status": "executed_success",
+        "description": "你离开洛奇的办公室，穿过城区来到轻率琐事古董店所在的街区，在对面的咖啡馆找了个靠窗的位置坐下，能看清古董店门口进出的人。",
+        "npc_direction": "洛奇办公室此刻无人，玩家离开不会遇到洛奇；古董店（维克处）尚不知被监视，若监视持续过久可能触发人类压力时钟。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 360,
+            "after": 390
+          }
+        ]
+      },
+      "input": "接下来几天，我白天在古董店对面的咖啡馆监视进出的人，晚上回旅馆整理三个买家的线索",
+      "narrative": "你前往轻率琐事古董店。阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。\n\n你前往轻率琐事古董店。阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。\n\n你前往轻率琐事古董店。阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。\n\n你前往轻率琐事古董店。阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。\n\n你前往轻率琐事古董店。阿卡姆商业区的古董店，地下储藏空间深处连接着更危险的隧道与砖井。\n\n你离开洛奇的办公室，穿过城区来到轻率琐事古董店所在的街区，在对面的咖啡馆找了个靠窗的位置坐下，能看清古董店门口进出的人。\n\n咖啡馆里人不多，侍者给你端来一杯咖啡，热气在窗玻璃上糊出一小片雾。你隔着这层雾看对面的古董店：门面干净体面，橱窗里摆着黄铜烛台、瓷盘和几件旧家具，标价牌写得工工整整。橱窗玻璃擦得很亮，黄铜件被反复擦拭过，在灯光下泛着温润的光。偶尔有穿着体面的客人推门进出，多半空手而来，空手而去，像是来看看货、聊聊天的。\n\n你坐下来的时候，天已经开始暗了。街上的煤气灯一盏盏亮起来，把湿漉漉的石板路照出一层薄薄的黄。古董店的门在灯光里开合了几次。有一次，一个穿深色大衣、体格宽大的男人从店里出来，站在门口点了一支烟，慢慢抽完，才沿着街走开。又有一次，一对男女先后从后门方向绕出来——两人长得有些像，都不太说话，走路的姿势不太自然，经过橱窗时没有往里看一眼。\n\n你在咖啡馆里坐到街上的行人渐渐稀少。这段时间里，你没有看到维克本人露面。古董店二楼的窗子亮着灯，灯光一直没熄。街角偶尔有巡夜的警察经过，脚步不紧不慢。\n\n夜色渐深，咖啡馆的侍者开始收拾桌子，暗示要打烊了。你手边的咖啡已经凉透。这一晚，你从窗边看到的，是这家店进进出出的人，和它关得很晚的灯。\n\n**你可以——**\n1. 明天一早换一身装束，直接进古董店，以买家或访客的身份试探维克。\n2. 继续在对面监视，重点盯住那对从后门绕出的男女和店里的后门。\n3. 先回旅馆，把这两天看到的人和时间整理成笔记，再决定下一步。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "接下来几天，我白天在古董店对面的咖啡馆监视进出的人，晚上回旅馆整理三个买家的线索",
+        "approach": "玩家计划连续数日：白天在轻率琐事古董店对面的咖啡馆蹲守监视进出人员，夜间回旅馆整理三名买家的线索。本轮只结算抵达监视地点（古董店对面咖啡馆）的行程，监视与整理的具体结果留待抵达后逐日结算。",
+        "target_npc_id": "",
+        "destination_scene_id": "trivial_pursuits",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 30,
+        "success_description": "你离开洛奇的办公室，穿过城区来到轻率琐事古董店所在的街区，在对面的咖啡馆找了个靠窗的位置坐下，能看清古董店门口进出的人。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "洛奇办公室此刻无人，玩家离开不会遇到洛奇；古董店（维克处）尚不知被监视，若监视持续过久可能触发人类压力时钟。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2918,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 17770,
+          "error": null
+        },
+        {
+          "role": "narrative_consistency",
+          "status": "completed",
+          "elapsed_ms": 2770,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 630
+      },
+      "last_action_outcome": {
+        "resolution_id": "d29ea58f60e7d68873ff56b486d6d99e26fdbbf0",
+        "success": true,
+        "status": "executed_success",
+        "description": "你在咖啡馆与街角之间轮换位置，熬过整个夜晚。你摸清了古董店后门的作息：费德曼兄妹在深夜从后门进出，搬运用帆布盖住的大件货物，动作熟练而沉默；维克本人只在二楼窗口短暂露面。你记下了大致的时间规律与搬运路线。",
+        "npc_direction": "维克一方对街对面的长期监视者保持警觉但未直接干预；费德曼兄妹照常执行夜间搬运，若被明显盯梢会向维克报告。维克可能借机派人试探或送来接触邀请。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 390,
+            "after": 630
+          },
+          {
+            "type": "npc_reaction",
+            "target": "hector_kara_feldman",
+            "value": "unknown"
+          },
+          {
+            "type": "clock_advance",
+            "target": "human_pressure",
+            "before": 2,
+            "after": 3
+          }
+        ]
+      },
+      "input": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律，留意夜里搬运的大件货物",
+      "narrative": "你在咖啡馆与街角之间轮换位置，熬过整个夜晚。你摸清了古董店后门的作息：费德曼兄妹在深夜从后门进出，搬运用帆布盖住的大件货物，动作熟练而沉默；维克本人只在二楼窗口短暂露面。你记下了大致的时间规律与搬运路线。\n\n你在咖啡馆与街角之间轮换位置，熬过整个夜晚。你摸清了古董店后门的作息：费德曼兄妹在深夜从后门进出，搬运用帆布盖住的大件货物，动作熟练而沉默；维克本人只在二楼窗口短暂露面。你记下了大致的时间规律与搬运路线。\n\n咖啡馆打烊后，你换到街角一家通宵营业的杂货铺檐下。夜里的阿卡姆街道冷清，煤气灯把湿石板照得发亮，偶尔有出租汽车驶过，轮胎碾过水洼。你裹紧外套，一边注意着对面古董店的动静，一边在笔记本上记下时间和人数。\n\n后门开在最不起眼的地方，夹在两栋楼之间一条窄巷里。头一次开合大约在午夜前后——两个身影一前一后出来，个子都不高，身形相似，像是兄妹。他们没有交谈，动作却很有默契：一人先把一只用帆布盖得严严实实的大件抬到巷口停着的推车上，另一人前后张望，随后两人一起把东西推走。帆布盖得很低，只露出边角，看不出里面是什么，但分量不轻——两人推车时肩膀都压得很低。\n\n这样的搬运在整夜出现了两趟。第二趟比第一趟更晚，天快亮前才结束。费德曼兄妹每次进出都走那条窄巷，从不在正门前停留。你注意到他们搬运的路线是固定的：出巷，沿后街往北，拐进一条更暗的小路，之后就看不见了。\n\n古董店二楼那扇窗亮着灯。整夜里，那扇窗只短暂地暗过一次——有个人影在窗前站了一会儿，体形宽大，站在灯后看不清脸。片刻之后灯又亮起，人影消失。你再没看到维克本人下楼或出门。\n\n天蒙蒙亮的时候，你合上笔记本，手指冻得有些僵。你记下了大致的时间规律、搬运路线，以及那些帆布下不知去向的大件货物。这些东西显然不是摆在小店里的古董——没有哪件古董需要半夜从后巷偷偷运走。\n\n**你可以——**\n1. 趁天刚亮，绕到后巷去查看那条搬运路线的尽头。\n2. 白天以买家身份进店，借看货接近柜台后那扇半掩的门。\n3. 先回旅馆休息，把昨夜记录整理清楚，再决定下一步。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "wait",
+        "input_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律，留意夜里搬运的大件货物",
+        "approach": "玩家留在轻率琐事古董店对面的咖啡馆，继续长时间蹲守监视：记录维克、费德曼兄妹及可疑访客的出入规律，特别留意夜间是否有大件货物被搬运。以观察与耐心换取情报，不主动接触目标。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "轻率琐事古董店夜间出入与搬运规律",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "长时间蹲守需要从街对面分辨进出人物、后门动向与夜间搬运的大件货物，属于观察类检定；玩家已有一次白天监视的基础，但夜间搬运规律是新目标，难度为常规。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 240,
+        "success_description": "你在咖啡馆与街角之间轮换位置，熬过整个夜晚。你摸清了古董店后门的作息：费德曼兄妹在深夜从后门进出，搬运用帆布盖住的大件货物，动作熟练而沉默；维克本人只在二楼窗口短暂露面。你记下了大致的时间规律与搬运路线。",
+        "failure_description": "你守了一夜，但夜里下起细雨，街灯昏黄，橱窗反光让你几次看错人影。你只确认了古董店后门在深夜确有活动，却没能看清搬运的是什么、由谁经手。长时间蹲守让你疲惫，天亮时侍者开始打量你这个整夜不走的客人。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "hector_kara_feldman",
+            "value": "unknown",
+            "source_id": "",
+            "evidence_quote": "留意夜里搬运的大件货物",
+            "reason": "玩家成功掌握费德曼兄妹夜间搬运规律，但未与其接触，其态度仍不明。"
+          },
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律",
+            "reason": "长时间蹲守拖延，让维克一方有时间察觉并行动，符合 human_pressure 的 advance_when（拖延过久）。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律",
+            "reason": "整夜蹲守未果且暴露了长时间停留的痕迹，符合 human_pressure 的 advance_when（拖延过久）。"
+          }
+        ],
+        "npc_direction": "维克一方对街对面的长期监视者保持警觉但未直接干预；费德曼兄妹照常执行夜间搬运，若被明显盯梢会向维克报告。维克可能借机派人试探或送来接触邀请。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 12286,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 18816,
+          "error": null
+        },
+        {
+          "role": "narrative_consistency",
+          "status": "completed",
+          "elapsed_ms": 3366,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": false,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 2
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 650
+      },
+      "last_action_outcome": {
+        "resolution_id": "7ce2fc24e9238f0f4d1587e1b1193953136805a4",
+        "success": true,
+        "status": "executed_success",
+        "description": "你以看货为由在店里慢慢转了一圈，把柜台后那扇半掩的小门、北端那道木质隔断以及厨房的位置都记进了心里，没有引起维克或费德曼兄妹的特别注意。",
+        "npc_direction": "维克以彬彬有礼的店主姿态接待这位陌生顾客，喷着过量古龙水，主动介绍几件古董并试探来意；费德曼兄妹在店内沉默地整理货品，不主动搭话，但会留意顾客的动向。若玩家表现出对后场结构的兴趣，维克会不动声色地把话题引回货品。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 630,
+            "after": 650
+          },
+          {
+            "type": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded"
+          }
+        ]
+      },
+      "input": "进入古董店，以顾客身份浏览，暗中记下布局：柜台后的小门、北端的木质隔断和厨房的位置",
+      "narrative": "你以看货为由在店里慢慢转了一圈，把柜台后那扇半掩的小门、北端那道木质隔断以及厨房的位置都记进了心里，没有引起维克或费德曼兄妹的特别注意。\n\n你以看货为由在店里慢慢转了一圈，把柜台后那扇半掩的小门、北端那道木质隔断以及厨房的位置都记进了心里，没有引起维克或费德曼兄妹的特别注意。\n\n你推门进去的时候，门楣上的铜铃响了一声。屋里比外面暖，一股过量的古龙水味道先扑过来，甜得有些发腻，底下压着旧木柜散出的蜡味。不同年代的物件挤在同一个视野里：黄铜烛台挨着瓷盘，一张维多利亚式的椅子旁边摆着殖民时期的木箱，橱窗里那些被反复擦拭过的铜件在灯下亮得发温。\n\n柜台后站着一个肥胖的男人。四十八九岁，脸色苍白，穿得体面，见你进来便从柜台后绕出来，步子不快，带着一种刻意的从容。\n\n\"欢迎，先生。第一次来吧？我这里的东西不便宜，但都是真货。您随便看，有什么中意的，我给您讲讲来历。\"\n\n他的声音温和，说话时微微欠身，古龙水的味道随着他的动作又浓了一层。你点头示意，说只是随便看看，便沿着货架慢慢走动。维克没有跟得太紧，但也没有走开，始终保持着几步的距离，偶尔介绍一件物件的年代和出处，像是在试探你对什么感兴趣。\n\n店里的格局你很快看明白了。柜台在正对门的位置，柜台后面有一扇半掩的小门，门帘遮住大半，里面光线昏暗，看不清通向哪里。店面北端有一道木质隔断，隔断后面是另一片空间，堆着几件大件家具，隔断的缝隙里透不出光，像是通向后场。再往里，靠墙的位置有一扇门，门缝里飘出一点冷湿的气味——像是厨房，又像是别的什么。费德曼兄妹就在那片区域附近整理货品，两人都不说话，偶尔抬眼看你一下，又低下头去。\n\n\"您要是喜欢老物件，那边还有几件从北方收来的，比这儿的更特别。\"\n\n他指了指北端隔断的方向，语气仍旧客气，可你注意到，他说话时身体有意无意地挡在柜台与那扇半掩小门之间。你转完一圈，把该记的都记下了，维克也一直陪在附近，没有离开。\n\n**你可以——**\n1. 顺着他的话，走到北端隔断那边看那几件\"特别的\"大件，借机靠近后场。\n2. 装作对柜台后那扇小门感兴趣，试探维克会怎么回答。\n3. 以还要考虑为由告辞，先离开再作打算。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "进入古董店，以顾客身份浏览，暗中记下布局：柜台后的小门、北端的木质隔断和厨房的位置",
+        "approach": "玩家以普通顾客身份进入轻率琐事古董店，边浏览货品边观察店内空间布局，重点记住柜台后的小门、北端木质隔断与厨房的位置。属于低风险的公开观察，但要在维克（manipulative）与费德曼兄妹在场的情况下不引起注意，用 spot_hidden 判定观察是否细致到位。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "轻率琐事古董店店内布局（柜台后小门/北端木质隔断/厨房）",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "在店主与两名沉默店员在场的情况下，以顾客身份自然浏览并暗中记下店内结构，需要观察力与不引人注意的分寸；spot_hidden 70 属常规难度。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 20,
+        "success_description": "你以看货为由在店里慢慢转了一圈，把柜台后那扇半掩的小门、北端那道木质隔断以及厨房的位置都记进了心里，没有引起维克或费德曼兄妹的特别注意。",
+        "failure_description": "你只顾着看货，视线几次在柜台后和北端隔断上停留过久，维克从柜台后投来审视的目光，你只记住了大致方位，细节模糊，且似乎已被留意。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "以顾客身份浏览，暗中记下布局",
+            "reason": "维克对陌生顾客本就戒备，成功观察意味着你未暴露意图，他维持礼貌而疏离的商人姿态。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "nervous",
+            "source_id": "",
+            "evidence_quote": "暗中记下布局：柜台后的小门、北端的木质隔断和厨房的位置",
+            "reason": "你停留过久、视线可疑，维克察觉有人对店内结构过分感兴趣，变得警觉并可能主动搭话试探。"
+          }
+        ],
+        "npc_direction": "维克以彬彬有礼的店主姿态接待这位陌生顾客，喷着过量古龙水，主动介绍几件古董并试探来意；费德曼兄妹在店内沉默地整理货品，不主动搭话，但会留意顾客的动向。若玩家表现出对后场结构的兴趣，维克会不动声色地把话题引回货品。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 4091,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5728,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": false,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 70,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 3
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "趁店员不注意，检查大厅北端那堵不起眼的木质隔断，看看它后面藏着什么",
+      "narrative": "你绕过货架，在店面后方找到储藏室与装卸区。角落里一扇不起眼的门虚掩着，门后是通往更下方空间的楼梯。\n\n你绕过货架，在店面后方找到储藏室与装卸区。角落里一扇不起眼的门虚掩着，门后是通往更下方空间的楼梯。\n\n你借着浏览货品的动作往北端挪。维克还在柜台那边，正低头整理一只瓷盘，费德曼兄妹在更里面的位置整理箱子，背对着你。你停在一张殖民时期的木箱前，装作端详箱面的铜扣，指尖却顺着隔断的木框往下摸。\n\n木框的接缝在几处地方都严丝合缝，到了一人多高的地方，其中一段板壁的手感却不一样——木纹对得上，颜色也对得上，但接缝比别处略宽，指腹能感觉到一道极细的缝。你轻轻按了按，板壁微微一松，透出一线冷湿的气味，像是从很深、很潮的地方冒上来的。这是一扇伪装成隔断的暗门，门后通向店铺的后场。\n\n你没有推它。你把这个位置、门的方向和它开合的方式都记进心里，随后自然地转过身，像是看够了那几只木箱。\n\n几乎同时，维克的声音从你身后不远处响起来。\n\n\"先生，看中那只箱子了？那是从北边收来的，年代不好断，但做工扎实。您要是有兴趣，我可以给您讲讲它的来历——或者，您要是喜欢更安静的物件，那边那几件瓷器和烛台，比这些更值得细看。\"\n\n他不知什么时候已经走到离你几步远的地方，脸上仍旧是那副绅士式的客气，古龙水的味道又浓了一层。他说话时身体微微侧着，恰好挡在你与那道暗门之间，像是在引你往柜台那边走。费德曼兄妹中的一个抬起头，看了你一眼，又低下头去。\n\n**你可以——**\n1. 顺着维克的话，回到柜台那边看瓷器和烛台，不再逼近后场。\n2. 装作对后场感兴趣，直接问他隔断后面是什么地方。\n3. 以还要考虑为由告辞，把今天的发现带回去。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "趁店员不注意，检查大厅北端那堵不起眼的木质隔断，看看它后面藏着什么",
+        "approach": "玩家趁维克与费德曼兄妹注意力分散时，靠近店面北端的木质隔断，检查隔断结构、缝隙与背后空间，寻找暗门或后场入口。维克始终在几步之内留意顾客，费德曼兄妹也在附近整理货品，因此需要在不被察觉的情况下完成细致检查，用 spot_hidden 判定。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "wick_shop_secrets:0",
+          "wick_shop_secrets:1"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "轻率琐事古董店北端木质隔断",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "在店主与两名店员在场的情况下暗中检查隔断结构，需要观察力与不引人注意的手法；spot_hidden 70 为高技能，判定常规难度。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 5,
+        "success_description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "failure_description": "你刚把手搭上隔断，维克便不动声色地踱了过来，用身体挡在你与隔断之间，笑着介绍起旁边一件瓷盘，把你引开。你只来得及看清隔断表面，没能确认它背后是什么，而维克显然已经注意到你对那片区域格外上心。",
+        "on_success": [],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "趁店员不注意，检查大厅北端那堵不起眼的木质隔断",
+            "reason": "玩家对北端隔断表现出兴趣被维克察觉，维克会更加戒备并盯紧玩家。"
+          }
+        ],
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 9114,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4212,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": false,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false
+      },
+      "hp": 10,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "继续向地下室深处搜查，留意任何非人的动静，手按在枪柄上保持警戒",
+      "narrative": "你穿过地下室成堆的包装箱，掀开那扇半掩的活板门，沿阶梯下到迷宫般的深层地下室——破棺材、成堆的人骨、被制成工具的骨头映入眼帘，中央房间的砖砌井深不见底。\n\n你穿过地下室成堆的包装箱，掀开那扇半掩的活板门，沿阶梯下到迷宫般的深层地下室——破棺材、成堆的人骨、被制成工具的骨头映入眼帘，中央房间的砖砌井深不见底。\n\n你穿过地下室成堆的包装箱，掀开那扇半掩的活板门，沿阶梯下到迷宫般的深层地下室——破棺材、成堆的人骨、被制成工具的骨头映入眼帘，中央房间的砖砌井深不见底。\n\n你把手电筒握在左手，右手按在枪柄上，慢慢走下那截石阶。阶梯比上面的砖石旧得多，边缘被踩得圆钝，潮湿的寒气顺着裤脚爬上来，带着一股说不清的、介于泥土和陈腐之间的气味。\n\n手电的光柱扫过去，先照见的是墙角那堆东西。破棺材的木板歪斜地叠着，有的盖子还半掩着，漆皮剥落，露出下面发黑的木料。棺材旁边散落着一堆骨头——不是标本，是散乱堆放的，长短不一，有些还连着一小段灰白的筋络。更远处靠墙的架子上，摆着几件用骨头打磨成的器具，边缘被反复磨过，泛着一种类似牙白的冷光。你没有凑近去看它们是什么用途，光柱只是停了一瞬就移开了。\n\n再往里，是一间稍大的中央房间。房间正中有一口砖砌的井，井口齐腰高，砖缝里渗着湿气。你走过去，用手电往下照——光柱探进去几米就没了，井底黑得像是没有尽头。井口边缘的砖被什么东西磨得发亮，像是常有绳索或重物在上面来回拖过。\n\n你屏住呼吸听了一会儿。四周很静，只有你自己脚步的回声在石壁间撞来撞去，以及从井的方向传来的一种极低的、若有若无的声响——像是很深的地方有水在缓慢流动，又像是别的什么在呼吸。你说不准。手电的光在井口边停住，你把枪柄握得更紧了一些，指节有些发白。\n\n这地方不属于任何一家古董店。\n\n**你可以——**\n1. 靠近那口砖井，用手电仔细照井壁，看有没有落脚或攀爬的痕迹。\n2. 检查那些骨制工具和破棺材，看看它们和维克、和这份文档有没有关系。\n3. 沿原路退回去，先离开这里，把发现带出去再作打算。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4959,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 10,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（6发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": true,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+      "narrative": "楼上突然传来维克的声音，温和却冰冷：「赫克托，卡拉——处理了。」货架的阴影里，那对沉默的兄妹动了——赫克托第一个扑上来，骨白色的手指直取你的咽喉，动作快得完全不像人类；卡拉从另一侧包抄，封死了你退向楼梯的路线。楼梯口，维克脸上那副殷勤的笑容终于彻底消失了。\n\n地窖的冷气里，赫克托的身影压过来得比你想的还快。他骨白色的手指在半空中分开，动作里没有一丝人该有的迟疑——那不是打手扑人的架势，更像是某种被驯熟了的捕食者。你右脚后撤半步，脚底在湿砖上蹭出一点涩响，左手的电筒光柱被这动作晃开，扫过他的脸：那张脸没有表情，眼睛里映着一点手电的白，却没有正常的收缩。\n\n另一侧，卡拉的脚步几乎同步。她没有出声，只是把身体压低，沿着货架的阴影斜切过来，正对着你背后的楼梯口——那是你唯一的退路。她的动作里透着和赫克托一样的沉默和默契，两个人像是一左一右收拢的两扇门。\n\n楼梯上方，维克站的位置正好挡住出口的光。他肥胖的身形在灰白的门光里成了一团黑影，方才那种殷勤的笑容彻底消失了，脸上只剩下一种冷静的、衡量过什么的平板。他没有下来，只是站着看，像是在等一件早就安排好的事情结束。\n\n赫克托的指尖离你的喉咙已经很近了。\n\n**你可以——**\n1. 拔枪，朝扑来的赫克托开枪。\n2. 侧身闪避这一扑，借势退向中央那口砖井的方向。\n3. 挥拳反击赫克托，和他硬碰硬。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+        "approach": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+        "npc_direction": "处理刚刚发生的伏击"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 5961,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 24899,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 9990,
+          "error": null
+        }
+      ],
+      "errors": [
+        "（叙述过长被截断，请重试或继续）"
+      ]
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 10,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（5发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": true,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "遭遇非人生物袭击时拔枪自卫，朝袭击我的东西射击",
+      "narrative": "枪声在砖石穹顶下炸开，回音像被墙壁追着来回弹了两次才散。你后撤半步，左手的电筒光柱被甩到一旁，斜斜打在墙上——就在那道光里，赫克托的胸口腾起一小团暗色的东西。他中弹了。子弹的力道让他上半身拧了一下，肩线歪过去，脚下的动作却没停。\n\n这不正常。普通人挨了这一下，至少得踉跄一瞬。\n\n赫克托没有。他只是把那记冲击卸进侧身的动作里，像是扑过来的势头本来就打算这么拐一下。你借着后撤的空档压低身子，肩膀贴着货架的边角滑开半尺——他骨白色的手指从你颈侧擦过，抓空了，指尖划过空气的声音很轻，几乎听不见。你稳住了重心。卡拉在你斜后方收住了脚步，没有扑上来，只是把位置又往楼梯口那边挪了半步。\n\n楼梯上，维克站着没动。灯从上面照下来，把他肥胖的轮廓压成一道黑边，他俯视着这片地窖，声音比刚才更慢，像是终于卸掉了伪装。\n\n\"枪声。这上面听得很清楚，先生。您把一件本来能谈的事，做成了不能谈的事。\"\n\n他没有下来。赫克托在你面前半蹲着，胸口的血渍在昏暗里看不真切，可他那双眼睛一直没有离开你的手——你的右手，和那把还在发热的左轮。\n\n---\n**你可以——**\n1. 趁赫克托半蹲的空档，再补一枪。\n2. 掉转方向冲上楼梯，把维克本人拖进这场对峙。\n3. 退向中央那口砖井，利用井边的空间与两人周旋。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "遭遇非人生物袭击时拔枪自卫，朝袭击我的东西射击",
+        "approach": "玩家在深层地下室被赫克托与卡拉伏击，赫克托已扑至近身。玩家拔出手枪，朝扑来的赫克托射击自卫。战斗已激活，本轮为战斗回合，出手、命中与伤害交由战斗流程结算；此处仅确定动作语义与 NPC 战术方向。",
+        "target_npc_id": "hector_kara_feldman",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "赫克托继续贴身扑击，试图压制玩家持枪的手臂并夺取武器；卡拉保持沉默，从侧翼封住退路，若玩家开枪则趁其换弹或失手时合围。维克留在楼梯口观望，不亲自下场，若局势不利则准备撤离或呼叫增援。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2454,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 4011,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 4849,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 7101,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 8,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（4发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": true,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "继续开枪射击那个非人生物，直到它不再动弹",
+      "narrative": "第二枪打空了。子弹擦着货架边角钻进砖墙，溅起一小撮灰，回音还没落下，赫克托已经重新站直了。\n\n你甚至没看清他是怎么起来的。中弹那一处的衣料颜色发暗，可他的动作里没有一丝迟滞——他贴着货架斜切进来，左手一探，骨白色的手指一根根扣上你的小臂，力道不像人握东西，更像是某种夹具在收紧。你侧身想抽回手臂，脚底在湿砖上一滑，重心偏了半寸。他的另一只手指节抵着你的肩窝压下去，你的呼吸被顶得一窒，肋骨根那儿传来一阵闷钝的痛。\n\n枪还在你手里，但手腕被他往下一压，枪口歪向地面。你能感觉到那股力道还在往上走——他不是要打你，是要把枪从你手里拿走。\n\n卡拉始终没出手。她站在你斜后方两步的位置，背对着楼梯，堵着那条路，眼睛盯着你和赫克托纠缠的手。她没有催促，也没有上前帮忙，像是在等一个确定的时刻。\n\n楼梯上方的灯影里，维克挪动了一下他肥胖的身体。他没有下来，声音隔着几米传过来，仍旧慢条斯理。\n\n\"先生，我劝您把枪放下。这一位不太懂得什么叫疼痛，但您懂。\"\n\n赫克托的手指又收紧了一分。\n\n---\n**你可以——**\n1. 全力扭转手腕，挣脱钳制后再开一枪。\n2. 不再缠斗，趁他手上加力时突然松手弃枪，转身冲向砖井那边拉开距离。\n3. 抬膝猛撞赫克托的躯干，逼他松手。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "继续开枪射击那个非人生物，直到它不再动弹",
+        "approach": "玩家在战斗第二轮继续以 .38 左轮手枪射击赫克托，试图持续压制直到其失去行动能力。战斗的出手、命中与伤害由后续战斗工具结算，本回合只确定动作语义与 NPC 战术方向。",
+        "target_npc_id": "hector_kara_feldman",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "赫克托已中一弹却几乎不受影响，仍以非人的速度与沉默继续逼近，试图贴身压制并夺取或拨开玩家的枪；卡拉保持包抄，封住通往楼梯的退路，不主动抢攻，等待赫克托缠住玩家后从侧后下手。维克留在楼梯上方俯视，不介入，只观察并评估局势。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2248,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 3861,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 4658,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 5917,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 6,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（3发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": true,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "掩护自己继续开枪，别让它近身",
+      "narrative": "第三枪又打空了。子弹撞在砖墙上，剥下一片灰皮，碎屑落在你的肩上。你借着货架侧身撤步，想把小臂从那只手里扯开——扯开了一半。赫克托没有追你，他只是在原处转了个身，然后更快地贴了上来。\n\n这一次你没能躲过去。他的手背抵上你的胸口，不是挥击，更像是一记推送，可那股力道把肺里的空气整个挤了出去。你背脊撞上身后的木箱，箱板发出一声闷响，几件堆在上面的铜器滑下来，落地时叮叮当当地滚开，其中一只黄铜烛台打着旋停在血一样暗的地砖上。你肋下的那一处在跳着疼，呼吸变得又短又浅。\n\n赫克托退开半步，重新摆正了姿势。他的眼睛一直盯着你的右手——盯着那把枪。他现在离你不到两步，而你身后是箱子，左手边是货架，右手边是通向中央那口砖井的空地。\n\n卡拉往前挪了一点。她没有出手，只是把那两步的距离缩成了一步半，仍旧拦在楼梯那边。\n\n楼梯上方，维克还在原处。他看了一眼地上滚落的铜器，像是看着什么不体面的失手。\n\n\"您看，先生，我一直在给您留门。把枪撂下，我们还能坐下来谈莱特那档子事。\"\n\n他的语气仍旧从容，可他没有往下走。他在等你先动。\n\n左轮里还剩三发。\n\n---\n**你可以——**\n1. 借箱子做掩体，退向中央砖井方向，拉开距离后再开枪。\n2. 不再恋战，掉头从赫克托身侧的空隙朝楼梯冲，赌他和卡拉来不及合围。\n3. 放弃枪械，改用货架上的铜器或木箱跟他近身搏一下，为脱身找机会。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "掩护自己继续开枪，别让它近身",
+        "approach": "玩家在近身缠斗中试图一边后撤拉开距离、一边用左轮继续射击赫克托，核心是\"掩护自己、别让它近身\"——即先摆脱钳制/保持距离，再开火。这属于战斗回合内的动作语义：以防御性走位换取射击机会。",
+        "target_npc_id": "hector_kara_feldman",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "玩家成功拉开距离并稳住枪口，在赫克托逼近前完成一次有效射击。",
+        "failure_description": "玩家未能摆脱钳制，射击被压制或落空，赫克托进一步贴近并继续施压夺枪。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "赫克托持续逼近，优先夺取或压制玩家的左轮（不追求致命伤害，目标是解除武装并制服）；卡拉仍守在楼梯口方向，堵住退路，等待玩家露出破绽时再介入。维克留在楼梯上方观望，继续用言语施压劝降。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3075,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 5745,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 3514,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 8102,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": true,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "掩护自己继续开枪，别让它近身",
+      "narrative": "那一记推送之后你没能站住。你想往后卸力，脚下却踩到了刚才滚落的黄铜烛台，身体整个歪向一边——肩膀先着地，左轮跟你的手臂一起撞上地砖，枪口磕在石面上发出一声轻响。灰土扑进你的鼻子里。你尝到嘴里有铁锈味。\n\n赫克托没有趁机压上来。他站在原地，垂着两只手，不快不慢地等你重新起身。他胸口的衣料颜色更深了，可他的呼吸还是那么平稳，安静得像一口井。你看着他，脑子里有一小块地方始终没能接受：他中了一枪，那种伤口不会自己晾着。\n\n卡拉把位置又往楼梯那边挪了半尺——她始终在堵门。\n\n你撑起上半身的时候，肋下像有什么东西裂开了似的疼。血从你左手侧渗出，浸进西装内衬，在暗处看不见颜色，只感觉到那一片正在变湿。你有过这样的伤，你知道三处能走、两处就得躺着。现在大概在两处和三处之间。\n\n楼梯上，维克看着地上的你，像是看着一件终于肯就位的货物。\n\n\"先生，我把话说在这儿：您是个明白人。这一位可以站到天亮，您不行。把枪推过来，剩下的我们慢慢谈——莱特，文档，都可以谈。\"\n\n他仍旧没有下来。他在等你自己算清这笔账。\n\n**你可以——**\n1. 咬牙起身，趁赫克托在等你站直的空档开火——赌这最后一搏。\n2. 用脚把枪贴着地砖推出去，接受维克的谈判。\n3. 不再挣这条楼梯，转身扑向那口砖井或后方的隧道，赌它比人先累。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "掩护自己继续开枪，别让它近身",
+        "approach": "玩家在近身缠斗中试图以货架/木箱为掩护，边后撤边保持射击，阻止赫克托贴近。属于战斗回合内的射击+走位动作，交由战斗流程结算。",
+        "target_npc_id": "hector_kara_feldman",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "赫克托持续压迫式逼近，优先夺取或压制玩家的手枪，不因中弹而迟滞；卡拉保持堵住楼梯退路，等待合围时机。维克留在楼梯上方不出手，继续以言语劝降。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 1878,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 4178,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 3875,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 8486,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 7494,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 4
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 655
+      },
+      "last_action_outcome": {
+        "resolution_id": "1be122e4a5c46828fd7d5ade1516e4852b4d71d3",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着浏览货品的动作挪到北端，指尖沿隔断的木框摸过去，发现其中一段板壁的接缝与别处不同——它是一扇伪装成隔断的暗门，门后透出冷湿的气味，通向店铺后场。你记下了暗门的位置与开合方式，没有惊动任何人。",
+        "npc_direction": "维克保持绅士式的客气，但会主动用介绍货品的方式把玩家从北端隔断引开，并留意玩家是否对后场区域过分好奇；费德曼兄妹继续沉默整理货品，偶尔抬眼观察玩家。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 650,
+            "after": 655
+          }
+        ]
+      },
+      "input": "我放低武器，停止开火，与维克谈判：先叫双方停手。我愿意讨论安全处置文档的条件，但不承诺放弃调查。",
+      "narrative": "你把左轮从地砖上抬起来，枪口朝下，慢慢放到自己膝边——手指还搭在握把上，但没有抬起来。你撑着那只没受伤的手臂坐直了一些，肋下的伤在动的时候抽了一下，你咬着牙没出声，抬头看向楼梯口的黑影。\n\n“都停下。”你的声音比预想的哑，“我先把枪放下，你们也别再动。我要谈的是文档怎么处置——不是投降，我也不打算放弃这条案子。但照这样打下去，这栋楼里谁都走不出去。”\n\n赫克托没有动。他站在两步外，垂着手，像一尊等指令的旧雕像。卡拉在你侧后方，也没往前。\n\n楼梯上，维克看了看你，又看了看你膝边那把枪，慢慢地把一只手搭上扶手。他肥胖的身体往下压了半步——只半步，仍旧没有离开楼梯口。\n\n“好。这才像个谈事的样子。”\n\n他朝赫克托和卡拉的方向抬了抬下巴，那对兄妹便各自退开半步，把中间那片空地让了出来。赫克托退得不情不愿，眼睛始终没离开你的手。\n\n“不过，先生，我得纠正您一句。您说‘不放弃调查’，又说‘好好谈’——这两句话放在一起，是谈不成的。谈生意得先有个诚意。您手里那把枪，或者您知道的东西，总得先拿出来一件。”\n\n他说得很慢，像是在称量每一个字。地窖里的寒气顺着砖缝往上爬，你肋下的湿意也在扩大。地上那只黄铜烛台还横在你们中间，反着一点灯光。\n\n“我先把话说在前头：这栋楼里，能救您的人是我。您现在站起来走不到街口。所以——您打算先给我什么？”\n\n他没有走近，也没有让路。他在等你先亮底牌。\n\n---\n**你可以——**\n1. 先只谈停火条件，表明愿意交出左轮，但不透露自己掌握的任何信息。\n2. 反问维克：他要文档做什么、莱特是怎么死的——先掏他的话。\n3. 谎称已把今天的发现交给了外面的人，用这一点作为筹码压他。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "我放低武器，停止开火，与维克谈判：先叫双方停手。我愿意讨论安全处置文档的条件，但不承诺放弃调查。",
+        "approach": "玩家在战斗中主动停火、放低左轮，向楼梯上的维克喊话，要求双方停手并开启关于文档处置条件的谈判；不交出武器、不承诺放弃调查，只争取停火与对话窗口。由战斗流程结算这一停火/谈判动作，赫克托与卡拉是否收手取决于维克的指令。",
+        "target_npc_id": "abner_wick",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "你放低枪口，声音压过地下室的回音。维克抬手示意，赫克托停在两步之外，卡拉也收住了脚步——攻击暂停，谈判的窗口打开，但楼梯仍被堵着，维克等着你拿出诚意。",
+        "failure_description": "你的话没能让维克松口。他冷笑一声，说\"空口白话换不来停手\"，赫克托与卡拉没有退开，反而借你分神的一瞬重新逼近，谈判还没开始就已经被压回了墙角。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克乐于见到调查员先示弱：他会喝止赫克托与卡拉暂缓攻击，但不会让出楼梯或放人离开；他会把\"安全处置文档\"当作筹码，要求调查员先交出武器或文档作为诚意，语气仍旧从容、居高临下，试探调查员底线而不立刻动粗。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 8274,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 4290,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5110,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": false,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": false,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 665
+      },
+      "last_action_outcome": {
+        "resolution_id": "326ab8d55e94c3f2e1449fe65e8262a90a099159",
+        "success": true,
+        "status": "executed_success",
+        "description": "你借着地窖里那点昏黄的光，把文档摊在膝上。手写段落是一种你不熟悉的斜体，笔画细而密，越往后越潦草，像是写字的人手在抖。几何图示画在段落之间——不是装饰，是某种反复出现的结构，几处线条被后来的人用铅笔描过、又擦掉。你读得越久，越觉得那些线条在纸面上微微发胀，纸边卷起，一股烧焦的墨味钻进鼻子。你合上文档时，指尖是凉的。",
+        "npc_direction": "维克站在楼梯口，看着你翻文档，不催促也不走近。他显然认得这份东西，眼神在你翻页时跟着移动；他更在意的是你会不会把文档带走或交给别人，而不是你读不读。费德曼兄妹保持退开的半步距离，赫克托的目光仍锁在你膝边的左轮上。若你读完仍不表态，维克会再次开口索要\"诚意\"。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 655,
+            "after": 665
+          }
+        ]
+      },
+      "input": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+      "narrative": "你当面辨认文档的手写段落与几何图示，将所见记在心里；这次阅读并不转移原件的保管权。\n\n你借着地窖里那点昏黄的光，把文档摊在膝上。手写段落是一种你不熟悉的斜体，笔画细而密，越往后越潦草，像是写字的人手在抖。几何图示画在段落之间——不是装饰，是某种反复出现的结构，几处线条被后来的人用铅笔描过、又擦掉。你读得越久，越觉得那些线条在纸面上微微发胀，纸边卷起，一股烧焦的墨味钻进鼻子。你合上文档时，指尖是凉的。\n\n你借着地窖里那点昏黄的光，把文档摊在膝上。手写段落是一种你不熟悉的斜体，笔画细而密，越往后越潦草，像是写字的人手在抖。几何图示画在段落之间——不是装饰，是某种反复出现的结构，几处线条被后来的人用铅笔描过、又擦掉。你读得越久，越觉得那些线条在纸面上微微发胀，纸边卷起，一股烧焦的墨味钻进鼻子。你合上文档时，指尖是凉的。\n\n你把文档摊开在膝上的时候，维克没有拦你。他就站在楼梯口，看着你翻页，眼神随着你的手移动。你翻到那些画着图示的段落时，他那边安静了一下，像是在等你露出什么表情。\n\n纸页很旧，边缘发脆，可摊开之后你注意到一件事：手写段落之间那些几何图形，笔迹和正文不一样。正文是十七世纪的斜体，墨色发褐；那些线条却更深、更黑，有几处像是被人反复描过又擦掉，纸面留着浅浅的凹痕。它们不是随手涂的装饰——同样的结构在好几页上重复出现，角度、间距、彼此的位置，都严丝合缝地对应着，像是一张图被拆成了几块，分插在文字中间。\n\n你读得越久，越觉得那些线条在纸面上发胀。不是错觉——是纸的边缘在微微卷起，像是被热烘过。一股烧焦的墨味钻进你的鼻子，很淡，但确实在那里，和地窖里的潮湿混在一起。你翻页的时候用了两根手指，指尖是凉的。合上文档的一刻，你才发觉自己刚才一直屏着呼吸。\n\n“看明白了？”\n\n维克的嗓音从楼梯上落下来，不急不缓。他没有走近，也没有催你把文档交出去，只是看着你把它合上。“先生，这东西在莱特手上待过，在亨特手上待过——现在在您手上。您大概也看出来了，它不是一件古董。所以我才说，得谈谈。”他的目光在你和那本合起的文档之间来回，像是在称它的分量。\n\n---\n**你可以——**\n1. 用你读到的内容试探维克：问他知不知道图示里那些线条是什么。\n2. 提出条件：你愿意把文档交给他处置，但要他先说明莱特是怎么死的。\n3. 把话题拉回停火与离开，先谈如何从这栋楼里走出去。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+        "approach": "玩家在谈判对峙中，就着现场光线当面翻阅女巫审判文档原件，重点研读手写段落与几何图示，明确表示只看不带走。阅读本身不需要检定，但文档中的手写段落与图示属于恐怖来源，第一次阅读将触发理智检定。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "witch_trial_documents_read:0"
+        ],
+        "check": null,
+        "time_minutes": 10,
+        "success_description": "你借着地窖里那点昏黄的光，把文档摊在膝上。手写段落是一种你不熟悉的斜体，笔画细而密，越往后越潦草，像是写字的人手在抖。几何图示画在段落之间——不是装饰，是某种反复出现的结构，几处线条被后来的人用铅笔描过、又擦掉。你读得越久，越觉得那些线条在纸面上微微发胀，纸边卷起，一股烧焦的墨味钻进鼻子。你合上文档时，指尖是凉的。",
+        "failure_description": "你借着地窖里那点昏黄的光，把文档摊在膝上。手写段落是一种你不熟悉的斜体，笔画细而密，越往后越潦草。几何图示画在段落之间，几处线条被后来的人用铅笔描过、又擦掉。你读到一半，肋下的伤抽了一下，视线发花，那些线条在纸面上微微发胀，纸边卷起，一股烧焦的墨味钻进鼻子。你合上文档时，指尖是凉的，脑子里有一小块地方空了一下。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克站在楼梯口，看着你翻文档，不催促也不走近。他显然认得这份东西，眼神在你翻页时跟着移动；他更在意的是你会不会把文档带走或交给别人，而不是你读不读。费德曼兄妹保持退开的半步距离，赫克托的目光仍锁在你膝边的左轮上。若你读完仍不表态，维克会再次开口索要\"诚意\"。",
+        "sanity_source_id": "witch_documents_read",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3885,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5385,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": false,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 0,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 680
+      },
+      "last_action_outcome": {
+        "resolution_id": "e57546c94ce073ec6b32a50c13105011f9c76a11",
+        "success": true,
+        "status": "executed_success",
+        "description": "玩家在储藏室与锁箱一带翻找，找到被藏起的女巫审判文档原件，并在锁箱夹层里发现一枚银质徽章；维克在楼梯口看着，脸色越来越沉，但没有立刻阻止。",
+        "npc_direction": "维克站在楼梯口不走近，也不让路，冷眼旁观玩家翻找；若玩家翻出他藏的东西，他会立刻改口加价、试图夺回或重新定义交易条件，但不会在费德曼兄妹在场时先动手。费德曼兄妹保持退开的半步距离，随时听维克指令。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 665,
+            "after": 680
+          },
+          {
+            "type": "npc_reaction",
+            "target": "abner_wick",
+            "value": "nervous"
+          }
+        ]
+      },
+      "input": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档",
+      "narrative": "你在深层地下室翻找，终于在箱底找到了那叠失踪的阿卡姆女巫审判文档——泛黄纸页上的几何图示让你的指尖一阵发凉。\n\n在维克楼上的办公室里，你撬开一只上锁的锡盒——里面是一枚沉甸甸的银质徽章，徽章表面刻着与文档上如出一辙的几何纹路。你立刻明白了它的用途：这是能关闭那道墨中通道的封印之物。\n\n你借着维克没有立刻动手的那点空当，撑着箱子站起来，一边用话拖住楼梯口，一边往储藏室那边挪。他没拦你，只是看着，像是笃定你跑不掉——他大概也想知道你到底能在他的地窖里翻出什么。\n\n独立储藏室比外间窄，堆着几只上锁的锡箱和一口落灰的立式冷柜。你用手指试了试其中一只锡箱的锁扣，锁是老式的，扣得不严。你把它别开的时候，箱盖弹起一寸，里面垫着旧布。布底下，你摸到了那叠东西——泛黄的纸页，边缘发脆，最上面一页露出的正是你在膝上读过的那种几何线条。失踪的阿卡姆女巫审判文档，就在这里。你把纸页翻了一下确认，指尖又是一阵发凉。\n\n同一只箱子的夹层里，还有一件更沉的东西。你把它抠出来，是一枚银质徽章，边缘磨得发亮，正面刻着一圈纹路——你一眼就认出来了，和文档图示里的结构一模一样，连那些被反复描过的角度都对得上。你把它握在手里，金属的凉意贴着掌心，忽然就明白它是什么用的：这不是收藏品，是能合上某扇东西的钥匙。\n\n你把文档和徽章收进怀里，转身的时候，楼梯口的空气已经变了。\n\n维克的脸色沉下来了。他不再用那副从容的腔调，肥胖的身体在楼梯上动了动，像是想下来又忍住了。\n\n“先生，您手里那两样，本来是我准备用来谈的筹码。”他的声音低了些，古龙水味随着他前倾的动作压过来，“您把它们都拿了，那我们之间就没什么好谈的了——除非您现在就把东西放回去。”\n\n他没有示意费德曼兄妹动手，可赫克托和卡拉已经不再退开半步，而是各自把重心压低了一点。地窖里那口冷柜还在嗡嗡地响。你怀里揣着两样东西，肋下的伤在提醒你时间不多。\n\n---\n**你可以——**\n1. 亮明立场：文档归大学、徽章由你来用，维克要么放你走，要么承担后果。\n2. 用徽章做筹码反将一军，逼他说出莱特之死和那口砖井的真相。\n3. 不再谈判，趁他还没下令，朝楼梯口或井边方向抢路出去。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档",
+        "approach": "玩家在停火谈判的间隙，趁维克与费德曼兄妹尚未重新动手，对地下室展开彻底搜查：独立储藏室、锁箱、冷柜以及砖井周围。维克仍在楼梯口盯着他，费德曼兄妹退开半步但未离开，因此搜查必须在被注视、时间有限且随时可能重新爆发的对峙中进行，用 spot_hidden 判定搜查是否细致到位。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [
+          "witch_trial_documents:1",
+          "abner_seal:0"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "轻率琐事古董店地下室（储藏室/锁箱/冷柜/砖井周围）",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "在敌对NPC注视下、时间受限地彻底搜查多处隐蔽空间，属于有不确定性与代价的观察检定；玩家spot_hidden=70，无特别加成或惩罚。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 15,
+        "success_description": "玩家在储藏室与锁箱一带翻找，找到被藏起的女巫审判文档原件，并在锁箱夹层里发现一枚银质徽章；维克在楼梯口看着，脸色越来越沉，但没有立刻阻止。",
+        "failure_description": "玩家翻遍储藏室、冷柜与砖井周围，只翻出些无关的旧货与杂物，没能找到文档；翻找的动静惊动了维克，他往前压了半步，谈判的天平开始向他倾斜。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "nervous",
+            "source_id": "",
+            "evidence_quote": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档",
+            "reason": "玩家当面翻出维克藏匿的文档与徽章，维克失去部分筹码，态度转为紧张。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档",
+            "reason": "搜查无果且动静惊动维克，他重新收紧姿态，继续以文档为筹码施压。"
+          }
+        ],
+        "npc_direction": "维克站在楼梯口不走近，也不让路，冷眼旁观玩家翻找；若玩家翻出他藏的东西，他会立刻改口加价、试图夺回或重新定义交易条件，但不会在费德曼兄妹在场时先动手。费德曼兄妹保持退开的半步距离，随时听维克指令。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 4730,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5652,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": false,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 680
+      },
+      "last_action_outcome": {
+        "resolution_id": "3c68df0abd3ad1123473be8730092310f65e7f61",
+        "success": true,
+        "status": "executed_success",
+        "description": "",
+        "npc_direction": "维克仍站在楼梯口，脸色阴沉，要求玩家把文档与徽章放回原处，否则\"没什么好谈的\"；费德曼兄妹压低重心，尚未动手，等维克示意。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 680,
+            "after": 680
+          }
+        ]
+      },
+      "input": "我到古董店楼上办公室搜查上锁的锡盒，设法打开它并取出银质徽章。",
+      "narrative": "你怀中的文档突然变得滚烫。泛黄的纸页无风自动，深黑的墨迹从字缝里渗出、汇聚、隆起，凝成一团不断流动的暗影——暗影中央，一枚幽绿的独眼缓缓睁开，笔直地落在你身上。被囚禁了三百多年的东西，出来讨它的自由了。\n\n你怀中的文档突然变得滚烫。泛黄的纸页无风自动，深黑的墨迹从字缝里渗出、汇聚、隆起，凝成一团不断流动的暗影——暗影中央，一枚幽绿的独眼缓缓睁开，笔直地落在你身上。被囚禁了三百多年的东西，出来讨它的自由了。\n\n你怀里的东西先烫起来。不是纸该有的温度，是隔着衣料都压不住的那种灼热。你下意识想按住它，手却停在半空——文档在你怀里自己动了，纸页翻卷，没有风，那些页角却一张张翘起，像有什么东西从里面往外顶。\n\n然后是墨。\n\n深黑的墨迹从字缝里渗出来，不是流，是爬——一道一道顺着纸面的纹路汇聚，拢成一团，在你胸前隆起。那团暗影不断流动、变大，边缘却不散，像被某种看不见的容器兜着。地窖里所有的光似乎都被它吸了过去，四周暗了一度。\n\n暗影中央，一只眼睛睁开了。\n\n幽绿，缓慢，笔直地落在你身上——不是扫视，是认出。它看着你，就像你隔着三百年看着它一样。那只眼里没有恨，也没有饥饿，只有一种漫长的、终于等到出口的专注。你听见自己的血在耳朵里响。\n\n楼梯口那边，维克的脸色彻底白了。他往后退了半步，一只手扶住扶手，喉咙里挤出一句变了调的话。“先生——把它放下！现在！”费德曼兄妹也停住了。赫克托第一次露出了不像人的迟疑，他的目光从你身上移到那团暗影，又移回去，像是不知道该防哪一个。卡拉往后缩了半步，仍旧没出声。\n\n那团墨悬在你胸前，独眼一动不动地盯着你。它没有立刻扑上来——它在等你，或者在等你手里的、或者你怀里的什么东西。你肋下的伤在跳，你的手还按在那枚冰凉的银徽章上。\n\n---\n**你可以——**\n1. 抓起银质徽章，按向那团墨影中央。\n2. 把文档和徽章一起扔出去，趁它追着东西离开时冲向楼梯。\n3. 拔枪朝那只独眼射击。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我到古董店楼上办公室搜查上锁的锡盒，设法打开它并取出银质徽章。",
+        "approach": "玩家声称要上到古董店楼上的办公室，搜查一只上锁的锡盒并打开取出银质徽章。但权威状态显示：玩家此刻身处轻率琐事古董店的地下室，正与维克及费德曼兄妹对峙，怀里已揣着刚取出的女巫审判文档与银质徽章（seal_obtained=true，徽章已在 inventory 中）。楼上办公室并非本场景单列的可确认归属空间，且玩家并未声明离开地下室、上楼或脱离对峙；同时\"取出银质徽章\"所指之物已在其手中。因此本回合不构成可执行的新动作，需先澄清玩家意图。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克仍站在楼梯口，脸色阴沉，要求玩家把文档与徽章放回原处，否则\"没什么好谈的\"；费德曼兄妹压低重心，尚未动手，等维克示意。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2612,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 63569,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 68,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": []
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 680
+      },
+      "last_action_outcome": {
+        "resolution_id": "3c68df0abd3ad1123473be8730092310f65e7f61",
+        "success": true,
+        "status": "executed_success",
+        "description": "",
+        "npc_direction": "维克仍站在楼梯口，脸色阴沉，要求玩家把文档与徽章放回原处，否则\"没什么好谈的\"；费德曼兄妹压低重心，尚未动手，等维克示意。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 680,
+            "after": 680
+          }
+        ]
+      },
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印",
+      "narrative": "你将银质徽章覆上文档中央的几何图示。纹路相接的一瞬，纸页下的黑暗发出最后一声无声的嘶嚎——随即彻底沉寂。通道关闭了，这一次是永远的。\n\n你将银质徽章覆上文档中央的几何图示。纹路相接的一瞬，纸页下的黑暗发出最后一声无声的嘶嚎——随即彻底沉寂。通道关闭了，这一次是永远的。\n\n你将银质徽章覆上文档中央的几何图示。纹路相接的一瞬，纸页下的黑暗发出最后一声无声的嘶嚎——随即彻底沉寂。通道关闭了，这一次是永远的。\n\n你没有再多想。你把手探进怀里，摸到那枚徽章冰凉的边缘，就着那团墨影正对着你的姿势，把它按了下去——正对着文档中央那幅几何图示。\n\n金属贴上纸面的那一刻，徽章表面的纹路和纸上的线条咬合在一起，严丝合缝，像是本来就长在同一块东西上。那团悬在你胸前的墨影猛地一缩，独眼张到最大，却没有声音——它没有嘴。你只感觉到一股巨大的、无声的力道顺着你的手臂往上撞，撞得你肩膀发麻，牙关发酸。然后那股力道开始退，像潮水被什么拽回了地底。墨迹从空气里收回纸面，一道一道顺原路爬回字缝，颜色由深转淡，最后连一丝影子都不剩。\n\n纸页落回你手里，软下来，凉下来，平平地摊着，就像一本普通的旧书。烧焦的墨味散了。\n\n地窖重新亮起来——不是灯变亮了，是那团吸走光的东西不在了。你听见自己粗重的呼吸，还有远处冷柜继续嗡嗡地响。\n\n楼梯口，维克僵在原地。他张了张嘴，没有出声。赫克托和卡拉也定住了，像两尊被抽掉指令的旧雕像，目光从你怀里的文档移到你脸上，又移回去，不明白刚才发生了什么，只知道他们的老板输了。\n\n你肋下的伤还在疼，但这栋楼里已经没有任何东西在等你了。\n\n**你可以——**\n1. 带着文档和徽章，趁维克还没回过神，立刻离开这栋楼。\n2. 转过身，向维克清算这一切：莱特的死、地窖里的人骨、那口井。\n3. 先处理自己的伤，再决定怎么处置维克和这栋房子。\n4. [自由行动] 你决定做什么？",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 62481,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "trivial_pursuits",
+      "npcs_present": [
+        "abner_wick",
+        "hector_kara_feldman"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 19,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": [
+          {
+            "name": "囤积癖（Hoarding）— 无法丢弃任何物品",
+            "trigger_context": "SAN暴跌9点——当前场景的心理冲击",
+            "source": "suggested_by_table"
+          }
+        ]
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 681
+      },
+      "last_action_outcome": {
+        "resolution_id": "7dc9ce6375fd57501a51cf1d78a36564591dafb0",
+        "success": true,
+        "status": "executed_success",
+        "description": "呼吸慢慢平复下来。地窖的冷、肋下伤口的钝痛、冷柜的嗡鸣都清晰可辨，记忆连贯，你知道自己是谁、刚才做了什么——神志是清醒的。",
+        "npc_direction": "维克仍僵在楼梯口，脸色苍白，一时不敢开口；赫克托与卡拉定在原地，目光在玩家与怀中的文档之间来回，等待维克的下一步指令。三人暂时都不会主动行动。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 680,
+            "after": 681
+          }
+        ]
+      },
+      "input": "我稳住心神，深呼吸，确认自己还清醒",
+      "narrative": "你稳住心神，深呼吸，确认自己还清醒。\n\n你稳住心神，深呼吸，确认自己还清醒。\n\n你站在原地，慢慢地吸了一口气，再把它吐出去。地窖的冷贴着你的脸，肋下那处伤在呼吸时一抽一抽地疼，冷柜的嗡鸣还在耳后响着。你能数清这些东西——冷、痛、声音、脚下湿砖的触感。你记得自己是谁：黄千陆，受法伦主任之托来查莱特教授的死。你记得刚才做了什么，也记得为什么要那么做。记忆是连贯的，没有断口，没有缺失。你的手还在微微发抖，但那是失血的抖，不是别的东西。\n\n神志是清醒的。\n\n你低头看了一眼怀里的文档。纸页平平地摊着，泛黄，发脆，像一本放了太久的旧书。那枚银徽章压在上面，纹路朝下，贴着那幅几何图示，严丝合缝。地窖里再没有别的动静。\n\n楼梯口那边，维克还僵着。他一只手撑着扶手，肥胖的身体前倾了一半又停住，脸色白得不像话，嘴唇动了两下，到底没说出话。赫克托和卡拉各自定在原处，谁也没有再往前。他们的目光在你和怀里的文档之间来回，像是在等一个不会再来的指令。\n\n整栋楼安静下来。你能听见自己呼吸的声音，和很远的地方——也许是街上——一辆汽车驶过的声音。现在，这栋楼里所有的东西都听你的了。\n\n**你可以——**\n1. 带着文档和徽章，趁维克还没回过神，立刻离开这栋楼。\n2. 转过身，向维克清算这一切：莱特的死、地窖里的人骨、那口井。\n3. 先处理自己的伤，再决定怎么处置维克和这栋房子。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我稳住心神，深呼吸，确认自己还清醒",
+        "approach": "玩家在封印完成、怪物沉寂之后，站在原地做几次深呼吸，检查自己的意识、感官与记忆是否连贯，确认刚才目睹的一切没有让自己失去清醒。这是对自身状态的自我确认，不涉及搜查、移动或与在场者交涉。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 1,
+        "success_description": "呼吸慢慢平复下来。地窖的冷、肋下伤口的钝痛、冷柜的嗡鸣都清晰可辨，记忆连贯，你知道自己是谁、刚才做了什么——神志是清醒的。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克仍僵在楼梯口，脸色苍白，一时不敢开口；赫克托与卡拉定在原地，目光在玩家与怀中的文档之间来回，等待维克的下一步指令。三人暂时都不会主动行动。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2306,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 46606,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_university",
+      "npcs_present": [
+        "bryce_fallon"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 19,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": [
+          {
+            "name": "囤积癖（Hoarding）— 无法丢弃任何物品",
+            "trigger_context": "SAN暴跌9点——当前场景的心理冲击",
+            "source": "suggested_by_table"
+          }
+        ]
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 711
+      },
+      "last_action_outcome": {
+        "resolution_id": "85616a2cb2fb7fceb9e1bf1e12ddda0839dadc28",
+        "success": true,
+        "status": "executed_success",
+        "description": "你抱着文档、揣好徽章，从地窖走上楼梯，穿过店面。维克没有拦你，费德曼兄妹也没有动。阿卡姆的午后街道在门外铺开，你拦下一辆车，往密斯卡托尼克大学去。三十分钟后，大学的砖墙与常春藤出现在车窗外——你到了。",
+        "npc_direction": "维克仍处于惊惧与失势状态，不会阻拦玩家离开；费德曼兄妹僵在原地等待不会再来的指令。法伦在密斯卡托尼克大学，尚未得知地窖中发生的一切。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 681,
+            "after": 711
+          }
+        ]
+      },
+      "input": "文档已经找回、怪物已被消灭。我去找法伦，完成封印仪式，了结这个案子",
+      "narrative": "你前往密斯卡托尼克大学。新英格兰最负盛名的高等学府之一，哥特式石砌建筑群坐落于阿卡姆镇中心。法伦主任的办公室位于行政楼二层。\n\n你抱着文档、揣好徽章，从地窖走上楼梯，穿过店面。维克没有拦你，费德曼兄妹也没有动。阿卡姆的午后街道在门外铺开，你拦下一辆车，往密斯卡托尼克大学去。三十分钟后，大学的砖墙与常春藤出现在车窗外——你到了。\n\n你抱着文档、揣好徽章，从地窖走上楼梯，穿过店面。维克没有拦你，费德曼兄妹也没有动。阿卡姆的午后街道在门外铺开，你拦下一辆车，往密斯卡托尼克大学去。三十分钟后，大学的砖墙与常春藤出现在车窗外——你到了。\n\n你抱着文档，揣好那枚徽章，一步一步走上地窖的石阶。维克站在楼梯口，肥胖的身体贴着扶手，看着你从他身边经过，一个字也没有说。赫克托和卡拉定在原处，目光跟着你，但谁都没有动——他们的指令已经随着那团墨影一起消失了。你穿过储藏室，走上店面后场那道伪装成隔断的暗门，推开它，回到店里。玻璃柜里的黄铜烛台还亮着温润的光，古龙水的味道还浮在空气里，一切都像什么都没发生过。\n\n你推门出去。阿卡姆的午后街道在门外铺开，雨已经停了，石板路上还留着浅浅的水光。你拦下一辆车，报了密斯卡托尼克大学的名字。车夫看了你一眼——大概是看你西装上的血迹和脸色——没有多问，踩下了油门。\n\n三十分钟后，大学的砖墙和常春藤出现在车窗外。你付了车钱，扶着车门下来，肋下的伤在起身时又抽了一下。行政楼的走廊里很安静，只有远处某间办公室的打字机在响，响了一阵，停了。你走到二楼尽头那扇半开的门前，门牌上刻着“布莱斯·法伦，行政处主任”。\n\n法伦主任正站在窗边，背对着门。听见脚步，他转过身来，看清是你，脸上的从容先是一顿——他看到了你怀里的东西，也看到了你的脸色。\n\n“黄先生。”他放下手里的茶杯，往前迎了半步，“您……找到了？”\n\n他的目光落在你怀里那叠泛黄的纸页上，没有立刻伸手来接。\n\n---\n**你可以——**\n1. 把文档和徽章放在他桌上，从头讲述这一趟查到的一切。\n2. 只说结果：文档找回了，东西已经了结，其余细节暂不多谈。\n3. 先问他一个问题：他究竟还知道多少没告诉你的东西。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "文档已经找回、怪物已被消灭。我去找法伦，完成封印仪式，了结这个案子",
+        "approach": "玩家带着已封印的文档与银质徽章离开轻率琐事古董店，前往密斯卡托尼克大学寻找布莱斯·法伦，准备完成封印仪式并结案。本回合只结算从古董店到大学的行程，抵达后不立即展开调查或交涉。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_university",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 30,
+        "success_description": "你抱着文档、揣好徽章，从地窖走上楼梯，穿过店面。维克没有拦你，费德曼兄妹也没有动。阿卡姆的午后街道在门外铺开，你拦下一辆车，往密斯卡托尼克大学去。三十分钟后，大学的砖墙与常春藤出现在车窗外——你到了。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克仍处于惊惧与失势状态，不会阻拦玩家离开；费德曼兄妹僵在原地等待不会再来的指令。法伦在密斯卡托尼克大学，尚未得知地窖中发生的一切。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2533,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 49069,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_university",
+      "npcs_present": [
+        "bryce_fallon"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 19,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": [
+          {
+            "name": "囤积癖（Hoarding）— 无法丢弃任何物品",
+            "trigger_context": "SAN暴跌9点——当前场景的心理冲击",
+            "source": "suggested_by_table"
+          }
+        ]
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 726
+      },
+      "last_action_outcome": {
+        "resolution_id": "2a906a1e78197eb233c744d7e1e432d56811bc63",
+        "success": true,
+        "status": "executed_success",
+        "description": "徽章纹路与图示严丝合缝地咬合，纸页上那团墨色像被抽走了最后一丝活气，缓缓沉入纸纤维里，再不动弹。封印成了——文档重新变回一叠死物，怪物被彻底锁回文字之中。法伦在旁看着，脸色几度变化，最终长长吐出一口气。",
+        "npc_direction": "法伦站在一旁看着调查员动手封印，神情从期待转为紧张；若成功，他会松一口气并主动提出善后（封存文档、向柯布家族交代）；若失败，他会显得不安，催促调查员另寻他法，但不会抢夺文档。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 711,
+            "after": 726
+          },
+          {
+            "type": "npc_reaction",
+            "target": "bryce_fallon",
+            "value": "cooperative"
+          }
+        ]
+      },
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印",
+      "narrative": "你把文档摊在法伦的桌面上，从怀里取出那枚银徽章。法伦没有问你要做什么，只是退开半步，看着你动手。\n\n你把文档摊在法伦的桌面上，从怀里取出那枚银徽章。法伦没有问你要做什么，只是退开半步，看着你动手。\n\n你把文档摊在法伦的桌面上，从怀里取出那枚银徽章。法伦没有问你要做什么，只是退开半步，看着你动手。\n\n你把文档摊在法伦的桌面上，从怀里取出那枚银质徽章。法伦没有问你要做什么，只是退开半步，看着你动手。\n\n你翻开文档，找到那几页画着几何图示的段落。徽章在你手里是凉的。你把它翻过来，纹路朝下，对准了纸上那幅反复出现的结构——在维克的地窖里你已经见过一次，纹路和线条咬合得严丝合缝。这一次你做得更稳，先把徽章的一个角对上去，再顺着边缘慢慢压平。\n\n金属贴上纸面的那一刻，你感觉到一丝极轻的、几乎算不上震动的颤动，像是有什么东西在纸的纤维深处最后挣了一下。然后它沉下去了。那团曾经在地窖里隆起、睁眼的墨色，此刻只像一摊被吸干的渍迹，缓缓渗回纸面，颜色从深转浅，最后连一点痕迹也不剩。文档重新变回一叠死物——泛黄、发脆、安静，和任何一份放在档案柜里的旧卷宗没有区别。\n\n法伦在对面看着，脸上的表情几度变化。先是紧张，然后是迟疑，最后他长长地吐出一口气，肩膀松了下来。他伸手扶了一下桌沿，像是站久了腿有些软。\n\n“成了。”他说，声音比先前低了一些，“就这么……成了。”他看了你一眼，又看了看桌上那叠文档和压在上面的徽章，像是在确认它们真的不再动。走廊外面，远处的打字机响了一阵，又停了。行政楼里仍旧是下午该有的安静。\n\n他直起身，整理了一下袖口，重新找回那副行政人员的腔调。“黄先生，这件事到此为止。文档我会处理，封存起来，向柯布家族交代——就说在莱特的遗物中找到的。您手上那份伤……需要我安排校医吗？还有，您这一趟查到的东西，哪些可以写进报告，哪些不必，我们可以谈。”他拉了拉椅子，示意你坐下。\n\n---\n**你可以——**\n1. 坐下，把这一趟查到的一切——莱特之死、亨特、维克、地窖——原原本本告诉他。\n2. 只谈可以写进报告的部分，其余细节自己保留。\n3. 先接受他安排的校医，处理伤口，之后再谈报告。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我用银质徽章覆上文档中央的几何图示，完成封印",
+        "approach": "在法伦的办公室里，黄千陆取出阿伯那·维克的银质徽章，将其纹路朝下覆在文档中央那幅几何图示上，试图以徽章完成封印仪式，彻底了结这桩案子。",
+        "target_npc_id": "bryce_fallon",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "occult",
+          "target": "阿卡姆女巫审判文档的几何图示封印",
+          "required_success_level": "regular",
+          "bonus_dice": 1,
+          "penalty_dice": 0,
+          "reason": "封印仪式需要理解图示与徽章纹路的关系；调查员神秘学仅5%，属于极不熟练的尝试，但徽章与图示严丝合缝、怪物已被制伏，仪式条件基本具备，故按常规难度判定，失败也不会毁掉文档。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 15,
+        "success_description": "徽章纹路与图示严丝合缝地咬合，纸页上那团墨色像被抽走了最后一丝活气，缓缓沉入纸纤维里，再不动弹。封印成了——文档重新变回一叠死物，怪物被彻底锁回文字之中。法伦在旁看着，脸色几度变化，最终长长吐出一口气。",
+        "failure_description": "徽章覆上去，图示却毫无反应，纸页边缘反而微微卷曲，一股烧焦的墨味浮起来。你意识到自己并不真正懂得这套仪式的门道——徽章压住了图示，却没有真正封住它。法伦凑近看了一眼，低声说这东西恐怕还得另想办法，而时间正在流逝。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "bryce_fallon",
+            "value": "cooperative",
+            "source_id": "",
+            "evidence_quote": "我用银质徽章覆上文档中央的几何图示，完成封印",
+            "reason": "封印成功、案子了结，法伦对调查员彻底信服并愿意配合收尾。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "monster_manifestation",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "我用银质徽章覆上文档中央的几何图示，完成封印",
+            "reason": "封印未成，文档图示被反复触碰且未获防护，符合 advance_when 中『反复触碰/阅读文档图示』的推进条件。"
+          }
+        ],
+        "npc_direction": "法伦站在一旁看着调查员动手封印，神情从期待转为紧张；若成功，他会松一口气并主动提出善后（封存文档、向柯布家族交代）；若失败，他会显得不安，催促调查员另寻他法，但不会抢夺文档。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 8380,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 32832,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_university",
+      "npcs_present": [
+        "bryce_fallon"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 19,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": [
+          {
+            "name": "囤积癖（Hoarding）— 无法丢弃任何物品",
+            "trigger_context": "SAN暴跌9点——当前场景的心理冲击",
+            "source": "suggested_by_table"
+          }
+        ]
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 741
+      },
+      "last_action_outcome": {
+        "resolution_id": "494c7bdb291bf3b13a764cfeb4a8716cb1870369",
+        "success": true,
+        "status": "executed_success",
+        "description": "徽章压平在纸面上，那点最后的颤动沉了下去，文档彻底变回一叠死物。法伦长长吐出一口气，把文档收进抽屉，向你伸出手——案子到此了结。你带着肋下的伤走出行政楼，阿卡姆的午后阳光落在石阶上。",
+        "npc_direction": "法伦如释重负，态度合作：他愿意按约定封存文档、向柯布家族交代，并主动提出安排校医处理你的伤口、商定哪些内容写进报告。他不会追问你不愿说的细节，但会留意你身上的伤与血迹。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 726,
+            "after": 741
+          }
+        ]
+      },
+      "input": "完成封印，结案",
+      "narrative": "徽章压平在纸面上，那点最后的颤动沉了下去。文档彻底变回一叠死物——泛黄、发脆、安静，和档案柜里任何一份旧卷宗没有区别。法伦在对面看着，长长地吐出一口气，肩膀松了下来，伸手扶了一下桌沿，像是站久了腿有些软。\n\n“成了。”他说，声音比先前低了一些，“就这么……成了。”他没有立刻去碰那叠文档，而是先看了你一眼——看你肋下那片洇开的暗色，看你撑着桌沿的手。他拉开抽屉，把文档和徽章一起收进去，动作很轻，像是怕惊动什么。然后他直起身，整理了一下袖口，重新找回那副行政人员的腔调。“黄先生，这件事到此为止。文档我会封存起来，向柯布家族交代——就说在莱特的遗物中找到的。您手上那份伤，我这就安排校医过来。”他走到门边，按铃叫来秘书，交代了几句，又转回来。走廊里，有人放轻脚步经过，打字机响了一阵又停，整层楼仍旧是下午该有的安静。\n\n“至于报告，”他重新坐下，双手交叠，“您愿意写多少，就写多少。莱特的死因，我在报告里会写‘突发疾病’——这是校方能给的答案，也是柯布家族愿意接受的答案。地窖里的那些事，还有您今天看见的东西……写进去，只会让更多人睡不好觉。”他顿了顿，看着你，语气里少有地露出一点真实的疲惫。“但您救下来的东西，比一份报告重要。这一点，我记着。”校医很快到了。处理伤口的时候，法伦一直坐在桌后，没有再追问你不愿说的细节。窗外的雨已经停透，阿卡姆的午后阳光落在行政楼前的石阶上。\n\n**你可以——**\n1. 接受法伦的条件，就此结案，领了报酬离开。\n2. 把地窖里那些事写进自己的私人记录，带走一份真相。\n3. 临走前提一个要求：让法伦出面处理维克和那栋房子。\n4. [自由行动] 你决定做什么？",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "完成封印，结案",
+        "approach": "玩家在法伦办公室内，以银质徽章覆上文档中央的几何图示完成封印，随后向法伦交代结果、了结此案。封印动作已在本场景成功执行（occult 检定成功），怪物已被制伏，文档已找回，符合\"真相大白，怪物被制伏\"的结案条件。本轮不再重复检定，直接落定结案。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "徽章压平在纸面上，那点最后的颤动沉了下去，文档彻底变回一叠死物。法伦长长吐出一口气，把文档收进抽屉，向你伸出手——案子到此了结。你带着肋下的伤走出行政楼，阿卡姆的午后阳光落在石阶上。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦如释重负，态度合作：他愿意按约定封存文档、向柯布家族交代，并主动提出安排校医处理你的伤口、商定哪些内容写进报告。他不会追问你不愿说的细节，但会留意你身上的伤与血迹。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2797,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 62347,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "scene": "miskatonic_university",
+      "npcs_present": [
+        "bryce_fallon"
+      ],
+      "clues_found": [
+        "abner_seal",
+        "clue_001",
+        "clue_002",
+        "clue_003",
+        "hunter_copy",
+        "monster_sealed",
+        "wick_shop_secrets",
+        "wick_trapdoor",
+        "witch_trial_documents",
+        "witch_trial_documents_read",
+        "wright_body_evidence"
+      ],
+      "flags": {
+        "cottage_searched": true,
+        "office_searched": false,
+        "body_examined": true,
+        "documents_recovered": true,
+        "double_life_exposed": false,
+        "sanatorium_visited": false,
+        "hobhouse_explored": false,
+        "wicks_shop_searched": true,
+        "deep_basement_found": true,
+        "feldman_ambushed": true,
+        "seal_obtained": true,
+        "monster_manifested": true,
+        "gangsters_dealt_with": false,
+        "monster_defeated": true,
+        "documents_given_to_wick": false,
+        "investigation_abandoned": false,
+        "crisis_fired_feldman_ambush": true,
+        "crisis_fired_ink_manifestation": true
+      },
+      "hp": 3,
+      "san": 19,
+      "inventory": [
+        "笔记本与钢笔",
+        "怀表",
+        "手电筒",
+        "旧金山唐人街带来的算盘",
+        "故乡的信物（一枚磨损的铜钱）",
+        ".38口径左轮手枪（2发）",
+        "莱特办公室的黄铜钥匙",
+        "莱特小屋的黄铜钥匙",
+        "阿卡姆女巫审判文档",
+        "阿伯那·维克的银质徽章"
+      ],
+      "psychological": {
+        "traits": [],
+        "key_relationships": [],
+        "phobias": [],
+        "manias": [
+          {
+            "name": "囤积癖（Hoarding）— 无法丢弃任何物品",
+            "trigger_context": "SAN暴跌9点——当前场景的心理冲击",
+            "source": "suggested_by_table"
+          }
+        ]
+      },
+      "clocks": {
+        "monster_manifestation": 5,
+        "human_pressure": 3,
+        "clue_clarity": 5
+      },
+      "combat_active": false,
+      "world_clock": {
+        "elapsed_minutes": 771
+      },
+      "last_action_outcome": {
+        "resolution_id": "55c5a78fd2aff10259b9cc889c5d7f93cdae4277",
+        "success": true,
+        "status": "executed_success",
+        "description": "封印落定，文档彻底变回一叠死物。法伦把文档与徽章锁进抽屉，向柯布家族交代为莱特遗物，报告上写\"突发疾病\"。校医处理了你的伤口，报酬如约付清。你走出行政楼时，阿卡姆午后的阳光落在石阶上——这桩案子到此为止。",
+        "npc_direction": "法伦接受结案：将文档与徽章封存，向柯布家族交代为莱特遗物；报告写\"突发疾病\"；安排校医处理黄千陆的伤；按约定支付报酬，并承诺日后处理维克与那栋房子的事。态度保持 cooperative，不再追问细节。",
+        "events": [
+          {
+            "type": "time_advanced",
+            "before": 741,
+            "after": 771
+          }
+        ]
+      },
+      "input": "完成封印，结案",
+      "narrative": "法伦把文档和徽章一起锁进抽屉，钥匙在锁孔里转了一圈，发出很轻的一声。他站在桌后，看着那层抽屉，像是终于把一件压了很久的东西交了出去。“我会向柯布家族交代——就说是在莱特的遗物里找到的。”他抬起眼，语气恢复成那副老练的行政腔，“报告上，死因写‘突发疾病’。这是校方能给的答案，也是他们愿意接受的答案。”校医很快到了。处理伤口的时候，法伦一直坐在桌后，没有再追问地窖里的事。包扎完，他从抽屉里取出一个信封，推到你面前——报酬，数目如约。他还留了一个电话，说维克和那栋房子的事，他会出面。他没有多解释“出面”是什么意思，你也没有追问。\n\n你收拾好东西，走出行政楼。雨已经停透，阿卡姆午后的阳光落在石阶上，照得那些被无数手掌磨亮的楼梯扶手泛出温润的光。楼里有学生抱着书走过，有打字机在远处响，一切照常。\n\n这桩案子到此为止。莱特的死因有了一个体面的说法，失踪的文档回到了它该去的地方，那个从纸页里爬出来的东西，被按回了文字深处。你怀里少了两样东西，肋下多了一道会留疤的伤。至于维克地下室那口井、井边那些骨头，还有那只在暗影里慢慢睁开的绿眼睛——它们不在任何一份报告里，只在你自己的记忆里。\n\n---\n\n**真相大白，怪物被制伏。**\n\n---\n\n**你可以——**\n1. 确认结束，让这桩案子就此落幕。\n2. 继续探索——你还有没问完的人、没走完的地方。",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "完成封印，结案",
+        "approach": "黄千陆在法伦的办公室里，以银质徽章覆上文档中央的几何图示完成封印，怪物已被制伏、文档已封存。玩家明确表示就此结案，接受法伦的安排（报告写\"突发疾病\"、由校方与柯布家族交代），领报酬离开。此为本模组已解锁的结局\"真相大白，怪物被制伏\"的收场动作，无需检定。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 30,
+        "success_description": "封印落定，文档彻底变回一叠死物。法伦把文档与徽章锁进抽屉，向柯布家族交代为莱特遗物，报告上写\"突发疾病\"。校医处理了你的伤口，报酬如约付清。你走出行政楼时，阿卡姆午后的阳光落在石阶上——这桩案子到此为止。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦接受结案：将文档与徽章封存，向柯布家族交代为莱特遗物；报告写\"突发疾病\"；安排校医处理黄千陆的伤；按约定支付报酬，并承诺日后处理维克与那栋房子的事。态度保持 cooperative，不再追问细节。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3814,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 49445,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": null,
+          "status": null,
+          "elapsed_ms": null,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 60720,
+          "error": null
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "status": "completed",
+  "finished_at": "2026-09-16 11:19:30",
+  "acceptance_passed": false,
+  "errors": [
+    "（叙述过长被截断，请重试或继续）"
+  ],
+  "handout_count": 11,
+  "decision_count": 5,
+  "decision_kinds": [
+    "coercive_threat",
+    "combat_defense",
+    "combat_defense",
+    "combat_defense",
+    "combat_defense"
+  ],
+  "dice_count": 22,
+  "turn_count": 41
+}

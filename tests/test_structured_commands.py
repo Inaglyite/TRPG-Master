@@ -713,6 +713,57 @@ class StructuredCommandTests(unittest.TestCase):
         state, _revision = self.persisted()
         self.assertEqual("study", state["current_scene"]["id"])
 
+    def test_party_known_clue_presentable_by_any_investigator(self):
+        """granted_to 为空 = 全队共享线索（模组初始线索即此形态）。
+
+        快照投影按此口径展示，行动校验必须一致——否则 UI 给得出示按钮、
+        提交却被拒（2026-09-16 按钮级真机验收实测：模组初始线索
+        clue_001/002 无 granted_to，出示被判 not_authorized）。
+        """
+        state, _ = self.persisted()
+        found = state["clues_found"]["investigation"]
+        found.append(
+            {
+                "id": "clue_party_shared",
+                "catalog_id": "clue_party_shared",
+                "text": "全队都知道的公开线索。",
+                "category": "investigation",
+                # 无 granted_to：全队共享
+            }
+        )
+
+        def mutate(s):
+            s["clues_found"]["investigation"] = found
+
+        store = DatabaseWorldStore(self.context.database_url, "sp-world", self.context.world_dir)
+        store.update(mutate)
+        for request_id, principal in (
+            ("r-shared-alice", self.alice),
+            ("r-shared-bob", self.bob),
+        ):
+            ok = self.service.submit_action_request(
+                world_id="sp-world",
+                principal=principal,
+                request={
+                    "type": "action_request",
+                    "protocol_version": 1,
+                    "world_id": "sp-world",
+                    "expected_revision": None,
+                    "investigator_id": principal.investigator_ids[0],
+                    "request_id": request_id,
+                    "action": {
+                        "kind": "present_clue",
+                        "clue_id": "clue_party_shared",
+                        "presentation": "describe",
+                        "physical_item_id": None,
+                        # 未解析目标交主持澄清（keeper_npc 在 library，不在当前场景），
+                        # 本测试只钉线索知情口径。
+                        "target": {"kind": "unresolved", "text": "在场的人"},
+                    },
+                },
+            )
+            self.assertEqual("queued", ok["status"])
+
     def test_unresolved_target_is_queued_for_keeper_clarification(self):
         ok = self.service.submit_action_request(
             world_id="sp-world",
@@ -771,6 +822,77 @@ class StructuredCommandTests(unittest.TestCase):
             world_id="sp-world", after_sequence=0, principal=self.alice
         )
         self.assertIn("clue_granted", [e["type"] for e in replayed_alice])
+
+    def test_keeper_snapshot_sees_all_party_items(self):
+        # 主持/Agent 必须看到全队持有物（含持有人）——否则裁决时对
+        # 「玩家身上有什么」是盲的（2026-09-16 真机验收：Agent 上下文
+        # items 恒空，错误断言玩家没有起始钥匙）。
+        keeper_view = self.service.session_snapshot(world_id="sp-world", principal=self.keeper)
+        keeper_items = keeper_view["items"]
+        self.assertEqual(
+            ["绷带", "记者证"], sorted(item["label"] for item in keeper_items)
+        )
+        self.assertTrue(all(item.get("holder_id") == "inv-alice" for item in keeper_items))
+        # Agent principal（无 investigator_ids）与 keeper 同视角
+        agent_view = self.service.session_snapshot(
+            world_id="sp-world", principal=Principal(kind="agent", run_id="t")
+        )
+        self.assertEqual(
+            ["绷带", "记者证"], sorted(item["label"] for item in agent_view["items"])
+        )
+        # 对偶：玩家仍只看自己的——bob 无物品，且看不到 alice 的
+        bob_view = self.service.session_snapshot(world_id="sp-world", principal=self.bob)
+        self.assertEqual([], bob_view["items"])
+        alice_view = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        self.assertEqual(
+            ["绷带", "记者证"], sorted(item["label"] for item in alice_view["items"])
+        )
+        self.assertNotIn(
+            "holder_id", alice_view["items"][0]  # 玩家投影不带持有人字段
+        )
+
+    def test_scene_notes_for_agent_carry_module_descriptions(self):
+        # Agent 上下文需要模组场景描述做 grounding（2026-09-16 A 组：目的地只有
+        # 名称没有描述，模型把「遗体在冷柜」编成「已下葬」）。
+        notes = self.service.scene_notes_for_agent("sp-world")
+        by_id = {note["scene_id"]: note for note in notes}
+        self.assertEqual("堆满书。", by_id["study"]["description"])
+        self.assertTrue(by_id["study"].get("current"))
+        self.assertEqual("安静的大厅。", by_id["library"]["description"])
+        self.assertNotIn("current", by_id["library"])
+        # 对偶：公开快照的 destinations 仍然只有 id+name（协议不变）
+        view = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        self.assertEqual(
+            {"id", "name"}, set(view["destinations"][0].keys())
+        )
+
+    def test_investigator_sheets_for_agent_carry_skill_keys(self):
+        # Agent 需要权威角色卡的精确技能键来发起检定（2026-09-16 实测：看不到
+        # 角色卡时模型写中文技能名「侦查」，被确定性拒绝——真实键是英文）。
+        sheets = self.service.investigator_sheets_for_agent("sp-world")
+        by_id = {sheet["investigator_id"]: sheet for sheet in sheets}
+        self.assertEqual(70, by_id["inv-alice"]["skills"]["侦查"])
+        self.assertEqual(55, by_id["inv-alice"]["skills"]["说服"])
+        self.assertEqual(11, by_id["inv-alice"]["hp"])
+        self.assertIn("inv-bob", by_id)
+        self.assertIn("pc", by_id)  # 占位 pc 也在（有 name）
+        # 对偶：公开快照不含角色卡细节（协议不变，只读投影仍是 targets 的 id+name）
+        view = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        target = next(t for t in view["targets"] if t["id"] == "inv-alice")
+        self.assertEqual({"kind", "id", "name"}, set(target.keys()))
+
+    def test_snapshot_item_ids_are_stable_and_persisted(self):        # 快照展示的物品 ID 必须稳定且已落库：前端拿快照 ID 提交，若首次命令
+        # 再迁移生成另一套随机 ID，提交必被拒（2026-09-16 按钮级实测
+        # object_not_held）。两次快照 + 独立连接读库三重一致。
+        first = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        ids_first = [item["id"] for item in first["items"]]
+        self.assertTrue(ids_first)
+        second = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        self.assertEqual(ids_first, [item["id"] for item in second["items"]])
+        state, _ = self.persisted()
+        self.assertIn("item_registry", state)  # 已落库，不只是内存迁移
+        registry_ids = sorted(state["item_registry"]["items"].keys())
+        self.assertEqual(sorted(ids_first), registry_ids)
 
     def test_use_item_consumes_once_and_transfer_splits_stack(self):
         # 首个命令触发稳定 ID 注册表的一次性迁移并持久化；之后再读注册表。
