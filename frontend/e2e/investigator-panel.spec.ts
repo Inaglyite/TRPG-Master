@@ -213,11 +213,14 @@ test("三卡片布局、折叠、出示与使用行动编辑器全流程", async
   // 时轨道下限取内容的 min-content —— 面板里可任意断行的文本（中文按字断行）
   // 只有一两个字宽，轨道会被压到 ~1px，面板连同线索行整体竖排（每行一个字）。
   // 这里断言面板有真实宽度、线索正文不是竖排，避免这类塌陷再次悄悄上线。
-  const panelBox = await page.locator("#char-panel").boundingBox();
-  expect(
-    panelBox?.width ?? 0,
-    "侧栏被压塌（网格 auto 轨道被 min-content 挤没）",
-  ).toBeGreaterThan(280);
+  // 注意：面板展开有 0.3s 的 width/min-width 抽出过渡，直接量会量到动画中帧，
+  // 用 poll 等过渡收敛后再判定（真塌陷时永远只有 ~1px，poll 超时仍红）。
+  await expect
+    .poll(
+      async () => (await page.locator("#char-panel").boundingBox())?.width ?? 0,
+      { timeout: 5_000 },
+    )
+    .toBeGreaterThan(280);
   const firstSummary = page
     .locator('[data-clue^="investigation:"] .inv-clue-summary-text')
     .first();

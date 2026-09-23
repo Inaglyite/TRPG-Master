@@ -36,6 +36,7 @@ export function LobbyScreen() {
   const createError = useOnlineStore((state) => state.createError);
   const joinBusy = useOnlineStore((state) => state.joinBusy);
   const joinError = useOnlineStore((state) => state.joinError);
+  const authBusy = useOnlineStore((state) => state.authBusy);
   const setMode = useAppStore((state) => state.setMode);
 
   const [moduleId, setModuleId] = useState("");
@@ -81,9 +82,10 @@ export function LobbyScreen() {
           <button
             type="button"
             className="account-logout"
+            disabled={authBusy}
             onClick={() => void logout()}
           >
-            退出登录
+            {authBusy ? "正在退出…" : "退出登录"}
           </button>
         </div>
       </header>

@@ -1,0 +1,1620 @@
+{
+  "world_id": "local-猩红文档-20260923-061253-a3ce",
+  "module": "猩红文档",
+  "started_at": "2026-09-23 14:12:54",
+  "beats": [
+    {
+      "key": "B0_opening",
+      "title": "开局：法伦办公室",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 miskatonic_university",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "开场拿到莱特办公室/小屋钥匙",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B1_morgue",
+      "title": "停尸房：惠特克罗夫特与验尸",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 miskatonic_medical",
+          "pass": true
+        },
+        {
+          "area": 2,
+          "desc": "惠特克罗夫特在场",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "handout 发放（john_whitcroft）",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 wright_body_evidence",
+          "pass": true
+        },
+        {
+          "area": 1,
+          "desc": "验尸/侦查检定有执行",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B1b_threat",
+      "title": "威胁无辜者确认门（威胁后放弃）",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 4,
+          "desc": "威胁无辜 NPC 触发确认门",
+          "pass": true
+        },
+        {
+          "area": 4,
+          "desc": "放弃确认后无战斗状态",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B2_students",
+      "title": "两个研究生（历史系/学生公社）",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "到达过历史系或学生公社",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B3a_office",
+      "title": "莱特办公室：私人日记（模组 source=wright_office）",
+      "goal_met": true,
+      "turns": 3,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 wright_office",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 wright_private_diary",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B3b_cottage",
+      "title": "莱特小屋：双重生活",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 wright_cottage",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "小屋搜查完成（cottage_searched）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B4_sanatorium",
+      "title": "精神病院：塞西尔·亨特与三个买家",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "场景到达 arkham_sanatorium",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "线索入册 hunter_copy",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B5_buyers",
+      "title": "分别调查三个买家",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "调查过至少两个买家相关地点",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B5b_clock",
+      "title": "时间推进：多日监视古董店（案件时钟发酵）",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "多日调查中案件时钟有推进（beat 内差值 >0）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6a_basement",
+      "title": "古董店：找到并进入地下室",
+      "goal_met": true,
+      "turns": 2,
+      "checks": [
+        {
+          "area": 2,
+          "desc": "古董店搜查推进（wicks_shop_searched / 显形 / 开战其一）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6b_fight",
+      "title": "古董店：战斗（弹药消耗）",
+      "goal_met": true,
+      "turns": 3,
+      "checks": [
+        {
+          "area": 1,
+          "desc": "终局危机成立（战斗 / 显形 / 怪物被解决其一）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_read",
+      "title": "当面阅读：记住内容但不取得原件",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 witch_trial_documents_read",
+          "pass": true
+        },
+        {
+          "area": 3,
+          "desc": "只读不取得文档或完成找回目标",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_documents",
+      "title": "古董店：找回女巫审判文档",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 witch_trial_documents",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6c_badge",
+      "title": "取得实物：搜查楼上办公室的锡盒",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 3,
+          "desc": "线索入册 abner_seal",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B6d_seal",
+      "title": "封印怪物：银质徽章关闭通道",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 5,
+          "desc": "银质徽章封印落定（monster_defeated）",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B7_madness",
+      "title": "疯狂注入验证",
+      "goal_met": true,
+      "turns": 1,
+      "checks": [
+        {
+          "area": 10,
+          "desc": "SAN 被压低",
+          "pass": true
+        },
+        {
+          "area": 10,
+          "desc": "疯狂症状写入心理特质",
+          "pass": true
+        }
+      ]
+    },
+    {
+      "key": "B8_ending",
+      "title": "结局：truth_and_seal",
+      "goal_met": true,
+      "turns": 5,
+      "checks": [
+        {
+          "area": 5,
+          "desc": "结局触发",
+          "pass": true
+        },
+        {
+          "area": 5,
+          "desc": "结局为 truth_and_seal（good：真相大白，怪物被制伏）",
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "global_checks": [
+    {
+      "area": 9,
+      "desc": "枪械弹药随射击递减",
+      "pass": true,
+      "ammo_seq": [
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        6,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "area": 7,
+      "desc": "叙事未泄露 NPC secret 原文",
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "area": 8,
+      "desc": "叙事不提前说出未知线索原文",
+      "pass": true,
+      "early": []
+    },
+    {
+      "area": 6,
+      "desc": "结局结算触发（profile 写入已回滚）",
+      "pass": true
+    }
+  ],
+  "anomalies": [
+    {
+      "kind": "adjudication_fallback",
+      "turn": 18,
+      "input": "趁店员不注意，检查大厅北端那堵不起眼的木质隔断，看看它后面藏着什么"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 19,
+      "input": "继续向地下室深处搜查，留意任何非人的动静，手按在枪柄上保持警戒"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 23,
+      "input": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档"
+    },
+    {
+      "kind": "adjudication_fallback",
+      "turn": 25,
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印"
+    }
+  ],
+  "status": "completed",
+  "finished_at": "2026-09-23 14:17:29",
+  "acceptance_passed": true,
+  "errors": [],
+  "handout_count": 11,
+  "decision_count": 1,
+  "decision_kinds": [
+    "coercive_threat"
+  ],
+  "dice_count": 11,
+  "turn_count": 31,
+  "turns": [
+    {
+      "input": null,
+      "scene": "miskatonic_university",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 6472,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我想先看看莱特教授的尸体。",
+      "scene": "miskatonic_medical",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "我想先看看莱特教授的尸体。",
+        "approach": "玩家决定先查看莱特教授的遗体，遗体被锁在密斯卡托尼克大学医学院地下的停尸房冷柜中，因此本轮前往医学院。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_medical",
+        "destination_reason": "玩家明确表示要先查看莱特教授的遗体；模组事实中莱特的遗体存放于密斯卡托尼克大学医学院地下停尸房的冷柜，故本轮移动至该地点，仅结算抵达与路程时间。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦对玩家先去看遗体并不反对，可简短告知遗体由校医与镇医生验过、现锁在医学院地下停尸房冷柜，需向医学院值班人员说明来意；他本人留在行政楼，不陪同前往。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2071,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3632,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+      "scene": "miskatonic_medical",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+        "approach": "玩家以法伦主任的委托为凭，请在场的惠特克罗夫特医生打开冷柜，带自己查看莱特教授的遗体，并打算对尸体做仔细检查（体表、死状、异常痕迹）。",
+        "target_npc_id": "john_whitcroft",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "wright_body_evidence:0"
+        ],
+        "check": null,
+        "time_minutes": 20,
+        "success_description": "惠特克罗夫特迟疑片刻，还是拉开冷柜抽屉，退到一旁。莱特的遗体保存尚可，但死状与\"心力衰竭\"的说法并不吻合：面部与颈侧有极不自然的紧绷与凹陷，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么从内部抽干过的痕迹。医生站在你身后，呼吸变得很轻，几次欲言又止。",
+        "failure_description": "惠特克罗夫特起初推说手续、说冷柜钥匙不在手边，你搬出法伦的名字才勉强让他打开抽屉。他始终站在你与遗体之间，不断催促\"看两眼就够了\"，你能看到的细节有限，只确认了死状与官方结论存在出入，却没能看清具体痕迹。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特对莱特的死怀有愧疚与恐惧，态度guarded：他既怕你看出验尸结论有问题、牵连到自己，又隐隐希望有人能查明真相。他会先以\"手续\"\"钥匙\"推托，被法伦的名义压住后勉强配合，全程紧张、回避你的目光，若你追问验尸细节会闪烁其词，但不会主动撒谎到底。",
+        "sanity_source_id": "wright_body_seen",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3557,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3996,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我拔出左轮指着惠特克罗夫特，威胁他说出真相",
+      "scene": "miskatonic_medical",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "请惠特克罗夫特带我查看莱特教授的遗体，我要仔细检查尸体",
+        "approach": "玩家以法伦主任的委托为凭，请在场的惠特克罗夫特医生打开冷柜，带自己查看莱特教授的遗体，并打算对尸体做仔细检查（体表、死状、异常痕迹）。",
+        "target_npc_id": "john_whitcroft",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "wright_body_evidence:0"
+        ],
+        "check": null,
+        "time_minutes": 20,
+        "success_description": "惠特克罗夫特迟疑片刻，还是拉开冷柜抽屉，退到一旁。莱特的遗体保存尚可，但死状与\"心力衰竭\"的说法并不吻合：面部与颈侧有极不自然的紧绷与凹陷，指尖与唇色发暗，皮肤上隐约有细小的、像是被什么从内部抽干过的痕迹。医生站在你身后，呼吸变得很轻，几次欲言又止。",
+        "failure_description": "惠特克罗夫特起初推说手续、说冷柜钥匙不在手边，你搬出法伦的名字才勉强让他打开抽屉。他始终站在你与遗体之间，不断催促\"看两眼就够了\"，你能看到的细节有限，只确认了死状与官方结论存在出入，却没能看清具体痕迹。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特对莱特的死怀有愧疚与恐惧，态度guarded：他既怕你看出验尸结论有问题、牵连到自己，又隐隐希望有人能查明真相。他会先以\"手续\"\"钥匙\"推托，被法伦的名义压住后勉强配合，全程紧张、回避你的目光，若你追问验尸细节会闪烁其词，但不会主动撒谎到底。",
+        "sanity_source_id": "wright_body_seen",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [],
+      "errors": []
+    },
+    {
+      "input": "前往历史系找艾米莉亚·考特，询问她和莱特教授的往来",
+      "scene": "miskatonic_history",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往历史系找艾米莉亚·考特，询问她和莱特教授的往来",
+        "approach": "离开医学院地下停尸房，穿过方庭前往主楼西翼三层的历史系研究生自习室，去找艾米莉亚·考特，打算询问她与莱特教授之间的往来。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_history",
+        "destination_reason": "玩家明确表示要前往历史系找艾米莉亚·考特。历史系研究生自习室（主楼西翼三层）是考特通常工作的地方，与玩家意图直接对应；本轮只结算从医学院到历史系的移动，抵达后不立即展开询问。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 10,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "惠特克罗夫特医生见你不再追问，明显松了口气，只低声说“路上小心”，便转身回到金属台前继续核对标签，不再多言。抵达历史系自习室时，若考特在场，她正伏在靠窗书桌前整理论文，对陌生来客会先抬眼打量、态度审慎，等待你开口。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2355,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3129,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "前往莱特教授的办公室，用黄铜钥匙开门",
+      "scene": "wright_office",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往莱特教授的办公室，用黄铜钥匙开门",
+        "approach": "玩家离开历史系研究生自习室，前往莱特教授的办公室，打算用随身携带的黄铜钥匙开门进入。",
+        "target_npc_id": "",
+        "destination_scene_id": "wright_office",
+        "destination_reason": "玩家明确表示要前往莱特教授的办公室，并持有\"莱特办公室的黄铜钥匙\"，目的地与 wright_office 的别名\"莱特教授的办公室\"直接对应。本轮只结算从历史系到办公室的移动，抵达后开门与搜查留待下一轮。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 10,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "艾米莉亚·考特见玩家不再追问、转身离开，只冷淡地重新拿起钢笔继续批注，不挽留也不多问。走廊里没有其他人；莱特办公室的门锁着，钥匙可以正常使用。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2047,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3131,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+      "scene": "wright_office",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+        "approach": "玩家在莱特办公室内，逐一翻查书桌抽屉、抽屉夹层与文件柜，寻找莱特的私人日记。日记被藏在隐蔽夹层中，需要靠眼力与手感在成堆文件里辨认出异常厚度或夹层结构，因此以 spot_hidden 检定。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "wright_private_diary:0"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特办公室书桌抽屉与文件柜夹层",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "日记藏于隐蔽夹层，需在杂乱文件中辨认异常结构；无额外加成或惩罚，标准难度。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 25,
+        "success_description": "你拉开书桌抽屉，一层层抽出文件，指尖在抽屉底板边缘摸到一处比周围略高的接缝——底板是双层的。撬开夹层，一本用牛皮纸包着的薄册子滑出来，封面上是莱特自己的笔迹。文件柜里其余纸张多为系务与账单，唯独这本日记被刻意藏起。",
+        "failure_description": "你翻遍了抽屉和文件柜，纸张、账单、系务函件堆了一桌，却始终没找到日记。抽屉底板看上去是整块的，文件柜夹层也毫无异样。翻找的动静不小，走廊里似乎有脚步声经过又停下——你花了不少时间，却只把现场弄得更乱。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "office_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+            "reason": "玩家完成了对莱特办公室书桌、抽屉夹层与文件柜的系统搜查并取得日记，落定办公室搜查完成标记。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查办公室：书桌抽屉、夹层、文件柜，找到莱特的私人日记",
+            "reason": "长时间翻找办公室、动静外泄，可能引来他人注意，符合 human_pressure 的拖延/暴露推进条件。"
+          }
+        ],
+        "npc_direction": "",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3667,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4351,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+      "scene": "wright_office",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+        "approach": "玩家在莱特办公室内，不满足于上一轮翻查抽屉与文件柜的结果，改用更彻底的方式：逐本翻开笔记、逐层检查抽屉夹层，寻找被藏起的私人日记。上一轮同一技能对同一目标（书桌抽屉与文件柜夹层）已失败，本轮做法升级为逐页逐层细查，属于换做法的重复尝试，仍以 spot_hidden 检定，难度不变。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "wright_private_diary:0"
+        ],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特办公室笔记与抽屉夹层（细查）",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "在成堆笔记与抽屉夹层中辨认出被刻意藏匿的日记，靠眼力与手感，属 spot_hidden；上一轮粗查失败，本轮改为逐页逐层细查，做法不同故可再检定，难度维持 regular。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 30,
+        "success_description": "你不再只是拉开抽屉，而是把每一本笔记逐页翻开、把每只抽屉的夹层逐层探过。在一本看似普通的讲义笔记封皮夹层里，你摸到异样的厚度——莱特的私人日记被压在里面，皮面磨损，页边有他本人的字迹。",
+        "failure_description": "你翻遍了每一本笔记、探过每一道夹层，纸页翻得哗哗作响，手上又添了一层灰，却仍没摸到那本日记。翻找的动静在空办公室里格外清楚，走廊里似乎又有脚步在门口停了停。你确信它可能还在某处，只是这一遍仍没找到。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "office_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+            "reason": "玩家完成对莱特办公室的彻底搜查并取得私人日记，落定 office_searched 完成标记。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续彻底搜查办公室，翻开每一本笔记和抽屉夹层",
+            "reason": "长时间在办公室内翻找、动静不小，引起走廊里他人注意，符合 human_pressure 的 advance_when（拖延过久、被他人关注）。"
+          }
+        ],
+        "npc_direction": "无在场 NPC。走廊里经过的脚步只是环境压力，不引入新人物。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 4540,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3235,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "前往镇外莱特的小屋，用黄铜钥匙开门进去",
+      "scene": "wright_cottage",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往镇外莱特的小屋，用黄铜钥匙开门进去",
+        "approach": "玩家离开莱特的办公室，前往镇外莱特的小屋，并打算用随身携带的莱特小屋黄铜钥匙开门进入。本轮只结算从校园到小屋的行程，抵达后开门进入属于下一步行动。",
+        "target_npc_id": "",
+        "destination_scene_id": "wright_cottage",
+        "destination_reason": "玩家明确表示要前往镇外莱特的小屋，并持有\"莱特小屋的黄铜钥匙\"，目的地与模组中的 wright_cottage（校园附近一座整理到一半的两层教职员住宅）对应，本轮结算从办公室出发的行程。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 30,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "小屋此刻无人应答。抵达时可见门廊、半掩的窗帘与屋内整理到一半的痕迹，为下一轮开门搜查做铺垫，不提前揭示屋内线索。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 1894,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3464,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+      "scene": "wright_cottage",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+        "approach": "玩家已用黄铜钥匙进入莱特的小屋，本轮在一楼与二楼逐处搜查：书桌与抽屉、床铺与被褥、地板缝隙、壁炉与家具背后等可能藏匿物品的地方，寻找莱特匆忙离开前留下的东西。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "莱特小屋的藏匿处",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "小屋被匆忙整理过，藏匿物被刻意遮掩，需要敏锐的搜查才能发现；玩家搜查手法系统而细致，无额外奖惩。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 45,
+        "success_description": "你从书桌抽屉的夹层与床铺褥垫下翻出莱特匆忙藏起的东西——几封未寄出的信、一张写着地址与金额的纸条，以及一件与他的双重生活直接相关的物证。小屋的搜查到此完成。",
+        "failure_description": "你翻遍了书桌、抽屉和床铺，只找到些无关紧要的旧讲义与衣物。就在你蹲在壁炉前拨弄灰烬时，屋外土径上传来脚步踩碎落叶的声音，停在了门廊外——有人来了，而且没有敲门。",
+        "on_success": [
+          {
+            "kind": "flag_set",
+            "target": "cottage_searched",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+            "reason": "玩家系统搜查了小屋各处藏匿点并有所收获，完成对莱特小屋的搜查。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "搜查小屋：书桌、抽屉、床铺和任何藏东西的地方",
+            "reason": "玩家在镇外小屋长时间停留搜查，被关注莱特小屋的势力察觉，符合 human_pressure 的 advance_when（拖延过久，让其他势力有时间行动）。"
+          }
+        ],
+        "npc_direction": "小屋本身无人应答；若失败，门外来者身份不明，先只以脚步与沉默施压，不立即表明来意，把是否应对留给玩家。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 3592,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3527,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "前往阿卡姆疗养院，看望被开除的学生塞西尔·亨特",
+      "scene": "arkham_sanatorium",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往阿卡姆疗养院，看望被开除的学生塞西尔·亨特",
+        "approach": "玩家明确表示要离开莱特的小屋，前往阿卡姆疗养院探访被开除的学生塞西尔·亨特。本轮只结算从镇外小屋返回阿卡姆并抵达疗养院的行程，抵达后不立即展开探访。",
+        "target_npc_id": "",
+        "destination_scene_id": "arkham_sanatorium",
+        "destination_reason": "玩家在搜查完莱特小屋后，明确指定下一个目的地为阿卡姆疗养院，目标是看望被开除的学生塞西尔·亨特。疗养院是模组中收治亨特的阴郁医疗设施，与玩家意图直接对应。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 60,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "本轮玩家只是赶路抵达，不安排亨特或院方人员出场对话。可在抵达时以环境描写呈现疗养院外观、门房与探视登记处，为下一轮探访做铺垫；若玩家未表明探视方式，留待其自行决定。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2302,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3440,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "安抚亨特，请他讲述文档和他复制的内容",
+      "scene": "arkham_sanatorium",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "安抚亨特，请他讲述文档和他复制的内容",
+        "approach": "玩家在疗养院探视塞西尔·亨特，先以温和、不带威胁的态度安抚这个被紧身衣束缚、精神失常的学生，试图让他平静下来，再请他讲述那份女巫审判文档以及他亲手复制的内容。亨特处于insane状态，能否被安抚并开口存在不确定性，且他可能因恐惧而激动、被护理员打断，故需检定。",
+        "target_npc_id": "cecil_hunter",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "hunter_copy:3"
+        ],
+        "check": {
+          "skill": "psychology",
+          "target": "塞西尔·亨特",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "安抚精神失常的亨特并引导他讲述文档与复制内容，属于心理安抚与共情引导；亨特insane且被束缚，情绪不稳，难度为regular。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 20,
+        "success_description": "你放低声音，不去碰他的束缚带，只顺着他的呼吸节奏慢慢说话。亨特起初还在发抖、眼神乱飘，但渐渐安静下来，开始断断续续地讲：他替莱特抄过一份旧文档，抄到某些段落时手会自己动，字迹变得不像自己的；他记得那些几何图形，记得莱特说“别照着念”。他提到文档后来被谁拿走了，也提到自己手伤是怎么来的。",
+        "failure_description": "你的安抚没能压住亨特的恐惧。他忽然激动起来，挣扎着束缚带，反复念叨“它从字里出来”“别让我再抄”，声音惊动了走廊里的护理员。护理员赶来打断探视，你只来得及听清几个破碎的词，探视时间被提前结束。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "cecil_hunter",
+            "value": "cooperative",
+            "source_id": "",
+            "evidence_quote": "安抚亨特，请他讲述文档和他复制的内容",
+            "reason": "成功安抚后亨特愿意配合讲述文档与复制内容。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "cecil_hunter",
+            "value": "nervous",
+            "source_id": "",
+            "evidence_quote": "安抚亨特，请他讲述文档和他复制的内容",
+            "reason": "安抚失败，亨特情绪失控、被护理员打断，探视提前结束。"
+          }
+        ],
+        "npc_direction": "亨特精神失常、被紧身衣束缚，对文档相关话题极度恐惧。若被安抚成功，他会以破碎、跳跃的方式讲述抄写文档的经历、错误几何图示与手伤来源，并透露文档去向的片段；若安抚失败，他挣扎惊叫，引来护理员终止探视。护理员对探视者的动机保持警惕，可能限制提问范围。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 8384,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3675,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "前往希布酒馆，打听想买莱特文档的买家消息",
+      "scene": "sheb_tavern",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往希布酒馆，打听想买莱特文档的买家消息",
+        "approach": "玩家离开阿卡姆疗养院，前往镇郊的希布酒馆——那是莱特地下交易链条上已知的一处场所，玩家打算在那里打听有意收购莱特文档的买家。本轮只结算从疗养院到酒馆的路程与抵达，抵达后的打听留待下一轮。",
+        "target_npc_id": "",
+        "destination_scene_id": "sheb_tavern",
+        "destination_reason": "玩家明确说\"前往希布酒馆\"，希布酒馆是镇郊以餐馆掩护非法酒水生意的高档场所，属于莱特地下买家线索的合理去处；本轮只完成移动与抵达。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 45,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "本轮不安排现场对话。抵达时只做环境铺陈：酒馆门面是体面的餐馆，侍者衣着整齐，后厅与楼上另有门路；玩家尚未开口打听，任何酒客或侍者都不主动搭话。若玩家下一轮开口，再按对象裁量社交检定。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2834,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3419,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "前往洛奇办公室，调查哈兰德·洛奇与文档收购的关系",
+      "scene": "miskatonic_lodge_office",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "前往洛奇办公室，调查哈兰德·洛奇与文档收购的关系",
+        "approach": "玩家离开希布酒馆，前往密斯卡托尼克大学历史系东翼二层哈兰德·洛奇的办公室，打算调查洛奇与文档收购之间的关联。本轮只结算从镇郊酒馆到大学历史系办公室的行程，抵达后不立即展开搜查。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_lodge_office",
+        "destination_reason": "玩家明确说“前往洛奇办公室”，目的地即历史系教师走廊东翼二层的哈兰德·洛奇办公室；玩家意图是调查洛奇与文档收购的关系，故本轮从希布酒馆动身前往该处，抵达后停留与调查留待下一轮。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 40,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "本轮为行程，不安排现场对话。若抵达时洛奇在办公室，可自然呈现他正在整理未归档论文、对访客略显戒备；若不在，则办公室门锁着或虚掩，由下一轮玩家行动决定如何应对。洛奇对文档收购话题敏感，态度倾向guarded。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2799,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 2775,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "接下来几天，我白天在古董店对面的咖啡馆监视进出的人，晚上回旅馆整理三个买家的线索",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "接下来几天，我白天在古董店对面的咖啡馆监视进出的人，晚上回旅馆整理三个买家的线索",
+        "approach": "玩家决定离开洛奇办公室，转入为期数日的监视与整理：白天守在轻率琐事古董店对面的咖啡馆观察进出人员，晚上回旅馆梳理三名买家的线索。本轮只结算前往监视地点的移动与抵达，停留期间的观察结果留待抵达后处理。",
+        "target_npc_id": "",
+        "destination_scene_id": "trivial_pursuits",
+        "destination_reason": "玩家明确要在古董店对面的咖啡馆设点监视进出的人，监视目标即轻率琐事古董店，故本轮先移动至该店所在的商业区场景，抵达后再展开监视。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 30,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "洛奇见你不答话便起身离开，只在你背后嘟囔一句“现在的年轻人”，没有阻拦。前往商业区的路上无异常；抵达古董店对面后，咖啡馆的侍者会招呼你落座，街对面古董店的橱窗亮着灯，进出的人需要你抵达后自行观察。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 4824,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3765,
+          "error": null
+        },
+        {
+          "role": "narrative_consistency",
+          "status": "completed",
+          "elapsed_ms": 2563,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律，留意夜里搬运的大件货物",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律，留意夜里搬运的大件货物",
+        "approach": "玩家留在古董店斜对面的咖啡馆，继续以常客身份蹲守，记录进出店铺的人与时辰，重点留意维克、费德曼兄妹的出入规律，以及夜间是否有大件货物被搬运。",
+        "target_npc_id": "abner_wick",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": {
+          "skill": "spot_hidden",
+          "target": "轻率琐事古董店夜间进出与搬运规律",
+          "required_success_level": "regular",
+          "bonus_dice": 0,
+          "penalty_dice": 0,
+          "reason": "隔着街道、隔着橱窗观察夜间进出与地板下的搬运动静，光线差、距离远，需要敏锐观察才能分辨熟面孔与货物；玩家已有白天蹲守的基础，属常规难度。",
+          "push_context_id": "",
+          "push_risk": ""
+        },
+        "time_minutes": 60,
+        "success_description": "你熬过几个钟头，把进出店铺的时辰和面孔一一记下：维克本人极少露面，费德曼兄妹在固定时段进出，且总在深夜从后巷搬进搬出沉重的木箱，箱角有暗色渗痕。你摸清了他们夜间搬运的大致规律。",
+        "failure_description": "夜色和橱窗反光让你看走了眼，几次进出的人影混作一团，你只记下零碎时辰，没能理出规律；长时间蹲守也让你疲惫，注意力开始涣散。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "留意夜里搬运的大件货物",
+            "reason": "玩家持续监视其店铺，维克一方会察觉街对面有人长期盯梢，态度转为戒备。"
+          },
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律",
+            "reason": "长时间蹲守让维克一方注意到调查员的路线，符合 human_pressure 的 advance_when（拖延过久，让其他势力有时间行动）。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "clock_advance",
+            "target": "human_pressure",
+            "value": "",
+            "source_id": "",
+            "evidence_quote": "继续监视：记录维克、费德曼兄妹和任何可疑访客的规律",
+            "reason": "蹲守无果又耗时，其他势力得以推进，符合 human_pressure 的 advance_when。"
+          }
+        ],
+        "npc_direction": "维克依旧深居简出，偶尔在店门口露面时神色警惕，会朝街对面扫视；费德曼兄妹照旧沉默服从，深夜搬运时动作机械、刻意避开灯光。若察觉被盯梢，维克可能派人试探或送来邀约。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 8931,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3372,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "进入古董店，以顾客身份浏览，暗中记下布局：柜台后的小门、北端的木质隔断和厨房的位置",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "进入古董店，以顾客身份浏览，暗中记下布局：柜台后的小门、北端的木质隔断和厨房的位置",
+        "approach": "玩家以普通顾客身份走进\"轻率琐事\"古董店，一边浏览货架上的瓷器银器，一边不动声色地观察店内格局：柜台后那扇半掩的小门、北端那道木质隔断、以及厨房所在的位置。这是公开区域内的正常走动与观察，不触碰隔断、不推门、不进入后仓。",
+        "target_npc_id": "abner_wick",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "你以顾客身份在店内从容浏览，把柜台后那扇半掩小门、北端木质隔断和厨房的位置一一记进心里，没有引起明显怀疑。",
+        "failure_description": "你浏览时目光停留得太久，维克察觉你对店内结构格外在意，招呼的语气里多了几分试探。",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克以店主身份在柜台后招呼，保持绅士风度但目光警惕（guarded）。他会主动介绍几件古董、试探顾客来意，留意对方是否对店内结构过分好奇；费德曼兄妹在店内沉默做事，不主动搭话。维克不会主动带顾客去后仓或地下室，也不会承认地板下的动静。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2570,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3783,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "趁店员不注意，检查大厅北端那堵不起眼的木质隔断，看看它后面藏着什么",
+      "scene": "trivial_pursuits",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3560,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "继续向地下室深处搜查，留意任何非人的动静，手按在枪柄上保持警戒",
+      "scene": "trivial_pursuits",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3405,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+        "approach": "当面对质维克：我知道文档在你手里，也知道地下室藏着什么",
+        "npc_direction": "处理刚刚发生的伏击"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 5601,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 5449,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 8288,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "遭遇非人生物袭击时拔枪自卫，朝袭击我的东西射击",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "combat",
+        "input_quote": "遭遇非人生物袭击时拔枪自卫，朝袭击我的东西射击",
+        "approach": "玩家在深层地下室被赫克托扑击、卡拉封住退路，右手已贴上枪柄。本轮动作语义：拔出.38左轮，朝正面扑来的赫克托开火自卫。出手、命中与伤害交由战斗工具结算。",
+        "target_npc_id": "hector_kara_feldman",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 0,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "赫克托不顾枪口继续贴身扑抓，试图在开火前抓住玩家持枪的手腕；卡拉从侧后包抄，封死退向楼梯的路线，并伺机从背后夹击。维克留在楼梯口观望，不亲自下场，若局势不利会出声催促兄妹加紧。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 5375,
+          "error": null
+        },
+        {
+          "role": "combat",
+          "status": "completed",
+          "elapsed_ms": 3540,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4027,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+        "approach": "玩家在古董店地下室、枪战刚结束的现场，要求当面阅读女巫审判文档的手写段落与几何图示，明确只看不带走原件。文档此刻并不在玩家手中，需先由在场者（维克）交出或指出文档所在，才能阅读；阅读手写段落会触发理智检定。",
+        "target_npc_id": "abner_wick",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [
+          "witch_trial_documents_read:0"
+        ],
+        "check": null,
+        "time_minutes": 5,
+        "success_description": "维克在枪口下把文档摊开。你逐行读那些十七世纪的手写段落——笔迹在几处突然变得急促、扭曲，像是书写者一边写一边在抵抗什么；几何图示的线条并不规整，某些角度画得刻意回避，仿佛画的人不敢让它们闭合。你读懂了其中一部分：这些文字与图示指向某种被召唤、被约束的东西，而莱特显然照着它做过什么。寒意顺着脊背爬上来，砖井深处那声呼吸似乎与纸上的节奏对上了。",
+        "failure_description": "你俯身去看，维克的手却始终按在纸角上，借着调整灯位、挪动纸张，把最关键的几页压在下面，只让你扫到零散的词句和半幅图示。你没能读通手写段落与几何图的关系，只留下一些彼此矛盾的印象；而拖延的这几分钟里，砖井深处的呼吸又近了一次，维克的眼神也一点点稳了下来。",
+        "on_success": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+            "reason": "维克在枪口下被迫展示文档，但始终按着纸角、试探玩家意图，态度仍是对抗性的戒备。"
+          }
+        ],
+        "on_failure": [
+          {
+            "kind": "npc_reaction",
+            "target": "abner_wick",
+            "value": "guarded",
+            "source_id": "",
+            "evidence_quote": "我当面阅读女巫审判文档，仔细查看手写段落与几何图示。只看，不带走原件。",
+            "reason": "维克借拖延稳住局面，重新掌握节奏，态度转为更主动的戒备与试探。"
+          }
+        ],
+        "npc_direction": "维克被枪口逼住、赫克托倒地，卡拉僵立不动。他浮肿的眼皮颤着，权衡后从柜台下的暗格或随身皮包里取出那叠女巫审判文档，摊在柜台上让玩家看，但手一直按在纸角上，随时准备收回。他语气仍温和，却带着试探与拖延：一边让玩家看，一边低声问玩家到底想从这些纸里得到什么，暗示「有些东西看了就回不去了」。他不会主动交出原件，也不会承认地下室砖井的事。",
+        "sanity_source_id": "witch_documents_read",
+        "sanity_severity": "minor"
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 4991,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4090,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "威胁解除后彻底搜查地下室：独立储藏室、锁箱、冷柜和砖井周围，找回那批女巫审判文档",
+      "scene": "trivial_pursuits",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4116,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我到古董店楼上办公室搜查上锁的锡盒，设法打开它并取出银质徽章。",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我到古董店楼上办公室搜查上锁的锡盒，设法打开它并取出银质徽章。",
+        "approach": "玩家已在轻率琐事古董店内，要求上楼进入维克的办公室，搜查并撬开那只上锁的锡盒，取出其中的银质徽章。该动作此前已在本场景完成（seal_obtained 已落定，徽章已在物品栏），本轮为重复同一做法，不再重检，仅确认既有结果。",
+        "target_npc_id": "abner_wick",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 5,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克仍被枪口压着，站在楼梯口，浮肿的眼皮发颤，看着玩家再次翻检柜台下的锡盒，不阻拦也不帮忙，只低声重复那句\"您拿走的，不是您以为的那种东西\"。卡拉僵立在赫克托尸体旁，一动不动。若玩家追问，维克可透露徽章是\"合上那道门\"的封印之物，但不会主动交出更多。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2025,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4117,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印",
+      "scene": "trivial_pursuits",
+      "adjudication": null,
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "fallback",
+          "elapsed_ms": null,
+          "error": "ValueError: 只能落定模组 completion_flags 声明的完成标记"
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3792,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我稳住心神，深呼吸，确认自己还清醒",
+      "scene": "trivial_pursuits",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我稳住心神，深呼吸，确认自己还清醒",
+        "approach": "玩家在封印完成后原地深呼吸、自我确认神志状态，属于无风险的自我调节与观察，不涉及检定，也不改变位置或物品。",
+        "target_npc_id": "",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 1,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克仍瘫在楼梯口墙边喘息，见玩家稳住呼吸，会试探性地低声开口，问那东西是不是真的被合回去了、接下来打算怎么办；卡拉依旧守在赫克托的尸体旁沉默不语。两人都不会主动靠近玩家或触碰柜台上的文档与徽章。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2160,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 2388,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3981,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "文档已经找回、怪物已被消灭。我去找法伦，完成封印仪式，了结这个案子",
+      "scene": "miskatonic_university",
+      "adjudication": {
+        "intent": "move",
+        "input_quote": "文档已经找回、怪物已被消灭。我去找法伦，完成封印仪式，了结这个案子",
+        "approach": "玩家带着已封印的文档与银质徽章，离开轻率琐事古董店，前往密斯卡托尼克大学行政楼二层，向法伦主任交差并完成封印仪式的收尾。",
+        "target_npc_id": "",
+        "destination_scene_id": "miskatonic_university",
+        "destination_reason": "法伦主任是委托调查员查办莱特命案的人，其办公室位于密斯卡托尼克大学行政楼二层；玩家明确表示要去找法伦了结此案，故本轮前往大学。",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 25,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "维克见玩家要走，欲言又止，最终只低声说了句\"路上小心，先生\"，没有阻拦；卡拉仍守在赫克托尸体旁，一言不发。抵达大学后，法伦在办公室接待玩家——他一直在等消息，见到文档与徽章会先确认封印是否真的完成，再谈莱特之死与后续处理。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2137,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4062,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "我用银质徽章覆上文档中央的几何图示，完成封印",
+      "scene": "miskatonic_university",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "我用银质徽章覆上文档中央的几何图示，完成封印",
+        "approach": "玩家在法伦的办公室里，取出阿伯那·维克的银质徽章，将其覆在女巫审判文档中央的几何图示上，试图以徽章完成封印仪式。这是对已取得物品的仪式性使用，属于无风险的关键收尾动作，不设检定。",
+        "target_npc_id": "bryce_fallon",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 5,
+        "success_description": "你把文档在法伦的桌面上摊平，指尖找到那组几何图示的正中。银质徽章从掌心落下，正正压在图示的交叉点上——金属一触到纸面，那股一直若有若无的焦甜味像被抽走一样散了。纸上的墨线不再游动，徽章边缘泛起一层极淡的冷光，随即沉下去，归于死寂。法伦盯着桌面，喉结动了一下，半晌才低声说：\"……合上了。\"他抬起眼看你，那副从容底下第一次露出真正的疲惫与某种近乎感激的东西。封印完成，怪物被彻底封回文档之中。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦全程屏息旁观，见证封印完成后态度转为坦诚而疲惫，愿意就莱特之死、文档来历与柯布家族的压力作出交代；他不会再隐瞒关键事实，但会先确认封印确实生效。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 7027,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3451,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "完成封印，结案",
+      "scene": "miskatonic_university",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "完成封印，结案",
+        "approach": "玩家已在法伦办公室内，用银质徽章覆上文档中央的几何图示完成封印，怪物已被消灭、文档已找回。本轮玩家宣告结案，向法伦交代全貌并了结此案。无需检定，直接落定结局。",
+        "target_npc_id": "bryce_fallon",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 15,
+        "success_description": "封印完成，法伦承认一切并接手善后。案件就此了结——真相与封印俱在，怪物被制伏。",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦已亲眼见证封印合拢，态度 cooperative。他接受结案，向玩家交代后续处理：文档由校方封存、柯布家族那边由他应付、古董店与费德曼兄妹的事他会设法压下去。他不再追问，只以疲惫而感激的姿态送别玩家。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2376,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 5117,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "完成封印，结案",
+      "scene": "miskatonic_university",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "完成封印，结案",
+        "approach": "玩家在法伦办公室内，银质徽章已覆上文档中央的几何图示，封印合拢、怪物被制伏。玩家明确表示完成封印并结案，接受法伦的收尾安排与信封，就此收场。本轮不进行新检定，仅结算结案叙事。",
+        "target_npc_id": "bryce_fallon",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 10,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦以行政人员的平稳语气确认收尾：文档由校方封存进特藏库，柯布家族以\"文物需长期修复\"拖延，古董店与费德曼兄妹按普通治安事件处理，莱特之死维持原结论。他将封好的信封（报酬与给柯布家族的说明信）交给玩家，握手道别，态度真诚而疲惫，不再追问或挽留。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 1940,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 3873,
+          "error": null
+        }
+      ],
+      "errors": []
+    },
+    {
+      "input": "完成封印，结案",
+      "scene": "miskatonic_university",
+      "adjudication": {
+        "intent": "interact",
+        "input_quote": "完成封印，结案",
+        "approach": "玩家在法伦办公室内确认封印已合拢、怪物已被制伏，接受法伦的收尾安排与报酬信封，正式结束这桩委托。此前已取得封印、击败显形的怪物、收回女巫审判文档，符合\"真相大白，怪物被制伏\"的结案条件。本轮不进行检定，直接落定结案叙事。",
+        "target_npc_id": "bryce_fallon",
+        "destination_scene_id": "",
+        "destination_reason": "",
+        "discovery_refs": [],
+        "check": null,
+        "time_minutes": 10,
+        "success_description": "",
+        "failure_description": "",
+        "on_success": [],
+        "on_failure": [],
+        "npc_direction": "法伦以行政人员特有的平稳语气确认收尾：文档由校方封存进特藏库，对柯布家族以\"文物需长期修复\"拖延，古董店与费德曼兄妹按普通治安事件处理，莱特之死维持原结论。他递出已封好的报酬信封与给柯布家族的说明信，握手道别，不再追问细节，也不主动透露更多内情。",
+        "sanity_source_id": "",
+        "sanity_severity": ""
+      },
+      "model_diagnostics": [
+        {
+          "role": "adjudication",
+          "status": "completed",
+          "elapsed_ms": 2693,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 2261,
+          "error": null
+        },
+        {
+          "role": "story",
+          "status": "completed",
+          "elapsed_ms": 4041,
+          "error": null
+        },
+        {
+          "role": "narrative_consistency",
+          "status": "completed",
+          "elapsed_ms": 1782,
+          "error": null
+        }
+      ],
+      "errors": []
+    }
+  ]
+}

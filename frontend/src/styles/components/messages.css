@@ -408,9 +408,17 @@
   text-shadow: 0 0 12px var(--gold-glow);
   box-shadow: var(--shadow-glow);
   display: flex;
+  /* 行布局：左侧标题/结果，右侧掷骰守秘人 mascot（行内，不溢出框外） */
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.dice-body {
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 9px;
+  min-width: 0;
 }
 .dice-title {
   font-family: var(--font-display);
@@ -429,6 +437,78 @@
 }
 .dice-result.hidden {
   visibility: hidden;
+}
+
+/* ---- 守秘人 Q 版形象（frontend/character 原稿，非模组内容） ---- */
+.gm-mascot {
+  pointer-events: none;
+  user-select: none;
+}
+/* 思考中：守在等待提示左侧，缓慢浮动（短行程、低频，不抢打字点） */
+.gm-mascot-thinking {
+  width: 56px;
+  height: auto;
+  align-self: center;
+  animation: gm-mascot-bob 2.6s ease-in-out infinite alternate;
+}
+@keyframes gm-mascot-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-3px);
+  }
+}
+/* 掷骰：行内站在检定框右侧，脚踩下框轨（flex-end + 负下边距），
+   出场 pop，翻滚时轻晃 */
+.gm-mascot-dice {
+  width: 84px;
+  height: auto;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin-bottom: -10px;
+  transform-origin: 50% 90%;
+  animation: gm-mascot-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gm-mascot-dice.is-rolling {
+  animation:
+    gm-mascot-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both,
+    gm-mascot-wiggle 0.9s ease-in-out 0.28s infinite;
+}
+@keyframes gm-mascot-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes gm-mascot-wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(-4deg);
+  }
+  65% {
+    transform: rotate(3deg);
+  }
+}
+@media (max-width: 767px) {
+  /* 窄屏检定框让给文字：边框+ mascot 会把正文挤成竖排，直接隐藏 */
+  .gm-mascot-dice {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-mascot-thinking,
+  .gm-mascot-dice,
+  .gm-mascot-dice.is-rolling {
+    animation: none;
+  }
 }
 
 /* ---- 3D 骰覆盖层 ---- */

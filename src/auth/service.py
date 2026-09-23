@@ -80,8 +80,10 @@ def local_token_path():
 def local_launch_token() -> str:
     """本进程的本地连接凭证：优先启动注入，否则每次启动随机生成。
 
-    非桌面场景（浏览器本地模式）不依赖它，生成后仅用于同进程校验；
-    桌面壳注入时不落盘（避免多一份副本）。
+    非桌面场景（浏览器本地模式）不依赖它，生成后仅用于同进程校验。
+    注入与自生成的凭证都落盘（0600）：桌面壳接管「已在运行的后端」时只认
+    这个文件——注入不落盘会让没被正确回收的后端永远无法被再次接管，
+    表现为前端卡在加载态（2026-09 实际事故）。
     """
     global _local_token
     if _local_token is not None:
@@ -93,8 +95,8 @@ def local_launch_token() -> str:
                 _local_token = injected
             else:
                 _local_token = secrets.token_urlsafe(32)
-                if not auth_required():
-                    _persist_local_token(_local_token)
+            if not auth_required():
+                _persist_local_token(_local_token)
     return _local_token
 
 

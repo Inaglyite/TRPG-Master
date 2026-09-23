@@ -1,12 +1,12 @@
 # 联合验收证据收口 · 结构化操作跑团平台（2026-09-13 → 09-14）
 
-本文件对应交付记录 [STRUCTURED_PLAY_FRONTEND_DELIVERY_20260913.md](../../STRUCTURED_PLAY_FRONTEND_DELIVERY_20260913.md)
+本文件对应交付记录 [STRUCTURED_PLAY_FRONTEND_DELIVERY_20260913.md](../../archive/2026-09/reports/STRUCTURED_PLAY_FRONTEND_DELIVERY_20260913.md)
 的第 6 节，只做**证据收口，不新增功能**。
 
 ## 0. 边界
 
 - 未修改后端负责人正在维护的文件：`src/structured/**`、`src/multiplayer/**`、`tests/test_structured_*.py`、
-  `schemas/**`、`docs/STRUCTURED_PLAY_PROTOCOL_V1.md`。
+  `schemas/**`、`docs/reference/STRUCTURED_PROTOCOL_V1.md`。
 - 本轮新增（前端侧）：`tests/test_structured_world_probe_duals.py`（5 条对偶）、
   `tests/test_packaged_upgrade_evidence.py`（3 条打包升级）、本目录。
 - 未提交、未发布；未在生产环境（`https://trpggame.xyz`）做过任何测试。
@@ -134,7 +134,7 @@ E  RuntimeError: 无法接管未版本化数据库：缺少基础表 check_reque
 > 后续（过渡回合功能，2026-09-14）按 list reporter 逐条核对，E2E 稳定态是 **22 收集 → 20 passed /
 > 2 skipped**：两条 skip 都是环境门控的既有用例（`multiplayer.spec.ts:890` 需要 Electron 运行环境、
 > `staging-recovery.spec.ts:8` 需要外部 staging 服务器）。上表写「1 skipped」是因为当时只有其中一条
-> 触发了 skip；以后续实测为准，见 `docs/STRUCTURED_TRANSITION_TURN_20260914.md` §5。
+> 触发了 skip；以后续实测为准，见 `docs/archive/2026-09/reports/STRUCTURED_TRANSITION_TURN_20260914.md` §5。
 
 关于那次顺序敏感：`test_structured_trigger.py` 单跑 7 passed，且与我的两个新测试文件同跑 14 passed；
 在后端负责人收工后（`75516a4`）的默认顺序全量跑中已不再复现，故不再作为未决项。

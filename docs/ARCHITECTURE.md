@@ -1,843 +1,134 @@
-# TRPG Game 架构
+# 架构：跑团平台与 Agent harness
 
-本文描述当前仓库的实际运行结构。目标读者是准备修改引擎、前端、模组、存档或多人功能的开发者。
+现行入口，整理于 2026-09-16；汇总基线 `46d5760`。本文件描述边界，不作为在途改动的验收证明。[状态与限制](STATUS.md)单独维护。
 
-## 1. 系统定位
+## 1. 产品与设计原则
 
-TRPG Game 同时支持本地桌面和账号化云端运行。Electron 提供桌面窗口，FastAPI 提供 HTTP/WebSocket 服务。单机 `/ws` 仍为每条连接创建 `GameEngine`；多人 `/ws/room` 由 `RoomManager` 按 `world_id` 只创建一个 `GameRoom`、一个共享 `GameEngine` 和一份 `ModelSession`。工作流在普通叙事节点与临时战斗职责节点间路由；这两个节点不是独立 Agent。Python 工具通过 `DatabaseWorldStore` 执行确定性规则与状态写入。
+平台同时服务人类守秘人和 Agent 守秘人。玩家通过按钮提交明确对象的操作意图，也可以自由说话；主持判断情境、请求检定、调用命令并叙事。服务端负责权限、确定性计算和持久化，前端只展示公开投影。
 
-核心边界：
+- 结构化按钮不能先拼成句子，再交关键词解析器决定效果。
+- 意愿不等于执行，出示不等于赠送，抵达不等于调查或获得线索。
+- 过渡是正常叙事与自由回应：需要玩家决定时真正停下，而不是播放固定提醒后继续替玩家行动。
+- 人类和 Agent 复用领域服务；模型输出不是权威事实。
+- 同一效果只有一个执行所有者，不让新旧引擎同时结算。
 
-- 模型可以提出工具调用，但不能替代骰子、伤害、SAN、存档等确定性实现。
-- `world_states.state` 的 JSONB 文档是一个运行世界的事实来源；生产环境使用 PostgreSQL。世界状态 v2 通过 `state_meta.domains` 声明每个聚合的唯一 JSON 路径，不复制可变状态；旧文件状态在导入数据库时经过 `world_migrations`。
-- `snapshots.state` 的不可变 JSONB 文档是读档时恢复世界状态的事实来源。
-- 前端不直接修改数据库世界状态，只通过 HTTP/WebSocket 请求服务端动作。
-- `mod/<module>/` 只保存模组定义与初始模板，新游戏不会写回版本控制目录。
-- 用户 `.trpgmod` 版本化安装到 `modules/<id>/<version>/`；运行世界固定绑定模组 key。
-- 多人房间由服务端 Session、成员关系、调查员占用和当前行动者共同授权；不接受客户端自报身份。
-
-运行时所有权划分：
-
-- `WsSessionContext` 与 `WsMessageRouter` 拥有连接生命周期、回合租约和协议分发；
-- `GameApplication` 提供开始、继续、行动、改写和存档用例，不依赖 FastAPI；
-- `ModelSession` 拥有消息历史、活动流、取消和模型诊断；
-- `ToolRuntime` 以唯一注册表执行工具并记录审计，模型 schema 与 handler 有覆盖契约；
-- `action_resolution`、`encounters`、`discovery`、`consequences` 是不依赖 LLM 的确定性领域层；
-- `DatabaseWorldStore` 提供数据库事务、行锁、revision、恢复和显式 schema 迁移；`WorldStore` 文件实现只保留给旧数据导入和兼容测试。
-
-## 术语表
-
-- **TIER（信息边界层级）**：CoC 风格的信息分级，定义于 `skills/core/no_spoiler.skill`：TIER_0 公开（进入场景即可感知的事实、`visible_tags`）、TIER_1 发现（交互或检定得到的表层事实）、TIER_2 推理（由已获线索支撑的结论）、TIER_3 秘密（NPC `secret`、幕后真相，绝不主动揭示）。引擎以滑动窗口向消息历史注入 TIER 提醒（`src/app/engine.py` 的 `TIER_REMINDER`），防止上下文稀释导致泄密；`link_clues` 工具生成的关联推理线索即 TIER_2 条目。
-- **DSML**：部分 OpenAI 兼容供应商误把工具调用以 `<|DSML|tool_calls>` XML 块写进流式 `delta.content` 的私有协议。`src/ai/tools/tool_protocol.py` 把完整区块隔离并转换为内部工具调用；损坏、过长或未闭合的区块直接丢弃，其参数不进入叙事、消息历史或诊断日志。
-- **spine / hybrid prompt**：system prompt 组装档位（`TRPG_PROMPT_PROFILE`，取值 `full`/`hybrid`/`opening`，默认 `hybrid`）。模组 skill 在前 300 字符内声明 `trpg-master:prompt-role=spine` 且脊柱内容合计不少于 1000 字符时，`hybrid` 用这些剧情脊柱（spine）替代完整 `module.md`；未声明或内容不足的第三方模组自动回退 `full`（完整 `module.md + skills`）。`opening` 仅供结构化开场使用。
-- **narrative_model / judgement_model**：两类模型分工。普通叙事使用 `narrative_model`；战斗职责节点、复杂工具命中后的同回合续写、可选回合审计和上下文摘要兜底使用 `judgement_model`。默认值来自 `src/app/config.py`，可由设置页或 `TRPG_NARRATIVE_MODEL` / `TRPG_JUDGEMENT_MODEL` 环境变量分别指定。
-- **回合记录（TurnRecord）**：一次 GM 回合的持久提交，由 `DatabaseTurnJournal` 写入 `turns` 表（父链、状态、消息与快照引用）与 `turn_events` 表（有序公开事件）；是断线恢复、重新叙述和时间线分支的事实来源。TurnRecord 是文档概念，代码中的共享记录类型与错误位于 `src/storage/turn_journal.py`。
-
-## 2. 系统上下文
-
-```mermaid
-flowchart LR
-    Player[玩家] --> UI[Electron / Browser UI]
-    UI <--> |HTTP + /ws or /ws/room| Server[FastAPI server.py]
-    Server --> Rooms[RoomManager / GameRoom]
-    Rooms <--> Engine[One shared GameEngine per active room]
-    Server <--> LocalEngine[One GameEngine per local connection]
-    LocalEngine --> Graph
-    Engine <--> Graph[LangGraph Turn Workflow]
-    Graph --> Story[Story-role Node]
-    Graph --> Combat[Combat-role Node]
-    Story <--> LLM[OpenAI-compatible LLM]
-    Combat <--> LLM
-    Graph <--> Tools[Deterministic Python Tools]
-    Tools <--> Store[DatabaseWorldStore]
-    Store <--> DB[(SQLite desktop / PostgreSQL production)]
-    Engine <--> DB
-    Server --> Auth[Session + World Authorization]
-    Auth <--> DB
-    LocalEngine <--> Profile["profiles/player_profile.json<br/>本地单机"]
-    Server --> Registry[ModuleRegistry]
-    Registry --> Builtin[mod/module]
-    Registry --> UserModules[modules/id/version]
-    Server --> Assets[module/assets]
-```
-
-## 3. 进程模型
-
-### 3.1 Linux 源码桌面模式
-
-`start_desktop.sh` 是进程所有者：
-
-1. 检查前端依赖与构建产物，启动 Electron 模式选择页；此时不接触 Python 依赖、SQLite 或旧世界。
-2. 选择多人模式时，Electron 直接加载受信任的云端 HTTPS origin，不启动本机后端。
-3. 选择单机模式时，Electron 调用脚本的 `--backend-only` 模式；该子进程才激活 `venv`（回退
-   `.venv`）并自动补齐缺失的 Python 依赖。
-4. 后端子进程设置桌面 SQLite URL，执行 Alembic；首次运行以数据库审计标记保护的
-   `--once --replace` 导入旧 `worlds/`，随后启动 `server.py`。Electron 轮询 `/api/health` 后进入游戏。
-5. Electron 最后一个窗口关闭或成功切换到多人模式时，向自己拥有的整个后端进程组发送 TERM，
-   超时后发送 KILL，避免依赖安装、迁移或 Uvicorn 子进程残留。
-6. 仅当有交互终端且 Electron 立即失败时，脚本才启动同样隔离进程组的后端并打开
-   `http://localhost:8765/?mode=local`；Ctrl+C 负责关闭它。无终端桌面启动不使用浏览器回退。
-7. SIGINT、SIGTERM 与异常退出统一进入幂等清理函数。
-
-终端模式继承 stdout/stderr；`--desktop` 模式重定向到 `/tmp/trpg-desktop.log`。浏览器回退的后端
-日志同时写入 `/tmp/trpg-server.log`；Electron 按需启动的后端由 Electron 主进程继承并管理。
-
-### 3.2 Windows 打包桌面模式
-
-当前仓库只生成 Windows NSIS 安装版和便携版；Linux 使用 §3.1 的源码启动脚本，不提供
-AppImage。`frontend` 的通用 `npm run dist` 会主动拒绝 Linux 打包，防止把 Windows 后端误装进
-不可运行的 AppImage。Windows 打包后的 Electron 由 `frontend/electron/main.cjs` 提供单机/多人
-双模式：
-
-1. 启动时只加载打包内置的 `dist/index.html` 模式选择页，不提前启动后端。
-2. 选择单机后才定位 `resources/backend/trpg-server(.exe)`，完成本地配置、设置用户数据下的
-   `TRPG_RUNTIME_ROOT`、启动后端并轮询 `/api/health`。
-3. 选择多人时严格校验裸 `https` origin，并让窗口加载
-   `https://<cloud>/?mode=online`；HTTP、WSS 和 HttpOnly Session Cookie 因此保持同源。
-4. preload 只暴露模式选择和返回启动器的窄 IPC；本地 IPC 调用校验确切的内置页面 URL，云端页面
-   只能请求返回内置启动器，不能启动本地后端。任意新窗口、越界导航和权限请求默认拒绝。
-5. `window-all-closed` 或 `before-quit` 时终止已启动的内置后端。
-
-设置 `TRPG_EXTERNAL_BACKEND=1` 可禁止打包壳启动内置后端，供调试或外部服务托管使用。
-
-### 3.3 浏览器模式
-
-`server.py` 在 `frontend/dist` 存在时将其挂载到 `/`；浏览器可直接访问
-`http://127.0.0.1:8765`。生产构建默认以页面自身 origin 访问 HTTP/WSS（保留 Nginx 的 443/8443
-等实际端口），Vite 开发模式才直连本地 8765。浏览器标签页关闭无法可靠代表服务生命周期，因此
-自动关服只由 Electron/启动脚本保证。
-
-## 4. 后端模块边界
-
-`src/` 根目录只保留包声明；业务文件必须归入一个明确的所有权包。包名表达“谁维护这段能力”，
-而不是把一次请求强行切成互不调用的纯层。跨包导入统一使用 `src.<package>...` 绝对路径，避免文件
-移动后出现含义不明的多级相对导入。
-
-| 包或入口 | 所有权与代表性内容 |
-|---|---|
-| `server.py` | FastAPI 组合根，只装配 HTTP、WebSocket、应用服务和运行时依赖，不承载玩法规则 |
-| `src/app/` | 应用编排：`GameEngine`、LangGraph 回合、配置、运行时上下文、事件流和终端入口 |
-| `src/gameplay/` | 确定性玩法：行动、场景、NPC、线索、战斗、SAN、道具、时钟、结局与回合对账 |
-| `src/ai/model/` | 模型供应商请求、流式协议、容量控制、诊断和会话生命周期 |
-| `src/ai/context/` | 可见上下文投影、压缩、Lorebook、checkpoint 和 shadow memory |
-| `src/ai/skills/` | Skill catalog、世界 pin、确定性激活与内容完整性校验 |
-| `src/ai/tools/` | 模型工具 catalog、请求授权、参数策略、执行管线与 handler 注册表 |
-| `src/storage/` | PostgreSQL/SQLite、世界状态、存档、快照、回合日志、玩家笔记和时间线 |
-| `src/modules/` | `.trpgmod` 格式、编译器、诊断、迁移、编辑工程与版本化注册表 |
-| `src/auth/` | 账号、Argon2id、可撤销 Session、审计与 HTTP 鉴权适配 |
-| `src/multiplayer/` | 房间控制面、成员权限、共享引擎、多人/云单人协议和恢复协调 |
-| `src/web/` | 模组/编辑器 HTTP 适配、静态前端和玩家安全的素材载荷 |
-| `tools/` | 调用上述包的维护 CLI 与规则工具；不作为第二套应用内核 |
-| `frontend/` | React/Vite/Electron 客户端，只消费服务端协议，不直接修改权威世界状态 |
-
-架构门禁会拒绝重新出现在 `src/` 根目录的平铺业务模块，并禁止 `src/gameplay/` 依赖 FastAPI、
-OpenAI 客户端、`server.py` 或 `GameEngine`。`src/app/` 是组合层，可以依赖玩法、AI、存储和模组包；
-传输适配通过应用服务进入内核。现有少量 AI/context/storage 之间的协作属于后续可继续收紧的依赖，
-本次目录重构不同时改写运行语义。
-
-## 5. WebSocket 会话、房间与线程
-
-每次连接单机 `/ws` 时，服务端打开一个 `RuntimeContext`，用它创建 `GameEngine` 并调用 `prepare_session()`。多人 `/ws/room?world_id=...` 则先校验 Session 与成员关系，再通过 `RoomManager.get_or_create()` 单飞加载共享引擎；后续连接附着到同一个 `RoomEventHub`，不会创建第二份模型历史。连接初始化后发送模组、角色、主题、模型设置、存档列表和可恢复的公开房间状态。
-
-`GameEngine.handle_action()` 是同步阻塞函数。`server.py` 使用 `run_in_executor` 把它放入工作线程，避免阻塞 FastAPI 事件循环：
-
-```mermaid
-sequenceDiagram
-    participant UI as Frontend
-    participant Loop as FastAPI Event Loop
-    participant Worker as Engine Worker Thread
-    participant Engine as GameEngine
-    participant Queue as Ordered Event Stream
-
-    UI->>Loop: {type: action}
-    Loop->>Loop: reserve connection + world turn
-    Loop->>Queue: gm_turn_start(turn_id, seq=1)
-    Loop->>Worker: run_in_executor(handle_action)
-    Worker->>Engine: LangGraph turn
-    Engine-->>Worker: synchronous callbacks
-    Worker->>Queue: emit(payload)
-    Queue-->>UI: one FIFO sender
-```
-
-`OrderedTurnEventStream` 是连接内唯一的 `send_json` 调用者。回合事件从 `gm_turn_start` 到 `done`
-共享 `turn_id`，并携带从 1 递增的 `seq`；会话级列表、状态和心跳响应仍走同一个 FIFO，但不带
-回合字段。前端拒绝旧回合或非递增事件，因此工具回调、素材和 `done` 不再依赖多个 asyncio
-任务碰巧按创建顺序完成。
-
-单机会话拥有连接级 `turn_lock`，每个 `world_id` 另有进程内共享的 `world_turn_lock`。多人入口还在
-`GameRoom` 先执行当前行动者、数据库持久 `action_id` 和房间行动锁检查。它们都必须在
-`begin_turn()` 前非阻塞占用；失败返回 `turn_rejected`，所以异常客户端无法先覆盖 active
-`turn_id` 再排队 worker。世界锁也阻止断线后的旧 worker 与新连接同时推进同一世界。
-`DatabaseWorldStore` 使用进程内锁配合回合工作单元：工具 mutation 先写入连接内缓冲状态，finalize
-再以回合起始 revision 加数据库行锁校验，并与 Turn、Snapshot、自动存档和事件在同一事务提交。
-异常或取消丢弃缓冲状态；多人连接共享同一个 `GameEngine.messages`，单机 `/ws` 的连接仍彼此独立。
-
-每次 gameplay 回合在 worker 启动前由 `DatabaseTurnJournal.begin()` 在 `turns` 创建持久 `turn_id`。
-finalize 在数据库事务中写入消息、不可变 `snapshots`、`turn_events` 与 completed 状态，事务成功后
-才发送 `done`。模型/工具中途异常会留下 `failed/interrupted` 记录；进程重启会把旧 owner 的 active 记录
-标成 `interrupted`，但仅限同主机且 PID 可证明已退出的 owner。旧格式、跨主机或未知 owner 会
-fail-closed 地保留 active；确认原服务已停止后，维护者只能通过本机
-`tools/recover_active_turn.py` 的 world/turn/owner-token 栅栏和显式确认中断它，绝不走 HTTP。
-重连客户端可查询该 ID：完整记录直接重放已合并的公开事件，尚在同进程执行则轮询，未提交记录才回退到最近自动存档。
-
-模型设置保存不再占用 `turn_lock`：任意时刻可保存并写入作用域存储（本地 `model_settings.local.json` 0600 / 云端 `model_service_configs` 表按账号或世界隔离、Key 经 Fernet 加密），引擎在回合边界（`begin_turn_record`）经 `route_service.apply_pending_routes` 冻结解析出本回合的 client 与模型，下回合生效；自定义地址经 `egress_guard` 出站校验（云端仅公网 HTTPS、不跟随重定向、不读系统代理）。API Key 永不回显、不进日志/诊断/存档。
-
-本地模式（非账号鉴权）的 API 与 WebSocket 走"受控来源 + 每次启动的连接凭证"：
-`auth/service.local_request_trusted` 接受显式白名单 Origin、环回 Origin（浏览器本地页面）、
-有效凭证头 `X-TRPG-Local-Token`，以及无 Origin/Sec-Fetch 的非浏览器本地客户端；恶意站点与
-null/缺失来源一律 403。凭证由 Electron 主进程每次启动生成、经子进程环境注入后端，并在主进程
-`webRequest` 层加到发往本地后端的请求头（渲染进程、URL、前端存储与日志里都没有）；接管已在
-运行的后端时，后端把本次启动凭证写入 `<runtime>/local_launch_token`（0600）供主进程读取。
-云端账号鉴权不受影响：本地凭证不参与云端会话校验。
-
-时间型案件时钟由模组声明、引擎按实际结算时间推进（`gameplay/case_clock_time`）：模组在
-`case_clock_definitions.<clock>.time_advance` 声明 `every_minutes / advance / daily_cap /
-activity / carry`，只有声明的时钟按时间推进；进度锚点取 `world_clock.elapsed_minutes` 绝对值，
-重复结算（重试、审计重放、读档）不会重复记账，读档后按该分支锚点继续。跨场景的"先去某地再停留/
-监视"必须先 move 抵达：抵达回合只结算旅行时间（上限 240 分钟），停留时间与时钟推进留到抵达后。
-欺骗、暴露、公开指控等语义事件仍由模型提出、引擎校验。
-
-检定确认、战斗决定和行动预演共用阻塞式回复通道：
-
-1. 工作线程通过 `suggest_check` 或 `decision_request` 事件询问前端。
-2. 工作线程最多等待 120 秒。
-3. WebSocket 主循环仍可接收 `suggest_reply` 或带决定 ID 的 `decision_reply`。
-4. `threading.Event` 被置位后，工作线程继续工具调用。
-
-战斗决定超时时采用状态机给出的安全默认项。`action_preview` 以及战斗开始前的
-`irreversible_violence/coercive_threat` 预确认虽复用
-`decision_request/decision_reply` 的等待、ID 校验和多人定向投递，但声明
-`presentation=chat`：NPC/守秘人提醒进入正常叙事气泡，回复显示在底部普通选项栏，调查员的
-选择也作为正常玩家气泡发送，不打开战斗弹窗。行动预演超时固定选择 `cancel_action`，暴力与
-威胁预确认分别固定取消；都不得自动移动、掷骰或消耗资源。战斗已经发生后的闪避、反击等即时
-防御决定仍使用聚焦弹窗。
-
-确认回复只持久化公开按钮文案和它前方的叙事段数量（`player_followups`），不保存作者态
-`action_text`、技能阈值或内部计划。实时前端会在决定到达时封口当前守秘人/NPC 气泡，回复后
-的新叙事另起气泡；定稿事件按已封口段数切分，只用未展示的权威后缀覆盖新气泡，历史与断线
-恢复按同一顺序重建。引擎生成的提醒、过场和入场节拍在发出时逐 beat 冻结发言归属；场景切换后
-的 NPC 姓名/在场推断只作用于随后生成的模型正文，不能回头把守秘人提示归给新场景 NPC。
-
-## 6. GM 单引擎回合工作流
-
-`src/app/agent_graph.py` 构建以下 LangGraph。节点名中的 `agent` 是历史命名；它们共享同一个
-`GameEngine`、`ModelSession`、消息列表和世界上下文，不代表多个独立 Agent：
-
-```mermaid
-flowchart TD
-    Start([START]) --> Prepare[prepare_turn]
-    Prepare --> Preview{预演后继续?}
-    Preview -->|取消| Finalize
-    Preview -->|继续/准备| Route{combat_state.active?}
-    Route -->|否| Story[call_story_agent]
-    Route -->|是| Combat[call_combat_agent]
-    Story -->|无工具调用| Finalize[finalize]
-    Combat -->|无工具调用| Finalize
-    Story -->|执行工具| Tools[execute_tools]
-    Combat -->|执行工具| Tools
-    Tools -->|未达上限| Route
-    Tools -->|达到上限| Finalize
-    Finalize --> End([END])
-```
-
-### 6.1 `prepare_turn`
-
-- 默认开启 `TRPG_ACTION_ADJUDICATION`：在掷骰前由判定模型提议动作语义、技能与难度、
-  成败后果、NPC 反应和时间；`action_adjudication.validate_proposal` 按在场人物、
-  模组发现候选、角色表和有界效果校验，确定性规则负责掷骰与落账。校验失败最多重试一次，
-  再回退到确定性解析；回退记录在回合诊断中，不计作模型裁决成功。裁决上下文与叙事层
-  共享同一权威视图（一般 flags、`eligible_endings`、本场景 recent_checks），防止两层
-  对"某事是否已落定"判断不一而拖延结局。
-- 失去行动能力的 PC（HP ≤ 0 或 dead/dying/unconscious）不能执行本人身体动作、发现或
-  检定；可以 wait/clarify/decline，并可通过 `rescue` 效果请求在场非敌对 NPC 施救——
-  引擎核验救援者在场、非敌对、未死亡（dead 不可逆）且 `time_minutes ≥ 20`，结算为
-  HP 回到 1 并移除 dying/unconscious。查看物品与取得实物分别授权，明确拒绝取得时
-  不能改走 `take_item` 或叙事工具发放。已结算分钟数传给叙事模型，禁止扩写未结算时间；
-  这仍需真实模型一致性验收，提示词本身不构成叙事正确性的证明。
-- 裁决结果以三态 `status`（executed_success / executed_failure / not_executed）连同
-  description、events 一起传给叙事模型：未执行的行动必须说明原因，不得演成已发生。
-  定稿阶段 `src.gameplay.narrative_consistency` 对叙事做确定性时间跨度核对，越界时
-  重写一次；历史、回合记录与前端权威段统一采用修正文本，检查/重写失败一律 fail-open。
-- 同一技能+同一目标+相同做法的检定在同场景只结算一次（`_check_history`）：已成功不得
-  重检；已失败须改变具体做法，或由玩家明确要求后按既有孤注一掷通道承担风险重试。
-  检定目标由 `target_npc_id` 或 `check.target`（对象稳定标识）给出：双方目标已知且不同
-  一律放行，"目标未知"不等同于"同一目标"。做法指纹为 `approach⟦input_quote⟧`（兜底路径
-  用玩家原文），两条执行路径共用同一构造：裁决改写措辞不改变逐字锚点；调用方给不出
-  做法（空指纹）时无法证明"做法已改变"，按重复处理。重复检定拒绝（`RepeatCheckError`）
-  与模型调用失败分流：前者返回拒行决议按 not_executed 落账，绝不退回可掷骰的确定性
-  流程；后者才回退。执行层被拦的检定以显式 `repeat_blocked` 哨兵按 not_executed 落账，
-  description 只带拒绝原因，不夹带未发生的成败分支叙述。
-- 玩家输入存在时增加玩家回合计数。
-- 根据上轮风险和轮数注入 TIER 提醒。
-- `src.gameplay.action_resolution` 在任何状态写入前生成单一、不可变的 `ActionResolution`，并在进入 LangGraph 前冻结。跨场景动作停在 `arrival`；同一句中的查看、阅读等后续目的不升级为已完成事实。抵达可来自明确移动、当前场景作者声明的 `action_routes`，或唯一且尚未发现的物理线索目标；后者只接受至少四个归一化字符的明确目标，并只路由到 `source/related_scenes` 唯一的场景，绝不直接发现线索。背包中已经存在且被输入明确点名的物品固定视为当前交互，不能被远端线索的“副本/抄本/墨迹”等短别名劫持。当前场景命中声明式发现规则时才进入 `contact`，其余为 `interaction`。
-- `src.gameplay.action_preflight` 只从冻结计划、当前场景的 `action_advisories`、公开 PC 卡和 flags 判断是否需要预演。低技能、职业或性格冲突只决定是否展示作者写好的公开提醒；NPC `secret`、私有记忆、线索正文和后台阈值不会进入事件。玩家可继续原计划、选择作者声明的准备行动或取消；继续时复用同一个 `ActionResolution`，准备行动也在选择落定时冻结，绝不把按钮标签重新交给自然语言路由。
-- 预演分两种形态且互不混用。`blocking: true` 是决策卡：卡片文案只在玩家需要做决定时展示，选择落定后决定 `continue/replace/cancel`。`blocking: false` 是过渡节拍：没有卡也没有第二次选择，引擎只取 `transition_text`，把它与赶路、抵达、接待一起作为已结算的既定事实先播给玩家，故事模型从节拍之后继续叙述。卡片文案（可能是劝留或"先问某人再决定"的分支提示）绝不可能被降级成非阻塞素材——玩家已经决定出发后不会被再问一次。声明了 `npc_id` 而该 NPC 不在场时改用 `keeper_text`，后者写的是未完成的现状，不得断言一个没发生的联系。
-- 迁移前只带卡片文案的非阻塞 advisory 在匹配时直接跳过（宁可不提醒，也不回灌劝留）。已有世界在打开时（`RuntimeContext.sync_module_metadata`）或从旧回合快照建分支时按条目升级为模板当前的 `transition_text`；同一钩子也按 `entry_beat.supersedes` 逐字匹配升级旧入场节拍。升级幂等，只替换与作者声明旧载荷逐字一致且未声明 `transition_text` 的非阻塞条目/旧节拍，阻塞卡与世界内已改写的内容一律保留。
-- `arrival` 按 `过渡节拍（如有）→ departure_text → travel_text → 抵达描述 → entry_beat` 推进。执行顺序是**先结算、后宣布**：先提交明确场景移动并按实际 `current_location/encounters` 计算在场 NPC，移动落账成功后才向玩家公开过渡/离场/途中节拍，且只有确认对应 NPC 在场后才发送 `entry_beat`；移动结算被拒绝（返回空或抛异常）时节拍一律不播，回合按失败收口，可原样重试。这一回合不执行通用技能预检，也不授权线索、SAN 和发现规则关联 flag；模型提出这些副作用时会被同一行动阶段门禁拒绝。
-- 场景目录的 `npcs_present` 是模组初始驻点和按人物寻路的索引，不是永久出勤承诺。每次抵达时，引擎按 NPC 的运行时 `current_location` 重新生成 `current_scene.npcs_present`；只有实际在场人物才能触发头像。人物离开、被带走或死亡后无需改写静态场景目录。
-- 场景声明 `encounters` 时，`src.gameplay.encounters` 覆盖对应 NPC 的隐式驻点，统一处理 guaranteed、conditional、luck 和 unavailable。幸运结果使用真实 d100 工具；`repeat=once` 写入 `encounter_history`，避免通过反复进出刷结果。解析只公开在场/不在场及作者提供的可见文本，不把 NPC 的真实位置泄露给故事模型。
-- `contact` 由 `src.gameplay.discovery` 匹配当前场景中尚未发现的 `discovery_rules`，组合 `approach_text` 并在叙事前结算。无条件规则是本动作的权威契约，不再叠加通用语言推断出来的侦查；只有 `requires_success: true` 才执行作者指定技能。
-- 前置叙事可见后，在第一次模型请求前原子提交线索、`flag_effects`、SAN、NPC 揭示和素材事件。
-- 没有命中发现规则时，`src.gameplay.action_checks` 仍对明确搜查、聆听、追踪等动作做一次权威检定。
-- 将玩家动作、紧凑世界状态、时代约束、真实检定和已结算发现一并追加为 user 消息。
-- 根据权威状态、行动 phase、ruleset、模组 capability 与已派发工具确定性加载战斗、魔法、心理等 Skill；
-  内容关键词只留下漏加载诊断，不参与规则注入。
-- 每轮先恢复为 `narrative_model`。默认配置下叙述与判定均为 Pro，也可由设置页或环境变量分别指定。
-
-### 6.2 模型职责节点路由
-
-- `combat_state.active` 为假时进入 `call_story_agent`（普通叙事职责节点），负责探索、社交、线索与战斗交接。
-- 战斗激活时进入 `call_combat_agent`（战斗职责节点），使用 `judgement_model` 并在同一次正常模型调用上叠加临时战斗提示。
-- 两个节点共享同一消息历史、权威世界状态和模型调用器，没有独立长期记忆、独立规划循环或节点间通信。
-- 战斗职责节点可选择 NPC 战术，但只能用 `combat_*` 工具改变战斗事实。
-
-### 6.3 模型调用
-
-- 使用 OpenAI Chat Completions 流式接口。
-- 开头首句经过内部控制语过滤；流式协议防火墙会短暂保留可能构成工具协议起始符的尾部，确认是普通文本后再通过 `on_narrative` 发送，因此仍保留细粒度流式输出。
-- 结构化工具调用按 index 累积并在流结束后交给路由节点。兼容供应商误放进 `delta.content` 的 DSML 工具协议：完整区块被隔离并转换为内部工具调用，损坏、过长或未闭合区块直接丢弃，参数不会进入叙事、消息历史或诊断日志。
-- 玩家展示不以原始模型正文为权威：服务端把正文定稿为 `chat_events`，补齐守秘人/NPC 身份并只下发公开 schema 字段。显式 NPC 标签用于低延迟流式归因；漏标签时仅允许当前世界已知公开姓名的 `姓名：台词` 或同一行、语法明确的 NPC 说话归属恢复为人物发言。回退不会猜测裸姓名受词；模糊引语、跨行代词继承，以及“调查员对 NPC 说”的文本一律保留为守秘人叙述，不能猜测为 NPC 气泡。
-- 浏览器用独立展示队列消费安全的叙事增量，网络接收速度、缓存积压和选项到达都不能改变玩家选择的固定播放档位；标点和人物切换可以保留节奏停顿，长按叙述区域只做临时加速。`done` 与玩家可交互的 presentation complete 分离，骰点、素材和选项不会越过尚未展示的相关叙事。
-- 普通叙事使用 `narrative_model`；战斗、复杂工具命中后的同回合续写、可选回合审计和上下文摘要兜底使用 `judgement_model`。
-- 故事模型只看到需要其判断的 `MODEL_TOOLS`。项目文件读取、状态快照读取、素材展示、场景缓存和私有摘要写入仍保留兼容实现，但不再制造同步工具循环。
-- 发送请求前会修复旧存档中被控制消息打断的工具响应批次，避免 OpenAI 兼容接口拒绝历史。
-- 不会因普通检定重跑已经流式输出的内容；只有确实调用复杂工具时，工具后的下一次请求才切到判定模型。
-- 默认 `hybrid` system prompt 只对声明 `trpg-master:prompt-role=spine` 且内容充足的模组启用；未声明的第三方模组自动保留完整 `module.md + skills`。
-
-### 6.4 战斗状态机
-
-`combat_start` 在 `world_state.combat_state` 创建权威状态，包含 encounter ID、轮次、参战者、先攻、当前行动者、防御次数、待确认决定和有界日志。玩家消息已经声明开场攻击或武力威胁时，调用方通过 `initial_action` 一次提交，状态机直接进入确认/结算，不再依赖模型节点开战后补交第二次工具调用。`combat_action` 校验行动者并执行 d100 对抗、伤害、重伤与回合推进；PC 枪械攻击通过 `src.gameplay.inventory` 的共享资源服务扣弹，即使射击落空也会消耗一发，0 发时拒绝动作且不推进回合。`combat_end` 负责非击倒类结束条件。
-
-战斗外道具动作调用 `use_item`：`use` 仅验证持有，`consume` 更新堆叠数量或移除一次性物品，`firearm_discharge` 处理鸣枪、试射、打锁等非攻击开枪。后者与战斗枪击共用形如 `左轮手枪（6发）` 的解析和扣减逻辑，但同一发子弹只能走一条调用路径。成功动作追加到有界 `item_use_log`，并随世界状态快照保存。
-
-状态机在两类升级动作前插入阻塞式玩家决定；决定的载荷字段、选项 ID 与超时语义见 `docs/API.md` 的 `decision_request`：
-
-- `irreversible_violence`：PC 首次攻击未主动敌对的 NPC 时，在任何掷骰、伤害或弹药消耗前返回。默认项为取消，取消不消耗动作或资源；确认后目标写入 `hostile_to_pc`，事件追加到 `violence_log`，并在模组存在 `case_clocks.human_pressure` 时推进压力。
-- `coercive_threat`：PC 用武器胁迫未主动敌对的 NPC 时返回。取消开场威胁会结束刚创建的战斗且不消耗行动、弹药或物品；确认后目标写入 `threatened_by_pc` 并转为 `guarded`，事件追加到 `threat_log`。后续真正攻击仍需独立经过 `irreversible_violence`。
-- NPC 攻击 PC 时状态机先返回 `decision_required`，由 `GameEngine` 完成前端确认后内部调用 `combat_decide`。
-
-为避免流式文本抢在确认之前叙述“已经拔枪”，`GameEngine.handle_action()` 会先通过
-`src.gameplay.escalation_preflight` 调用无副作用的 `preview_player_escalation()`（`src/gameplay/combat.py`）。它以
-保守关键词识别明确攻击/武力威胁，并从当前世界的 NPC 名称解析目标；假设句、否定句和已敌对
-目标不会拦截。守秘人的公开后果提醒先作为正常聊天气泡发送，底部再显示取消/继续选项；取消时
-不进入 LangGraph、不发送 tension，也不改变世界状态。确认后提醒和玩家回复随回合历史持久化，
-并生成仅本回合有效的一次性授权；后续 `combat_start` / `combat_action` 返回同类型、同目标的
-状态机决定时，授权静默选择确认项，避免第二次询问。授权不匹配或未被消费会在回合结束时清除。
-
-`src.gameplay.personality` 统一读取 `backstory.beliefs`、背景特质和游戏中获得的心理特质。角色可通过 `backstory.violence_stance` 声明 `avoidant`、`conditional` 或 `unrestrained`；旧角色缺少字段时使用 `conditional`。立场只改变确认措辞和返回给模型职责节点的 `roleplay_context`，不能替玩家否决行动，也不能免除战斗、资源、法律、声望、案件与 SAN 后果。
-
-模组缺少 NPC 的 DEX 或战斗技能时，状态机使用保守默认值并写入 `assumed_fields`，便于后续补全模组数据。战斗状态属于世界快照，因此可随普通存档恢复。
-
-### 6.5 `execute_tools`
-
-- 解析模型提供的 JSON 参数。
-- 调用 `GameEngine._execute_tool()`，最终落到 `src.ai.tools.registry.execute_function()`。
-- 将工具结果作为 tool 消息写回会话。
-- 技能、普通骰、战斗和 SAN 结果转换成 `dice_result`，供前端可视化。
-- 单个工具抛出的异常会变成模型可读的错误结果，不会中断整条 WebSocket 回合；按需 Skill 只在整批 tool 消息写完后注入。
-- NPC 首次揭示、场景切换和图片线索加入会产生权威事件；`src.gameplay.handouts` 按编译后的
-  `reveal_on.entity_id` 解析素材并按素材 ID 去重。目录线索必须先归档，图片才可展示；展示层不反向写入线索或旗标，模型调用 `show_handout` 只是受同一状态门禁约束的兼容入口。
-- 可选 GLM 对复杂工具结果生成简短反馈。
-
-所有工具 handler 都在引擎进程内执行：`execute_function()` 落到 `ToolRuntime` 唯一注册表，handler
-接收 `RuntimeContext` 并直接操作同一个 `DatabaseWorldStore`，每次执行记录有界审计
-（`ToolExecutionRecord`）。`tools/*.py` 仍保留 CLI 入口，经 `RuntimeContext.from_env()` 读取
-`TRPG_PROJECT_ROOT`、`TRPG_RUNTIME_ROOT`、`TRPG_MODULE` 与 `TRPG_WORLD_ID` 打开同一数据库，
-不会仅凭模组名猜测唯一状态；但 CLI 不是模型工具的调用路径。
-
-### 6.6 `finalize`
-
-- 合并工具轮与最终叙事，并裁掉尚未发生的选项菜单。
-- 叙事不能反向修改场景；仅保留当前在场 NPC 的公开身份同步。
-- 普通回合不追加模型审计。诊断时可设置 `TRPG_ENABLE_TURN_AUDIT=1`，用结构化
-  `commit_turn` 检查场景、线索、物品、NPC、旗标、SAN 或结局声明；它仅记录差异，
-  不再补写状态，也不能将叙事里的成功追认为机械成功。
-- 将最终叙事追加到消息历史；素材仅由结构化线索、SAN、场景和 NPC 事件触发。
-- 更新自动存档 `slot_000`。
-- 从明确的 `你可以——` 菜单提取结构化 `choices` 事件；正文中的其他编号列表不会进入协议。
-- 标记本轮是否为高风险回合。
-- 发送 `done`，前端恢复输入与行动选项。
-- 在需要时于 `done` 之后静默压缩历史。
-
-## 7. 上下文与 Skill
-
-### 7.1 常驻上下文
-
-`src.storage.persistence.load_system_prompt()` 先读取当前世界的冻结 Skill pin。对已有数据库 `world` 行，零 pin
-会原子写入当时完整 catalog；已有 pin 时，核心与模组 Skill 的正文、顺序、`opening` 行为均由 pin 中的
-manifest 快照决定，绝不反读已变化的磁盘 catalog。pin 表不可读、digest/sidecar 校验失败或数据库 schema
-不完整时必须 fail-closed，不能把错误误判成“没有 pin”再回退磁盘。
-
-只有**整套** pre-0011 内容 pin 且完全没有 sidecar 的旧世界可走保守兼容：保留 pin 行中有效的
-`version`/`trust`，但统一降格成带固定单条预算的常驻 core 正文，且一律非 `opening`、不可模型调用、无
-activation；仍然不读当前磁盘 catalog。0011 sidecar 若只缺后来新增且默认安全的声明字段，会按空/`false`
-规范化；其他任何“部分 sidecar”、空 sidecar 或行列不一致都不是 legacy，会受控失败。真正没有数据库世界的
-旧导入/鸭子上下文才允许旧磁盘兼容路径。非 opening 请求再按 `full`/`hybrid` 决定使用
-`module.md` 或已声明 spine 的模组 Skill；`module.md` 中的默认 PC 会替换为运行时调查员约束。
-
-当前已交付的每个 pin 由 `world_skill_pins` 冻结 `content`、`content_digest`、`skill_version`、`trust` 和
-`residency`；1:1 的 `world_skill_pin_manifests.entry_snapshot` 冻结 `SkillEntry` 的
-`id/path/version/trust/residency/description/opening/model_invocable/max_context_tokens/required_tools/allowed_tools/`
-`dependencies/user_invocable/resources/activation/diagnostic_keywords` 以及 `order`、`catalog_version`、完整
-`catalog_ids`。`activation` 目前含 `tools/combat_active/san_below/phases/scenes/scene_capabilities/`
-`module_capabilities/rulesets`；deterministic `dependencies` 有闭包/循环校验，`resources` 只能由受信引擎通过
-manifest allowlist 读取，模型没有文件读取工具。`required_tools`、`allowed_tools` 与 `user_invocable` 目前虽有
-严格字段校验，但非空/`true` 会在 catalog 校验时拒绝，绝不假装已经改变请求级工具权限。
-
-**H3.1（未开始）** 才会实现这些被安全门禁的工具/UI capability 的真实执行策略，并考虑 `local-author` trust、
-catalog version migration 和作者编辑 UI；工具授权在那之前仍只由每次签发的模型 catalog 管理，不能把声明字段
-误当作已交付的权限机制。
-
-按需 Skill 只以有界的 `id + description` 目录出现在 system prompt 中。模型无法调用通用文件工具；它
-只能在本次服务端签发的 `load_skill` schema 中选择被冻结、`on_demand`、`model_invocable` 的 ID。
-
-### 7.2 回合 Lorebook
-
-模组可在独立 `lorebook.json` 中提供 Character Card V3 Lorebook。`GameEngine.prepare_session()` 只加载并校验一次；`src.ai.context.lorebook.select_lore()` 在模型请求前按最近可见消息、当前场景、在场 NPC、已知线索和 flags 做本地确定性筛选。结果有条目数/token 双上限，并追加在本轮 `[引擎权威状态]` 之后，因此不会破坏稳定 system prompt 的前缀缓存。
-
-检索不调用模型、embedding 服务或数据库。条目分组使用模组 ID、组名和持久化回合序号产生可复现选择；`world_state.narrative_memory` 保存 `turn_sequence` 与最多 512 个条目的最近使用记录，支持跨读档冷却。注入过的权威状态和 Lorebook 内容不会再次参与关键词扫描，`gated` 条目必须先通过服务端线索/flag 门槛。
-
-每次选择还生成不含条目正文的 trace：记录条目 ID、命中键、token 估算以及 `scene_gate`、
-`cooldown`、`token_budget` 等筛除原因。trace 随回合记录保存并在“上一回合诊断”中展开，
-用于调试模组触发，而不是把守秘信息暴露给玩家界面。
-
-### 7.3 按需 Skill
-
-战斗、魔法、心理学、调查方法与角色创建等较大 Skill 不全部常驻。`src.ai.skills.skill_resolver` 只根据
-权威 `WorldState`、ruleset、模组 capability、行动 phase 和已派发工具确定性激活；
-`diagnostic_keywords` 只写漏加载诊断，绝不作为注入条件。`src.ai.skills.skill_activation` 用 pin 正文注入，
-并以当前模型 surface 上受信的 `(skill_id, digest)` 控制标记避免重复；压缩、读档或重试移除了该标记时会
-确定性补回，不能因进程内的“曾加载”标记而丢失规则。模型不直接读取项目文件，也不能热加载未 pin 的规则。
-
-### 7.4 历史压缩
-
-- 请求前依据完整 wire payload（messages、tool schema 与 JSON framing）计算容量；
-  `TRPG_CONTEXT_WINDOW_TOKENS`、`TRPG_CONTEXT_TARGET_RATIO`、`TRPG_MAX_OUTPUT_TOKENS` 决定预压缩和硬拒绝边界。
-- 先裁剪窗口外过大的 tool result，保留 head + marker + tail；原始结果仍留在 Context Event 日志。
-- 摘要只在完整 user/tool 边界 replace 旧 surface，失败、不可验证或未缩小时保留原 surface；不再有截断兜底。
-- provider context overflow 最多触发一次安全压缩重试；流中失败会先释放全局 LLM slot，避免树莓派单并发自锁。
-- 摘要是受限 JSON 的**非权威连续性缓存**。场景、资源、骰值和线索每回合从 `WorldState`/Turn 重投影，
-  摘要不能写入权威状态或成为事实来源。
-- `done` 后的低频维护仍可尝试压缩；成功才更新自动存档。已归档世界的旧 Context Event 由每日维护任务引用感知 GC。
-
-TIER 提醒在高风险回合后最多间隔 5 轮注入；即使没有高风险回合，也会每 10 轮至少注入一次。前 3 轮不重复注入。
-
-### 7.5 结构化记忆（shadow-only，尚非游戏功能）
-
-H3 已有 `memory_fact_candidates` 和 `memory_facts` 的 ORM、迁移与内部 `StructuredMemoryService`：前者表示
-候选，后者表示经受信代码接受的事实，并带 world/root/turn、subject、audience、owner、tier、digest、
-provenance、revision 与 supersede 关系。其 branch/audience/tier 查询规则仅作为内部 shadow 验证基础。
-祖先 fact 还必须同时落在分叉的 `source_world_revision` 和接受时间截点内：新分支写入
-`branch.memory_cutoff_at`，旧分支仅兼容带时区的 `branch.created_at`。因此分叉后才被接受、即使引用旧回合的
-fact 也不会倒灌到子线；损坏 branch metadata 一律 fail-closed。
-
-它**没有**接入正常游戏回合：当前没有模型 tool、HTTP/WS 协议、前端面板、prompt 注入或自动 transcript
-提取会读写这些表；这正是 H3 的完成边界，而不是漏接了一条产品链路。`WorldState`、`Turn`、`Snapshot` 和
-确定性领域工具仍是唯一会影响规则、叙事和玩家可见状态的权威来源。`world_branches` 对 root id 的回填不等于
-启用记忆召回。未来若接入，必须先提供独立 principal/API、明确的写入接受者、branch/audience/TIER/clue gate、
-并发幂等、泄漏测试与 gold precision 评测；在此之前不得把它宣传为玩家的长期记忆或导出接口。
-
-## 8. 数据所有权
-
-| 数据 | 路径 | 写入者 | 生命周期 |
-|---|---|---|---|
-| 模组定义 | `mod/<name>/module.md` | 模组作者 | 版本控制 |
-| 初始世界 | `mod/<name>/world_state_initial.json` | 模组作者/导入器 | 新游戏模板 |
-| 叙事知识库 | `mod/<name>/lorebook.json` 或用户模组同名文件 | 模组作者 | 模组版本 |
-| 用户模组源文件 | `modules/<id>/<version>/manifest.json`、`module.json`、`keeper.md` | `.trpgmod` 导入器 | 指定模组版本 |
-| 用户模组编译产物 | `modules/<id>/<version>/module.md`、`world_state_initial.json` | `module_compiler` | 指定模组版本 |
-| 官方 Skill catalog / 正文 | `skills/catalog.json`、`skills/*.skill` | 开发者/受信发布制品 | 版本控制；只供首次 pin 或无数据库兼容路径读取 |
-| 世界 Skill 内容 pin | `world_skill_pins` | `ensure_world_pins()` 一次性快照；分支 copier | 该世界生命周期；不允许热更新或 reset 重 pin，删世界时外键级联 |
-| 世界 Skill manifest sidecar | `world_skill_pin_manifests` | 与对应 pin 同事务写入 | 1:1 随 pin 级联删除；完整快照优先，部分 sidecar fail-closed |
-| Shadow 记忆候选 / facts | `memory_fact_candidates`、`memory_facts` | 仅内部 `StructuredMemoryService` / 测试与未来受信路径 | 当前不接入游戏热路径、prompt、HTTP/WS 或玩家导出；不拥有世界事实 |
-| 世界元数据 | `worlds.metadata_json` | `RuntimeContext` / 世界服务 | 世界生命周期 |
-| 当前世界 | `world_states.state` JSONB | `DatabaseWorldStore` | 当前案件 |
-| 主题 | `mod/<name>/theme.json` | 模组作者 | 版本控制 |
-| 模组素材 | `mod/<name>/assets/*` | 模组作者 | 版本控制 |
-| 自动/手动存档 | `save_slots` + `snapshots` | `src.storage.persistence` | 事务化存档与不可变快照 |
-| 回合提交日志 | `turns` + `turn_events` | `DatabaseTurnJournal` | 当前时间线的可恢复提交历史 |
-| 玩家笔记 | `player_notes` | `PlayerNotesStore` | 按用户隔离，不进入 prompt |
-| 默认调查员 | `characters/default/*.json` | 开发者 | 版本控制 |
-| 自定义调查员 | `characters/custom/*.json` | 玩家/工具 | 本地运行数据 |
-| 长期履历 | `profiles/player_profile.json` | `src.gameplay.characters` | 跨模组本地数据 |
-| 模型配置 | `.env.json` | 配置向导/`start.py` | 本地机密 |
-| 运行日志 | `logs/`、`/tmp/trpg-*.log` | 后端/启动脚本 | 诊断数据 |
-
-### 8.1 数据库与账号
-
-服务端事实统一通过 SQLAlchemy 2 Repository 访问：桌面环境默认使用
-`TRPG_RUNTIME_ROOT/trpg-master.db` 的 SQLite，云端使用 PostgreSQL。SQLite 连接显式启用
-`PRAGMA foreign_keys=ON`；两种数据库共享同一套 Alembic 迁移，当前版本以
-`venv/bin/python -m alembic -c alembic.ini heads` 输出为准，不在文档里复制易过时的 revision。
-
-数据库职责分为三组：
-
-- 身份与权限：`users`、`sessions`、`worlds`、`world_members`、`world_invites`、
-  `world_investigators` 和 `audit_events`；密码使用 Argon2id，登录态使用可撤销的服务端 Session，
-  明文邀请 token 不落库。
-- 运行世界：`world_states.state` 保存动态 JSON/JSONB 聚合；`room_actions` 以
-  `world_id + action_id` 保证进程重启后的行动幂等。
-- 历史与恢复：`turns`、`turn_events`、`snapshots`、`save_slots` 和 `player_notes` 保存父链、
-  公开事件、不可变快照、存档元数据和按用户隔离的笔记。
-
-运行时不再从 `world_state.json`、`turns/`、`saves/` 或 `player_notes.json` 读取事实。旧
-`worlds/` 只由 `tools/import_worlds_to_database.py --once --replace` 做一次性幂等导入；完成标记写在
-`audit_events`，导入前会校验 JSON、revision、字段长度和 owner 冲突。生产数据库只监听回环地址，
-应用使用独立最小权限账号；环境变量、迁移、备份与恢复命令统一见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
-
-> **规划边界（尚未实现）**：场景地图、区域、Token、互动对象和迷雾不会另起一套文件存储。
-> 模组包保存静态作者态定义，运行中的位置、对象、可见性和导演临时布置先写入
-> `world_states.state` 的版本化 JSON/JSONB 聚合，并复用当前事务、`revision`、快照、回合事件与
-> 房间可见性过滤。只有出现稳定的跨世界查询或协作需求时才拆成关系表；详细阶段与兼容策略见
-> [`ROADMAP.md`](ROADMAP.md#3-场景化多人-trpg-与模组工坊多人收口后)。
-
-### 8.2 运行时上下文
-
-`RuntimeContext` 是世界与模组绑定的运行时入口，包含 `world_id`、`module_name`、数据库 URL、
-只读 `module_dir`、兼容导入目录和对应 `DatabaseWorldStore`。`GameEngine`、持久化、角色服务和
-工具执行器都显式接收该对象。桌面启动器在后端启动前用 `--once --replace` 将旧 `worlds/`
-导入数据库；成功标记写入 `audit_events`，后续运行不再把兼容 JSON 当成事实来源。
-
-世界状态含 `schema_version` 与单调递增的 `revision`。`DatabaseWorldStore.update()` 在数据库
-事务和行锁内读取最新状态、执行 mutator 并检查可选 `expected_revision`。过期版本抛出
-`StaleRevisionError`，提交失败则由数据库整体回滚。
-
-### 8.3 存档
-
-`save_slots` 保存槽位、消息与 UI 摘要，`snapshots` 保存不可变 JSONB 状态并由外键关联。
-
-- `slot_000` 是自动槽。
-- `save_slots.messages` 保存 system/user/assistant/tool 消息及工具调用关联。
-- 读取旧槽位时会规范化工具消息顺序，并为历史中缺失的工具返回补入明确错误，避免存档无法继续。
-- `snapshots.state` 保存完整世界状态，读档时通过 `DatabaseWorldStore.restore()` 生成新的 revision。
-- 读档记录开始时的 revision；读取槽位期间若世界已被其他动作更新，恢复会以 `StaleRevisionError` 明确拒绝，避免覆盖新行动。
-- `save_slots.metadata_json` 保存列表 UI 所需摘要、schema/revision 与可选 `label`。
-- 旧快照通过 `src.storage.world_migrations` 补充 schema、私有记忆、NPC 揭示与 PC 心理档案。
-- 进行中的 `combat_state` 位于完整世界状态内，读档后 LangGraph 会路由到战斗职责节点。
-
-### 8.4 回合记录、重新叙述与时间线
-
-`turns` 保存父链、状态、消息和快照引用，`turn_events` 保存有序公开事件；桌面兼容导出可生成旧 `record.json`，但它不是事实来源。公开恢复数据不包含 system prompt、Lorebook 正文或工具私有输出。
-
-“重新叙述”仅允许当前世界最后一个完成回合，要求当前 world revision 与记录一致。它使用独立的
-短 prompt、禁用全部 tools，并只替换匹配的 assistant 正文；固定 choices、工具结果和世界快照不变。
-每个变体及模型诊断写回回合记录，失败则恢复原消息和自动存档。
-
-每个回合记录同时保存本回合 `player_input`、结果叙事以及 `parent_turn_id`。结果消息上的“创建分支”
-不是复制结果后的状态，而是以 `parent_turn_id` 恢复到本次玩家行动前的决策点；首个没有父回合的
-开场记录才以自身作为分支源。服务端从该完成回合复制父链、消息和快照到唯一 `world_id`，保留
-分叉 revision，并在 `worlds.metadata_json.branch` 记录 parent world 与 source turn。原世界不回滚；新世界后续
-状态、存档、回合日志和笔记均独立。存档面板只列出当前主世界及其分支树，不把同模组的其他
-本地世界、测试世界或账号世界伪装成时间线；每个可切换分支必须拥有 `slot_000` 自动存档。前端
-把当前 world/module 记入本地连接偏好。
-
-玩家可见的最外层存档单位是**存档位（Save Slot）**：一次游玩 = 一棵世界树（根 + 全部分支），
-由 `WorldBranchService.list_adventures` 聚合，按根世界创建时间编号（`slot_index` → SAVE 01/02/03）。
-单机“开始新游戏”总是创建新的根世界（新存档位），不再 reset 模组默认世界；从未开始过的树
-（无回合无存档）不作为存档位展示并可被下一次开局复用。删除存档位（`adventure_archive` →
-`archive_tree`）逻辑归档整棵树；删除分支（`world_archive`）只影响单条时间线。
-
-### 8.5 调查员与长期履历
-
-单机新游戏从 `profile/default/module/custom` 四类来源解析角色引用，把角色复制到当前
-`world_state.pc`。游戏内变化只作用于案件状态；案件结算后，`settle_case()` 才把结局、HP/SAN
-变化、声望、人脉与最后角色状态写入 `profiles/player_profile.json`。
-
-多人房间只允许版本化的 `default` 与 `module` 调查员。房间候选接口和 WebSocket 初始化都以
-`include_personal=False` 构建列表，`profile` 与 `custom` 既不作为云端账号资料，也不进入共享房间。
-多人角色占用与案件内状态保存在数据库成员关系及世界状态中，不读写本机长期履历文件。
-
-### 8.6 模组包与注册表
-
-`ModuleRegistry` 合并两类来源：
+## 2. 两条执行路径
 
 ```text
-内置 legacy key       mod/<directory>/
-用户版本 key          modules/<package-id>/<version>/  -> id@version
+Browser / Electron → React + Zustand → HTTP / WebSocket
+                         ↓
+          FastAPI + 身份/世界/房间权限
+                         ↓ execution_profile
+          ┌──────────────┴────────────────┐
+       legacy                       structured_v1
+ GameApplication                    StructuredGateway
+ GameEngine / LangGraph              StructuredPlayService
+ 裁决 + 旧工具管线                      ↑ 人类 / assisted / Agent runner
+ turn_cache                         逐命令短事务
+ TurnJournal 整回合提交               状态 + 命令账本 + outbox 同事务
+          └──────────────┬────────────────┘
+                    SQLite / PostgreSQL
+                         ↓
+                  有权限的事件与快照 → UI
 ```
 
-`RuntimeContext` 在构造时解析并固定 `ModuleRecord`，之后主题、角色、素材、Skill、初始模板和
-守秘人提示都从同一 `module_dir` 读取，不允许各服务再次自行拼接 `PROJECT_ROOT/mod`。
+`execution_profile=legacy|structured_v1` 决定执行路径；新模式的 `keeper_mode=human|assisted|agent` 决定主持方式。本地/云端、单人/多人是另两个维度，不等于运行模式。
 
-`.trpgmod` 导入分为预检与安装：
+legacy 保留原有文本裁决与确定性后备。structured 不因协议或模型失败静默返回旧路径。旧模式通过的战斗、结局或主线测试，不自动证明新模式覆盖同样玩法。
 
-```mermaid
-sequenceDiagram
-    participant UI as Start UI
-    participant API as FastAPI
-    participant PKG as Package Inspector
-    participant REG as ModuleRegistry
-    participant Compiler as Module Compiler
-    UI->>API: POST /api/modules/inspect (raw package)
-    API->>PKG: ZIP/security/schema/engine/reference checks
-    PKG-->>UI: manifest summary + warnings
-    UI->>API: POST /api/modules/import
-    API->>REG: install(package)
-    REG->>Compiler: compile_module(manifest, module, keeper)
-    Compiler-->>REG: outputs + diagnostics + trace
-    REG->>REG: staging + atomic rename
-    REG-->>UI: module record (id@version)
-    UI->>API: WS switch_module
-```
+## 3. 模块责任
 
-作者态 `module.json` 保存全部内容定义，运行时编译器只把初始已知线索写入 `clues_found`，并将
-完整定义保存到私有 `clue_catalog`/`scene_catalog`。模组版本和世界状态 schema 分别迁移，不能
-共用一个版本号。完整契约见 `docs/MODULE_FORMAT.md`。
+| 区域 | 所有权 | 主要入口 |
+|---|---|---|
+| HTTP/WS 装配 | 请求入口与生命周期，不承载玩法规则 | `server.py`、`src/web/` |
+| 旧应用编排 | 整回合、模型会话、开局、继续、存档 | `src/app/` |
+| 新平台 | 意图、命令、主持控制、暂停、交互、角色记忆 | `src/structured/` |
+| 确定性玩法 | 检定、发现、战斗、SAN、时间、结局 | `src/gameplay/` |
+| AI 基础设施 | 供应商、路由、容量、旧工具/上下文/skill | `src/ai/` |
+| 持久化 | 世界、快照、回合、笔记、BYOK 配置 | `src/storage/` |
+| 房间控制面 | 成员、认领、共享引擎、恢复和时间线 | `src/multiplayer/` |
+| 身份 | 密码、Session、来源检查、世界权限 | `src/auth/` |
+| 作者工具链 | 格式、编译、包检查、版本化安装 | `src/modules/` |
+| 客户端 | React 展示、请求、事件校验与恢复 | `frontend/src/` |
+| 桌面/运维 | 进程、IPC、打包、部署与恢复 | `frontend/electron/`、`packaging/`、`deploy/` |
 
-当前 v1/v2 还没有场景地图、区域、Token、互动对象或迷雾的作者态 schema。未来添加这些可选能力时，
-必须先升级 `module_format`、`module_compiler`、诊断和兼容测试，再让编辑器或运行时消费；不能以
-未校验的自定义字段绕过编译边界。
+逐文件导航见[模块地图](reference/MODULE_MAP.md)。旧工作流细节见[legacy 实现参考](reference/LEGACY_ARCHITECTURE.md)，不要把其中“单引擎”描述套到新平台上。
 
-素材触发同样在编译边界内：实体上的 `asset_id` 会生成精确的 `npc_revealed`、`scene_entered` 或
-`clue_discovered` 规则，`reveal_on` 也只有稳定 `entity_id` 能授权展示。旧包里的文本条件可以
-解析但运行时忽略并产生编译警告。旧存档恢复时只刷新模组的静态素材元数据，并按目录线索 ID
-修复已发现但没有图片关联的线索，不会用线索正文猜图，也不覆盖 HP、场景或其他游戏进度。
+## 4. 权威状态与事务
 
-线索素材遵循单向副作用边界：`discovery_rules -> state_add_clue(clue_id) -> handout`。图片展示层
-不能反向创建目录线索或应用 `flag_effects`；未进入 `clues_found` 的线索图片即使被显式请求也会
-被状态门禁拒绝。模型仍可记录即兴文字线索，但只有结构化目录 ID 能进入作者定义的证据流程。
+| 数据 | 存储/所有者 | 非权威替代物 |
+|---|---|---|
+| 当前世界事实 | `world_states`；按模式由 store 或命令服务写入 | 叙事、摘要、人物记忆 |
+| 世界模式/成员/控制关系 | `worlds/world_members/world_investigators` | 前端自报身份 |
+| 旧回合与恢复 | `turns/turn_events/snapshots/save_slots` | 新命令游标 |
+| 新请求/检定 | `player_requests/check_requests` | 行动已经成功 |
+| 新命令/事件 | `game_commands/event_outbox` | 模型建议或发送成功 |
+| 主持控制权 | `keeper_control` | 房主自动拥有主持权 |
+| 当前交互/新记忆 | `interaction_threads/character_memories` | 执行授权/世界真相 |
 
-线索的 `discovery_rules` 也在该边界内。规则只允许预定义行动意图、目标别名、可选
-`approach_text`、技能门槛、SAN 严重度和 NPC 揭示，不执行作者代码或任意正则。命中后先展示
-不含判定结果的前置叙事，再由引擎提交效果，最后把 `resolved_discoveries` 交给模型续写，因此
-关键线索与图片不依赖 Function Calling 的自觉性，骰子也不会早于“看见了什么”出现。
+legacy 的 mutation 可先进入 `turn_cache`，最终由日志服务与状态一起提交；流式展示不等于持久提交。structured 每条命令短事务写状态、命令结果与 outbox，提交后投递；模型中途失败不回滚已提交命令。记忆派生在提交后独立执行，失败可补建，不反写事实。
 
-编译边界分为四层：`module_format` 定义语言，`module_diagnostics` 产生稳定且可定位的反馈，
-`module_compiler` 负责纯转换，`module_registry` 负责 ZIP 安全、落盘和原子安装。
-`POST /api/modules/compile` 与 `tools/module_packager.py compile` 都直接消费同一个编译入口；预览
-不会创建世界、安装模组或修改作者工程。旧的 `module_format.compile_world_state` 与
-`render_keeper_prompt` 仅作为兼容转发保留。
+请求、命令、检定、交互线程使用不同 ID。重复同一操作复用同 ID/载荷；同 ID 不同载荷拒绝。`revision`、世界事件 `sequence`、`event_id` 不可互换；聊天事件可能不推进 revision。
 
-## 9. 前端结构
+## 5. 暂停、重连、读档、分支
 
-前端使用 Electron + Vite + React + TypeScript。FastAPI 是规则与世界状态的权威；React 只管理
-客户端展示和交互。依赖方向固定为：
+- 普通重连：恢复当前已提交状态和待办，不取消玩家尚未回答的决定。
+- 正常叙事等待：保存尚未执行行动、已告知事项与交互目标，runner 结束，玩家自由回应。追问完成不等于原行动完成。
+- 主动读档：structured 使用专用 reconcile，未决请求置失败、pending 检定作废、开放线程取消，并清理/修正未来记忆与事件；不是完整恢复当时交互快照。
+- 分支：legacy 从完成回合分叉；structured 从当前已提交状态分叉，可用 `expected_revision` 钉住分叉点，不伪造 turn ID。新世界不继承活动控制权和原 outbox。
+- 模型不可用/预算耗尽：明确暂停及原因，保留已提交结果，允许合法接管；禁止永久 loading 或自动改用平台 Key。
 
-```text
-React components
-      ↓
-Zustand client state ← Zod 校验后的 WebSocket 消息
-      ↓
-typed HTTP / WebSocket services
-      ↓
-FastAPI authoritative state
-```
+细节与信封见[协议](PROTOCOL.md)；相关数据清理只由对应生命周期服务执行。
 
-`GameShell` 组合玩家可见区域，业务状态写入 Zustand，组件只按状态渲染。新增页面、地图或面板
-必须直接实现为 React 组件，不得重新引入 `document.getElementById` 一类命令式业务渲染。
+## 6. 模型与主持模式
 
-| 模块 | 职责 |
-|---|---|
-| `react-main.tsx` / `react/App.tsx` | 创建 React 根节点并启动 WebSocket 生命周期 |
-| `react/GameShell.tsx` | 组合主界面、开始菜单与所有覆盖层 |
-| `react/components/` | 聊天、控制区、存档、设置、笔记、模组导入等声明式视图 |
-| `state/app-store.ts` | 连接、角色、线索、存档、覆盖层与客户端偏好 |
-| `state/message-store.ts` | 聊天段、叙述播放队列、滚动和回合操作状态 |
-| `state/start-store.ts` / `state/model-store.ts` | 开局流程、模组/调查员选择、模型配置与诊断 |
-| `state/online-store.ts` | 登录态、联机大厅、房间成员、调查员占用与当前行动者 |
-| `ws.ts` | 连接、有界退避、断线恢复入口、发送队列、回合序号校验与事件分发 |
-| `start.ts` | 模组/调查员选择、新游戏与继续游戏入口 |
-| `react/components/ModuleImporter.tsx` | `.trpgmod` 文件选择、HTTP 预检、确认安装与自动切换 |
-| `renderer.ts` | 将叙事流、骰子和历史记录转换为消息状态 |
-| `options.ts` | 行动选项、自由输入、检定确认 |
-| `panels.ts` | 角色、线索、结局、存档与快速存档命令适配 |
-| `settings.ts` | 模型路由、回合耗时/context 分区与 Lorebook trace 诊断 |
-| `utility.ts` | 不注入模型的玩家笔记，以及仅发送普通 action 的快捷行动 |
-| `styles/` | 全局令牌、基础样式、氛围效果、布局和按区域拆分的组件样式 |
+human 不依赖 Key；assisted 产出主持私有草稿，批准不等于自动执行建议命令；agent 使用受限命令循环，按预算与控制权停止。
 
-### 9.1 协议与恢复
+新 runner 当前通过 BYOK caller 请求 JSON 决策，再校验、执行命令，不直接复用旧 ToolRuntime。触发主要来自玩家行动与检定回应；普通骰和主持命令不自动推进剧情。并发到达请求、开场以及恢复后的调度覆盖应以测试证明，不能仅根据提示词推断。
 
-`ws.ts` 持有唯一连接，断线按 1/2/5/10/30 秒有界退避重连；主动断开不重连。所有服务端消息先经
-`protocol/server-message.ts` 的白名单与 Zod schema 校验，未知类型、非法载荷和任何 DSML 工具协议
-文本都在进入业务处理器前拒绝。`chat_events` 只保留公开展示字段，并在定稿时覆盖流式临时布局。
+BYOK 按本地或账号/世界作用域解析；云端由相应世界所有者的有效绑定供本场使用，不允许缺配置时回退共享平台额度。Key 不进入角色记忆、prompt、前端回显或日志。
 
-时间线按钮使用公开历史的 `parent_turn_id`，含义始终是“回到本次行动之前”，历史回放、实时回合、
-断线恢复和重新叙述不得各自推断不同锚点。
+## 7. 上下文、规则知识与记忆
 
-Electron 的内置模式选择页与单机前端通过 `file://` 加载；选择多人后，主进程改为加载经过校验的
-云端 HTTPS origin，使 HTTP、WSS 和 Session Cookie 同源。图片 handout 同时携带
-`asset_data_uri` 与 HTTP `asset_url`：Electron 单机优先使用 data URI，浏览器和云端 Electron
-可回退到 HTTP 资产路由。回合中若 handout 先于任何可见叙事到达，前端只缓存到第一段叙事；已有
-可见叙事时立即展示，不再统一等待 `done`。等待状态由 `turn_phase` 驱动，超过 8 秒后在同一状态条
-显示耗时；最终按钮优先使用结构化 `choices`。
+### 7.1 游戏 Skill 与世界 pin
 
-断线时前端结束当前 loading、关闭失效决定并保留“本轮未确认完成”标记。重连使用有上限的指数
-退避，只维护一个连接提示，并按原 `turn_id` 请求持久状态：completed 记录重建完整 UI，active 记录
-短轮询，failed/interrupted 才提供自动存档回退。单机补发粒度是完成回合。多人连接另用单调
-`room_event_id`、逐连接 ack 和有界缓冲区增量补发；缓冲缺口或进程重启时发送只含公开回合父链、
-公开调查员状态与房间控制状态的 `room_full_state`。服务端还会按当前登录用户单独附加
-`private_state`，用于恢复其角色详情、可见线索和私人笔记；这一部分不进入公共事件缓冲，也不会
-广播给房间内其他连接。
+旧引擎的规则知识由 catalog、世界冻结的 skill pin/manifest 和模组正文装配。已 pin 的旧世界不能随磁盘更新静默换规则。项目开发者使用的 `.agents/skills` 与游戏中的 `skills/` 不同。
 
-### 9.2 产品身份、主题与动效
+### 7.2 四层上下文
 
-产品启动器、Electron 默认窗口、Windows `productName` 和安装产物统一使用 `TRPG Game`；仓库目录、
-Python 包、环境变量、协议路径、数据库字段和 Electron `appId` 属于兼容身份，不随展示名改动。
-玩家进入或切换模组后，浏览器标签、Electron 窗口和游戏内标题使用当前模组名（如“疯狂宅邸”或
-“猩红文档”），让当前世界明确可见。守秘人 system prompt 中的 `TRPG Master` 是内部角色身份，终端
-调试文案也不构成发行产品名。
+| 层 | 内容 | 注入原则 |
+|---|---|---|
+| 权威状态 | 当前地点、合法对象、已提交结果 | 当前任务所需部分可靠提供 |
+| 当前交互 | 已讨论目标、未执行行动、已提醒条件 | 跨请求保留，不靠长期检索碰运气 |
+| 近期对话 | 玩家与主持刚刚的交流 | 连贯、有界，保留指代 |
+| 角色记忆 | 亲历、被告知、传闻、推测 | 按需查询，附类型与来源 |
 
-模组 `theme.json` 由 `theme.ts` 校验后映射到 `styles/tokens.css` 的受管 CSS 变量；颜色、字体和
-`backgroundImage` 都经过白名单与路径检查，每次切换先清理上一模组的变量。组件不得硬编码主题色。
-`prefers-reduced-motion` 会关闭粒子、闪烁和位移动画。
+新路径的 `_build_context` 组装快照、交互、未决请求、近期消息、角色记忆和运行结果；system 来自 `agent_prompts.py`。这不是旧 ModelSession 的完整历史，也不能假定自动继承旧模组/skill/Lorebook 注入。
 
-前端入口 HTML 必须返回 `no-cache, no-store, must-revalidate`，确保发布后不会继续启动旧版应用壳；
-Vite 生成的带内容指纹 `/assets/` 文件则使用长期 `immutable` 缓存。
+### 7.3 按需知识与查询
 
-开始页切换模组采用一次约 750ms 的“翻页”过渡：首次挂载不播放；用户选定后旧页面（旧背景图层 +
-冻结的旧模组文案）立即绕左侧装订线 3D 翻走（flipping，520ms，先慢后快模拟书页掀起），新背景
-预加载后垫入下层、随翻页从右向左被揭开；翻页落定且新背景就绪后进入 entering（220ms），此刻才
-换装标题/简介/按钮文案（旧页已翻走，换装不可见）并淡入归位。网络慢于翻页时页面先翻走停在纯
-背景态，确认到达再 entering；快速连续选择只保留最新目标，请求失败恢复旧内容。动效不替代真实
-加载状态，不能闪白、丢焦点或绕过现有 `moduleSwitchPending` 门禁。
+旧 Lorebook 和 skill activation 是有门槛、有预算的知识选择。新角色记忆来自 `src/structured/memories.py`，支持提交事件派生、显式记录、替代更正与预算检索。当前检索有近期候选上限和相关度回退，不应宣传为精确语义搜索。
 
-开始页内部“主菜单 ↔ 选择调查员”采用双挂载交叉过渡：两页常驻 `#start-view-stack` 的同一 grid
-单元，空间位置即方向（菜单在左、角色选择在右），非激活页以 `view-off` 退场到自己的一侧并延迟
-隐藏（`visibility` 延迟过渡），激活页从该侧滑入——纯 CSS transition，天然可中断重定向，无 JS
-定时器，也消除了单挂载换页“旧页消失 → 空背景 → 新页跳入”的闪烁。选择调查员内切换角色时档案卡
-（`.character-dossier`）按键重挂载并播放 240ms 淡入上浮，同时面板滚动复位；换页不再重挂载档案卡
-（容器与子元素只保留一层动效）。
+Agent 要知道上下文是局部注入：未提供不等于未发生，缺依据可查询，不能虚构；但工具是否能提供任务所需模组知识仍须查实际请求。主持知道秘密不代表其扮演的 NPC 知情。
 
-浮层（存档管理、调查笔记、模型设置、决定弹窗、模组导入）统一走 `transitions.ts` 的
-`useDelayedClose`：关闭时保留内容播 160ms 退出（遮罩 `fade-out` + 面板 `pop-out`，与打开的
-`fade-in`/`pop-in` 成对），完全隐藏后才重置内部状态；退出途中重新打开会取消退出。存档面板内部
-“存档列表 ↔ 时间线”用 `usePhaseTransition` 单挂载两阶段换场（120ms 侧出 + 200ms 进入，
-方向与层级一致：进入时间线为向前）——面板背景恒定，单挂载不会产生闪烁。以上动效在
-`prefers-reduced-motion` 下都直接落定（hooks 跳过定时器 + 全局 CSS 兜底）。
+### 7.4 摘要与来源
 
-开局或读档被服务端接受（`gameStarted` 翻转）后，开始遮罩同样经 `useDelayedClose` 保持挂载
-360ms：整幕 `start-overlay-out` 淡出、`#start-box` 轻微缩小降亮，淡出揭示下方已在渲染的游戏
-画面（无“先消失再切入”的空帧），播完才换成 `.hidden` 占位；退出途中回到开局流程会取消退出，
-刷新恢复会话（挂载时已 `gameStarted`）不播动画直接隐藏。
+旧摘要是非权威连续性缓存；新记忆也不拥有世界事实。检索结果、规则 pin、当前交互与世界状态必须保持来源区别。提示词约束不能证明叙事绝无越界，真实模型表现单独验收。
 
-云端单人复用本地开始页的视觉体系：登录页、「我的冒险」大厅、角色选择页与开局过渡卡都裸排版
-在模组主题背景上（`.online-start-view`），直接引用开始页的 `start-brand`/`start-art-button`、
-角色选择的 `character-select.css` 类和存档面板的 `adventure-card` 类，不另造样式。档案卡由
-共享组件 `CharacterDossier` 渲染（本地与云端同源：`character_list` 经房间 bootstrap 推送并落入
-`useStartStore`；HTTP `characterOptions` 仅作旧服务器回退）。与本地不同的是写通路——点卡即
-HTTP 认领、`start` 由服务端以认领记录为准、存档列表即世界列表——这些差异只停在适配层。
-联机外壳进入游戏画面时同样整幕淡出 360ms（`online-closing`）；solo 自动开局只对“进房时存档
-已有角色卡”的续玩生效（以成员列表就绪后的进房快照为准），在选择页里新认领不会触发自动开局，
-保证“以此调查员开始”由玩家显式确认。
+### 7.5 旧 shadow memory 与新角色记忆
 
-### 9.3 发言者与叙述播放
+`src/ai/context/structured_memory.py` 和 `memory_fact_candidates/memory_facts` 是旧 H3 shadow 机制；`src/structured/memories.py` 和 `character_memories` 是新运行路径的角色记忆。二者不是同一接口，测试也分别为 `test_structured_memory.py` 与 `test_structured_character_memory.py`。
 
-玩家可见叙述以服务端归因的段为单位：守秘人和 NPC 在左侧，调查员行动在右侧；系统、骰点、线索
-和错误继续使用居中事件卡。`narrative_chunk.npc_id` 只提供流式临时归因，最终以严格过滤的
-`chat_events` 为权威；前端不得从正文、头像或模型自报身份猜测角色。旧记录没有段结构时按单段
-守秘人叙述回放。
+## 8. 前端、权限与进程边界
 
-网络流和可见播放相互解耦。`narration-speed.ts` 提供慢、标准、快三档并保存到本地存储；同一档位
-每拍固定一个字符，缓存长度和选项到达不能自动提速。按住正在播放的叙述约 250ms 后临时按当前
-档位约三倍速度播放，松开、移出、取消或窗口失焦立即恢复；普通单击不跳过，也不显示“显示全文”
-按钮或鼠标悬浮提示。内部 `flushNarrativeStream()` 只供取消回合、切换世界和历史重载等生命周期
-收尾。`done` 只表示网络完成，输入与选项须等展示队列排空；reduced-motion 可直接完成展示。
+React → typed transport → HTTP/WS；Zod/协议校验 → Zustand → 组件。`structured-transport.ts` 统一两类 WS 的发帧、重试和事件处理，`structured-effects.ts` 负责显示投影。新消息使用显式 speaker，骰子动画不决定骰值，场景栏不从叙事猜位置。
 
-检定骰点仍由服务端权威，3D 骰只负责表现并用预定结果落面；WebGL、非标准面数、超时或
-reduced-motion 情况静默回退 CSS 骰面，不能生成第二套随机结果。
+角色权限由服务端解析。owner、player、viewer 与 can_keeper/调查员控制权分开；私人内容在实时帧、快照、重放和模型上下文中分别检查。兼任 keeper 的人本来能看主持资料，不能把其连接当普通玩家隔离验收。
 
-## 10. 错误与可观测性
+房间实例、Agent 活动任务和部分锁是进程内状态。当前单 worker 假设下的测试不能证明多进程/多副本安全；扩容前先设计世界归属和事件调度，不直接增加 worker 或套 K8s。
 
-- 引擎初始化失败：WebSocket 发送 `error` 后关闭连接。
-- 模型调用失败：`EngineCallbacks.on_error` 转为 `error` 事件。
-- 工具失败：进程内 handler 抛出的异常转为模型可读的错误结果，单个工具失败不中断回合。
-- 未捕获的回合异常：WebSocket 发送 `error` 后仍发送 `done`，前端不会永久锁住输入。
-- 活动回合重复提交：在创建生命周期前返回 `turn_rejected`，不会排队或覆盖事件归属。
-- 工具轮超限：LangGraph 进入 finalize，避免无限工具循环。
-- Electron 页面加载失败：主进程显示错误窗口。
-- 桌面后端启动失败：启动脚本输出/记录后端末尾日志。
+## 9. 扩展方式
 
-`src/app/logger.py` 负责游戏、工具、摘要、模型调用和错误日志。每次模型调用记录职责节点、模型名、首 token 延迟、总耗时、结束原因与工具数量；桌面壳日志带 `[main]` 前缀。日志出口统一挂 `RedactingFilter`（文件与 stderr、以及 uvicorn/httpx/sqlalchemy 等第三方 logger）：消息、格式化参数、嵌套载荷与异常堆栈里的 Key/Authorization/Cookie/连接凭证按形状替换为 `***`，错误类别、状态码与请求 ID 保留。server.py 直接写 stderr 的异常打印自行调用 `redact()`；未覆盖的出口（OS core dump、第三方库绕过 logging 的写文件）不在本模块控制范围内。
+先定义用户行为、运行模式、效果所有者、权限、事务及恢复，再改 schema/handler/提示词目录/前端 builder，并加正常与拒绝对偶。新增迁移同时核对打包接管表集；新增事件同时核对外层白名单、实时投影与快照恢复。
 
-### 10.1 回合性能
-
-`TurnPerformance` 记录准备、模型、工具、实体同步、模型审计和数据库提交阶段；指标通过
-`turn_performance` 事件发送并保存在回合 diagnostics，字段契约见 [`API.md`](API.md)。当前性能边界：
-
-- 模型工具在服务进程内执行，不为每次调用创建 Python 子进程；每个 `GameEngine` 复用一个模型客户端
-  及 HTTP 连接池。
-- `DatabaseWorldStore.turn_cache()` 在世界锁内复用读取、缓冲 mutation，并由 TurnJournal 按起始
-  revision 一次事务提交；自动存档和回合日志复用同一不可变 Snapshot。
-- `TurnMutationLedger` 让已确定落账的变化跳过冗余模型审计；纯叙事不确定性仍可保守回退审计。
-- 明确移动、调查、检定、发现和战斗确认先走确定性 `ActionResolution`，模型只叙述已经结算的结果。
-- 首个 `narrative_chunk` 立即发送；后续文本默认在 `TRPG_STREAM_BATCH_MS=25` 的窗口内合并，事件边界
-  不跨批。设置为 `0` 可关闭，允许范围为 0–100ms。
-
-本地无模型、临时数据库基准使用 `venv/bin/python tools/benchmark_turn_performance.py 100`。2026-07-22
-同机参考值为：进程内 `2d6+1` 平均约 0.009ms，普通 SQLite 世界读取约 0.618ms，turn cache 读取
-约 0.125ms；这些数字只用于同机版本对比，不是其他硬件的承诺。隔离回合对照中，声明式预结算曾把
-命中发现规则的动作从约 6 次模型请求降到 1 次，模型首 token 延迟仍是主要等待来源。
-
-### 10.2 设计依据
-
-架构优先使用确定工作流和单一事实来源，只把开放叙事判断交给模型。主要参考包括：
-
-- [Anthropic：Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) 与
-  [ReAct](https://arxiv.org/abs/2210.03629)：区分可预测工作流、开放判断和环境行动。
-- [LangGraph 幂等执行说明](https://docs.langchain.com/oss/python/langgraph/functional-api#idempotency) 与
-  [AWS Transactional Outbox](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html)：
-  副作用必须处于可识别、可恢复且幂等的边界。
-- [AG-UI 事件协议](https://docs.ag-ui.com/concepts/events)：事件使用稳定 ID、有序序列和明确生命周期。
-- [SillyTavern World Info](https://docs.sillytavern.app/usage/core-concepts/worldinfo/)：借鉴有预算的动态知识注入，
-  本项目另加场景、NPC、线索、flag 门槛与不含正文的命中 trace。
-- [Ink](https://github.com/inkle/ink/blob/master/Documentation/RunningYourInk.md) 与
-  [Yarn Spinner](https://github.com/YarnSpinnerTool/YSDocs/blob/main/docs/yarn-spinner-for-unity/components/dialogue-runner.md)：
-  叙事文本、运行时命令和变量状态分层处理。
-
-## 11. 并发边界
-
-- `/ws` 是单机兼容入口；同一世界的多个 `/ws` 连接不构成多人房间。
-- `/ws/room` 是权威多人入口。一个应用进程内，同一 `world_id` 只存在一个共享引擎；行动按当前
-  行动者和房间锁串行化，`room_actions` 的唯一约束保证进程重启后的 `action_id` 幂等。
-- `RoomEventHub` 在发送前过滤 `public`、`player:<user_id>`、`owner` 与 `server_only`，私人决定和
-  玩家笔记不会先广播再靠前端隐藏；完整 `character_state` 同样按当前调查员控制者定向投递。
-- 第一版只允许一个 Uvicorn worker。多 worker 或多 VM 尚未实现跨进程房间租约、粘性路由和事件
-  总线，直接横向扩容会破坏“一世界一引擎”约束。
-- 不同世界由数据库外键、世界行锁、独立 `GameRoom` 和独立事件缓冲共同隔离。
-
-## 12. 扩展方式
-
-### 新增工具
-
-1. 在 `src/ai/tools/registry.py` 添加 Function Calling schema。
-2. 用 `@TOOL_RUNTIME.handler(...)` 注册进程内 handler；`execute_function()` 经注册表分发。
-3. 如需即时反馈，将名称加入 `COMPLEX_FUNCTIONS`；该集合不触发模型切换。
-4. 如有前端副作用，在 `agent_graph._handle_tool_side_effects()` 或 EngineCallbacks 中发事件。
-5. 更新 `docs/API.md`（如果协议变化）及相关 Skill。
-
-### 新增服务端事件
-
-1. 在 `EngineCallbacks` 增加回调或从 `server.py` 直接发送。
-2. 在 `frontend/src/ws.ts` 增加事件分发。
-3. 把 payload 字段和事件顺序写入 `docs/API.md`。
-
-### 新增模组
-
-1. 从 `examples/module-template/` 复制作者工程。
-2. 编辑 `manifest.json`、`module.json`、`keeper.md` 与可选素材目录。
-3. 运行 `tools/module_packager.py compile` 查看诊断，再运行 `pack`；不能手写编译产物。
-4. 从开始界面导入，验证玩家预览、开场、读档隔离和图片发放。
-5. 已发布实体 ID 保持稳定；不兼容内容变更提升模组主版本。
-
-### 模组编译器契约
-
-`src/modules/module_compiler.py` 是游戏安装器、HTTP 预览和 CLI 共同使用的唯一权威编译入口。输入为
-`manifest.json + module.json + keeper.md`（`lorebook.json` 为可选校验输入），输出
-`CompilationResult`：世界模板 `world_state`、守秘人提示 `keeper_prompt`、`diagnostics[]` 和
-`trace[]`。`diagnostics` 分 `error`/`warning`/`advice` 三级，带稳定 `code`、`phase`、作者态字段
-`path` 和 `message`，只有 `error` 阻止安装；`trace` 记录 `source_path -> output_path` 的转换来源，
-供编辑器解释运行时值的出处。编译器本身不读写文件、不安装模组、不创建世界：包路径、素材
-存在性、checksum 和 ZIP 安全由 `module_registry` 在编译前检查，落盘只发生在注册表安装或 CLI
-显式指定 `--output` 时。作者侧的诊断与校验规则见 `docs/MODULE_FORMAT.md` 的「校验与诊断」一章。
-
-## 13. 安全边界
-
-- 服务端已提供 Argon2id 账号、可撤销 Session 和世界成员权限。桌面模式默认允许匿名游戏；公网部署必须设置 `TRPG_REQUIRE_AUTH=1`、通过 TLS 反向代理访问，并关闭或按需开放注册。
-- `.env.json` 含 API Key，禁止打包和提交。
-- 模型请求使用服务端签发、绑定当前 world/turn 的精确工具目录；结构化调用与 DSML 都必须匹配该目录。
-  `read_file`、`state_get/state_set`、`get_npc_secret`、私密记忆和展示类工具不在模型 catalog 中；受信引擎的
-  兼容读取仅可使用固定 manifest resource/path allowlist。
-- `.trpgmod` 必须经过跨平台路径、符号链接、文件类型、体积、Schema、引擎版本、引用和 checksum 检查后才能安装。
-- 第三方 `custom_skills` 会改变模型行为，导入预览必须显示信任警告。
-- 不要把模组 secret 直接发送到前端。人物线索只使用公开 name、visible tags 与已发放素材。
-- 模型输出属于不可信输入。所有玩家可见文本必须先经过流式协议防火墙；不得在 WebSocket、错误消息或日志中回显被隔离的工具协议及参数。
+跨模块任务须给出唯一负责人、文件边界、冻结 SHA、fixtures、验收与交接对象；流程见[开发与协作](DEVELOPMENT.md)。运维与发布授权见[运维](OPERATIONS.md)。架构检查通过仅证明已有静态门禁通过，不代替完整审计。

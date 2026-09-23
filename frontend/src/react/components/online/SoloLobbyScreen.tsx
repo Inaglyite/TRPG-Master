@@ -38,6 +38,7 @@ export function SoloLobbyScreen() {
   const modulesStatus = useOnlineStore((state) => state.modulesStatus);
   const createBusy = useOnlineStore((state) => state.createBusy);
   const createError = useOnlineStore((state) => state.createError);
+  const authBusy = useOnlineStore((state) => state.authBusy);
   const setMode = useAppStore((state) => state.setMode);
 
   const [moduleId, setModuleId] = useState("");
@@ -116,9 +117,10 @@ export function SoloLobbyScreen() {
           <button
             type="button"
             className="account-logout"
+            disabled={authBusy}
             onClick={() => void logout()}
           >
-            退出登录
+            {authBusy ? "正在退出…" : "退出登录"}
           </button>
         </div>
       </header>

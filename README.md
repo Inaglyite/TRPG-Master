@@ -1,8 +1,8 @@
-# TRPG Game
+# TRPG Master
 
-一个由 AI 担任守秘人的中文 TRPG 游戏。模型负责叙事与理解玩家意图，d100 检定、战斗、伤害、SAN、线索、世界状态和存档由确定性的 Python 规则引擎结算。
+中文跑团平台：玩家提交行动，守秘人决定如何主持，服务端负责权限、检定和状态落账。守秘人可以是人类，也可以是通过工具工作的 Agent。
 
-支持本地 Electron 单机、浏览器云端单人和 2–4 人联机；仓库内置「疯狂宅邸」与「猩红文档」两个可游玩模组。
+当前仓库同时保留 legacy AI 回合模式和实验性的 structured_v1 平台模式。**实验分支能力不代表正式环境已上线，Agent 真实模型验收也不能由人类主持测试替代。** 当前确认状态见[项目状态](docs/STATUS.md)。
 
 <p align="center">
   <img src="docs/screenshots/menu.png" alt="模组选择" width="48%"/>
@@ -11,27 +11,24 @@
   <img src="docs/screenshots/character-panel.png" alt="调查员面板" width="48%"/>
 </p>
 
-## 核心能力
+截图用于展示界面，不作为当前版本验收证据。
 
-- **模型叙事，代码裁决**：模型不能自行编造骰值、伤害、SAN 或世界状态；关键结果由服务端工具提交。
-- **行动预演与自然转场**：自由输入和推荐选项先经过确定性预检，在真正移动前给出 NPC 劝告、风险提示和可撤回机会。
-- **服务端权威战斗**：先攻、对抗检定、伤害、弹药和防御选择由状态机处理；不可逆的高风险行动需要玩家确认。
-- **场景、NPC 与线索闭环**：模组可以声明发现规则、失败保底、危机、时钟和结局条件，避免调查因一次失败永久卡死。
-- **Lorebook 与 Skill**：按当前场景、权威状态和规则集确定性注入相关材料；模型不能读取任意项目文件或越权调用内部工具。
-- **存档与时间线**：世界、存档位、不可变快照和回合日志持久化；支持从历史决策点创建分支并恢复未完成回合。
-- **模组工具链**：`.trpgmod` 使用 JSON、Markdown 和素材文件，支持 Schema 校验、编译诊断、版本并存及浏览器模组工坊。
-- **桌面与云端**：Electron 保留完整单机体验；云端提供账号、可撤销 Session、房间权限、私密事件过滤和 PostgreSQL 持久化。
+## 能做什么
+
+- 本地 Electron、浏览器云端单人和多人房间；内置「疯狂宅邸」「猩红文档」模组。
+- 结构化平台：出示线索、使用道具、请求移动与检定；人类/辅助/Agent 主持共用命令和权限边界。
+- 正常叙事中的过渡与等待：记录交互线程，允许玩家追问或改意；待办本身不授权移动。
+- 角色记忆与主持查询：按身份和当前上下文提供材料；它与 legacy 的影子记忆机制不同。
+- 世界、素材、存档与分支；legacy 从历史回合分叉，结构化单人从当前已提交版本分叉。
+- 模组包、Schema 校验、编译诊断和素材工具链。
+
+两种模式的规则和上下文能力并非完全等价。例如 legacy 的战斗、发现规则、Lorebook/Skill 注入不能因平台模式存在就视为已自动迁入。详细边界见[架构](docs/ARCHITECTURE.md)。
 
 ## 快速开始
 
-### 环境要求
+开发基线：Python 3.12、Node.js 22；本地 SQLite，云端部署配置见运维文档。
 
-- Python 3.12+
-- Node.js 20+
-- 本地游玩需要 OpenAI 兼容接口的 API Key；仅加入云端游戏不需要个人 Key
-- 云端部署使用 PostgreSQL；本地单机默认使用 SQLite
-
-### Linux 一键启动
+### Linux 桌面
 
 ```bash
 git clone https://github.com/Inaglyite/TRPG-Master.git
@@ -39,168 +36,45 @@ cd TRPG-Master
 bash start_desktop.sh
 ```
 
-脚本会在首次需要本地后端时创建 `venv`、安装 Python 依赖、迁移 SQLite，并自动安装与构建前端。只选择云端模式时不会创建本地数据库或安装后端依赖。
-
 ### Windows 构建
-
-在安装 Python 3.12+、Node.js LTS 和 Git 后，用 PowerShell 构建安装版与便携版：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1 -UseChinaMirrors
 ```
 
-输出位于 `frontend/release/`，API Key 和本地运行数据不会进入安装包。
+构建产物位于 `frontend/release/`。本地配置和运行数据不要纳入安装包或版本库。
 
-### 手动安装（开发者）
+### 模型与账号
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+人类主持的结构化游戏无需模型 Key；Agent 主持需要有效模型配置。云端使用 BYOK 授权与绑定，不能假定服务器提供免费额度，玩家加入房间也不等于获得主持密钥访问权。
 
-cd frontend
-npm ci
-npm run build
-cd ..
-```
-
-交互式配置模型，配置会写入已被 Git 忽略的 `.env.json`：
+通过界面配置模型；本地命令行配置入口为：
 
 ```bash
 python3 start.py --config
 ```
 
-最小配置示例：
+`.env.json`、API Key、数据库与真实存档不提交。手动安装、启动和测试步骤见[开发说明](docs/DEVELOPMENT.md)。
 
-```json
-{
-  "api_key": "your-api-key",
-  "base_url": "https://api.deepseek.com",
-  "flash_model": "deepseek-flash",
-  "pro_model": "deepseek-v4-pro"
-}
-```
+## 文档入口
 
-环境变量会覆盖文件配置。常用项包括 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、
-`TRPG_FLASH_MODEL`、`TRPG_PRO_MODEL`、`TRPG_DATABASE_URL`、
-`TRPG_REQUIRE_AUTH`、`TRPG_ALLOWED_ORIGINS` 和 `TRPG_LLM_MAX_CONCURRENCY`。
-部署所需的完整配置见[部署与恢复](docs/DEPLOYMENT.md)。
+日常只需从下面几份文档开始，避免把历史交付报告当作现行规格。
 
-### 启动桌面版
+| 文档 | 用途 |
+| --- | --- |
+| [架构](docs/ARCHITECTURE.md) | 模块边界、两条运行路径、权威状态、上下文与记忆 |
+| [协议](docs/PROTOCOL.md) | 请求/命令/事件、权限、恢复语义与 Schema 正本 |
+| [开发](docs/DEVELOPMENT.md) | 环境、门禁、协作分工、文档维护规则 |
+| [运维](docs/OPERATIONS.md) | 环境隔离、BYOK、备份、发布与回滚 |
+| [模组](docs/MODULE_FORMAT.md) | 模组作者入口、格式与迁移边界 |
+| [状态](docs/STATUS.md) | 已验收范围、发布门槛、未完成项与限制 |
 
-```bash
-bash start_desktop.sh
-```
+完整字段表、旧引擎详解和模块索引在[详细参考](docs/reference/README.md)。
+过程计划、事故调查与交付报告在[历史归档](docs/archive/README.md)，证据及截图保留原路径。
 
-启动后选择：
+## 协作与发布
 
-- **单机游戏**：按需启动本地后端，自动应用数据库迁移；首次数据库化启动会导入旧版 `worlds/` 数据。
-- **多人游戏**：直接连接云端，不启动本地后端，也不读取本机 API Key。
-
-终端版可直接运行：
-
-```bash
-python3 start.py --setup
-python3 start.py --config
-python3 start.py
-```
-
-### 前端开发
-
-```bash
-# 终端 1
-source venv/bin/activate
-python3 server.py
-
-# 终端 2
-cd frontend && npm run dev
-
-# 终端 3（可选）
-cd frontend && npm run electron:dev
-```
-
-## 云端与多人游戏
-
-官方入口为 [trpggame.xyz](https://trpggame.xyz)。登录后可以：
-
-1. 在「我的冒险」创建或继续私密云端单人世界；
-2. 创建多人房间并生成邀请码，或使用邀请码加入已有房间；
-3. 选择未被占用的调查员，准备后由房主开局；
-4. 按服务端给出的行动权提交操作，断线后重新进入同一房间即可恢复；
-5. 使用快速存档、手动存档和时间线分支管理调查进度。
-
-云端模型凭据由服务器维护者保管，玩家浏览器和 Electron 客户端不会收到 API Key。桌面单机默认关闭账号门禁，不应直接暴露到公网。
-
-## 模组开发
-
-从示例工程开始：
-
-```bash
-cp -r examples/module-template /tmp/my-trpg-module
-venv/bin/python tools/module_packager.py compile /tmp/my-trpg-module
-venv/bin/python tools/module_packager.py pack /tmp/my-trpg-module /tmp/my-module.trpgmod
-venv/bin/python tools/module_packager.py validate /tmp/my-module.trpgmod
-```
-
-模组编译器会验证稳定 ID、场景与 NPC 引用、发现规则、失败保底、危机和结局契约、素材路径及 ZIP 安全。完整字段见[模组格式](docs/MODULE_FORMAT.md)。
-
-## 项目结构
-
-```text
-trpg-master/
-├── server.py        # FastAPI HTTP / WebSocket 组合入口
-├── src/
-│   ├── app/         # 应用编排、GameEngine、配置与运行时
-│   ├── gameplay/    # 不依赖传输层的确定性玩法规则
-│   ├── ai/          # 模型、上下文、Skill 与工具执行边界
-│   ├── storage/     # 数据库、世界状态、存档与时间线
-│   ├── modules/     # 模组格式、编译、诊断与注册表
-│   ├── auth/        # 账号、Session 与权限
-│   ├── multiplayer/ # 房间、多人协议与协作状态
-│   └── web/         # HTTP 适配器与前端安全载荷
-├── tools/           # 模组、账号、备份与验收工具
-├── skills/          # 受控的守秘人规则与能力目录
-├── rules/           # 结构化规则数据
-├── mod/             # 内置模组
-├── schemas/         # .trpgmod JSON Schema
-├── examples/        # 模组工程模板
-├── frontend/        # React、Vite 与 Electron
-├── editor/dist/     # 随服务发布的模组工坊静态制品
-└── docs/            # 长期维护的技术契约
-```
-
-## 文档
-
-- [架构](docs/ARCHITECTURE.md)：进程、回合工作流、上下文、数据所有权、安全与扩展边界。
-- [接口](docs/API.md)：HTTP、WebSocket 消息、事件顺序和错误协议。
-- [模组格式](docs/MODULE_FORMAT.md)：`.trpgmod` 作者契约与编译诊断。
-- [部署与恢复](docs/DEPLOYMENT.md)：PostgreSQL、TLS、备份、监控和发布流程。
-- [路线图](docs/ROADMAP.md)：CoC 规则完整性、复杂战斗、追逐、地图和多人世界演进。
-
-项目只保留上述长期契约；个人 Agent 指令、验收 Skill、临时设计稿和过程记录均不进入版本控制。
-
-## 开发校验
-
-```bash
-venv/bin/python -m pytest -q
-venv/bin/python -m ruff check src server.py tools tests
-venv/bin/python -m compileall -q src tools server.py tests
-
-cd frontend
-npm test
-npm run format:check
-npm run build
-```
-
-涉及接口、状态结构或模组格式的变更，必须同步更新对应契约文档。真实模型全流程验收会产生 API 费用，仅在发布候选版本按需执行，不属于普通单元测试。
-
-## 当前边界
-
-- 多人目标为单房间 2–4 人，当前使用单个 Uvicorn worker；尚未实现跨进程房间协调。
-- 结构化记忆目前是 shadow-only 内部边界，不参与正常回合、模型工具、提示词、HTTP/WS 或玩家 UI。
-- 地图、复杂追逐、完整 CoC 长期角色成长和自由分头行动仍在路线图中。
-- Linux 当前从源码运行 Electron；Windows 安装包与便携版通过 `packaging/build_windows.ps1` 构建。
-
-## 许可证
-
-代码使用 [MIT License](LICENSE)。内置模组的文本与素材仅供游玩和研究；再分发前请检查各模组 `manifest.json` 中的许可字段。
+- 日常测试只在本地；预发布优先使用 Pi staging。
+- 正式环境不是测试环境。生产发布必须明确授权，按运维流程执行。
+- 修改协议先同步 Schema/fixtures，再由前后端共同验收；测试通过要注明版本、环境和跳过项。
+- `AGENTS.md` 是仓库协作约束，文档整理不改变其权限规则。

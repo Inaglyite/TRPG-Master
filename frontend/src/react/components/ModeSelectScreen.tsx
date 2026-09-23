@@ -8,6 +8,26 @@ import {
 import { desktopBridge } from "../../desktop";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
+import gmUrl from "../../assets/ui/gm.webp";
+import gmDiceUrl from "../../assets/ui/gm_dice.webp";
+import gmLittleUrl from "../../assets/ui/gm_little.webp";
+import gmThinkingUrl from "../../assets/ui/gm_thinking.webp";
+
+type ModePreview = "local" | "solo" | "online";
+
+/** 守秘人迎宾：默认 Q 版迎宾，悬停/聚焦各模式时换姿态（本地资产，非模组内容）。 */
+const COMPANION_POSE: Record<ModePreview | "default", string> = {
+  default: gmLittleUrl,
+  local: gmUrl,
+  solo: gmThinkingUrl,
+  online: gmDiceUrl,
+};
+const COMPANION_LINE: Record<ModePreview | "default", string> = {
+  default: "请选择你的模式",
+  local: "在你的本地进行游戏，不进行云端存档的上传与登录",
+  solo: "登录云端账号，你的冒险保存在云端，换一台设备也能继续。",
+  online: "创建或加入房间，和朋友一起调查同一份档案。",
+};
 
 /**
  * 启动后的第一个界面：本地单人（桌面版本地后端）、云端单人（账号 + 私密世界）
@@ -28,6 +48,16 @@ export function ModeSelectScreen() {
     getCloudOrigin() ?? OFFICIAL_CLOUD_ORIGIN,
   );
   const [originConfigOpen, setOriginConfigOpen] = useState(false);
+  // 守秘人迎宾：悬停/聚焦模式卡时切换姿态与气泡解说（触屏点按直接进入，
+  // 不影响既有交互；装饰性内容整体 aria-hidden）。
+  const [preview, setPreview] = useState<ModePreview | null>(null);
+  const previewOf = (mode: ModePreview) => ({
+    onMouseEnter: () => setPreview(mode),
+    onMouseLeave: () => setPreview(null),
+    onFocus: () => setPreview(mode),
+    onBlur: () => setPreview(null),
+  });
+  const companionKey = preview ?? "default";
 
   const bridge = desktopBridge();
 
@@ -114,6 +144,7 @@ export function ModeSelectScreen() {
             disabled={busyMode !== null || !bridge}
             title={bridge ? undefined : "本地单人请使用桌面版"}
             onClick={() => void chooseLocal()}
+            {...previewOf("local")}
           >
             <span className="start-art-label mode-card-title">
               {busyMode === "local" ? "正在启动…" : "本地单人"}
@@ -129,6 +160,7 @@ export function ModeSelectScreen() {
             className="start-art-button mode-card"
             disabled={busyMode !== null}
             onClick={() => void chooseSolo()}
+            {...previewOf("solo")}
           >
             <span className="start-art-label mode-card-title">
               {busyMode === "solo" ? "正在连接…" : "云端单人"}
@@ -142,6 +174,7 @@ export function ModeSelectScreen() {
             className="start-art-button mode-card"
             disabled={busyMode !== null}
             onClick={() => void chooseOnline()}
+            {...previewOf("online")}
           >
             <span className="start-art-label mode-card-title">
               {busyMode === "online" ? "正在连接…" : "多人游戏"}
@@ -177,6 +210,21 @@ export function ModeSelectScreen() {
             {error}
           </p>
         )}
+      </div>
+      {/* 守秘人迎宾区（≥1024px 显示）：气泡解说随悬停/聚焦模式切换，
+          姿态图随之更换；信息在模式卡副标题里已有，整体装饰性 aria-hidden。 */}
+      <div className="mode-select-companion" aria-hidden="true">
+        <div className="mode-companion-bubble">
+          <span className="mode-companion-text" key={companionKey}>
+            {COMPANION_LINE[companionKey]}
+          </span>
+        </div>
+        <img
+          className="gm-mascot mode-companion-mascot"
+          key={companionKey}
+          src={COMPANION_POSE[companionKey]}
+          alt=""
+        />
       </div>
     </div>
   );

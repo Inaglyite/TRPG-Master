@@ -115,8 +115,12 @@
   border-style: solid;
   border-width: 26px 32px;
   border-image: var(--ui-frame-card) 120 130 / 26px 32px / 0 stretch;
-  background: color-mix(in srgb, var(--bg) 90%, black);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.62);
+  /* 框图边带透明羽化，底色必须裁到 padding 区：否则按钮盒比框的可视边大，
+     会从框的透明缝里「露出来」（刷白即可见）。padding-box 同时盖掉
+     start-art-button 的渐变底。 */
+  background: color-mix(in srgb, var(--bg) 90%, black) padding-box;
+  /* 阴影也要贴着框的实际轮廓（alpha）而不是矩形盒：drop-shadow 跟随框图形状 */
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
 }
 /* 雕花框自带装饰，去掉 .start-art-button 的 ◆ 点缀与描金边 */
 .mode-card::before,
@@ -126,6 +130,37 @@
 
 .mode-card-title {
   font-size: 20px;
+}
+
+/* mode-card 自带雕花金框，通用 start-art-button 基类还叠了 inset 1px 金线 +
+   内阴影 + 矩形外影（start-screen.css 加载更晚，基类三影一直压在 mode-card
+   自己的覆盖上）——金线在框图透明角/缝里显成「第二个金框」，hover 时内阴影
+   突然消失又让卡片显得「变透明」。这里用双类选择器（比特异度压过基类）
+   彻底关掉矩形盒阴影。阴影/光晕一律走 filter drop-shadow：它按框图实际 alpha
+   轮廓生成、只出现在卡片外侧；矩形 box-shadow 会透过框图边缘的透明缝漏进
+   内侧（「光晕在里面」的根因），不要再加回来。 */
+.start-art-button.mode-card {
+  box-shadow: none;
+  transition:
+    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.18s ease;
+}
+.start-art-button.mode-card:hover:not(:disabled),
+.start-art-button.mode-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--gold);
+  box-shadow: none;
+  /* 外侧金色光晕：0 偏移 drop-shadow 沿框图雕花轮廓向外晕染，
+     卡片内部（alpha 不透明区）不会渗进光 */
+  filter:
+    brightness(1.08)
+    drop-shadow(0 12px 18px rgba(0, 0, 0, 0.6))
+    drop-shadow(0 0 16px color-mix(in srgb, var(--gold) 40%, transparent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-art-button.mode-card {
+    transition: none;
+  }
 }
 
 .mode-card-desc {
@@ -162,6 +197,76 @@
 
 .mode-select-box .online-notice {
   margin-top: var(--sp-3);
+}
+
+/* 守秘人迎宾区：绝对定位挂在居中卡列的右侧（卡列始终保持视口居中，
+   不被迎宾区顶偏）；空间不足时整体隐藏——模式卡副标题已承载同样信息。 */
+.mode-select-companion {
+  display: none;
+}
+@media (min-width: 1140px) {
+  .mode-select-companion {
+    position: absolute;
+    top: 50%;
+    /* 卡列半宽 240 + 间距 20：贴着卡列右缘，宽屏下也保持伴随关系 */
+    left: calc(50% + 260px);
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 300px;
+  }
+}
+.mode-companion-bubble {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* 两行文案占位：长短文案切换时气泡不跳高 */
+  min-height: 54px;
+  max-width: 280px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg2) 92%, black);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+/* 尾巴朝下指向守秘人 */
+.mode-companion-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+  border-right: 1px solid var(--border-bright);
+  border-bottom: 1px solid var(--border-bright);
+}
+/* 文案原地 swap：key 重挂载触发（auth-label-in 与提交按钮文案同一手法） */
+.mode-companion-text {
+  display: inline-block;
+  animation: auth-label-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* 姿态切换：pop 出场后接常驻轻浮动（bob/pop 关键帧在 messages.css） */
+.mode-companion-mascot {
+  width: 200px;
+  height: auto;
+  animation:
+    gm-mascot-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both,
+    gm-mascot-bob 2.8s ease-in-out 0.28s infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode-companion-text,
+  .mode-companion-mascot {
+    animation: none;
+  }
 }
 
 /* 页头 */
@@ -211,8 +316,11 @@
 
 /* 表单 */
 .online-tabs {
+  /* --tab-gap：指示条位移需要知道实际 gap（auth 页覆写为 sp-3） */
+  --tab-gap: var(--sp-2);
+  position: relative;
   display: flex;
-  gap: var(--sp-2);
+  gap: var(--tab-gap);
   border-bottom: 1px solid var(--border);
 }
 
@@ -220,6 +328,7 @@
   flex: 1;
   padding: var(--sp-2) 0;
   border: 0;
+  /* 透明的底线只做占位，金条由 .online-tab-indicator 滑动接管 */
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-dim);
@@ -227,17 +336,79 @@
   font-size: 14px;
   letter-spacing: 0.22em;
   cursor: pointer;
-  transition:
-    color 0.16s ease,
-    border-color 0.16s ease;
+  transition: color 0.16s ease;
 }
 
 .online-tab--active,
 .online-tab:hover,
 .online-tab:focus-visible {
   color: var(--gold-bright);
-  border-bottom-color: var(--gold);
   outline: none;
+}
+
+/* 活动 tab 指示条：跟随 tab 左右滑动（方向 = tab 空间排布），
+   而不是新旧位置各自淡入淡出。 */
+.online-tab-indicator {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: calc((100% - var(--tab-gap)) / 2);
+  height: 2px;
+  background: var(--gold);
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.online-tab-indicator[data-tab="register"] {
+  /* 自身宽度 = 单个 tab 宽，再补一个 gap 到达右半区 */
+  transform: translateX(calc(100% + var(--tab-gap)));
+}
+
+/* 确认密码字段展开/收起：grid-rows 补间（transition-recipes: card resize，
+   与 investigator-panel 的 inv-collapse 同构）。常挂载才能补间；关闭时负
+   margin 抵消 .online-form 的 flex gap，不留双倍间距，visibility 延迟翻转
+   把内容移出焦点序列与无障碍树（输入框同时 disabled，双保险）。 */
+.online-field-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition:
+    grid-template-rows 0.22s cubic-bezier(0.25, 1, 0.5, 1),
+    margin-top 0.22s cubic-bezier(0.25, 1, 0.5, 1),
+    visibility 0s 0s;
+}
+.online-field-collapse.closed {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  margin-top: calc(-1 * var(--sp-4));
+  transition:
+    grid-template-rows 0.22s cubic-bezier(0.25, 1, 0.5, 1),
+    margin-top 0.22s cubic-bezier(0.25, 1, 0.5, 1),
+    visibility 0s 0.22s;
+}
+.online-field-collapse-clip {
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity 0.16s ease;
+}
+.online-field-collapse.closed .online-field-collapse-clip {
+  opacity: 0;
+}
+
+/* 提交按钮文案原地 swap：React key 变化重挂载触发，只动 transform/opacity */
+@keyframes auth-label-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.online-submit-label {
+  display: inline-block;
+  animation: auth-label-in 0.15s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .online-form {
@@ -466,6 +637,66 @@
 @media (prefers-reduced-motion: reduce) {
   .online-start-view,
   .online-overlay.online-closing {
+    animation: none;
+  }
+}
+
+/* 认证 ↔ 大厅/我的冒险 换场（登录成功、退出登录、会话过期共用）：
+   与 solo-lobby-swap 同构，只动 transform/opacity；相位由 OnlineShell 的
+   usePhaseTransition 经 data-phase 驱动。wrapper display:contents 不参与
+   overlay 的 flex 布局，动画落在内部视图根节点上。 */
+.online-view-swap {
+  display: contents;
+}
+@keyframes online-view-swap-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes online-view-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.online-view-swap[data-phase="leaving"] > * {
+  animation: online-view-swap-out 160ms ease-in forwards;
+  pointer-events: none;
+}
+.online-view-swap[data-phase="entering"] > * {
+  animation: online-view-swap-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .online-tab-indicator,
+  .online-field-collapse,
+  .online-field-collapse-clip {
+    transition: none;
+  }
+  .online-submit-label,
+  .online-view-swap[data-phase="leaving"] > *,
+  .online-view-swap[data-phase="entering"] > * {
+    animation: none;
+  }
+}
+
+/* 云端单人布景等待屏的 Q 版守秘人（bob 关键帧定义在 messages.css） */
+.gm-mascot-little {
+  width: 148px;
+  height: auto;
+  align-self: center;
+  animation: gm-mascot-bob 2.8s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gm-mascot-little {
     animation: none;
   }
 }
@@ -1490,7 +1721,8 @@
 }
 
 .online-auth-screen .online-tabs {
-  gap: var(--sp-3);
+  --tab-gap: var(--sp-3);
+  gap: var(--tab-gap);
 }
 
 .online-auth-screen .online-tab {

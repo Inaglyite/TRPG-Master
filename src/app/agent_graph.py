@@ -235,7 +235,11 @@ def _prepare_turn_inner(
             preview_world = engine.context.world_store.load()
         except Exception:
             preview_world = {}
-        action_preview = match_action_preview(action_resolution, preview_world)
+        model_transition = action_resolution.transition_kind == "model_adjudicated"
+        action_preview = (
+            None if action_resolution.adjudication_json
+            else match_action_preview(action_resolution, preview_world)
+        )
         selected_preview_option = None
         preview_material = ""
         travel_material: list[str] = []
@@ -284,7 +288,7 @@ def _prepare_turn_inner(
         discovery_skill = None if skip_agent else action_resolution.preferred_skill
         transition_prelude = (
             ""
-            if skip_agent
+            if skip_agent or model_transition
             else build_transition_prelude(
                 preview_world,
                 action_resolution,
@@ -335,7 +339,7 @@ def _prepare_turn_inner(
                 entry_world = engine.context.world_store.load()
             except Exception:
                 entry_world = {}
-            entry_text = build_scene_entry_beat(entry_world, transition_id)
+            entry_text = "" if model_transition else build_scene_entry_beat(entry_world, transition_id)
             if entry_text:
                 if preview_material:
                     travel_material.append(entry_text)
@@ -429,6 +433,16 @@ def _prepare_turn_inner(
                 "这些节拍已经成立并展示给玩家：不得改写或否认其中的既成事实"
                 "（谁在场、说没说过、联系没联系、去过哪里），不要重复赶路、"
                 "抵达或揭示动作，只从节拍之后继续叙述。"
+            )
+        if model_transition and not skip_agent:
+            content += (
+                "\n\n[模型裁决的移动已结算]\n"
+                f"出发场景：{action_resolution.origin_scene_id}；抵达场景：{transition_id}。"
+                "本轮尚未向玩家展示出发或抵达。请结合玩家原话与最近对话交代地点转换，"
+                "让玩家明白目的地从何得知、如何从原场景抵达；不要直接从新地点的人物讲话起笔。"
+                "不要套用模组 action_routes/action_advisories/entry_beat 的固定台词，"
+                "不要声称玩家说过原话之外的内容，也不要虚构电话、许可或接待安排。"
+                "本轮只抵达，尚未进行验尸、搜查或取得线索。"
             )
         if authority:
             content += f"\n\n{authority}"

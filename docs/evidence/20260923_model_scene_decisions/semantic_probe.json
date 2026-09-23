@@ -1,0 +1,108 @@
+[
+  {
+    "case": "doctors_office",
+    "input": "请他带我去办公室看看笔记",
+    "history": "惠特克罗夫特医生说：笔记在我的办公室抽屉里。我的办公室就在停尸房楼上。",
+    "origin": "miskatonic_medical",
+    "destination": null,
+    "decision": {
+      "intent": "interact",
+      "input_quote": "请他带我去办公室看看笔记",
+      "approach": "玩家请惠特克罗夫特医生带路，前往他本人位于停尸房楼上的办公室查看莱特的笔记。医生此前已主动说明笔记在其办公室抽屉里，因此这是同场景内的走位与社交请求，不涉及跨场景移动，也无需检定。",
+      "target_npc_id": "",
+      "destination_scene_id": "",
+      "destination_reason": "",
+      "discovery_refs": [],
+      "check": null,
+      "time_minutes": 5,
+      "success_description": "",
+      "failure_description": "",
+      "on_success": [],
+      "on_failure": [],
+      "npc_direction": "惠特克罗夫特医生（guilty，浮肿的眼睛、海象似的胡子）犹豫片刻后答应带路，领玩家沿楼梯上到他位于停尸房楼上的办公室。他一边走一边低声解释：莱特的笔记是他私下留下的，本不该由他保管。到了办公室，他打开抽屉取出笔记，但手停在半空，显得不安——他可能提出条件（比如要求玩家不要把他牵扯进去），或试探玩家究竟知道多少。不要替玩家决定是否接受条件，也不要直接交出笔记内容；把笔记摆在可被查看的位置，等玩家下一步动作。",
+      "sanity_source_id": "",
+      "sanity_severity": ""
+    },
+    "passed": true
+  },
+  {
+    "case": "find_doctor",
+    "input": "我回去找惠特克罗夫特问问",
+    "history": "惠特克罗夫特医生仍在医学院，莱特办公室没有其他人在。",
+    "origin": "wright_office",
+    "destination": "miskatonic_medical",
+    "decision": {
+      "intent": "move",
+      "input_quote": "我回去找惠特克罗夫特问问",
+      "approach": "玩家决定离开莱特的办公室，前往密斯卡托尼克大学医学院找约翰·惠特克罗夫特医生问话。惠特克罗夫特已知仍在医学院，本轮只结算从办公室到医学院的行程，抵达后不立即展开询问。",
+      "target_npc_id": "",
+      "destination_scene_id": "miskatonic_medical",
+      "destination_reason": "玩家明确表示要回去找惠特克罗夫特医生问话，而权威状态显示惠特克罗夫特当前位于密斯卡托尼克大学医学院，因此本轮目的地为医学院，抵达后留待下一轮再展开询问。",
+      "discovery_refs": [],
+      "check": null,
+      "time_minutes": 20,
+      "success_description": "",
+      "failure_description": "",
+      "on_success": [],
+      "on_failure": [],
+      "npc_direction": "惠特克罗夫特医生仍在医学院地下的停尸房一带忙碌，尚未察觉调查员正赶来；抵达时他可能正在整理器械或记录，态度谨慎而疲惫，愿意交谈但不会主动透露莱特遗体异常的全部细节。",
+      "sanity_source_id": "",
+      "sanity_severity": ""
+    },
+    "passed": true
+  },
+  {
+    "case": "negation",
+    "input": "医学院先不去了，我留在这里问法伦",
+    "history": "遗体在医学院停尸房。",
+    "origin": "miskatonic_university",
+    "destination": null,
+    "decision": {
+      "intent": "interact",
+      "input_quote": "医学院先不去了，我留在这里问法伦",
+      "approach": "玩家放弃前往医学院，留在密斯卡托尼克大学行政楼，向在场的法伦主任当面询问还有谁参与过女巫审判文档的评估、谁接触过文档。法伦态度合作，属于无风险的信息交流，不设检定；由法伦以文雅沉着的口吻给出他愿意透露的知情人范围。",
+      "target_npc_id": "bryce_fallon",
+      "destination_scene_id": "",
+      "destination_reason": "",
+      "discovery_refs": [
+        "fallon_document_contacts:0"
+      ],
+      "check": null,
+      "time_minutes": 15,
+      "success_description": "",
+      "failure_description": "",
+      "on_success": [],
+      "on_failure": [],
+      "npc_direction": "法伦保持合作与从容，先对调查员放弃医学院表示理解，随后以行政处主任的谨慎口吻列出文档评估的经手范围：他自己、历史系的哈兰德·洛奇，以及经手过复制件的相关人；提到莱特教授生前也接触过文档。他措辞得体但会回避对自己不利的细节，不主动承认任何隐瞒，也不替调查员决定下一步。",
+      "sanity_source_id": "",
+      "sanity_severity": ""
+    },
+    "passed": true
+  },
+  {
+    "case": "hypothetical",
+    "input": "假如我去看尸体，能查出什么？先和法伦讨论，不出发",
+    "history": "遗体在医学院停尸房。",
+    "origin": "miskatonic_university",
+    "destination": null,
+    "decision": {
+      "intent": "interact",
+      "input_quote": "假如我去看尸体，能查出什么？先和法伦讨论，不出发",
+      "approach": "玩家不移动，只在行政楼二层法伦的办公室内，就\"去医学院停尸房查看莱特遗体可能得到什么\"这一假设性问题与法伦交换意见，属于无风险的日常交流，不触发检定。",
+      "target_npc_id": "bryce_fallon",
+      "destination_scene_id": "",
+      "destination_reason": "",
+      "discovery_refs": [],
+      "check": null,
+      "time_minutes": 0,
+      "success_description": "",
+      "failure_description": "",
+      "on_success": [],
+      "on_failure": [],
+      "npc_direction": "法伦态度合作但谨慎。他确认遗体锁在医学院地下停尸房冷柜中，由约翰·惠特克罗夫特医生经手；他会说明官方死因是心脏病，但尸检记录里有他本人也觉得说不通的地方（如体表无外伤却出现异常征象），因此他愿意为调查员安排探视或写一封给惠特克罗夫特的引荐便条。他不会替调查员决定是否前往，也不主动透露自己与文档评估相关的隐情；若被追问还有谁接触过文档，他会含糊其辞、以行政程序为由回避。",
+      "sanity_source_id": "",
+      "sanity_severity": ""
+    },
+    "passed": true
+  }
+]

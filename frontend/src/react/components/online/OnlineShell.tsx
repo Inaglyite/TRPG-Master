@@ -10,7 +10,8 @@ import {
 import { connectRoom, disconnectRoom } from "../../../room-ws";
 import { useOnlineStore } from "../../../state/online-store";
 import { ModelSettingsGateButton } from "../ModelSettingsPanel";
-import { useDelayedClose } from "../transitions";
+import { useDelayedClose, usePhaseTransition } from "../transitions";
+import gmLittleUrl from "../../../assets/ui/gm_little.webp";
 import { AuthScreen } from "./AuthScreen";
 import { LobbyScreen } from "./LobbyScreen";
 import { RoomScreen } from "./RoomScreen";
@@ -105,6 +106,15 @@ export function OnlineShell() {
   // 的 start-overlay 退场一致）；期间状态回退（如开局被拒）会取消退出。
   const shellOpen = !(gameSurfaceVisible && (!roomOpen || isSoloRoom));
   const shell = useDelayedClose(shellOpen, 360);
+  // 认证 ↔ 大厅/我的冒险 的换场（登录成功、退出登录、会话过期都经过这里）：
+  // 旧视图先播 leaving 再挂载新视图播 entering，room 系页面有自己的
+  // 连接/退场编排，不经过这个 swap（hallView=null 时旧厅照常播完离场）。
+  const hallView =
+    view === "auth" || view === "lobby" || view === "solo" ? view : null;
+  const hallSwap = usePhaseTransition(hallView, (item) => item ?? "none", {
+    exitMs: 160,
+    enterMs: 260,
+  });
   if (!shell.rendered) return null;
 
   return (
@@ -113,9 +123,16 @@ export function OnlineShell() {
       data-testid="online-shell"
       aria-hidden={shell.closing || undefined}
     >
-      {view === "auth" && <AuthScreen />}
-      {view === "lobby" && <LobbyScreen />}
-      {view === "solo" && <SoloLobbyScreen />}
+      {/* 认证 ↔ 大厅/我的冒险 换场（登录成功、退出登录、会话过期共用）。
+          只在落点仍是厅层视图时挂载 swap 包装：前往 room 系页面保持即时切换，
+          避免离场中的厅卡与刚挂载的房间页在 flex 布局里并排挤压 160ms。 */}
+      {hallView !== null && (
+        <div className="online-view-swap" data-phase={hallSwap.phase}>
+          {hallSwap.displayed === "auth" && <AuthScreen />}
+          {hallSwap.displayed === "lobby" && <LobbyScreen />}
+          {hallSwap.displayed === "solo" && <SoloLobbyScreen />}
+        </div>
+      )}
       {view === "room" &&
         soloRoomFlow &&
         isSoloRoom &&
@@ -127,6 +144,13 @@ export function OnlineShell() {
             className="online-start-view solo-start-screen"
             data-testid="solo-start-screen"
           >
+            {/* Q 版守秘人：布景等待屏的常驻形象 */}
+            <img
+              className="gm-mascot gm-mascot-little"
+              src={gmLittleUrl}
+              alt=""
+              aria-hidden="true"
+            />
             <div className="start-brand">
               <h1 className="online-title online-title--small">
                 正在准备你的冒险…

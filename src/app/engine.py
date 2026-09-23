@@ -1289,7 +1289,8 @@ class GameEngine:
         action_resolution = getattr(self, "_action_resolution", None)
         encounter_resolution = getattr(self, "_encounter_resolution", None)
         arrival_only = bool(action_resolution and action_resolution.is_arrival)
-        entry_beat = scene.get("entry_beat") if arrival_only else None
+        model_transition = bool(action_resolution and action_resolution.transition_kind == "model_adjudicated")
+        entry_beat = scene.get("entry_beat") if arrival_only and not model_transition else None
         if (
             not isinstance(entry_beat, dict)
             or str(entry_beat.get("npc_id") or "") not in present_npc_ids
@@ -1391,7 +1392,7 @@ class GameEngine:
             "不得为其中的线索、SAN、flag 或 NPC 揭示再次调用工具。"
             "narrative_fact_scope.closed_world_for_this_action 为 true 时，newly_confirmed_facts"
             "是本行动新发现的完整事实边界，不是扩写提纲；只能改写表达，不能增加可检验细节。"
-            "narrative_fact_scope.arrival_only 为 true 时，本轮只叙述抵达、环境与接洽在场人物；"
+            "narrative_fact_scope.arrival_only 为 true 时，本轮只叙述移动的出发衔接、旅行、抵达与接洽；"
             "玩家所述出行目的不是已经完成的调查动作。不得打开容器、展示或检查尸体、阅读文件，"
             "也不得触发 SAN、线索、NPC 秘密或相关 flag；应把明确调查动作留作抵达后的下一选择。"
             "scene_entry_beat 非空时，必须让其中 npc_id 对应的在场人物参与这次接洽；"

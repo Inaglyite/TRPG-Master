@@ -28,6 +28,12 @@ import {
   useTimelineCapabilities,
 } from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
+import gmAvatarUrl from "../../assets/ui/gm_avatar.webp";
+import gmDiceUrl from "../../assets/ui/gm_dice.webp";
+import gmThinkingUrl from "../../assets/ui/gm_thinking.webp";
+
+/** 守秘人标准形象（本地资产，非模组内容，不泄漏剧情）。 */
+const KEEPER_AVATAR = { asset_url: gmAvatarUrl, alt: "守秘人" } as const;
 
 /**
  * 流式叙述区域的长按加速：按住达到阈值后约 3 倍速播放，
@@ -95,6 +101,13 @@ function LoadingMessage({ label }: { label: string }) {
   }, []);
   return (
     <>
+      {/* 思考中的守秘人（Q 版）：伴随等待提示，轻微浮动 */}
+      <img
+        className="gm-mascot gm-mascot-thinking"
+        src={gmThinkingUrl}
+        alt=""
+        aria-hidden="true"
+      />
       <div className="typing-dots">
         <span />
         <span />
@@ -159,15 +172,24 @@ function DiceMessage({ message }: { message: ChatMessage }) {
       className={`msg dice ${settled ? "settled" : "rolling"}`}
       data-turn-id={message.turnId}
     >
-      <div className="dice-title">
-        {settled ? "命运之骰落定" : "命运之骰翻滚"}
+      <div className="dice-body">
+        <div className="dice-title">
+          {settled ? "命运之骰落定" : "命运之骰翻滚"}
+        </div>
+        <div
+          className={`dice-result${settled ? "" : " hidden"}`}
+          aria-live="polite"
+        >
+          {message.text}
+        </div>
       </div>
-      <div
-        className={`dice-result${settled ? "" : " hidden"}`}
-        aria-live="polite"
-      >
-        {message.text}
-      </div>
+      {/* 掷骰的守秘人（Q 版）：行内站在检定框右侧，翻滚时轻轻晃动 */}
+      <img
+        className={`gm-mascot gm-mascot-dice${settled ? "" : " is-rolling"}`}
+        src={gmDiceUrl}
+        alt=""
+        aria-hidden="true"
+      />
     </div>
   );
 }
@@ -176,7 +198,7 @@ function NarrationUnit({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
   return (
     <div className="chat-row chat-row-keeper">
-      <AvatarDisc name="守秘人" family="keeper" />
+      <AvatarDisc name="守秘人" family="keeper" avatar={KEEPER_AVATAR} />
       <div className="chat-speaker-column">
         <div className="chat-speaker-name keeper-name">
           守秘人<span>THE KEEPER</span>

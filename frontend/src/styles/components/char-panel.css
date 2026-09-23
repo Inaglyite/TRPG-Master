@@ -18,8 +18,13 @@
   background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
   padding: 18px;
   overflow-y: auto;
+  /* min-width 必须一起过渡：它是抗网格 auto 轨道塌陷的下限（见文件头），
+   * 若只过渡 width，展开时 min-width 瞬时跳到 340px，有效宽度
+   * max(width, min-width) 会一步到位——面板变成「忽然出现」而不是从右侧抽出。
+   * width 与 min-width 同时长同缓动同步插值，max() 全程等于插值本身。 */
   transition:
     width 0.3s ease,
+    min-width 0.3s ease,
     padding 0.3s ease;
   box-shadow: inset 4px 0 12px rgba(0, 0, 0, 0.3);
 }

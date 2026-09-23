@@ -141,6 +141,12 @@ export function AuthScreen() {
         >
           注册
         </button>
+        {/* 滑动指示条：方向与 tab 的空间排布一致（注册在右 → 右移） */}
+        <span
+          className="online-tab-indicator"
+          data-tab={tab}
+          aria-hidden="true"
+        />
       </div>
 
       <form className="online-form" onSubmit={onSubmit}>
@@ -163,18 +169,25 @@ export function AuthScreen() {
             disabled={authBusy}
           />
         </label>
-        {tab === "register" && (
-          <label className="online-field">
-            <span>确认密码</span>
-            <input
-              type="password"
-              value={confirm}
-              onChange={(event) => setConfirm(event.target.value)}
-              autoComplete="new-password"
-              disabled={authBusy}
-            />
-          </label>
-        )}
+        {/* 确认密码常挂载：登录态折叠（grid-rows 补间 + 移出焦点序列），
+            切换到注册时展开，而不是整块插拔。 */}
+        <div
+          className={`online-field-collapse${tab === "register" ? "" : " closed"}`}
+          aria-hidden={tab !== "register"}
+        >
+          <div className="online-field-collapse-clip">
+            <label className="online-field">
+              <span>确认密码</span>
+              <input
+                type="password"
+                value={confirm}
+                onChange={(event) => setConfirm(event.target.value)}
+                autoComplete="new-password"
+                disabled={authBusy || tab !== "register"}
+              />
+            </label>
+          </div>
+        </div>
         {error && (
           <p className="online-notice online-notice--error" role="alert">
             {error}
@@ -185,7 +198,11 @@ export function AuthScreen() {
           className="start-art-button online-submit"
           disabled={authBusy}
         >
-          <span className="start-art-label">
+          {/* key 切换触发原地文案 swap（auth-label-in）；布局尺寸不变 */}
+          <span
+            className="start-art-label online-submit-label"
+            key={authBusy ? "busy" : tab}
+          >
             {authBusy ? "请稍候……" : tab === "login" ? "登录" : "注册并登录"}
           </span>
         </button>

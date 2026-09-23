@@ -258,6 +258,10 @@
 }
 #char-content .inv-clue-row {
   display: flex;
+  /* 带缩略图（76px）+ 两枚按钮时操作区约 190px，300px 档面板里会把正文
+   * 挤到每行 3~5 个字（曾竖排的同一挤压的残留）。允许换行：空间不够时
+   * 操作区整体落到正文下方，正文拿整行宽；无图行的并排布局不受影响。 */
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
   padding: 8px 0;
@@ -268,7 +272,8 @@
 }
 #char-content .inv-clue-main {
   flex: 1 1 auto;
-  min-width: 0;
+  /* 低于这个宽度就不再硬挤，触发上面的换行（配合 flex-wrap）。 */
+  min-width: 140px;
 }
 #char-content .inv-clue-summary {
   color: var(--text);

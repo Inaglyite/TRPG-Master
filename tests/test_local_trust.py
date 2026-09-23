@@ -98,11 +98,15 @@ def test_stale_token_from_previous_launch_is_rejected():
     assert local_request_trusted(headers(origin="file://", **{LOCAL_TOKEN_HEADER: current})) is True
 
 
-def test_injected_token_wins_and_is_not_persisted(monkeypatch, tmp_path):
+def test_injected_token_wins_and_is_persisted_for_desktop_takeover(monkeypatch, tmp_path):
+    # 桌面壳注入的凭证也必须落盘：否则没被回收的后端（孤儿进程）无法再被
+    # 新应用实例接管——壳只认 0600 凭证文件，拿不到正确凭证就会一直 403。
     monkeypatch.setenv("TRPG_LOCAL_LAUNCH_TOKEN", "injected-launch-token")
     reset_local_token_for_tests()
     assert local_launch_token() == "injected-launch-token"
-    assert not (tmp_path / "local_launch_token").exists()
+    token_file = tmp_path / "local_launch_token"
+    assert token_file.read_text(encoding="utf-8").strip() == "injected-launch-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
 
 
 def test_generated_token_is_persisted_for_desktop_reuse(tmp_path):
