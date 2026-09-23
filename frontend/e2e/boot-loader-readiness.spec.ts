@@ -117,9 +117,15 @@ async function startModelStub(): Promise<string> {
   return `http://127.0.0.1:${address.port}/v1`;
 }
 
+let modelBaseUrl = "";
+
 test.beforeAll(async () => {
+  modelBaseUrl = await startModelStub();
+});
+
+test.beforeEach(async () => {
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-boot-readiness-"));
-  const modelBaseUrl = await startModelStub();
+  serverOutput = "";
   server = spawn(
     pythonPath(),
     [
@@ -167,18 +173,24 @@ test.beforeAll(async () => {
   await client.dispose();
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");
     await new Promise<void>((wait) => setTimeout(wait, 1500));
     if (server.exitCode === null) server.kill("SIGKILL");
   }
+  if (runtimeRoot) {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    runtimeRoot = "";
+  }
+});
+
+test.afterAll(async () => {
   if (modelServer) {
     await new Promise<void>((resolveClose) =>
       modelServer!.close(() => resolveClose()),
     );
   }
-  if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
 });
 
 function collectFrames(page: Page): { sent: string[]; received: string[] } {

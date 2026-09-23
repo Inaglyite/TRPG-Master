@@ -146,9 +146,15 @@ async function waitForServer(): Promise<void> {
   throw new Error(`E2E server did not start:\n${serverOutput.slice(-3000)}`);
 }
 
+let modelBaseUrl = "";
+
 test.beforeAll(async () => {
+  modelBaseUrl = await startModelStub();
+});
+
+test.beforeEach(async () => {
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-interaction-duals-"));
-  const modelBaseUrl = await startModelStub();
+  serverOutput = "";
   server = spawn(
     pythonPath(),
     [
@@ -188,7 +194,7 @@ test.beforeAll(async () => {
   await waitForServer();
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");
     await new Promise<void>((wait) => {
@@ -200,12 +206,18 @@ test.afterAll(async () => {
     });
     if (server.exitCode === null) server.kill("SIGKILL");
   }
+  if (runtimeRoot) {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    runtimeRoot = "";
+  }
+});
+
+test.afterAll(async () => {
   if (modelServer) {
     await new Promise<void>((resolveClose) =>
       modelServer!.close(() => resolveClose()),
     );
   }
-  if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
 });
 
 type Frames = { sent: string[]; received: string[] };
@@ -750,6 +762,13 @@ test("agent 缺 BYOK：请求明确暂停、输入可用、无永久转圈、可
   // 「刷新/重连」那一半：暂停态 + 可操作原因都要能从快照恢复出来，输入仍可用。
   await expect(page.locator("#user-input")).toBeEnabled();
   await expect(page.getByTestId("btn-keeper-console")).toBeVisible();
+  // 等待权威状态确实到达再刷新；否则刷新可能发生在请求仍为 queued 时，
+  // 那测试覆盖的是“处理进行中重连”，并非暂停快照恢复。
+  await expect(
+    page.locator('.action-status-card[data-status="paused"]'),
+  ).toBeVisible({
+    timeout: 60_000,
+  });
   await page.reload();
   await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
   await expect(page.getByText("已暂停（可恢复）")).toBeVisible({

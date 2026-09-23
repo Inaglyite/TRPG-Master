@@ -150,9 +150,15 @@ async function waitForServer(): Promise<void> {
   throw new Error(`E2E server did not start:\n${serverOutput.slice(-3000)}`);
 }
 
+let modelBaseUrl = "";
+
 test.beforeAll(async () => {
+  modelBaseUrl = await startModelStub();
+});
+
+test.beforeEach(async () => {
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-pending-sync-"));
-  const modelBaseUrl = await startModelStub();
+  serverOutput = "";
   server = spawn(
     pythonPath(),
     [
@@ -191,7 +197,7 @@ test.beforeAll(async () => {
   await waitForServer();
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");
     await new Promise<void>((wait) => {
@@ -203,12 +209,18 @@ test.afterAll(async () => {
     });
     if (server.exitCode === null) server.kill("SIGKILL");
   }
+  if (runtimeRoot) {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    runtimeRoot = "";
+  }
+});
+
+test.afterAll(async () => {
   if (modelServer) {
     await new Promise<void>((resolveClose) =>
       modelServer!.close(() => resolveClose()),
     );
   }
-  if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
 });
 
 type Frames = { sent: string[]; received: string[] };
