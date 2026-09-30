@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAppStore } from "../../state/app-store";
@@ -68,6 +68,57 @@ describe("StartScreen", () => {
     expect(
       screen.getByRole("button", { name: "以此调查员开始" }),
     ).toBeEnabled();
+  });
+
+  it("角色库入口出现在主菜单和选角页；库中新建角色后自动选中", () => {
+    render(<StartScreen />);
+    const menuView = document.getElementById("start-menu-view")!;
+    const selectView = document.getElementById("character-select-view")!;
+
+    // 主菜单入口
+    fireEvent.click(within(menuView).getByRole("button", { name: "角色库" }));
+    expect(useAppStore.getState().characterLibraryOpen).toBe(true);
+    act(() => useAppStore.setState({ characterLibraryOpen: false }));
+
+    // 选角页入口
+    fireEvent.click(screen.getByRole("button", { name: /开始新游戏/ }));
+    fireEvent.click(within(selectView).getByRole("button", { name: "角色库" }));
+    expect(useAppStore.getState().characterLibraryOpen).toBe(true);
+    act(() => useAppStore.setState({ characterLibraryOpen: false }));
+
+    // 新建/导入完成 → character_list 重推到位后自动选中该角色
+    act(() => {
+      useStartStore.setState({
+        pendingLibraryCharacterId: "chlib_1",
+        characterGroups: [
+          {
+            id: "library",
+            title: "角色库",
+            characters: [
+              {
+                ref: { source: "library", id: "chlib_1" },
+                id: "chlib_1",
+                name: "库角色",
+                occupation: "医生",
+                source_label: "角色库",
+                hp: 11,
+                max_hp: 11,
+                san: 60,
+                max_san: 60,
+                reputation: 0,
+                completed_modules: 0,
+              },
+            ],
+          },
+        ],
+      });
+    });
+    expect(useStartStore.getState().selectedCharacterId).toBe("chlib_1");
+    expect(useStartStore.getState().selectedCharacterRef).toEqual({
+      source: "library",
+      id: "chlib_1",
+    });
+    expect(useStartStore.getState().pendingLibraryCharacterId).toBeNull();
   });
 });
 

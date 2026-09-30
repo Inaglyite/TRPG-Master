@@ -1,6 +1,7 @@
 import type { CharacterOption } from "../../state/start-store";
 
-const attributes: Record<string, string> = {
+// 角色库编辑表单复用同一套中文标签（保持单一来源）。
+export const CHARACTER_ATTRIBUTE_LABELS: Record<string, string> = {
   STR: "力量",
   CON: "体质",
   SIZ: "体型",
@@ -10,7 +11,7 @@ const attributes: Record<string, string> = {
   POW: "意志",
   EDU: "教育",
 };
-const skills: Record<string, string> = {
+export const CHARACTER_SKILL_LABELS: Record<string, string> = {
   spot_hidden: "侦查",
   listen: "聆听",
   library_use: "图书馆使用",
@@ -104,7 +105,7 @@ export function CharacterDossier({
         <section className="character-detail-section">
           <h4>基础属性</h4>
           <div className="character-attribute-grid">
-            {Object.entries(attributes)
+            {Object.entries(CHARACTER_ATTRIBUTE_LABELS)
               .filter(([id]) => typeof character.attributes?.[id] === "number")
               .map(([id, label]) => (
                 <div className="character-attribute" key={id}>
@@ -123,7 +124,10 @@ export function CharacterDossier({
           <div className="character-skill-list">
             {character.top_skills?.map((skill) => (
               <div className="character-skill" key={skill.id}>
-                <span>{skills[skill.id] || skill.id.replaceAll("_", " ")}</span>
+                <span>
+                  {CHARACTER_SKILL_LABELS[skill.id] ||
+                    skill.id.replaceAll("_", " ")}
+                </span>
                 <strong>{skill.value}</strong>
               </div>
             ))}

@@ -88,7 +88,6 @@ if _ENV_FILE.exists():
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy import text
 
 from src.ai.context.narrative_history import enrich_public_history_record
 from src.ai.model.model_stream_diagnostics import turn_context_summary
@@ -164,6 +163,10 @@ from src.web.asset_payload import (
     enrich_narrative_segments,
     enrich_pc_for_frontend,
 )
+from src.web.character_library_http import (
+    CharacterLibraryHttpDependencies,
+    create_character_library_router,
+)
 from src.web.editor_api import create_editor_router
 from src.web.frontend_http import FrontendStaticFiles, mount_editor_bundle
 from src.web.frontend_payload import enrich_clues_for_frontend
@@ -172,6 +175,7 @@ from src.web.module_http import (
     create_module_http_router,
     serve_module_asset,
 )
+from src.web.service_health import health_payload, readiness_payload
 
 app = FastAPI(title="TRPG Agent API")
 app.add_middleware(
@@ -445,6 +449,11 @@ app.include_router(
             set_active_context=_set_active_context,
             auth_required=lambda: auth_required(),
         )
+    )
+)
+app.include_router(
+    create_character_library_router(
+        CharacterLibraryHttpDependencies(database_url=lambda: DATABASE_URL)
     )
 )
 
@@ -963,6 +972,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     engine.context.module_name,
                     context=engine.context,
                     include_personal=not auth_required(),
+                    library_scope=None if auth_required() else "local",
                 ),
             }
         )
@@ -1086,6 +1096,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     engine.context.module_name,
                     context=engine.context,
                     include_personal=not auth_required(),
+                    library_scope=None if auth_required() else "local",
                 ),
             }
         )
@@ -1233,6 +1244,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                         name,
                         context=context,
                         include_personal=not auth_required(),
+                        library_scope=None if auth_required() else "local",
                     ),
                 }
             )
@@ -1476,6 +1488,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 engine.context.module_name,
                 context=engine.context,
                 include_personal=not auth_required(),
+                library_scope=None if auth_required() else "local",
             ),
         }
     )
@@ -1581,29 +1594,13 @@ async def get_theme():
 @app.get("/api/health")
 async def health():
     """Process liveness; it deliberately does not touch external dependencies."""
-    return {
-        "ok": True,
-        "module": _active_context.module_name,
-        "world_id": _active_context.world_id,
-    }
+    return health_payload(_active_context)
 
 
 @app.get("/api/ready")
 def readiness():
     """Deployment readiness, including a real database round trip."""
-    try:
-        with session_scope(DATABASE_URL) as db_session:
-            db_session.execute(text("SELECT 1"))
-    except Exception:
-        return JSONResponse(
-            {"ok": False, "detail": "database unavailable"},
-            status_code=503,
-        )
-    return {
-        "ok": True,
-        "module": _active_context.module_name,
-        "world_id": _active_context.world_id,
-    }
+    return readiness_payload(DATABASE_URL, _active_context)
 
 
 @app.get("/api/characters")
@@ -1613,6 +1610,7 @@ async def list_characters():
         _active_context.module_name,
         context=_active_context,
         include_personal=not auth_required(),
+        library_scope=None if auth_required() else "local",
     )
 
 

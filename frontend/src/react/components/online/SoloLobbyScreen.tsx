@@ -111,6 +111,13 @@ export function SoloLobbyScreen() {
           <p className="online-subtitle">云端私密单人世界，只有你能进入</p>
         </div>
         <div className="solo-lobby-user online-account">
+          <button
+            type="button"
+            className="btn-ghost lobby-library-link"
+            onClick={() => useAppStore.getState().setCharacterLibraryOpen(true)}
+          >
+            角色库
+          </button>
           <span className="online-user" title={user?.id}>
             {user?.username}
           </span>

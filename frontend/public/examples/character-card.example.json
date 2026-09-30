@@ -1,0 +1,50 @@
+{
+  "format": "trpg-character-card",
+  "format_version": 1,
+  "card": {
+    "name": "示例调查员",
+    "occupation": "记者",
+    "age": 30,
+    "era": "1920年代",
+    "attributes": {
+      "STR": 50,
+      "DEX": 60,
+      "CON": 55,
+      "INT": 70,
+      "POW": 65,
+      "SIZ": 50,
+      "APP": 45,
+      "EDU": 75
+    },
+    "derived": {
+      "LUCK": 60
+    },
+    "skills": {
+      "library_use": 60,
+      "spot_hidden": 55,
+      "fast_talk": 50,
+      "photography": 45,
+      "listen": 40
+    },
+    "credit_rating": 30,
+    "inventory": ["记者证", "笔记本与钢笔", "柯达折叠相机"],
+    "backstory": {
+      "description": "短发，眼神锐利，总在口袋里摸钢笔。",
+      "background": "跑社会新闻五年，盯上过三条不该盯的线。",
+      "key_connection": "线人「老宋」——警局档案室的管理员。"
+    },
+    "psychological_profile": {
+      "traits": ["谨慎", "好奇心重"],
+      "key_relationships": [],
+      "phobias": [],
+      "manias": []
+    },
+    "career": {
+      "reputation": 0,
+      "titles": [],
+      "known_contacts": [],
+      "completed_modules": [],
+      "case_history": []
+    }
+  }
+}

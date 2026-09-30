@@ -106,6 +106,7 @@ WebSocket 消息都有一个字符串字段 `type`：
 | `POST` | `/api/modules/inspect` | 预检 `.trpgmod`，不安装 |
 | `POST` | `/api/modules/import` | 校验并版本化安装 `.trpgmod` |
 | `GET` | `/api/characters` | 当前模组可选调查员 |
+| `GET/POST` | `/api/character-library`（含 `/{id}`、`/inspect`、`/duplicate`、`/export`） | 角色库（按账号隔离，见 2.11.1） |
 | `POST` | `/api/modules/switch` | 切换 REST/新连接使用的默认本地世界 |
 | `GET` | `/api/assets/{module_name}/{filename:path}` | 读取模组素材 |
 | `GET` | `/` | 已构建前端或构建提示 |
@@ -528,9 +529,58 @@ X-Module-Filename: example.trpgmod
 | `default` | `characters/default/*.json` |
 | `module` | 当前模组运行目录下的 `characters/*.json` |
 | `custom` | `characters/custom/*.json` |
+| `library` | 角色库（`character_library_entries` 表；本地为空 owner，云端按用户隔离；见 2.11.1） |
 
 本节描述单机 `/api/characters` 的完整候选集合。多人房间必须改用
-`GET /api/worlds/{id}/investigators/options`；后者不会返回个人长期角色或自定义角色。
+`GET /api/worlds/{id}/investigators/options`；后者不会返回个人长期角色或自定义角色，
+角色库分组也仅出现在云端单人（play_mode=solo）房间，且只含当前用户的条目。
+
+### 2.11.1 角色库 `/api/character-library`
+
+玩家可复用角色资料的按账号隔离存储（本地模式 owner 为空串；账号模式必须登录，
+所有读写只作用于当前用户）。开局选用库角色时物化为世界内独立快照：游戏内
+HP/SAN 等状态变化不回写库，编辑/删除库条目不影响已开局世界与历史存档。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/character-library` | 列出当前用户的条目（按更新时间倒序） |
+| `POST /api/character-library/inspect` | 导入预览：只校验不落库，返回 `ok/errors/warnings/preview` |
+| `POST /api/character-library` | 新建/导入（201）；校验失败 400 + `details:[{field,message}]` |
+| `GET /api/character-library/{id}` | 条目摘要 + 完整卡面 |
+| `PUT /api/character-library/{id}` | 整体替换卡面（同一 id，不影响已开局世界） |
+| `POST /api/character-library/{id}/duplicate` | 复制为新条目（201） |
+| `DELETE /api/character-library/{id}` | 删除（204） |
+| `GET /api/character-library/{id}/export` | 下载版本化信封（只含角色资料） |
+
+角色卡信封格式（`format_version: 1`）：
+
+```json
+{
+  "format": "trpg-character-card",
+  "format_version": 1,
+  "card": {
+    "name": "示例调查员",
+    "occupation": "记者",
+    "attributes": {"STR": 50, "DEX": 60, "CON": 55, "INT": 70, "POW": 65, "SIZ": 50, "APP": 45, "EDU": 75},
+    "derived": {"LUCK": 60},
+    "skills": {"library_use": 60},
+    "credit_rating": 30,
+    "inventory": ["笔记本"],
+    "backstory": {"description": "...", "background": "...", "key_connection": "..."}
+  }
+}
+```
+
+校验契约：
+- 必填 `name`/`occupation`/`attributes`（八项 CoC 属性，整数）；缺项、非法类型、
+  非法数值一律拒绝并给出字段级 `field` 定位。
+- `derived` 中 HP/SAN/MP/MOV/DB/BUILD 以属性为准由服务端重算（不一致会在
+  `warnings` 里逐条说明）；`LUCK` 尊重输入。
+- 超出建卡范围但合法的取值（如属性 >90）只告警不拦截，原值保留。
+- 文件中的 `id`/`owner_user_id`/`world_id` 等身份与权限字段一律剥离并告警，
+  不作为可信输入；条目 id 由服务端生成。同名角色允许共存，不会按名覆盖。
+- 未声明 `format` 的裸卡按 v1 解析并告警；未知格式/版本拒绝导入。
+- 文件大小上限 256 KB；示例文件见前端 `/examples/character-card.example.json`。
 
 ### 2.12 `POST /api/modules/switch`
 

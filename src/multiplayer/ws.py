@@ -94,6 +94,7 @@ class MultiplayerWsController:
                     engine.context.module_name,
                     context=engine.context,
                     include_personal=False,
+                    library_scope=user_id if room.play_mode == "solo" else None,
                 ),
             }
         )

@@ -6,6 +6,7 @@ import {
   initialOnlineState,
   useOnlineStore,
 } from "../../../state/online-store";
+import { useAppStore } from "../../../state/app-store";
 import { useStartStore } from "../../../state/start-store";
 import { SoloCharacterSelectScreen } from "./SoloCharacterSelectScreen";
 
@@ -157,5 +158,35 @@ describe("SoloCharacterSelectScreen", () => {
     const bobCard = screen.getByRole("button", { name: /罗伯特/ });
     expect(bobCard).toBeDisabled();
     expect(bobCard.textContent).toContain("已被占用");
+  });
+
+  it("角色库入口打开管理面板；库中新建角色在列表重推后自动认领", () => {
+    render(<SoloCharacterSelectScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "角色库" }));
+    expect(useAppStore.getState().characterLibraryOpen).toBe(true);
+    act(() => useAppStore.setState({ characterLibraryOpen: false }));
+
+    // 模拟「导入完成 → 房间重推 character_list」后的状态
+    act(() => {
+      useStartStore.setState({
+        pendingLibraryCharacterId: "chlib_9",
+        characterGroups: [
+          {
+            id: "library",
+            title: "角色库",
+            characters: [
+              {
+                ...fullCharacter,
+                ref: { source: "library", id: "chlib_9" },
+                id: "chlib_9",
+                name: "库角色",
+              },
+            ],
+          },
+        ],
+      });
+    });
+    expect(claimByKey).toHaveBeenCalledWith("chlib_9");
+    expect(useStartStore.getState().pendingLibraryCharacterId).toBeNull();
   });
 });

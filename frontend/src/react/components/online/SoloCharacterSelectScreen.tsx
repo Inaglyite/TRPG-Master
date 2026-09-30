@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { claimByKey, enterSoloLobby, startGame } from "../../../online";
 import { openSettings } from "../../../settings";
+import { useAppStore } from "../../../state/app-store";
 import { useOnlineStore } from "../../../state/online-store";
 import { useStartStore } from "../../../state/start-store";
 import { CharacterDossier } from "../CharacterDossier";
@@ -81,6 +82,20 @@ export function SoloCharacterSelectScreen() {
   useEffect(() => {
     if (detailRef.current) detailRef.current.scrollTop = 0;
   }, [focusedId]);
+  // 角色库新建/导入完成后：列表经房间 character_list 重推到位即认领并聚焦。
+  const pendingLibraryId = useStartStore(
+    (state) => state.pendingLibraryCharacterId,
+  );
+  useEffect(() => {
+    if (!pendingLibraryId) return;
+    const target = groups
+      .flatMap((group) => group.characters || [])
+      .find((character) => character.id === pendingLibraryId);
+    if (!target) return;
+    useStartStore.setState({ pendingLibraryCharacterId: null });
+    setFocusId(target.id);
+    void claimByKey(target.id);
+  }, [pendingLibraryId, groups]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (event.key === "Escape" && canChoose) void enterSoloLobby();
@@ -112,6 +127,13 @@ export function SoloCharacterSelectScreen() {
           <div id="character-module-name">{heading}</div>
         </div>
         <div className="character-select-side">
+          <button
+            type="button"
+            className="btn-ghost character-settings-entry"
+            onClick={() => useAppStore.getState().setCharacterLibraryOpen(true)}
+          >
+            角色库
+          </button>
           <button
             type="button"
             className="btn-ghost character-settings-entry"

@@ -13,6 +13,20 @@
   gap: 18px;
   padding: 0 4px 12px;
 }
+/* 本地选角页右侧槽位：角色库入口（与云端单人页同一尺寸约定） */
+#character-select-view .character-select-side {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#character-select-view .character-settings-entry {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .character-back-button {
   justify-self: start;
   position: relative;

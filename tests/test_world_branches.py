@@ -573,14 +573,26 @@ class WorldBranchTests(unittest.TestCase):
                 metadata = dict(world.metadata_json or {})
                 metadata["created_at"] = "2026-01-01T00:00:00"
                 world.metadata_json = metadata
+                # 连同存档点时间一起老化：older-world 的最近游玩时间停在旧日期。
+                save_row = (
+                    session.query(SaveSlot)
+                    .filter_by(world_id="older-world")
+                    .first()
+                )
+                assert save_row is not None
+                save_meta = dict(save_row.metadata_json or {})
+                save_meta["created_at"] = "2026-01-01T00:00:00"
+                save_row.metadata_json = save_meta
 
             adventures = service.list_adventures(active_world_id="main-world")
             roots = [item["root_world_id"] for item in adventures]
-            self.assertEqual(["older-world", "main-world"], roots)
-            self.assertEqual([1, 2], [item["slot_index"] for item in adventures])
+            # 展示顺序按最近游玩倒序：刚行动过的 main-world 在最上面；
+            # 编号仍按创建顺序（older=SAVE 01），与展示位置解耦。
+            self.assertEqual(["main-world", "older-world"], roots)
+            self.assertEqual([2, 1], [item["slot_index"] for item in adventures])
             self.assertNotIn("empty-world", roots)
 
-            older_entry, main_entry = adventures
+            main_entry, older_entry = adventures
             self.assertEqual("2026-01-01T00:00:00", older_entry["created_at"])
             # 主世界完成了一个回合；resume 指向它，turn_count 随之得出。
             self.assertEqual("main-world", main_entry["resume_world_id"])

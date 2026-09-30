@@ -193,6 +193,8 @@ type AppState = {
   notesStatus: string;
   notesStatusKind: string;
   characterPanelOpen: boolean;
+  /** 角色库管理面板开关（本地与云端单人共用，挂在 GameShell）。 */
+  characterLibraryOpen: boolean;
   handouts: Handout[];
   clueToast: string | null;
   savePanelOpen: boolean;
@@ -246,6 +248,7 @@ type AppState = {
     >,
   ) => void;
   setCharacterPanelOpen: (open: boolean) => void;
+  setCharacterLibraryOpen: (open: boolean) => void;
   addHandout: (handout: Handout) => void;
   dismissHandout: (id: string) => void;
   setSavePanel: (open: boolean, mode?: "load" | "manage") => void;
@@ -284,6 +287,7 @@ export const useAppStore = create<AppState>((set) => ({
   notesStatus: "",
   notesStatusKind: "",
   characterPanelOpen: false,
+  characterLibraryOpen: false,
   handouts: [],
   clueToast: null,
   savePanelOpen: false,
@@ -347,6 +351,8 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setNotesProgress: (state) => set(state),
   setCharacterPanelOpen: (characterPanelOpen) => set({ characterPanelOpen }),
+  setCharacterLibraryOpen: (characterLibraryOpen) =>
+    set({ characterLibraryOpen }),
   addHandout: (handout) =>
     set((state) => ({ handouts: [...state.handouts, handout] })),
   dismissHandout: (id) =>

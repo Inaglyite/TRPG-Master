@@ -84,6 +84,20 @@ export function StartScreen() {
         selectedCharacterRef: selected.ref,
       });
   }, [selected?.id]);
+  // 角色库新建/导入完成后直接选中该角色：数据经 character_list 重推到位后消费。
+  useEffect(() => {
+    const pending = state.pendingLibraryCharacterId;
+    if (!pending || state.view !== "characters") return;
+    const target = state.characterGroups
+      .flatMap((group) => group.characters || [])
+      .find((character) => character.id === pending);
+    if (!target) return;
+    useStartStore.setState({
+      selectedCharacterId: target.id,
+      selectedCharacterRef: target.ref,
+      pendingLibraryCharacterId: null,
+    });
+  }, [state.pendingLibraryCharacterId, state.view, state.characterGroups]);
   // 切换调查员时档案面板回到顶部，避免沿用上一人的滚动位置。
   useEffect(() => {
     if (detailRef.current) detailRef.current.scrollTop = 0;
@@ -181,6 +195,15 @@ export function StartScreen() {
               <span className="start-art-label">从存档开始</span>
             </button>
             <ModelSettingsTrigger />
+            <button
+              type="button"
+              className="start-menu-button"
+              onClick={() =>
+                useAppStore.getState().setCharacterLibraryOpen(true)
+              }
+            >
+              角色库
+            </button>
             {/\bElectron\//.test(navigator.userAgent) && (
               <button
                 id="btn-exit"
@@ -211,6 +234,17 @@ export function StartScreen() {
             <div className="character-select-heading">
               <h2>选择调查员</h2>
               <div id="character-module-name">{shown.activeModuleTitle}</div>
+            </div>
+            <div className="character-select-side">
+              <button
+                type="button"
+                className="btn-ghost character-settings-entry"
+                onClick={() =>
+                  useAppStore.getState().setCharacterLibraryOpen(true)
+                }
+              >
+                角色库
+              </button>
             </div>
           </header>
           <div className="investigator-layout">

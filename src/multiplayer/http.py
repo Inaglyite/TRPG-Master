@@ -10,10 +10,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from src.app.runtime import RuntimeContext
-from src.auth.service import audit, authorize_world, request_user
+from src.auth.service import audit, request_user
 from src.gameplay.characters import list_character_options
 from src.modules.module_registry import ModuleRegistry
 from src.multiplayer.archive_http import register_archive_world_route
+from src.multiplayer.character_options_http import register_character_options_route
 from src.multiplayer.private_state import release_world_controller
 from src.multiplayer.room_events import broadcast_investigator_change
 from src.multiplayer.room_runtime import GameRoom, RoomManager
@@ -61,6 +62,7 @@ def _error(exc: MultiplayerError) -> JSONResponse:
 def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRouter:
     router = APIRouter()
     db_url = deps.database_url
+    register_character_options_route(router, deps)
     register_archive_world_route(router, database_url=db_url, room_manager=deps.room_manager)
     register_solo_timeline_http_routes(
         router,
@@ -215,31 +217,6 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
         except MultiplayerError as exc:
             return _error(exc)
 
-    @router.get("/api/worlds/{world_id}/investigators/options")
-    async def get_world_investigator_options(world_id: str, request: Request):
-        user = request_user(request, db_url())
-        if user is None:
-            return JSONResponse({"detail": "未登录"}, status_code=401)
-        try:
-            authorize_world(db_url(), user.id, world_id, "read")
-            with session_scope(db_url()) as db_session:
-                world = db_session.get(World, world_id)
-                if world is None or world.status != "active":
-                    raise MultiplayerError("world_not_found", "房间不存在", 404)
-                module_name = world.module_name
-            context = RuntimeContext.create(
-                world_id,
-                module_name,
-                project_root=deps.project_root,
-                runtime_root=deps.runtime_root,
-            )
-            return list_character_options(
-                module_name,
-                context=context,
-                include_personal=False,
-            )
-        except MultiplayerError as exc:
-            return _error(exc)
 
     @router.patch("/api/worlds/{world_id}/members/{target_user_id}")
     async def patch_world_member(
@@ -369,6 +346,12 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
                 module_name,
                 context=context,
                 include_personal=False,
+                # 与 options 端点同一口径：仅云端单人房间可认领本人角色库角色。
+                library_scope=(
+                    user.id
+                    if str((world.metadata_json or {}).get("play_mode") or "") == "solo"
+                    else None
+                ),
             )
             selected = next(
                 (

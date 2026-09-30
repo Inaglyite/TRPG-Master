@@ -30,6 +30,12 @@ def test_default_server_runtime_and_database_are_test_isolated(
 
     with TestClient(server.app) as client:
         assert client.get("/api/health").status_code == 200
+        assert client.get("/api/ready").json()["ok"] is True
+        with patch.object(server, "DATABASE_URL", "unsupported-driver://unavailable"):
+            assert client.get("/api/health").status_code == 200
+            unavailable = client.get("/api/ready")
+            assert unavailable.status_code == 503
+            assert unavailable.json() == {"ok": False, "detail": "database unavailable"}
 
     with patch("src.structured.engine_gate.OpenAI", return_value=object()):
         engine = GameEngine()

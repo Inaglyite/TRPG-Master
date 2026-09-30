@@ -334,6 +334,28 @@ class ModelServiceConfig(Base):
 ACTIVE_CONTEXT_SESSION_INDEX = "uq_context_sessions_one_active_per_world"
 
 
+class CharacterLibraryEntry(Base):
+    """角色库条目：玩家可复用的角色资料卡。
+
+    ``owner_user_id == ""`` 表示本地模式（无账号体系）；账号模式恒为所有者
+    用户 id，所有读写按 owner 过滤，绝不跨用户解析。``card_json`` 是完整
+    角色卡（格式见 src/gameplay/character_library.py 的校验契约）；开局时
+    物化为世界内独立快照，游戏内 HP/SAN 等状态变化不回写本表，修改/删除
+    库条目也不影响已开局的世界与历史存档。
+    """
+
+    __tablename__ = "character_library_entries"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(48), default="", index=True)
+    name: Mapped[str] = mapped_column(String(80), default="", index=True)
+    card_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class ContextSession(Base):
     """One append-only model-context timeline for a world.
 

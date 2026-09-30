@@ -53,6 +53,8 @@ type StartState = {
   charactersReady: boolean;
   selectedCharacterId: string;
   selectedCharacterRef: CharacterRef | null;
+  /** 角色库新建/导入后期望选中的条目 id：选角页在列表刷新后消费并清空。 */
+  pendingLibraryCharacterId: string | null;
   hasSaves: boolean;
   hint: string;
 };
@@ -69,6 +71,7 @@ export const useStartStore = create<StartState>(() => ({
   charactersReady: false,
   selectedCharacterId: "",
   selectedCharacterRef: null,
+  pendingLibraryCharacterId: null,
   hasSaves: false,
   hint: "正在读取存档…",
 }));

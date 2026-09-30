@@ -14,6 +14,7 @@ import {
   HandoutLayer,
   SavePanel,
 } from "./components/PanelLayers";
+import { CharacterLibraryPanel } from "./components/CharacterLibraryPanel";
 import { StartScreen } from "./components/StartScreen";
 import { UtilityPanel } from "./components/UtilityPanel";
 
@@ -44,6 +45,7 @@ export function GameShell() {
       <SavePanel />
       <ModelSettingsPanel />
       <UtilityPanel />
+      <CharacterLibraryPanel />
       {mode === "select" && <ModeSelectScreen />}
       {mode === "online" && <OnlineShell />}
     </>

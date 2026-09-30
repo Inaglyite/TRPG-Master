@@ -41,6 +41,8 @@ LATER_TABLES = {
     # 0016 上下文与记忆：交互线程与角色记忆（同样由 upgrade head 建立）
     "interaction_threads",
     "character_memories",
+    # 0017 角色库：玩家可复用角色卡（同样由 upgrade head 建立）
+    "character_library_entries",
 }
 
 # Columns added by later migrations to tables that already exist in the

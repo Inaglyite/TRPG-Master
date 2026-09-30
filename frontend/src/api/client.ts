@@ -61,12 +61,20 @@ export function apiHttpOrigin(): string {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
+  /** 服务端附带的结构化错误明细（如角色库导入的字段级问题列表）。 */
+  readonly details: unknown;
 
-  constructor(message: string, status: number, code: string | null) {
+  constructor(
+    message: string,
+    status: number,
+    code: string | null,
+    details: unknown = null,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 
   get isUnauthorized(): boolean {
@@ -91,7 +99,7 @@ export function onUnauthorized(listener: UnauthorizedListener): () => void {
 
 async function readError(
   response: Response,
-): Promise<{ message: string; code: string | null }> {
+): Promise<{ message: string; code: string | null; details: unknown }> {
   try {
     const data: unknown = await response.json();
     if (data && typeof data === "object") {
@@ -110,16 +118,22 @@ async function readError(
             : typeof record.detail === "string"
               ? record.detail
               : null;
-      if (message) return { message, code };
+      // 字段级错误明细（数组）原样透传，供表单类 UI 定位展示
+      const details = Array.isArray(record.details) ? record.details : null;
+      if (message) return { message, code, details };
     }
   } catch {
     /* 非 JSON 错误体，走通用文案 */
   }
-  return { message: `请求失败（HTTP ${response.status}）`, code: null };
+  return {
+    message: `请求失败（HTTP ${response.status}）`,
+    code: null,
+    details: null,
+  };
 }
 
 export type ApiRequestInit = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 };
 
@@ -154,8 +168,8 @@ export async function apiFetch<S extends z.ZodTypeAny>(
     unauthorizedListeners.forEach((listener) => listener());
   }
   if (!response.ok) {
-    const { message, code } = await readError(response);
-    throw new ApiError(message, response.status, code);
+    const { message, code, details } = await readError(response);
+    throw new ApiError(message, response.status, code, details);
   }
   if (response.status === 204) {
     return schema.parse(undefined);

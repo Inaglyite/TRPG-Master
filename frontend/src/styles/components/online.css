@@ -745,6 +745,14 @@
   cursor: pointer;
   transition: color 0.16s ease;
 }
+/* 大厅头部的角色库入口：与退出登录同排，ghost 主题 + 本处尺寸 */
+.lobby-library-link {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .account-logout::after {
   content: "";
   position: absolute;

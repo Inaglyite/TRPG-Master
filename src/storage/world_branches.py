@@ -813,9 +813,15 @@ class WorldBranchService:
                     "timelines": timelines,
                 }
             )
-        # 存档位按创建顺序编号：SAVE 01 是最早的一次游玩，删除中间存档位后
-        # 后续编号顺延（与传统 RPG 动态存档位一致）。
+        # 存档位编号按创建顺序：SAVE 01 是最早的一次游玩，删除中间存档位后
+        # 后续编号顺延（与传统 RPG 动态存档位一致）。编号是稳定身份，不随
+        # 展示顺序重排。
         adventures.sort(key=lambda item: item["created_at"])
         for index, adventure in enumerate(adventures, start=1):
             adventure["slot_index"] = index
+        # 展示顺序与编号解耦：最近游玩的存档位排在最上面。列表里因此可能
+        # 出现 SAVE 03 位于 SAVE 01 之上——编号是身份，不是位置。
+        adventures.sort(
+            key=lambda item: str(item.get("updated_at") or ""), reverse=True
+        )
         return adventures

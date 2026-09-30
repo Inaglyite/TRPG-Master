@@ -19,7 +19,7 @@ from src.app.runtime import RuntimeContext, default_world_id
 from src.modules.module_registry import ModuleRegistry
 from src.storage.world_store import atomic_write_json
 
-CHARACTER_SOURCES = {"profile", "default", "custom", "module"}
+CHARACTER_SOURCES = {"profile", "default", "custom", "module", "library"}
 
 
 def _runtime_context(
@@ -258,6 +258,22 @@ def resolve_character(
         }
         return _profile_entry_to_character(entry), normalized
 
+    if source == "library":
+        # 角色库条目在数据库中按 owner 隔离；解析时校验归属（本地=空 owner，
+        # 账号模式=当前世界创建者），见 character_library.resolve_library_card。
+        from src.gameplay.character_library import resolve_library_card
+
+        entry_id = str(ref.get("id") or "")
+        char = resolve_library_card(entry_id, context=context)
+        if char is None:
+            return None, None
+        normalized = {
+            "source": "library",
+            "id": entry_id,
+            "path": f"character_library#{entry_id}",
+        }
+        return char, normalized
+
     file_name = _safe_file_name(ref.get("file", ""))
     if not file_name:
         return None, None
@@ -347,7 +363,14 @@ def list_character_options(
     *,
     context: RuntimeContext | None = None,
     include_personal: bool = True,
+    library_scope: str | None = None,
 ) -> dict:
+    """列出开局可选角色。
+
+    ``library_scope``：``"local"`` 表示本地模式（owner 为空串的库条目）；
+    传入用户 id 表示账号模式下列出该用户的角色库（云端单人）；
+    ``None`` 不带角色库分组（多人房间——私有角色不进共享房间列表）。
+    """
     context = _runtime_context(context, module_name)
     ensure_character_dirs(context)
     module = module_name or context.module_name
@@ -358,11 +381,25 @@ def list_character_options(
         ref = {"source": "profile", "id": char_id}
         experienced.append(_character_summary(char, ref, source_label="长期角色"))
 
+    library_characters: list[dict] = []
+    if library_scope is not None:
+        from src.gameplay.character_library import list_library_summaries
+
+        owner_id = "" if library_scope == "local" else library_scope
+        library_characters = list_library_summaries(
+            getattr(context, "database_url", None), owner_id
+        )
+
     groups = [
         {
             "id": "profile",
             "title": "长期角色",
             "characters": experienced,
+        },
+        {
+            "id": "library",
+            "title": "角色库",
+            "characters": library_characters,
         },
         {
             "id": "default",

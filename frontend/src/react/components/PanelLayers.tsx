@@ -12,7 +12,11 @@ import {
   type TimelineCapabilities,
 } from "../../state/online-store";
 import { CharacterPanelContent } from "./CharacterPanelContent";
-import { useDelayedClose, usePhaseTransition } from "./transitions";
+import {
+  useDelayedClose,
+  usePhaseTransition,
+  prefersReducedMotion,
+} from "./transitions";
 import { interactionPath } from "../../protocol/structured";
 import { useStructuredStore } from "../../state/structured-store";
 
@@ -376,6 +380,10 @@ export function SavePanel() {
   const [worldName, setWorldName] = useState("");
   const [branchLabel, setBranchLabel] = useState("");
   const [selectedSaveId, setSelectedSaveId] = useState<string | null>(null);
+  // 正在播放「抽走」离场动画的存档位：动画结束后才真正下发删除命令。
+  const [leavingAdventureId, setLeavingAdventureId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!rendered) {
@@ -386,6 +394,7 @@ export function SavePanel() {
       setRenamingWorldId(null);
       setBranchLabel("");
       setSelectedSaveId(null);
+      setLeavingAdventureId(null);
     }
   }, [rendered]);
 
@@ -874,162 +883,197 @@ export function SavePanel() {
                     const canDeleteSlot = appMode === "local" && !current;
                     return (
                       <div
-                        className={`adventure-card${current ? " current" : ""}`}
+                        className={`adventure-slot${leavingAdventureId === rootId ? " leaving" : ""}`}
                         key={rootId}
                         data-adventure={rootId}
                       >
-                        <div className="adventure-card-main">
+                        <div className="adventure-slot-inner">
                           <div
-                            className="adventure-card-info"
-                            onClick={() => {
-                              if (!renamingSlot)
-                                setView({ name: "timelines", rootId });
-                            }}
+                            className={`adventure-card${current ? " current" : ""}`}
                           >
-                            <div className="adventure-slot-line">
-                              <span className="adventure-slot-no">
-                                {slotNo}
-                              </span>
-                              {current && (
-                                <span className="adventure-badge">当前</span>
-                              )}
-                            </div>
-                            {renamingSlot ? (
-                              <span className="save-rename-form">
-                                <input
-                                  autoFocus
-                                  className="save-rename-input"
-                                  maxLength={50}
-                                  placeholder={moduleTitle}
-                                  value={slotName}
-                                  onChange={(event) =>
-                                    setSlotName(event.target.value)
-                                  }
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                      void panelCommand(
-                                        "renameAdventure",
-                                        rootId,
-                                        slotName,
-                                      );
-                                      setRenamingSlotId(null);
-                                    }
-                                    if (event.key === "Escape")
-                                      setRenamingSlotId(null);
-                                  }}
-                                />
+                            <div className="adventure-card-main">
+                              <div
+                                className="adventure-card-info"
+                                onClick={() => {
+                                  if (!renamingSlot)
+                                    setView({ name: "timelines", rootId });
+                                }}
+                              >
+                                <div className="adventure-slot-line">
+                                  <span className="adventure-slot-no">
+                                    {slotNo}
+                                  </span>
+                                  {current && (
+                                    <span className="adventure-badge">
+                                      当前
+                                    </span>
+                                  )}
+                                </div>
+                                {renamingSlot ? (
+                                  <span className="save-rename-form">
+                                    <input
+                                      autoFocus
+                                      className="save-rename-input"
+                                      maxLength={50}
+                                      placeholder={moduleTitle}
+                                      value={slotName}
+                                      onChange={(event) =>
+                                        setSlotName(event.target.value)
+                                      }
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          void panelCommand(
+                                            "renameAdventure",
+                                            rootId,
+                                            slotName,
+                                          );
+                                          setRenamingSlotId(null);
+                                        }
+                                        if (event.key === "Escape")
+                                          setRenamingSlotId(null);
+                                      }}
+                                    />
+                                    <button
+                                      className="save-rename-confirm"
+                                      aria-label="确认重命名存档"
+                                      data-tooltip="确认重命名"
+                                      onClick={() => {
+                                        void panelCommand(
+                                          "renameAdventure",
+                                          rootId,
+                                          slotName,
+                                        );
+                                        setRenamingSlotId(null);
+                                      }}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      className="save-rename-cancel"
+                                      aria-label="取消重命名存档"
+                                      data-tooltip="取消重命名"
+                                      onClick={() => setRenamingSlotId(null)}
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <div className="adventure-card-title">
+                                    {title}
+                                  </div>
+                                )}
+                                <div className="adventure-card-meta">
+                                  {progress}
+                                </div>
+                                <div className="adventure-card-meta dim">
+                                  {slotNameShown ? `${moduleTitle} · ` : ""}
+                                  最后保存 {savedTime.absolute}
+                                  {savedTime.relative
+                                    ? `（${savedTime.relative}）`
+                                    : ""}
+                                </div>
+                              </div>
+                              <div className="adventure-card-actions">
                                 <button
-                                  className="save-rename-confirm"
-                                  aria-label="确认重命名存档"
-                                  data-tooltip="确认重命名"
-                                  onClick={() => {
+                                  className="adventure-resume"
+                                  disabled={!adventure.resume_world_id}
+                                  onClick={() =>
                                     void panelCommand(
-                                      "renameAdventure",
-                                      rootId,
-                                      slotName,
+                                      "resumeAdventure",
+                                      adventure,
+                                    )
+                                  }
+                                >
+                                  {manage ? "继续游戏" : "读取"}
+                                </button>
+                                <div className="adventure-card-sub-actions">
+                                  <button
+                                    className="adventure-manage"
+                                    onClick={() =>
+                                      setView({ name: "timelines", rootId })
+                                    }
+                                  >
+                                    {manage ? "管理时间线" : "时间线"}
+                                  </button>
+                                  {canRenameSlot && !renamingSlot && (
+                                    <button
+                                      type="button"
+                                      className="adventure-rename"
+                                      onClick={() => {
+                                        setRenamingSlotId(rootId);
+                                        setSlotName(slotNameShown);
+                                      }}
+                                    >
+                                      重命名
+                                    </button>
+                                  )}
+                                  {canDeleteSlot && !confirmingSlot && (
+                                    <button
+                                      type="button"
+                                      className="adventure-delete"
+                                      onClick={() =>
+                                        setSlotConfirmationId(rootId)
+                                      }
+                                    >
+                                      删除存档
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {canDeleteSlot && confirmingSlot && (
+                              <div
+                                className="adventure-delete-confirmation"
+                                role="group"
+                                aria-label={`确认删除${slotNo}`}
+                              >
+                                <span>
+                                  删除此存档位？其{" "}
+                                  {adventure.timeline_count ?? 1}{" "}
+                                  条时间线将一并归档（数据保留可恢复）。
+                                </span>
+                                <button
+                                  type="button"
+                                  className="world-archive-confirm"
+                                  onClick={() => {
+                                    setSlotConfirmationId(null);
+                                    // 先播「抽走 + 收拢」离场动画（save-panel.css），
+                                    // 结束后再真正下发删除；reduced-motion 直接删。
+                                    if (prefersReducedMotion()) {
+                                      panelCommand("archiveAdventure", rootId);
+                                      return;
+                                    }
+                                    setLeavingAdventureId(rootId);
+                                    window.setTimeout(
+                                      () =>
+                                        panelCommand(
+                                          "archiveAdventure",
+                                          rootId,
+                                        ),
+                                      500,
                                     );
-                                    setRenamingSlotId(null);
+                                    // 删除失败兜底（服务端拒绝、存档位仍在列表中）：
+                                    // 恢复卡片显示，不装作删掉了。
+                                    window.setTimeout(() => {
+                                      setLeavingAdventureId((current) =>
+                                        current === rootId ? null : current,
+                                      );
+                                    }, 2000);
                                   }}
                                 >
-                                  ✓
+                                  确认删除
                                 </button>
                                 <button
-                                  className="save-rename-cancel"
-                                  aria-label="取消重命名存档"
-                                  data-tooltip="取消重命名"
-                                  onClick={() => setRenamingSlotId(null)}
+                                  type="button"
+                                  className="world-archive-cancel"
+                                  onClick={() => setSlotConfirmationId(null)}
                                 >
-                                  ×
+                                  取消
                                 </button>
-                              </span>
-                            ) : (
-                              <div className="adventure-card-title">
-                                {title}
                               </div>
                             )}
-                            <div className="adventure-card-meta">
-                              {progress}
-                            </div>
-                            <div className="adventure-card-meta dim">
-                              {slotNameShown ? `${moduleTitle} · ` : ""}
-                              最后保存 {savedTime.absolute}
-                              {savedTime.relative
-                                ? `（${savedTime.relative}）`
-                                : ""}
-                            </div>
-                          </div>
-                          <div className="adventure-card-actions">
-                            <button
-                              className="adventure-resume"
-                              disabled={!adventure.resume_world_id}
-                              onClick={() =>
-                                void panelCommand("resumeAdventure", adventure)
-                              }
-                            >
-                              {manage ? "继续游戏" : "读取"}
-                            </button>
-                            <div className="adventure-card-sub-actions">
-                              <button
-                                className="adventure-manage"
-                                onClick={() =>
-                                  setView({ name: "timelines", rootId })
-                                }
-                              >
-                                {manage ? "管理时间线" : "时间线"}
-                              </button>
-                              {canRenameSlot && !renamingSlot && (
-                                <button
-                                  type="button"
-                                  className="adventure-rename"
-                                  onClick={() => {
-                                    setRenamingSlotId(rootId);
-                                    setSlotName(slotNameShown);
-                                  }}
-                                >
-                                  重命名
-                                </button>
-                              )}
-                              {canDeleteSlot && !confirmingSlot && (
-                                <button
-                                  type="button"
-                                  className="adventure-delete"
-                                  onClick={() => setSlotConfirmationId(rootId)}
-                                >
-                                  删除存档
-                                </button>
-                              )}
-                            </div>
                           </div>
                         </div>
-                        {canDeleteSlot && confirmingSlot && (
-                          <div
-                            className="adventure-delete-confirmation"
-                            role="group"
-                            aria-label={`确认删除${slotNo}`}
-                          >
-                            <span>
-                              删除此存档位？其 {adventure.timeline_count ?? 1}{" "}
-                              条时间线将一并归档（数据保留可恢复）。
-                            </span>
-                            <button
-                              type="button"
-                              className="world-archive-confirm"
-                              onClick={() => {
-                                setSlotConfirmationId(null);
-                                panelCommand("archiveAdventure", rootId);
-                              }}
-                            >
-                              确认删除
-                            </button>
-                            <button
-                              type="button"
-                              className="world-archive-cancel"
-                              onClick={() => setSlotConfirmationId(null)}
-                            >
-                              取消
-                            </button>
-                          </div>
-                        )}
                       </div>
                     );
                   })}

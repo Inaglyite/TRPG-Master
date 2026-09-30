@@ -194,6 +194,40 @@
   flex-direction: column;
   gap: 10px;
 }
+/* 删除存档位：卡片先被「抽」出列表（右移淡出），随后槽位高度收拢、
+   下方存档顶上来。两阶段串联：extract 动画结束后（0.28s）才开始收拢。 */
+.adventure-slot {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: 0;
+  transition:
+    grid-template-rows 0.22s cubic-bezier(0.3, 0, 0.7, 0.15) 0.28s,
+    margin-bottom 0.22s cubic-bezier(0.3, 0, 0.7, 0.15) 0.28s;
+}
+.adventure-slot-inner {
+  min-height: 0;
+}
+.adventure-slot.leaving {
+  grid-template-rows: 0fr;
+  /* 抵消列表 gap，收拢后兄弟卡片之间不留下幽灵空隙 */
+  margin-bottom: -10px;
+}
+.adventure-slot.leaving .adventure-slot-inner {
+  overflow: hidden;
+}
+.adventure-slot.leaving .adventure-card {
+  animation: adventure-card-extract 0.28s cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
+@keyframes adventure-card-extract {
+  25% {
+    opacity: 1;
+    transform: translateX(8px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(64px);
+  }
+}
 /* 手绘档案索引卡：左侧黄铜书脊饰带落在 border-image 左区，中段羊皮纸横向拉伸 */
 .adventure-card {
   padding: 6px 12px 8px 14px;
