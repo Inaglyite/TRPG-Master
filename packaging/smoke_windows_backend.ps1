@@ -151,7 +151,9 @@ finally:
     connection.close()
 print(json.dumps({"revision": revision, "tables": tables}))
 '@
-  $DatabaseJson = & python -c $DatabaseProbe $DatabasePath
+  # 经 stdin 传给 python（`python -`）：Windows PowerShell 5.1 会把 -c 的
+  # 多行字符串参数截断在第一个内嵌引号处，CI 的 pwsh 两种写法都兼容。
+  $DatabaseJson = $DatabaseProbe | & python - $DatabasePath
   Assert-Condition ($LASTEXITCODE -eq 0) "Host Python could not inspect the migrated SQLite database."
   $Database = $DatabaseJson | ConvertFrom-Json
   Assert-Condition ($Database.revision -eq $ExpectedMigrationHead) "Packaged database revision '$($Database.revision)' does not match '$ExpectedMigrationHead'."
