@@ -82,11 +82,12 @@ def model_timeout_seconds() -> float:
 MODEL_FLASH = os.environ.get("TRPG_FLASH_MODEL", "deepseek-flash")
 MODEL_PRO = os.environ.get("TRPG_PRO_MODEL", "deepseek-v4-pro")
 _legacy_force_pro = os.environ.get("TRPG_FORCE_PRO")
+# 两个角色模型默认都走 Flash；显式 TRPG_FORCE_PRO=1 才恢复全程 Pro 的旧默认。
 _default_role_model = (
-    MODEL_FLASH
+    MODEL_PRO
     if _legacy_force_pro is not None
-    and _legacy_force_pro.strip().lower() in ("0", "false", "no", "off")
-    else MODEL_PRO
+    and _legacy_force_pro.strip().lower() in ("1", "true", "yes", "on")
+    else MODEL_FLASH
 )
 NARRATIVE_MODEL = os.environ.get(
     "TRPG_NARRATIVE_MODEL", _default_role_model

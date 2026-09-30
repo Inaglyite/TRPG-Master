@@ -1,4 +1,6 @@
+import importlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -134,6 +136,50 @@ class ModelSettingsTests(unittest.TestCase):
         self.assertEqual(saved["narrative"]["service"]["api_key"], "sk-local-test")
         self.assertEqual(saved["narrative"]["service"]["model_id"], "qwen3:32b")
         self.assertEqual(saved["judgement"]["mode"], "default")
+
+
+class DefaultRoleModelTests(unittest.TestCase):
+    """角色模型默认值：叙事/裁决都默认 Flash；显式 TRPG_FORCE_PRO=1 才恢复 Pro。"""
+
+    _ENV_NAMES = (
+        "TRPG_FORCE_PRO",
+        "TRPG_NARRATIVE_MODEL",
+        "TRPG_JUDGEMENT_MODEL",
+        "TRPG_JUDGMENT_MODEL",
+        "TRPG_PRO_MODEL",
+        "TRPG_FLASH_MODEL",
+    )
+
+    def _reload_with(self, env_overrides):
+        import src.app.config as config
+
+        with patch.dict(os.environ, env_overrides, clear=False):
+            for name in self._ENV_NAMES:
+                if name not in env_overrides:
+                    os.environ.pop(name, None)
+            return importlib.reload(config)
+
+    def tearDown(self):
+        import src.app.config as config
+
+        importlib.reload(config)
+
+    def test_default_role_models_are_flash(self):
+        config = self._reload_with({})
+        self.assertEqual(config.NARRATIVE_MODEL, "deepseek-flash")
+        self.assertEqual(config.JUDGEMENT_MODEL, "deepseek-flash")
+        self.assertFalse(config.FORCE_PRO)
+
+    def test_force_pro_opt_in_restores_pro_default(self):
+        config = self._reload_with({"TRPG_FORCE_PRO": "1"})
+        self.assertEqual(config.NARRATIVE_MODEL, "deepseek-v4-pro")
+        self.assertEqual(config.JUDGEMENT_MODEL, "deepseek-v4-pro")
+        self.assertTrue(config.FORCE_PRO)
+
+    def test_explicit_role_env_overrides_default(self):
+        config = self._reload_with({"TRPG_NARRATIVE_MODEL": "my-story-model"})
+        self.assertEqual(config.NARRATIVE_MODEL, "my-story-model")
+        self.assertEqual(config.JUDGEMENT_MODEL, "deepseek-flash")
 
 
 if __name__ == "__main__":

@@ -1440,8 +1440,8 @@ system prompt、Lorebook 扫描或 `world_state`。
 ```json
 {
   "type": "model_settings",
-  "narrative_model": "deepseek-v4-pro",
-  "judgement_model": "deepseek-v4-pro",
+  "narrative_model": "deepseek-flash",
+  "judgement_model": "deepseek-flash",
   "available_models": [
     {"id":"deepseek-flash","label":"Flash"},
     {"id":"deepseek-v4-pro","label":"Pro"}
