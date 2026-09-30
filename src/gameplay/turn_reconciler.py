@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections import Counter
 from typing import Any
 
 from src.ai.model.llm_concurrency import llm_call_slot
@@ -421,12 +422,56 @@ def _extract_commit(response: Any) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _name_mentioned(name: str, text: str) -> bool:
+def _name_mentioned(name: str, text: str, extra_aliases: set[str] | None = None) -> bool:
     if not name:
         return False
     aliases = {name}
     aliases.update(part for part in re.split(r"[·・\s]+", name) if len(part) >= 2)
+    if extra_aliases:
+        aliases.update(extra_aliases)
     return any(alias in text for alias in aliases)
+
+
+# 中文常见复姓——推断姓氏时不得把“欧阳”截成“欧”。
+_COMPOUND_SURNAMES = frozenset(
+    {
+        "欧阳", "司马", "诸葛", "上官", "皇甫", "令狐", "慕容", "司徒",
+        "公孙", "东方", "独孤", "南宫", "夏侯", "尉迟", "长孙", "宇文",
+    }
+)
+
+# “姓氏+称谓”的公开提及（我姓苏 / 苏小姐 / 顾教授）：自我介绍与他人称呼
+# 很少带全名，首见公开卡补发必须认得这种叫法。
+_SURNAME_TITLES = (
+    "小姐", "先生", "女士", "夫人", "太太", "姑娘", "老爷", "老师",
+    "医生", "大夫", "博士", "教授", "记者", "警官", "探长", "队长",
+    "道长", "法师", "上师", "师父", "师傅", "老板", "掌柜", "经理", "主任",
+)
+
+
+def _npc_surname(name: str) -> str:
+    """中文姓名的姓氏；带分隔符/拉丁字母的西式名不参与姓氏推断。"""
+    if not name or len(name) < 2 or re.search(r"[·・\sA-Za-z0-9]", name):
+        return ""
+    if len(name) > 2 and name[:2] in _COMPOUND_SURNAMES:
+        return name[:2]
+    return name[:1]
+
+
+def _npc_surname_aliases(name: str, *, surname_counts: Counter) -> set[str]:
+    """姓氏级提及别名。模组内撞姓时禁用，避免“苏小姐”指错人。"""
+    surname = _npc_surname(name)
+    if not surname or surname_counts.get(surname, 0) != 1:
+        return set()
+    aliases = {f"姓{surname}"}
+    aliases.update(f"{surname}{title}" for title in _SURNAME_TITLES)
+    return aliases
+
+
+def _npc_visibly_described(npc: dict, body: str) -> bool:
+    """≥2 条可见特征原文出现：未点名但已被公开描摹，等同玩家认出了此人。"""
+    tags = [str(tag) for tag in npc.get("visible_tags", []) if str(tag).strip()]
+    return len(tags) >= 2 and sum(1 for tag in tags if tag in body) >= 2
 
 
 def _scene_transition_position(name: str, text: str) -> int:
@@ -457,14 +502,26 @@ def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
 
     current_scene = state.get("current_scene", {})
     present = set(current_scene.get("npcs_present", []))
-    for npc in state.get("npcs", []):
-        if not isinstance(npc, dict) or npc.get("id") not in present:
+    npcs = [npc for npc in state.get("npcs", []) if isinstance(npc, dict)]
+    surname_counts: Counter = Counter(
+        _npc_surname(str(npc.get("name") or "")) for npc in npcs
+    )
+    surname_counts.pop("", None)
+    for npc in npcs:
+        if npc.get("id") not in present:
             continue
         revealed = npc.get("revealed") or {}
         if revealed.get("level", 0) > 0:
             continue
         name = str(npc.get("name") or "")
-        if not _name_mentioned(name, body):
+        if not (
+            _name_mentioned(
+                name,
+                body,
+                extra_aliases=_npc_surname_aliases(name, surname_counts=surname_counts),
+            )
+            or _npc_visibly_described(npc, body)
+        ):
             continue
         tags = "、".join(str(tag) for tag in npc.get("visible_tags", [])[:6])
         entry = f"{name}：{tags}" if tags else f"调查员已见到{name}。"

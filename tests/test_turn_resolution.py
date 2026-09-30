@@ -76,6 +76,47 @@ def resolution_world() -> dict:
     }
 
 
+def silent_bells_world() -> dict:
+    """《无声编钟》申报馆真机事故现场：两名 NPC 同场，开场叙事只以
+    “我姓苏 / 苏小姐”称呼苏晚晴、以“奥斯古德”称呼伊芙琳，均未带全名。"""
+    return {
+        "module_meta": {"era": "1926年上海"},
+        "pc": {"name": "黄千陆", "hp": 10, "san": 70, "skills": {}, "inventory": []},
+        "current_scene": {
+            "id": "shenbao_office",
+            "name": "申报馆",
+            "npcs_present": ["su_wanqing", "evelyn_osgood"],
+        },
+        "scene_catalog": {
+            "shenbao_office": {
+                "id": "shenbao_office",
+                "name": "申报馆",
+                "npcs_present": ["su_wanqing", "evelyn_osgood"],
+            },
+        },
+        "npcs": [
+            {
+                "id": "su_wanqing",
+                "name": "苏晚晴",
+                "visible_tags": [
+                    "二十六岁", "齐耳短发", "呢子西装外套", "说话快而直率", "相机不离身",
+                ],
+                "revealed": {"level": 0, "entries": []},
+            },
+            {
+                "id": "evelyn_osgood",
+                "name": "伊芙琳·奥斯古德",
+                "visible_tags": ["二十八岁", "英伦装束", "眼圈发黑", "中文生硬"],
+                "revealed": {"level": 0, "entries": []},
+            },
+        ],
+        "clues_found": {"investigation": [], "event": [], "task": [], "npc": []},
+        "clue_catalog": {},
+        "flags": {},
+        "endings": [],
+    }
+
+
 def model_tool_calls(
     engine: SimpleNamespace,
     calls: list[tuple[str, str, str]],
@@ -901,6 +942,91 @@ class ClueClarityClockTests(unittest.TestCase):
             )
 
             self.assertEqual(store.load()["current_scene"]["id"], "hall")
+
+
+class FirstEncounterRevealTests(unittest.TestCase):
+    """首见 NPC 公开卡的确定性补发：玩家本回合见到并辨认出的在场 NPC，
+    平台必须逐个补齐公开人物卡，不能依赖模型记得逐一点名（真机事故：
+    无声编钟开场只发了伊芙琳的卡，苏晚晴迟了一回合才补上）。"""
+
+    def _engine(self, world):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        store = WorldStore(Path(temp_dir.name) / "world")
+        store.initialize(world)
+        return FakeCommitEngine(store), store
+
+    def _revealed_ids(self, store):
+        return {
+            npc["id"]
+            for npc in store.load()["npcs"]
+            if (npc.get("revealed") or {}).get("level", 0) > 0
+        }
+
+    def test_surname_title_and_short_name_reveal_both_present_npcs(self):
+        """开场正文只用“我姓苏/苏小姐”与“奥斯古德/伊芙琳”，结尾选项块里的
+        全名不计入（narrative_body 已剔除选项）——两人都必须补发公开卡。"""
+        engine, store = self._engine(silent_bells_world())
+        narrative = (
+            "桌后坐着一个二十六七岁的女子，听见脚步声便抬起头。\n\n"
+            "“黄先生，坐。我姓苏，申报记者。这案子我盯了半个月。”\n\n"
+            "她抬眼看了看身旁的英伦女士。苏小姐把剪报拍在桌上，"
+            "伊芙琳攥着叔父的信件，指节发白。\n\n"
+            "**你可以——**\n1. 请苏晚晴把剪报摊开。\n2. 追问伊芙琳·奥斯古德。"
+        )
+        reconcile_narrative_entities(engine, narrative)
+        self.assertEqual(self._revealed_ids(store), {"su_wanqing", "evelyn_osgood"})
+        entries = {
+            npc["id"]: npc["revealed"]["entries"][0]["text"]
+            for npc in store.load()["npcs"]
+        }
+        self.assertIn("齐耳短发", entries["su_wanqing"])
+
+    def test_shared_surname_disables_surname_aliases(self):
+        """同模组撞姓时“苏小姐”有歧义，不得猜；全名提及仍正常补发。"""
+        world = silent_bells_world()
+        world["npcs"].append(
+            {
+                "id": "su_manyu",
+                "name": "苏曼玉",
+                "visible_tags": ["杏色旗袍"],
+                "revealed": {"level": 0, "entries": []},
+            }
+        )
+        world["current_scene"]["npcs_present"].append("su_manyu")
+        engine, store = self._engine(world)
+
+        reconcile_narrative_entities(engine, "苏小姐放下茶缸，没有说话。")
+        self.assertEqual(self._revealed_ids(store), set())
+
+        reconcile_narrative_entities(engine, "苏晚晴把剪报推到你面前。")
+        self.assertEqual(self._revealed_ids(store), {"su_wanqing"})
+
+    def test_visible_tags_quorum_reveals_unnamed_npc(self):
+        """未点名、未提及姓氏，但 ≥2 条可见特征原样出现，等同公开认出。"""
+        engine, store = self._engine(silent_bells_world())
+        reconcile_narrative_entities(
+            engine,
+            "角落那张办公桌后，齐耳短发的女子拢了拢呢子西装外套的袖口，抬头看你。",
+        )
+        self.assertEqual(self._revealed_ids(store), {"su_wanqing"})
+
+    def test_single_tag_or_plain_scene_does_not_reveal(self):
+        """单条特征或纯环境描写不得触发补发——背景里一闪而过不算认出。"""
+        engine, store = self._engine(silent_bells_world())
+        reconcile_narrative_entities(
+            engine,
+            "排字房里铅字叮当落地，一个齐耳短发的背影伏在角落校样上。",
+        )
+        self.assertEqual(self._revealed_ids(store), set())
+
+    def test_unrelated_scene_npcs_are_not_revealed(self):
+        """不在当前场景的 NPC 即使被提及也不补发（提及≠见面）。"""
+        world = silent_bells_world()
+        world["current_scene"]["npcs_present"] = ["evelyn_osgood"]
+        engine, store = self._engine(world)
+        reconcile_narrative_entities(engine, "你想起苏小姐白天说过的话。")
+        self.assertEqual(self._revealed_ids(store), set())
 
 
 class FinalizeTurnTests(unittest.TestCase):

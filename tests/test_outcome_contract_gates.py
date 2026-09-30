@@ -104,6 +104,41 @@ def test_span_patterns_cover_chinese_numerals():
     assert not consistency_violations("他昨天来过这里。", settled_minutes=240)
 
 
+def test_dialogue_recited_spans_do_not_trigger_consistency_gate():
+    """真机事故（无声编钟申报馆，settled=0/30 分钟）：NPC 台词里转述的日期与
+    病程（“三月十日”“我盯了半个月”“这案子拖一天”）被当成叙事时间越界，
+    每回合误触一次重写且重写后仍报争议。对白不是本回合的时间流逝。"""
+    narrative = (
+        "她抽出一张剪报拍在桌上，指尖点着其中一行。\n\n"
+        "“三月十日，他突然不能说话。这案子我盯了半个月，拖一天，"
+        "就多一个人躺在江边。”\n\n"
+        "雨声隔着窗玻璃闷闷地响，排字房的铅字还在叮当地落。"
+    )
+    assert not consistency_violations(narrative, settled_minutes=0)
+    assert not consistency_violations(narrative, settled_minutes=30)
+    # 重写链路会把弯引号归一成 ASCII 直引号，剔除对白必须两种引号都认
+    straight = narrative.replace("“", '"').replace("”", '"')
+    assert not consistency_violations(straight, settled_minutes=0)
+
+
+def test_narrated_day_span_still_triggers_gate():
+    """剔除对白只保护台词；叙述层的时间越界照常命中。"""
+    assert consistency_violations("你回到旅馆歇下。三天后，你再次来到报馆。", settled_minutes=30)
+    assert consistency_violations("你守了一夜。", settled_minutes=30)
+
+
+def test_rewrite_that_changes_nothing_keeps_original():
+    """重写甄别后认定争议表述是回忆/打算而原样保留时，改写没有消除任何越界，
+    必须采用原文而不是接受了无谓改写的文本。"""
+    outcome = {
+        "status": "executed_success",
+        "events": [{"type": "time_advanced", "before": 0, "after": 30}],
+    }
+    original = "你在廊下守了一夜，雨声未歇。"
+    engine = consistency_engine(outcome, reply="你在回廊守了一整夜，雨声未歇。")
+    assert apply_narrative_consistency(engine, original) == original
+
+
 def consistency_engine(outcome, reply="你守了很久。", finish="stop"):
     return SimpleNamespace(
         client=SimpleNamespace(

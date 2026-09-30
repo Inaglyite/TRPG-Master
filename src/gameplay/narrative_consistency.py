@@ -32,6 +32,18 @@ _HOUR_SPAN = re.compile(
     r"一整个(?:上午|下午|晚上)|(?:上午|下午|晚上)一直到(?:上午|下午|晚上|夜里)"
 )
 
+# 引号对白：人物台词里转述的日期与时长（“三月十日”“我盯了半个月”“这案子
+# 拖一天”）是回忆/案情/假设，不是本回合真实经过的时间。跨度检查只看叙述层，
+# 否则每段案情对白都会误触一次多余的一致性重写。直引号一并剔除：重写链路
+# （deepseek-flash）会把弯引号归一成 ASCII "，只认弯引号会让改写后的文本
+# 再次误触闸门。
+_QUOTED_DIALOGUE = re.compile(r'“[^”]*”|"[^"]*"|「[^」]*」|『[^』]*』|‘[^’]*’')
+
+
+def _narration_text(narrative: str) -> str:
+    """剔除成对引号内的对白，只保留叙述层文本。"""
+    return _QUOTED_DIALOGUE.sub("", narrative)
+
 _REWRITE_PROMPT = """你是叙事一致性校对。给出的守秘人叙事与本回合实际结算存在冲突。
 只做消除冲突的最小修改：
 - 不改变已结算的事件、骰点、物品、时钟与人物态度；不新增线索、物品、秘密或行动结果；
@@ -45,11 +57,12 @@ def consistency_violations(narrative: str, *, settled_minutes: int | None) -> li
     violations = []
     if settled_minutes is None:
         return violations
-    if settled_minutes < 1440 and _DAY_SPAN.search(narrative):
+    narration = _narration_text(narrative)
+    if settled_minutes < 1440 and _DAY_SPAN.search(narration):
         violations.append(
             f"叙事出现以天/夜计的时间跨度，但本回合实际只结算了 {settled_minutes} 分钟"
         )
-    if settled_minutes < 90 and _HOUR_SPAN.search(narrative):
+    if settled_minutes < 90 and _HOUR_SPAN.search(narration):
         violations.append(
             f"叙事出现数小时级的时间跨度，但本回合实际只结算了 {settled_minutes} 分钟"
         )
@@ -127,6 +140,11 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         log_game("叙事一致性重写结果过短，保留原文")
         return narrative
     remaining = consistency_violations(rewritten, settled_minutes=settled)
+    if remaining == violations:
+        # 重写模型甄别后认为这些跨度是打算/回忆/假设而原样保留——改写没有
+        # 消除任何越界，采用原文避免无谓的文本漂移。
+        log_game("叙事一致性重写未改变争议表述，保留原文")
+        return narrative
     if remaining:
         log_game("叙事一致性重写后仍有争议 | " + "；".join(remaining)[:200])
     return rewritten
