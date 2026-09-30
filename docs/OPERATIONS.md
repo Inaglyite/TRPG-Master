@@ -56,3 +56,12 @@
 故障先保留版本、时间、请求/命令 ID 与脱敏诊断，再定位；不得为了调查导出完整 Key、Cookie、生产数据库或玩家剧情到第三方。紧急账号/注册/SSH 改动也须有恢复入口与明确权限，不能“顺手关闭 22”造成运维锁死。
 
 正式上线是否具备条件，只根据[当前状态](STATUS.md)和指定候选证据判断，不根据旧报告的“全部完成”。
+
+## 7. 桌面客户端发布与自动更新
+
+1. 只从 git 标签对应的干净检出构建（Windows VM 或 `windows-package` CI），不从脏工作区打包；候选提交先过本地 quality 与架构门禁。
+2. 构建：`packaging/build_windows.ps1`（缺依赖时可加 `-UseChinaMirrors`）。产物为 NSIS 安装包、portable 包、`latest.yml`、`*.blockmap` 与 `SHA256SUMS.txt`。
+3. 发布前必须在 Windows 上跑通 `packaging/smoke_windows_backend.ps1` 与 `packaging/verify_windows_desktop_artifacts.ps1`（含 NSIS 静默安装/启动/卸载），全绿才允许上传。
+4. 发布：`gh release create vX.Y.Z` 上传安装包、portable、`latest.yml`、`*.blockmap` 与校验和；tag 指向实际构建所用提交。
+5. 自动更新经 `latest.yml` 检查（仓库须保持 public）：启动后延迟检查、后台下载、默认退出时静默安装，玩家可选择立即重启更新；检查/下载失败一律 fail-open 只记日志。`TRPG_SKIP_AUTO_UPDATE=1` 可禁用（验收脚本已内置）。
+6. 自动更新从“包含更新器的那一版”之后才开始生效；首版发布后需在下一版实测一次升级链路。
