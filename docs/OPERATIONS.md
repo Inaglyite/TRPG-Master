@@ -60,7 +60,7 @@
 ## 7. 桌面客户端发布与自动更新
 
 1. 只从 git 标签对应的干净检出构建（Windows VM 或 `windows-package` CI），不从脏工作区打包；候选提交先过本地 quality 与架构门禁。
-2. 构建：`packaging/build_windows.ps1`（缺依赖时可加 `-UseChinaMirrors`）。构建/验收脚本统一用 PowerShell 7+（`pwsh`）执行，与 CI 一致；Windows 自带 5.1 对多行参数和原生命令 stderr 的处理不同，已知会误挂。产物为 NSIS 安装包、portable 包、`latest.yml`、`*.blockmap` 与 `SHA256SUMS.txt`。
+2. 构建：`packaging/build_windows.ps1`（缺依赖时可加 `-UseChinaMirrors`）。构建/验收脚本兼容 Windows 自带 PowerShell 5.1 与 CI 的 pwsh；5.1 下原生命令 stderr 与多行参数的两个已知坑已在脚本内处理，不要再退回依赖 pwsh 特性。产物为 NSIS 安装包、portable 包、`latest.yml`、`*.blockmap` 与 `SHA256SUMS.txt`。
 3. 发布前必须在 Windows 上跑通 `packaging/smoke_windows_backend.ps1` 与 `packaging/verify_windows_desktop_artifacts.ps1`（含 NSIS 静默安装/启动/卸载），全绿才允许上传。
 4. 发布：`gh release create vX.Y.Z` 上传安装包、portable、`latest.yml`、`*.blockmap` 与校验和；tag 指向实际构建所用提交。
 5. 自动更新经 `latest.yml` 检查（仓库须保持 public）：启动后延迟检查、后台下载、默认退出时静默安装，玩家可选择立即重启更新；检查/下载失败一律 fail-open 只记日志。`TRPG_SKIP_AUTO_UPDATE=1` 可禁用（验收脚本已内置）。

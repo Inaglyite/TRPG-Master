@@ -48,7 +48,9 @@ function Stop-DesktopLaunch(
     }
     foreach ($ProcessId in $ProcessIds) {
       if ($ProcessId -and (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
-        & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
+        # 经 cmd 吃掉 stderr：Windows PowerShell 5.1 在 EAP=Stop 下会把原生命令的
+        # stderr 提升为终止性错误，而子进程已先退出时 taskkill 报错属于正常竞态。
+        & cmd.exe /c "taskkill.exe /PID $ProcessId /T /F 2>nul" | Out-Null
       }
     }
     Start-Sleep -Milliseconds 250
@@ -120,7 +122,7 @@ function Assert-PortableBootstrap([string]$Executable) {
   }
   finally {
     if ($Probe -and -not $Probe.HasExited) {
-      & taskkill.exe /PID $Probe.Id /T /F 2>$null | Out-Null
+      & cmd.exe /c "taskkill.exe /PID $($Probe.Id) /T /F 2>nul" | Out-Null
     }
   }
 }
