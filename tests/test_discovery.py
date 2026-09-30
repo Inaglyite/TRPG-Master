@@ -480,7 +480,7 @@ class DiscoveryResolutionTests(unittest.TestCase):
                 "\n\n医学院地下的空气更冷。惠特克罗夫特医生站在门口等候。\n\n"
                 '惠特克罗夫特医生："法伦主任说你想亲眼看看。"'
             )
-            final_segments, _ = _parse_final_narrative(
+            final_segments, _, _intro_ids = _parse_final_narrative(
                 engine,
                 result,
                 model_suffix,

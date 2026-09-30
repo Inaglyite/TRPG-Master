@@ -35,13 +35,17 @@ def asset_payload(filename: str, context: RuntimeContext) -> dict:
 
 
 def npc_lookup(world: dict, npc_id: str, *, catalog: dict | None = None) -> dict | None:
-    """按 id 查 NPC 的展示信息：{id, name, avatar_file}；名称以权威 NPC 表为准。"""
+    """按 id 查 NPC 的展示信息：{id, name, avatar_file}；名称以权威 NPC 表为准。
+
+    模组声明了 display_name（公开称呼/艺名）时，玩家可见的名字一律使用它，
+    真名不进入任何玩家可见载荷。
+    """
     if not npc_id:
         return None
     name = None
     for npc in world.get("npcs", []) or []:
         if str(npc.get("id") or "") == npc_id:
-            name = str(npc.get("name") or "") or None
+            name = str(npc.get("display_name") or npc.get("name") or "") or None
             break
     asset_entry = ((world.get("asset_map") or {}).get("npcs") or {}).get(npc_id) or {}
     if not asset_entry and catalog:

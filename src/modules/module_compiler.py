@@ -158,6 +158,9 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
         })
         data = _merge_extensions(data)
         data["id"] = npc_id
+        if not data.get("display_name"):
+            # 未声明公开称呼的模组保持既有世界状态形状，不新增字段。
+            data.pop("display_name", None)
         if data.get("max_hp") is None:
             data["max_hp"] = data.get("hp", 0)
         data["revealed"] = {

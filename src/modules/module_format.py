@@ -214,6 +214,9 @@ class AssetMapDefinition(StrictModel):
 
 class NpcDefinition(StrictModel):
     name: str = Field(min_length=1, max_length=120)
+    # 公开称呼（艺名/姓氏称谓等）：设置后玩家可见的名字一律用它，
+    # 真名仅守秘人上下文可见，直到模组用更高 tier 的揭示放行。
+    display_name: str = Field(default="", max_length=120)
     visible_tags: list[str] = Field(default_factory=list)
     secret: str = ""
     hp: int = Field(default=10, ge=0)

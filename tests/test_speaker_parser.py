@@ -1,10 +1,78 @@
 import unittest
 
-from src.gameplay.speaker_parser import SpeakerStreamParser, parse_segments
+from src.gameplay.speaker_parser import (
+    SpeakerStreamParser,
+    parse_segments,
+    parse_segments_full,
+)
 
 
 def npc_ok(npc_id: str) -> bool:
     return npc_id in {"bryce_fallon", "butler_gregory"}
+
+
+class IntroMarkerTests(unittest.TestCase):
+    """【intro:id】人物介绍点标记：与发言标签同一状态机，不产出可见文本。"""
+
+    def test_intro_marker_is_stripped_and_collected_in_order(self):
+        segments, clean, intro_ids = parse_segments_full(
+            "你走进报馆。【intro:su_wanqing】她抬起头。【intro:evelyn_osgood】"
+            "旁边的英伦女士攥着信。【intro:su_wanqing】"
+        )
+        self.assertEqual(intro_ids, ["su_wanqing", "evelyn_osgood"])
+        self.assertNotIn("【", clean)
+        self.assertNotIn("intro", clean)
+        self.assertEqual([s.kind for s in segments], ["narration"])
+
+    def test_intro_marker_inside_speech_keeps_attribution(self):
+        segments, clean, intro_ids = parse_segments_full(
+            "【npc:su_wanqing】黄先生，坐。【intro:su_wanqing】我姓苏。【/npc】",
+            is_valid_npc=lambda _id: True,
+        )
+        self.assertEqual(intro_ids, ["su_wanqing"])
+        self.assertEqual([s.kind for s in segments], ["speech"])
+        self.assertEqual(segments[0].npc_id, "su_wanqing")
+        self.assertNotIn("intro", segments[0].text)
+        self.assertNotIn("【", clean)
+
+    def test_half_width_brackets_and_legacy_closer(self):
+        _segments, clean, intro_ids = parse_segments_full(
+            "开场。[intro:su_wanqing]正文。【intro:evelyn_osgood⟧完。"
+        )
+        self.assertEqual(intro_ids, ["su_wanqing", "evelyn_osgood"])
+        self.assertNotIn("intro", clean)
+        self.assertNotIn("⟧", clean)
+
+    def test_empty_and_malformed_markers_never_leak_or_crash(self):
+        _segments, clean, intro_ids = parse_segments_full("正文【intro:】继续。")
+        self.assertEqual(intro_ids, [])
+        self.assertEqual(clean, "正文继续。")
+
+    def test_streaming_chunks_match_one_shot(self):
+        text = "你进门。【intro:su_wanqing】她点头。【npc:su_wanqing】坐。【/npc】完。"
+        oneshot = parse_segments_full(text, is_valid_npc=lambda _id: True)
+        # 逐字符与碎块两种喂法
+        for chunks in (
+            list(text),
+            [text[i : i + 3] for i in range(0, len(text), 3)],
+        ):
+            parser = SpeakerStreamParser(is_valid_npc=lambda _id: True)
+            pieces = []
+            for chunk in chunks:
+                pieces.extend(parser.feed(chunk))
+            pieces.extend(parser.flush())
+            streamed_ids = list(
+                dict.fromkeys(t for k, t, _ in pieces if k == "intro" and t)
+            )
+            streamed_text = "".join(t for k, t, _ in pieces if k == "text")
+            self.assertEqual(streamed_ids, oneshot[2])
+            self.assertEqual(streamed_text, oneshot[1])
+            self.assertNotIn("【", streamed_text)
+
+    def test_parse_segments_legacy_signature_unchanged(self):
+        segments, clean = parse_segments("正文【intro:su_wanqing】完。")
+        self.assertEqual(clean, "正文完。")
+        self.assertEqual([s.kind for s in segments], ["narration"])
 
 
 class SpeakerParserTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""NPC 发言标签解析：【npc:id】…【/npc】。
+"""NPC 发言标签解析：【npc:id】…【/npc】 与人物介绍标记 【intro:id】。
 
 模型按叙述契约用标签包裹 NPC 直接引语；本模块是发言者归因的唯一解析点。
 规则：
@@ -9,10 +9,17 @@
 - 定稿兼容缺失标签时，只恢复同一行、已知 NPC 作为明确说话主语的引语；
   不从上一行继承发言者，也不把调查员对 NPC 的话猜成 NPC 台词。
 
+【intro:<npc_id>】 是点标记：模型声明“此处向玩家公开介绍了该人物”。
+它不属于台词也不属于旁白，不产出任何文本；id 列表仅供定稿阶段的
+人物卡落账校验使用（在场、未揭示、公开范围由平台核对，见
+turn_reconciler.apply_narrative_introductions）。标记语义只对模型叙事
+有效——玩家输入不经过本解析器，同款文字不构成授权。
+
 输出为有序的 Piece 序列（流式与定稿同一条状态机，天然幂等）：
     ("speech_start", npc_id)  — 发言段开始
     ("text", text, npc_id|None) — 文本片段（npc_id 非空表示发言段文本）
     ("speech_end", None)      — 发言段结束
+    ("intro", npc_id, None)   — 人物介绍点标记（无文本，不落段）
 """
 
 from __future__ import annotations
@@ -23,12 +30,13 @@ from dataclasses import dataclass, field
 
 OPEN_PREFIXES = ("【npc:", "[npc:")
 CLOSE_PREFIXES = ("【/npc", "[/npc")
+INTRO_PREFIXES = ("【intro:", "[intro:")
 _BRACKETS = ("【", "[")
 # 【npc: + 最长 NPC id + 】，超过即视为不可能构成开标签
 _MAX_OPEN_TAG_LEN = 64
 
 # piece = (kind, text, npc_id)
-#   kind: "speech_start" | "text" | "speech_end"
+#   kind: "speech_start" | "text" | "speech_end" | "intro"
 Piece = tuple[str, str, str | None]
 
 
@@ -97,6 +105,20 @@ class SpeakerStreamParser:
         """处理 _buf 开头的方括号构念，返回消耗字符数；0 表示需等待。"""
         buf = self._buf
         bracket = buf[0]
+        intro_prefix = next(
+            (prefix for prefix in INTRO_PREFIXES if buf.startswith(prefix)),
+            None,
+        )
+        if intro_prefix:
+            # 介绍点标记：不开始/结束发言段，不产出文本，只记录 id。
+            closing_brackets = ("】", "⟧") if intro_prefix.startswith("【") else ("]",)
+            ends = [buf.find(char, len(intro_prefix)) for char in closing_brackets]
+            ends = [end for end in ends if end >= 0]
+            end = min(ends) if ends else -1
+            if end < 0:
+                return 0 if len(buf) <= _MAX_OPEN_TAG_LEN else 1
+            pieces.append(("intro", buf[len(intro_prefix) : end].strip(), None))
+            return end + 1
         if not self._in_speech:
             open_prefix = next(
                 (prefix for prefix in OPEN_PREFIXES if buf.startswith(prefix)),
@@ -127,7 +149,10 @@ class SpeakerStreamParser:
                 if end < 0:
                     return 0 if len(buf) <= _MAX_OPEN_TAG_LEN else 1
                 return end + 1  # 游离闭标签（含 【/npc:id】 变体），剥离
-            if any(prefix.startswith(buf) for prefix in (*CLOSE_PREFIXES, *OPEN_PREFIXES)):
+            if any(
+                prefix.startswith(buf)
+                for prefix in (*CLOSE_PREFIXES, *OPEN_PREFIXES, *INTRO_PREFIXES)
+            ):
                 return 0  # 半个标签前缀
             self._emit_text(pieces, bracket)
             return 1  # 非标签的 ⟦，按普通文本输出
@@ -151,7 +176,7 @@ class SpeakerStreamParser:
             self._speech_npc = None
             pieces.append(("speech_end", "", None))
             return end + 1
-        if any(prefix.startswith(buf) for prefix in CLOSE_PREFIXES):
+        if any(prefix.startswith(buf) for prefix in (*CLOSE_PREFIXES, *INTRO_PREFIXES)):
             return 0
         self._emit_text(pieces, bracket)
         return 1  # 嵌套开标签或其他 ⟦，按文本处理
@@ -193,6 +218,8 @@ def pieces_to_segments(pieces: list[Piece]) -> list[Segment]:
             segments.append(Segment(kind="speech", text=text, npc_id=speech_npc))
 
     for kind, text, npc_id in pieces:
+        if kind == "intro":
+            continue  # 介绍点标记不落段、不产文本
         if kind == "speech_start":
             close_narration()
             speech = []
@@ -230,13 +257,41 @@ def parse_segments(
     present_npc_ids: Iterable[str] | None = None,
 ) -> tuple[list[Segment], str]:
     """权威整段解析：返回 (segments, clean_text)。与增量路径同一状态机。"""
+    segments, clean_text, _intro_ids = parse_segments_full(
+        full_text,
+        is_valid_npc=is_valid_npc,
+        on_unknown_npc=on_unknown_npc,
+        speaker_aliases=speaker_aliases,
+        player_text=player_text,
+        present_npc_ids=present_npc_ids,
+    )
+    return segments, clean_text
+
+
+def parse_segments_full(
+    full_text: str,
+    is_valid_npc: Callable[[str], bool] | None = None,
+    on_unknown_npc: Callable[[str], None] | None = None,
+    speaker_aliases: dict[str, str] | None = None,
+    player_text: str | None = None,
+    present_npc_ids: Iterable[str] | None = None,
+) -> tuple[list[Segment], str, list[str]]:
+    """权威整段解析：返回 (segments, clean_text, 介绍标记 npc id 列表)。
+
+    intro id 只做收集与去重（保持出现顺序）；在场/揭示态/公开范围校验
+    由定稿落账侧负责，解析层不读世界状态。
+    """
     parser = SpeakerStreamParser(
         is_valid_npc=is_valid_npc or (lambda _npc_id: True),
         on_unknown_npc=on_unknown_npc,
     )
     pieces = parser.feed(full_text) + parser.flush()
-    clean_text = "".join(text for kind, text, _ in pieces if kind == "text")
-    segments = pieces_to_segments(pieces)
+    intro_ids = list(
+        dict.fromkeys(text for kind, text, _ in pieces if kind == "intro" and text)
+    )
+    visible = [piece for piece in pieces if piece[0] != "intro"]
+    clean_text = "".join(text for kind, text, _ in visible if kind == "text")
+    segments = pieces_to_segments(visible)
     if speaker_aliases:
         segments = infer_named_speech(
             segments,
@@ -244,7 +299,7 @@ def parse_segments(
             player_text=player_text,
             present_npc_ids=present_npc_ids,
         )
-    return segments, clean_text
+    return segments, clean_text, intro_ids
 
 
 _NAMED_LINE = re.compile(

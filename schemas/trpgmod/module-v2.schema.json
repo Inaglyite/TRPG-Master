@@ -990,6 +990,12 @@
           "title": "Name",
           "type": "string"
         },
+        "display_name": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Display Name",
+          "type": "string"
+        },
         "visible_tags": {
           "items": {
             "type": "string"

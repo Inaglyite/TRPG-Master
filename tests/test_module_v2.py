@@ -115,6 +115,26 @@ class ModuleV2Tests(unittest.TestCase):
         )
         self.assertTrue(any(name == "state_add_clue" for name, _args in calls))
 
+    def test_npc_display_name_compiles_into_world_state(self):
+        """模组声明 display_name（公开称呼）→ 编译进世界状态；未声明则不新增字段。"""
+        manifest, module = v2_payloads()
+        npc_id = next(iter(module["npcs"]))
+        module["npcs"][npc_id]["display_name"] = "报馆记者"
+
+        preview = compile_payload(manifest, module)
+
+        self.assertTrue(preview.ok)
+        npcs = preview.result.world_state["npcs"]
+        by_id = {npc["id"]: npc for npc in npcs}
+        self.assertEqual(by_id[npc_id].get("display_name"), "报馆记者")
+
+        manifest2, module2 = v2_payloads()
+        preview2 = compile_payload(manifest2, module2)
+        self.assertTrue(preview2.ok)
+        self.assertTrue(
+            all("display_name" not in npc for npc in preview2.result.world_state["npcs"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

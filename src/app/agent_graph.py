@@ -48,7 +48,7 @@ from src.gameplay.choices import extract_action_choices
 from src.gameplay.crisis import maybe_fire_crisis
 from src.gameplay.discovery import preferred_luck_difficulty
 from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
-from src.gameplay.speaker_parser import Segment
+from src.gameplay.speaker_parser import Segment, parse_segments_full
 from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
 from src.gameplay.transition_prelude import build_scene_entry_beat, build_transition_prelude
 
@@ -146,6 +146,39 @@ def _parse_authored_parts(engine: Any, parts: list[str]) -> tuple[list[Segment],
 def _performance_span(engine: Any, name: str):
     factory = getattr(engine, "performance_span", None)
     return factory(name) if factory else nullcontext()
+
+
+def _time_semantics_note(adjudicated_outcome: dict) -> str:
+    """本回合现实耗时 vs 故事中被谈论的时间——注入故事模型的显式区分。
+
+    世界时间只由裁决通道（time_advanced 事件）推进；台词/回忆里的日期与
+    病程是内容而非耗时，模型不得据日期文字自行宣告时间流逝。
+    """
+    settled = next(
+        (
+            event
+            for event in adjudicated_outcome.get("events", [])
+            if isinstance(event, dict) and event.get("type") == "time_advanced"
+        ),
+        None,
+    )
+    if settled:
+        minutes = int(settled.get("after", 0)) - int(settled.get("before", 0))
+        note = (
+            f"\n本回合已结算时间 {minutes} 分钟：这是本回合现实里真实经过的时长，"
+            "叙事的时间跨度不得超出它，不得把数小时演成数天，不得叙述未结算的昼夜更替。"
+        )
+    else:
+        note = (
+            "\n本回合未结算时间流逝：剧情在现实时间上连续进行，"
+            "不得叙述等待、赶路、过夜等实际耗时。"
+        )
+    return note + (
+        "注意区分两类时间：台词与回忆中谈论的日期、病程、过往经历"
+        "（如“三月十日案发”“我盯了半个月”）只是故事内容，不代表本回合经过的时间；"
+        "只有裁决结算的耗时才是现实时间。若剧情需要更多实际耗时，"
+        "交给裁决通道结算，不要在叙事里直接宣告时间流逝。"
+    )
 
 
 def _prepare_turn(state: TurnState) -> dict:
@@ -447,21 +480,7 @@ def _prepare_turn_inner(
         if authority:
             content += f"\n\n{authority}"
         if adjudicated_outcome:
-            settled = next(
-                (
-                    event
-                    for event in adjudicated_outcome.get("events", [])
-                    if isinstance(event, dict) and event.get("type") == "time_advanced"
-                ),
-                None,
-            )
-            time_note = ""
-            if settled:
-                minutes = int(settled.get("after", 0)) - int(settled.get("before", 0))
-                time_note = (
-                    f"\n本回合已结算时间 {minutes} 分钟；叙事的时间跨度不得超出已结算时间，"
-                    "不得把数小时演成数天，不得叙述未结算的昼夜更替。"
-                )
+            time_note = _time_semantics_note(adjudicated_outcome)
             status = str(adjudicated_outcome.get("status") or "")
             status_hint = {
                 "executed_success": "行动已执行并成功；按 description 叙述已发生的结果与代价。",
@@ -478,6 +497,10 @@ def _prepare_turn_inner(
         content += (
             "\n\n[输出格式] NPC 直接引语的台词必须用 【npc:<npc_public_state 中的 id>】…"
             "【/npc】 包裹（只包台词；提及、转述、动作神态不加）。"
+            "首次向玩家正式介绍某位在场 NPC（自报家门、被引荐、开始直接交互）时，"
+            "在介绍发生处加一次点标记 【intro:<该 NPC 的 id>】（每位人物一次；"
+            "仅被谈论而未登场互动的人物不加；已发放过人物卡的人物不加）。"
+            "标记不会展示给玩家，平台据此发放公开人物卡。"
         )
         if lore_selection and lore_selection.context:
             content += f"\n\n{lore_selection.context}"
@@ -895,8 +918,12 @@ def _emit_sanity_dice(engine: Any, output: str) -> None:
 
 def _parse_final_narrative(
     engine: Any, state: TurnState, narrative: str
-) -> tuple[list[Segment], str]:
-    """Keep trusted prelude ownership frozen; infer speakers only in model prose."""
+) -> tuple[list[Segment], str, list[str]]:
+    """Keep trusted prelude ownership frozen; infer speakers only in model prose.
+
+    返回 (segments, clean_text, intro_ids)：intro_ids 是模型用 【intro:id】
+    声明的本回合人物介绍集合（仅收集；在场/揭示态校验在落账侧）。
+    """
     prefix = state.get("authored_prefix", "")
     frozen = state.get("authored_segments", [])
     if prefix and narrative.startswith(prefix) and isinstance(frozen, list):
@@ -909,7 +936,7 @@ def _parse_final_narrative(
             for item in frozen
             if isinstance(item, dict) and str(item.get("text") or "").strip()
         ]
-        suffix_segments, clean_suffix = parse_speaker_segments(
+        suffix_segments, clean_suffix, intro_ids = parse_segments_full(
             narrative[len(prefix) :],
             is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
             on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
@@ -920,8 +947,9 @@ def _parse_final_narrative(
         return (
             prefix_segments + suffix_segments,
             state.get("authored_clean_prefix", "") + clean_suffix,
+            intro_ids,
         )
-    return parse_speaker_segments(
+    return parse_segments_full(
         narrative,
         is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
@@ -976,7 +1004,8 @@ def _finalize_turn(state: TurnState) -> dict:
 
     # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
     # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
-    narrative_segments, narrative = _parse_final_narrative(engine, state, narrative)
+    # 同一次解析顺带收集 【intro:id】 人物介绍标记（点标记，不进文本）。
+    narrative_segments, narrative, intro_ids = _parse_final_narrative(engine, state, narrative)
     segment_dicts = [s.to_dict() for s in narrative_segments]
     if state.get("opening_turn") and not narrative.strip():
         log_error("开场失败：模型未生成任何叙述")
@@ -999,7 +1028,17 @@ def _finalize_turn(state: TurnState) -> dict:
 
     if narrative.strip():
         with _performance_span(engine, "entity_reconcile"):
-            engine._reconcile_narrative_entities(narrative)
+            from src.gameplay.turn_reconciler import apply_narrative_introductions
+
+            # 模型的 【intro:id】 介绍标记先落账（校验在场/未揭示后走 npc_reveal，
+            # 与确定性兜底同一账本）。识别到有效标记时关闭关键词兜底：
+            # 结构化语义是本回合介绍集合的权威陈述，不重复猜测。
+            _applied_intros, recognized_intros = apply_narrative_introductions(
+                engine, intro_ids
+            )
+            engine._reconcile_narrative_entities(
+                narrative, npc_backstop=not recognized_intros
+            )
         if (
             ENABLE_TURN_AUDIT
             and state.get("user_content")

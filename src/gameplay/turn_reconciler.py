@@ -474,6 +474,61 @@ def _npc_visibly_described(npc: dict, body: str) -> bool:
     return len(tags) >= 2 and sum(1 for tag in tags if tag in body) >= 2
 
 
+def _npc_public_name(npc: dict) -> str:
+    """玩家可见称呼：模组声明了 display_name（公开称呼/艺名）时绝不泄露真名。"""
+    return str(npc.get("display_name") or npc.get("name") or "")
+
+
+def _npc_public_entry(npc: dict) -> str:
+    """tier-1 公开人物卡文本：公开称呼 + 可见特征，两条落账路径共用同一格式。"""
+    name = _npc_public_name(npc)
+    tags = "、".join(str(tag) for tag in npc.get("visible_tags", [])[:6])
+    return f"{name}：{tags}" if tags else f"调查员已见到{name}。"
+
+
+def apply_narrative_introductions(engine: Any, intro_ids: list[str]) -> tuple[list[str], list[str]]:
+    """把模型的 【intro:<npc_id>】 标记结算为 tier-1 公开人物卡。
+
+    返回 (applied, recognized)：applied 是实际落账的 "npc:<id>" 列表，
+    recognized 是 id 存在于权威 NPC 表的标记（不论是否满足落账条件）。
+    校验失败（未知 id、不在场、已揭示）只剥离并记诊断，不中断回合；
+    落账走与确定性兜底完全相同的 npc_reveal 通道（单一账本，天然去重）。
+    """
+    if not intro_ids:
+        return [], []
+    state = engine.context.world_store.load()
+    npcs = {str(npc.get("id") or ""): npc for npc in state.get("npcs", []) if isinstance(npc, dict)}
+    recognized = [npc_id for npc_id in intro_ids if npc_id in npcs]
+    present = set((state.get("current_scene") or {}).get("npcs_present", []))
+    applied: list[str] = []
+    rejected: list[str] = []
+    for npc_id in dict.fromkeys(intro_ids):
+        npc = npcs.get(npc_id)
+        if npc is None:
+            rejected.append(f"{npc_id}(未知id)")
+            continue
+        if npc_id not in present:
+            rejected.append(f"{npc_id}(不在场)")
+            continue
+        revealed = npc.get("revealed") or {}
+        if revealed.get("level", 0) > 0:
+            continue  # 已发放：幂等去重，不算拒绝
+        engine._execute_tool(
+            "npc_reveal",
+            {
+                "npc_id": npc_id,
+                "tier": 1,
+                "entry_text": _npc_public_entry(npc),
+            },
+        )
+        applied.append(f"npc:{npc_id}")
+    if applied:
+        log_game("结构化人物介绍 | " + ", ".join(applied))
+    if rejected:
+        log_game("人物介绍标记被拒绝 | " + ", ".join(rejected))
+    return applied, recognized
+
+
 def _scene_transition_position(name: str, text: str) -> int:
     """Return an explicit arrival/location assertion, not a passing mention."""
     if not name:
@@ -490,8 +545,12 @@ def _scene_transition_position(name: str, text: str) -> int:
     return max(positions, default=-1)
 
 
-def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
-    """Deterministically sync scene and first-encounter NPCs from visible prose."""
+def reconcile_narrative_entities(engine: Any, narrative: str, *, npc_backstop: bool = True) -> list[str]:
+    """Deterministically sync scene and first-encounter NPCs from visible prose.
+
+    npc_backstop=False 表示本回合模型已用 【intro:id】 标记显式声明介绍集合：
+    关键词猜测通道关闭，避免与结构化语义重复落账或越过模型意图。
+    """
     body = narrative_body(narrative)
     if not body:
         return []
@@ -503,37 +562,36 @@ def reconcile_narrative_entities(engine: Any, narrative: str) -> list[str]:
     current_scene = state.get("current_scene", {})
     present = set(current_scene.get("npcs_present", []))
     npcs = [npc for npc in state.get("npcs", []) if isinstance(npc, dict)]
-    surname_counts: Counter = Counter(
-        _npc_surname(str(npc.get("name") or "")) for npc in npcs
-    )
-    surname_counts.pop("", None)
-    for npc in npcs:
-        if npc.get("id") not in present:
-            continue
-        revealed = npc.get("revealed") or {}
-        if revealed.get("level", 0) > 0:
-            continue
-        name = str(npc.get("name") or "")
-        if not (
-            _name_mentioned(
-                name,
-                body,
-                extra_aliases=_npc_surname_aliases(name, surname_counts=surname_counts),
-            )
-            or _npc_visibly_described(npc, body)
-        ):
-            continue
-        tags = "、".join(str(tag) for tag in npc.get("visible_tags", [])[:6])
-        entry = f"{name}：{tags}" if tags else f"调查员已见到{name}。"
-        engine._execute_tool(
-            "npc_reveal",
-            {
-                "npc_id": npc["id"],
-                "tier": 1,
-                "entry_text": entry,
-            },
+    if npc_backstop:
+        surname_counts: Counter = Counter(
+            _npc_surname(str(npc.get("name") or "")) for npc in npcs
         )
-        applied.append(f"npc:{npc['id']}")
+        surname_counts.pop("", None)
+        for npc in npcs:
+            if npc.get("id") not in present:
+                continue
+            revealed = npc.get("revealed") or {}
+            if revealed.get("level", 0) > 0:
+                continue
+            name = str(npc.get("name") or "")
+            if not (
+                _name_mentioned(
+                    name,
+                    body,
+                    extra_aliases=_npc_surname_aliases(name, surname_counts=surname_counts),
+                )
+                or _npc_visibly_described(npc, body)
+            ):
+                continue
+            engine._execute_tool(
+                "npc_reveal",
+                {
+                    "npc_id": npc["id"],
+                    "tier": 1,
+                    "entry_text": _npc_public_entry(npc),
+                },
+            )
+            applied.append(f"npc:{npc['id']}")
     if applied:
         log_game("确定性叙事同步 | " + ", ".join(applied))
     return applied

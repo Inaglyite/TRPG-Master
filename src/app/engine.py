@@ -94,7 +94,8 @@ module_opening、opening_public_facts、current_scene 和 npc_public_state 是�
 module_opening 明确标为“开局既成事实”的玩家处境；不得替调查员说出台词、展示证物、
 接受承诺、得出结论或执行新的有意义行动。NPC 可以先开口，但必须在第一个真实选择点
 停下，并按 module_opening 指定的格式输出行动选项，把主动权交还玩家。NPC 真正说出口的
-台词必须用 【npc:<npc_public_state 中的 id>】…【/npc】 包裹；旁白、转述与动作描写不加标签。"""
+台词必须用 【npc:<npc_public_state 中的 id>】…【/npc】 包裹；旁白、转述与动作描写不加标签。
+开场向玩家正式介绍某位在场 NPC（自报家门、被引荐、开始直接交互）时，在介绍发生处加一次点标记 【intro:<该 NPC 的 id>】（每位人物一次；仅被提及而未登场互动者不加），标记不会展示给玩家。"""
 
 _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 
@@ -103,7 +104,7 @@ _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 不得重新判定，不得让调查员说出原文没有的台词、作出新行动或获得新线索。可以调整句式、
 节奏、感官细节和对白表达，但普通气氛描写不能升级成证据。只输出改写后的叙事正文；
 不要解释任务，不要输出行动选项、标题、分析、JSON 或 Markdown 代码块。原文中 NPC 真正说
-出口的台词必须用 【npc:<id>⟧…【/npc】 原样保留或补标；旁白与转述不加标签。"""
+出口的台词必须用 【npc:<id>⟧…【/npc】 原样保留或补标；旁白与转述不加标签；原文中的 【intro:<id>】 人物介绍标记同样原样保留，不得新增或删除。"""
 
 
 def _thinking_type_for_request(model: str, request_role: str) -> str | None:
@@ -1432,8 +1433,8 @@ class GameEngine:
             executed_tools=executed_tools,
         )
 
-    def _reconcile_narrative_entities(self, narrative: str) -> list[str]:
-        return reconcile_narrative_entities(self, narrative)
+    def _reconcile_narrative_entities(self, narrative: str, *, npc_backstop: bool = True) -> list[str]:
+        return reconcile_narrative_entities(self, narrative, npc_backstop=npc_backstop)
 
     _commit_npc_conversations = commit_npc_conversations
 

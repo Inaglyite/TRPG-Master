@@ -93,6 +93,26 @@ def test_consistency_violations_track_settled_minutes():
     assert not consistency_violations("你拨弄锁芯。", settled_minutes=0)
 
 
+def test_time_semantics_note_distinguishes_settled_from_recited():
+    """两类时间提示：结算耗时明确告知分钟数；无结算回合明说未推进；
+    两种情况都强调台词/回忆中的日期只是故事内容。"""
+    from src.app.agent_graph import _time_semantics_note
+
+    settled = _time_semantics_note(
+        {
+            "status": "executed_success",
+            "events": [{"type": "time_advanced", "before": 0, "after": 15}],
+        }
+    )
+    assert "本回合已结算时间 15 分钟" in settled
+    assert "只是故事内容" in settled
+    assert "裁决通道" in settled
+
+    quiet = _time_semantics_note({"status": "executed_success", "events": []})
+    assert "本回合未结算时间流逝" in quiet
+    assert "只是故事内容" in quiet
+
+
 def test_span_patterns_cover_chinese_numerals():
     """Codex 探针漏网措辞：中文数字的天/小时跨度。"""
     assert consistency_violations("你等了三天，终于等到他出现。", settled_minutes=240)
