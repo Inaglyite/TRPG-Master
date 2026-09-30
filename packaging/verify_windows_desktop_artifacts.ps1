@@ -92,6 +92,8 @@ function Start-ElectronAcceptanceProcess(
   [void]$StartInfo.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE")
   [void]$StartInfo.EnvironmentVariables.Remove("NODE_ENV")
   $StartInfo.EnvironmentVariables["TRPG_EXTERNAL_BACKEND"] = "1"
+  # 验收启动不应访问 GitHub 检查更新：保持离线、可重复。
+  $StartInfo.EnvironmentVariables["TRPG_SKIP_AUTO_UPDATE"] = "1"
   $Process = [System.Diagnostics.Process]::new()
   $Process.StartInfo = $StartInfo
   if (-not $Process.Start()) {

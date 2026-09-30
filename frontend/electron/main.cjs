@@ -31,6 +31,7 @@ const {
   isTrpgHealthResponse,
   packagedBackendExecutable,
 } = require("./packaged-backend.cjs");
+const { initAutoUpdates } = require("./updater.cjs");
 const { pathToFileURL } = require("node:url");
 
 const isDev = process.env.NODE_ENV === "dev";
@@ -59,6 +60,8 @@ let mainWindow = null;
 let setupWindow = null;
 let setupPromise = null;
 let pendingSetupConfigPath = null;
+// 自动更新确认“立即重启”后置位：退出确认对话框不再拦截 quitAndInstall。
+let quitForUpdateInstall = false;
 // 打包模式下 IPC/导航唯一可信的内置页面 URL（确切的 dist/index.html）。
 const trustedFileUrl = pathToFileURL(
   path.join(__dirname, "..", "dist", "index.html"),
@@ -717,7 +720,7 @@ function createWindow() {
   // 退出确认（仅在用户真的要退时二次确认）
   let confirmedExit = false;
   win.on("close", (e) => {
-    if (confirmedExit) return;
+    if (confirmedExit || quitForUpdateInstall) return;
     e.preventDefault();
     const choice = dialog.showMessageBoxSync(win, {
       type: "question",
@@ -757,6 +760,18 @@ if (!hasSingleInstanceLock) {
     // 单机后端在用户选择“单机游戏”后按需拉起；联机由 IPC 校验后同源加载。
     registerIpcHandlers();
     createWindow();
+    // 自动更新：仅打包版生效；内部延迟检查并 fail-open，不影响启动与游戏。
+    initAutoUpdates({
+      isPackaged: app.isPackaged,
+      env: process.env,
+      autoUpdater: require("electron-updater").autoUpdater,
+      dialog,
+      getWindow: () => mainWindow,
+      log,
+      onBeforeQuitAndInstall: () => {
+        quitForUpdateInstall = true;
+      },
+    });
 
     // macOS 重新激活时重建窗口
     app.on("activate", () => {

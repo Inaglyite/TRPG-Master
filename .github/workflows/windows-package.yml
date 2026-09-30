@@ -121,6 +121,8 @@ jobs:
           path: |
             frontend/release/trpg-game-setup-*-x64.exe
             frontend/release/trpg-game-portable-*-x64.exe
+            frontend/release/latest.yml
+            frontend/release/*.blockmap
             frontend/release/SHA256SUMS.txt
 
       - name: Upload packaged backend
