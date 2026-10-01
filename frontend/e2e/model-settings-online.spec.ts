@@ -432,8 +432,16 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
       member.getByRole("heading", { name: "模型设置验收房" }),
     ).toBeVisible();
     await member.getByRole("button", { name: "选择" }).first().click();
+    // 点击只代表选角请求已发出；选角落账会清除该成员的准备状态。
+    // 必须等认领投影出现后再准备，否则迟到的选角广播会撤销准备。
+    await expect(member.getByRole("button", { name: "释放" })).toBeVisible();
     await member.getByRole("button", { name: "准备" }).click();
+    await expect(
+      member.getByRole("button", { name: "取消准备" }),
+    ).toBeVisible();
     await owner.getByRole("button", { name: "准备" }).click();
+    await expect(owner.getByRole("button", { name: "取消准备" })).toBeVisible();
+    await expect(owner.getByRole("button", { name: "开始游戏" })).toBeEnabled();
 
     // 未配置时开局被拒：房主看到可读原因与 CTA
     await owner.getByRole("button", { name: "开始游戏" }).click();
