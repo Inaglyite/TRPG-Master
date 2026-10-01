@@ -98,6 +98,7 @@ SYSTEM_CONTRACT = """你是本场游戏的守秘人。玩家结构化请求表�
   下一轮按当时情境与权限重新判断后再决定执行、替换或取消它；玩家只是回答或追问时不要据此移动。"""
 
 COMMAND_CATALOG_BRIEF = """命令目录（kind → 必填 payload 字段）：
+- control_keeper: action(take|release|retry), request_id?（只由人类主持调用，你不得使用）。
 - publish_message: speaker{kind: keeper|npc|investigator|system, id?}, audience{kind: public|keeper|investigators(+investigator_ids)}, text
   （对全体玩家说话一律用 public；kind=investigators 时 investigator_ids 必填，写全体会被协议拒绝）
 - move_party: destination_scene_id（候选在 snapshot.destinations）, travel_minutes?
@@ -114,7 +115,7 @@ COMMAND_CATALOG_BRIEF = """命令目录（kind → 必填 payload 字段）：
 - record_fact: text, audience(必填), source?(keeper|module|ruling)
 - record_memory: character_id, knowledge_type(experienced|told|rumor|belief), content；可选 character_kind/scene_id/subjects/topics/supersedes（更正旧记忆）
 - resolve_intent: request_id, resolution(completed|declined|cancelled|paused|awaiting_player), outcome?(success|failure|not_executed 三选一), note?(自由文本说明写这里，不要塞进 outcome), pending_action?, disclosed?, thread?{action(open|continue|close|replace), thread_id?(continue/close/replace 必填), pending_action?(open/replace 必填), disclosed?, waiting_on?, note?}（pending_action 必须是对象：kind 取 freeform|move|present_clue|use_item|other、note 为说明；disclosed 是字符串数组；两者仅 awaiting_player 用，都不得写成裸字符串）
-- resolve_draft: draft_id, decision(approved|rejected|edited), note?(assisted 草稿收尾；批准不代执行，命令仍由主持各自提交)
+- resolve_draft: draft_id, decision(approved|rejected|edited), note?(approved 原子执行草稿；edited 仅关闭草稿，由人类另行提交修改内容)
 """
 
 

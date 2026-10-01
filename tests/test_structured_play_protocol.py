@@ -39,6 +39,7 @@ FRONTEND_KNOWN_ERROR_CODES = {
 }
 
 COMMAND_KINDS = {
+    "control_keeper",
     "publish_message",
     "request_check",
     "resolve_check",

@@ -145,6 +145,52 @@ function framesOf(received: string[], type: string): string[] {
   return received.filter((frame) => frame.includes(`"type":"${type}"`));
 }
 
+async function captureFlowLayout(page: Page, label: string) {
+  for (const width of [1280, 939, 640]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(".boot-loader")).toHaveCount(0);
+    await page.waitForTimeout(1000);
+    const geometry = await page
+      .locator(
+        ".member-actions button, .structured-card-actions button, .lobby-refresh",
+      )
+      .evaluateAll((nodes) =>
+        nodes
+          .filter((node) => (node as HTMLElement).offsetWidth > 0)
+          .map((node) => {
+            const button = node as HTMLElement;
+            const css = getComputedStyle(button);
+            return {
+              text: button.textContent,
+              padding: parseFloat(css.paddingLeft),
+              nowrap: css.whiteSpace,
+              fits: button.scrollWidth <= button.clientWidth + 1,
+              height: button.getBoundingClientRect().height,
+            };
+          }),
+      );
+    for (const item of geometry) {
+      expect(
+        item.padding,
+        `${label}/${width}/${item.text}: missing padding`,
+      ).toBeGreaterThan(0);
+      expect(item.nowrap).toBe("nowrap");
+      expect(item.fits, `${label}/${width}/${item.text}: clipped`).toBe(true);
+      expect(item.height).toBeGreaterThanOrEqual(28);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `/tmp/trpg-flow-ui-${label}-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
 /** 用当前选择器（input 或 select）给主持表单字段赋值。 */
 async function setKeeperField(page: Page, field: string, value: string) {
   const control = page.locator(
@@ -228,6 +274,9 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
     await register(keeper, keeperName);
     await keeper.getByLabel("房间名称").fill(roomName);
     await keeper.getByLabel(/结构化操作模式/).check();
+    await keeper.getByLabel(/主持方式/).selectOption("assisted");
+    await captureFlowLayout(keeper, "lobby");
+    await keeper.getByLabel(/主持方式/).selectOption("human");
     await keeper.getByRole("button", { name: "创建房间" }).click();
     await expect(keeper.getByRole("heading", { name: roomName })).toBeVisible();
     // 主持不认领调查员（规格 §7）：模组只有两个可选角色，主持占一个会让
@@ -275,6 +324,15 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
       );
     });
     expect(playerAInvestigator, "甲没有认领到调查员").not.toBe("");
+    await keeper
+      .getByRole("button", { name: "授权主持", exact: true })
+      .first()
+      .click();
+    await expect(
+      keeper.getByRole("button", { name: "确认授权（可见主持秘密）" }),
+    ).toBeVisible();
+    await captureFlowLayout(keeper, "room");
+    await keeper.getByRole("button", { name: "取消", exact: true }).click();
 
     // ---- 准备（以服务端广播的 room_state.ready_user_ids 为准） ----
     for (const page of [keeper, playerA, playerB]) {
@@ -306,6 +364,10 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
       await expect(page.getByTestId("btn-move")).toBeVisible();
     }
     expect(framesOf(keeperFrames.sent, "start")).toHaveLength(1);
+    await expect(
+      keeper.getByRole("button", { name: "接管主持", exact: true }),
+    ).toBeVisible();
+    await captureFlowLayout(keeper, "control");
     expect(
       playerAFrames.received.filter((frame) =>
         frame.includes("session_snapshot"),

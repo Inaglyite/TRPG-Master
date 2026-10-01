@@ -282,6 +282,7 @@ def room_members(db_url: str, world_id: str, user_id: str) -> dict:
                     "user_id": member.user_id,
                     "username": account.username,
                     "role": member.role,
+                    "can_keeper": bool(member.can_keeper),
                     "investigator": (
                         {
                             "id": claims[member.user_id].id,

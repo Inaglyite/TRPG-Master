@@ -55,7 +55,7 @@ export function createWorld(
     play_mode?: string;
     /**
      * 世界执行档位（结构化协议 §2）。缺省不传 = legacy，保持既有节奏；
-     * `structured_v1` 才切换按钮/命令/待办语义。`keeper_mode` 目前固定 human。
+     * `structured_v1` 才切换按钮/命令/待办语义，可独立选择主持方式。
      */
     execution_profile?: "legacy" | "structured_v1";
     keeper_mode?: "human" | "assisted" | "agent";
@@ -189,6 +189,7 @@ export const roomMemberSchema = z.looseObject({
   user_id: z.string(),
   username: z.string(),
   role: z.enum(["owner", "player", "viewer"]),
+  can_keeper: z.boolean().optional(),
   investigator: memberInvestigatorSchema.nullable().optional(),
   // 在线/准备状态契约尚未落地；字段存在与否决定界面是否展示对应徽章。
   online: z.boolean().optional(),
@@ -208,6 +209,18 @@ export function getRoomInfo(worldId: string): Promise<RoomInfo> {
   return apiFetch(
     `/api/worlds/${encodeURIComponent(worldId)}/members`,
     roomInfoSchema,
+  );
+}
+
+export function updateKeeperAuthorization(
+  worldId: string,
+  userId: string,
+  enabled: boolean,
+) {
+  return apiFetch(
+    `/api/worlds/${encodeURIComponent(worldId)}/members/${encodeURIComponent(userId)}/keeper`,
+    z.object({ user_id: z.string(), can_keeper: z.boolean() }),
+    { method: "PATCH", body: { can_keeper: enabled } },
   );
 }
 

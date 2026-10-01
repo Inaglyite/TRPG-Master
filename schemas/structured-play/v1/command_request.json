@@ -5,6 +5,9 @@
   "description": "人类主持台与 Agent 适配器共用的命令入口。客户端不发送 principal/controller_epoch：身份由服务端会话或委派解析，epoch 在受理时由服务端绑定当前控制权。payload 按 kind 严格校验，禁止万能 execute_tool(name,args) 与任意 state_set。",
   "oneOf": [
     {
+      "$ref": "#/$defs/control_keeper"
+    },
+    {
       "$ref": "#/$defs/publish_message"
     },
     {
@@ -54,6 +57,55 @@
     }
   ],
   "$defs": {
+    "control_keeper": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "control_keeper"
+        },
+        "payload": {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "take",
+                "release",
+                "retry"
+              ]
+            },
+            "request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "action": {
+                    "const": "retry"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "request_id"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "publish_message": {
       "type": "object",
       "required": [],

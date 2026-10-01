@@ -16,6 +16,49 @@ const modelIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,119}$/;
 
 const LOAD_TIMEOUT_MS = 8000;
 let loadTimer: ReturnType<typeof setTimeout> | null = null;
+let operationTimer: ReturnType<typeof setTimeout> | null = null;
+let unconfirmedOperation = false;
+
+function clearOperationTimer() {
+  if (operationTimer) clearTimeout(operationTimer);
+  operationTimer = null;
+}
+
+function armOperationTimer() {
+  clearOperationTimer();
+  unconfirmedOperation = false;
+  operationTimer = setTimeout(() => {
+    operationTimer = null;
+    const state = useModelStore.getState();
+    if (state.saving || state.testingRole) {
+      unconfirmedOperation = true;
+      useModelStore.setState({
+        saving: false,
+        testingRole: null,
+        statusKind: "error",
+        status:
+          "操作超时，尚未确认结果。草稿已保留；请重新读取配置确认是否保存成功。",
+      });
+    }
+  }, 15000);
+}
+
+useAppStore.subscribe((state, previous) => {
+  if (previous.connection === "connected" && state.connection !== "connected") {
+    const current = useModelStore.getState();
+    if (current.saving || current.testingRole) {
+      clearOperationTimer();
+      unconfirmedOperation = true;
+      useModelStore.setState({
+        saving: false,
+        testingRole: null,
+        statusKind: "error",
+        status:
+          "连接已断开，尚未确认操作结果。草稿已保留，请重连后重新读取配置。",
+      });
+    }
+  }
+});
 
 function clearLoadTimer() {
   if (loadTimer) {
@@ -26,6 +69,7 @@ function clearLoadTimer() {
 
 /** 编辑前等待本次权威视图，避免迟到响应覆盖已经填写的草稿。 */
 export function fetchSettings() {
+  unconfirmedOperation = false;
   useModelStore.setState({
     loading: true,
     loadError: null,
@@ -187,6 +231,7 @@ export function saveSettings() {
     status: "正在保存…",
     statusKind: "working",
   });
+  armOperationTimer();
   safeSend(
     JSON.stringify({
       type: "model_settings_update",
@@ -205,6 +250,7 @@ export function restoreDefaultSettings() {
     status: "正在恢复默认…",
     statusKind: "working",
   });
+  armOperationTimer();
   safeSend(
     JSON.stringify({
       type: "model_settings_restore_default",
@@ -244,6 +290,7 @@ export function testConnection(role: "narrative" | "judgement") {
     status: "正在测试连接（固定探针，可能消耗少量额度）…",
     statusKind: "working",
   });
+  armOperationTimer();
   safeSend(JSON.stringify(payload));
 }
 
@@ -278,11 +325,13 @@ export function onModelSettings(
     state.view !== null &&
     (state.view.revision !== view.revision || state.view.mode !== view.mode);
   const shouldSyncDrafts =
-    state.loading ||
-    !state.open ||
-    data.saved ||
-    state.view === null ||
-    externalChange;
+    !unconfirmedOperation &&
+    (state.loading ||
+      !state.open ||
+      data.saved ||
+      state.view === null ||
+      externalChange);
+  clearOperationTimer();
   useModelStore.setState({
     view,
     loading: false,
@@ -290,11 +339,13 @@ export function onModelSettings(
     saving: false,
     status:
       data.notice ||
-      (data.saved
-        ? "配置已保存，将从下一回合生效"
-        : state.loading
-          ? ""
-          : state.status),
+      (unconfirmedOperation
+        ? "收到迟到回执，配置视图已更新；保留当前编辑草稿，请重新读取核对。"
+        : data.saved
+          ? "配置已保存，将从下一回合生效"
+          : state.loading
+            ? ""
+            : state.status),
     statusKind: data.saved ? "success" : state.loading ? "" : state.statusKind,
     ...(shouldSyncDrafts
       ? {
@@ -306,9 +357,11 @@ export function onModelSettings(
         }
       : {}),
   });
+  unconfirmedOperation = false;
 }
 
 export function onModelSettingsError(message: string) {
+  clearOperationTimer();
   clearLoadTimer();
   const hasView = Boolean(useModelStore.getState().view);
   useModelStore.setState({
@@ -324,6 +377,7 @@ export function onModelSettingsError(message: string) {
 }
 
 export function onModelSettingsTestResult(data: TestResult) {
+  clearOperationTimer();
   useModelStore.setState({
     testingRole: null,
     testResult: data,

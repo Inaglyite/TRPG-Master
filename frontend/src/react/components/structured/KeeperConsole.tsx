@@ -48,8 +48,7 @@ export function keeperAuthorized(
   if (!keeperMode) return false;
   if (currentUserId) {
     // 有账号身份：必须与服务端当前的 keeper 控制者一致（房主 ≠ keeper）。
-    // 房间尚未把 can_keeper 下发给客户端，因此 keeper 为 null 时前端不显示控制台，
-    // 服务端的 keeper 校验仍是最终边界（见前端契约文档待办）。
+    // 尚无成员投影时，只信服务端的当前 keeper；完整成员投影在组件内单独复核。
     return keeperUserId === currentUserId;
   }
   // 本地单机没有账号身份：服务端给出的 keeper_mode 表示本机操作者就是主持
@@ -83,12 +82,12 @@ export function KeeperConsole() {
   const [feedback, setFeedback] = useState<string>("");
 
   const appMode = useAppStore((state) => state.mode);
-  const roomOwner = useOnlineStore((state) => {
+  const roomKeeper = useOnlineStore((state) => {
     const uid = state.user?.id;
     return (
       uid != null &&
       state.members.some(
-        (member) => member.user_id === uid && member.role === "owner",
+        (member) => member.user_id === uid && member.can_keeper === true,
       )
     );
   });
@@ -97,10 +96,7 @@ export function KeeperConsole() {
       (state.roomMetadata as { execution_profile?: string } | null)
         ?.execution_profile === "structured_v1",
   );
-  // 房间尚未把 can_keeper 下发给客户端：结构化房间里房主即创建者，
-  // 服务端在创建世界时已给创建者 can_keeper，因此这里以“结构化房间 + 房主”
-  // 作为客户端可见的 keeper 判据；命令被拒时服务端返回 keeper_required，
-  // 由状态卡如实显示。本地单机沿用同一条规则（见 keeperAuthorized）。
+  // 房主与主持授权独立；成员投影中的 can_keeper 是云端入口判据。
   const authorized =
     keeperAuthorized(
       identity.keeperUserId,
@@ -108,7 +104,7 @@ export function KeeperConsole() {
       currentUserId,
       appMode === "local",
     ) ||
-    (appMode === "online" && roomStructured && roomOwner);
+    (appMode === "online" && roomStructured && roomKeeper);
   const blocked = structuredUnavailableReason(capabilities, protocolNotice);
 
   const roomInvestigators = useOnlineStore((state) => state.roomInvestigators);

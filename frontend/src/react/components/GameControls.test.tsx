@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useAppStore } from "../../state/app-store";
@@ -26,6 +26,17 @@ describe("game interaction components", () => {
       screen.getByRole("button", { name: "1. 检查门锁" }),
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText("你决定做什么？")).toBeEnabled();
+  });
+
+  it("中文输入法确认候选不提交或清空草稿", () => {
+    useAppStore.setState({ mode: "local", inputEnabled: true });
+    render(<GameControls />);
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "检查门锁" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(input).toHaveValue("检查门锁");
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(input).toHaveValue("检查门锁");
   });
 
   it("renders a structured decision without injecting HTML", () => {

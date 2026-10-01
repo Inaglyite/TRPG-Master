@@ -11,6 +11,15 @@
     "agent": "被委派的 Agent 运行时：拥有 keeper 命令子集，调用必须携带当前 controller_epoch。"
   },
   "permissions": {
+    "command.control_keeper": {
+      "roles": [
+        "keeper"
+      ],
+      "conditions": [
+        "can_keeper",
+        "explicit_takeover_or_release"
+      ]
+    },
     "action_request.submit": {
       "roles": [
         "player"

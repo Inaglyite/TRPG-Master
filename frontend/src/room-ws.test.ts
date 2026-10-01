@@ -18,6 +18,7 @@ import {
 import { useAppStore } from "./state/app-store";
 import { initialOnlineState, useOnlineStore } from "./state/online-store";
 import { useStartStore } from "./state/start-store";
+import { useStructuredStore } from "./state/structured-store";
 import {
   announceSoloWorldSwitch,
   displayWorldHistory,
@@ -364,6 +365,9 @@ describe("终止性关闭码", () => {
     connectRoom("world-1");
     FakeWebSocket.latest().open();
 
+    useStructuredStore.setState({
+      keeperMaterial: [{ title: "主持私设", text: "不能继续显示" }],
+    });
     FakeWebSocket.latest().close(4409);
     await vi.waitFor(() => expect(refreshRoom).toHaveBeenCalled());
 
@@ -382,6 +386,7 @@ describe("终止性关闭码", () => {
       inputEnabled: false,
     });
     expect(localStorage.getItem("trpg-online-world-id")).toBe("world-1");
+    expect(useStructuredStore.getState().keeperMaterial).toEqual([]);
 
     vi.advanceTimersByTime(1100);
     expect(FakeWebSocket.instances).toHaveLength(2);

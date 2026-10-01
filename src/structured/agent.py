@@ -115,6 +115,7 @@ class KeeperAgentRunner:
         self.service = StructuredPlayService(database_url)
         self.caller = caller
         self.budget = budget or AgentBudget()
+        self._pause_outcomes: list[dict] = []
 
     # ------------------------------------------------------------------
     # 控制权
@@ -318,9 +319,7 @@ class KeeperAgentRunner:
                     command.pop(key, None)
                 lifted += 1
             payload = command.get("payload")
-            if str(command.get("kind") or "") == "resolve_intent" and isinstance(
-                payload, dict
-            ):
+            if str(command.get("kind") or "") == "resolve_intent" and isinstance(payload, dict):
                 KeeperAgentRunner._normalize_awaiting_shapes(payload)
         return lifted
 
@@ -368,7 +367,9 @@ class KeeperAgentRunner:
         keeper = Principal(kind="agent", run_id="memory-query")
         for query in queries:
             if queries_run + spent >= self.budget.max_queries:
-                run_log.append(f"查询预算已用完（本轮最多 {self.budget.max_queries} 次）；请直接判断或结束本轮。")
+                run_log.append(
+                    f"查询预算已用完（本轮最多 {self.budget.max_queries} 次）；请直接判断或结束本轮。"
+                )
                 break
             if not isinstance(query, dict) or str(query.get("kind") or "") != "memory":
                 run_log.append("未知查询类型（当前只支持 kind=memory），已跳过。")
@@ -394,9 +395,7 @@ class KeeperAgentRunner:
                 continue
             lines = []
             for row in rows:
-                lines.append(
-                    f"- [{row['character_id']}|{row['knowledge_type']}] {row['content']}"
-                )
+                lines.append(f"- [{row['character_id']}|{row['knowledge_type']}] {row['content']}")
             run_log.append("memory 查询结果：\n" + "\n".join(lines))
         return spent
 
@@ -432,9 +431,7 @@ class KeeperAgentRunner:
             # 兜底 id 必须与**尝试次数**绑定：原先用 commands_committed（已提交数）
             # 拼接，某一步全部被拒时下一步就会重用同一 id，撞上幂等键被判
             # duplicate_request_conflict（真实模型验收实测），随后整轮空转。
-            command_id = (
-                str(command.get("command_id") or "") or f"{run_id}-s{step}-c{index}"
-            )
+            command_id = str(command.get("command_id") or "") or f"{run_id}-s{step}-c{index}"
             if isinstance(payload, dict):
                 payload = self._repair_audience(world_id, payload)
             try:
@@ -710,7 +707,7 @@ class KeeperAgentRunner:
         if not trigger_request_id:
             return
         try:
-            self.service.execute_command(
+            outcome = self.service.execute_command(
                 world_id=world_id,
                 principal=principal,
                 kind="resolve_intent",
@@ -722,6 +719,7 @@ class KeeperAgentRunner:
                 command_id=f"pause-{trigger_request_id}-{secrets.token_hex(3)}",
                 expected_revision=None,
             )
+            self._pause_outcomes.append(outcome)
         except StructuredError:
             pass  # 请求可能已被处理/接管；暂停只是提示，不强制
 
@@ -742,6 +740,8 @@ class KeeperAgentRunner:
         result = AgentRunResult(run_id=run_id)
         result.model_calls = 1
         context_text = self._build_context(world_id, trigger_request_id, [])
+        # 绑定模型实际看到的版本，而不是模型返回后才读取的世界版本。
+        source_revision = json.loads(context_text)["snapshot"]["revision"]
         try:
             raw = await self.caller(build_system_prompt(), context_text)
             decision = self._parse_decision(raw)
@@ -752,10 +752,16 @@ class KeeperAgentRunner:
                 if exc.truncated
                 else "draft_unavailable:model_output_empty"
             )
+            await self._pause_assisted(
+                world_id, trigger_request_id, result.stop_reason, deliver, broadcast
+            )
             return result
         except Exception as exc:
             result.status = "paused"
             result.stop_reason = f"draft_unavailable:{type(exc).__name__}"
+            await self._pause_assisted(
+                world_id, trigger_request_id, result.stop_reason, deliver, broadcast
+            )
             return result
         commands = []
         self._normalize_commands(decision.get("commands"))
@@ -772,6 +778,7 @@ class KeeperAgentRunner:
             proposed_commands=commands,
             narration=narration,
             related_request_id=trigger_request_id,
+            source_revision=source_revision,
         )
         result.decisions.append(summary)
         result.stop_reason = "draft_ready"
@@ -784,6 +791,38 @@ class KeeperAgentRunner:
             if broadcast is not None:
                 await broadcast(envelope)
         return result
+
+    async def _pause_assisted(self, world_id, request_id, reason, deliver, broadcast) -> None:
+        from src.storage.database import WorldMember
+
+        with session_scope(self.database_url) as session:
+            control = current_control(session, world_id)
+            members = (
+                session.execute(
+                    select(WorldMember).where(
+                        WorldMember.world_id == world_id,
+                        WorldMember.can_keeper.is_(True),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            member = next((m for m in members if m.user_id == control.controller_id), None)
+            member = member or next(iter(members), None)
+            principal = Principal(kind="keeper", user_id=member.user_id) if member else None
+        if principal is not None:
+            self._pause_trigger(
+                world_id,
+                principal,
+                request_id,
+                f"守秘人助手生成草稿失败（{reason}），请求已暂停，可由主持继续处理。",
+            )
+            await self._flush_pauses(world_id, deliver, broadcast)
+
+    async def _flush_pauses(self, world_id, deliver, broadcast) -> None:
+        outcomes, self._pause_outcomes = self._pause_outcomes, []
+        for outcome in outcomes:
+            await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
 
     # ------------------------------------------------------------------
     # 主循环（agent 模式）
@@ -868,9 +907,7 @@ class KeeperAgentRunner:
                     parse_failures = 0
                     lifted = self._normalize_commands(decision.get("commands"))
                     if lifted:
-                        run_log.append(
-                            f"归一化 {lifted} 条扁平形态命令（字段已收进 payload）。"
-                        )
+                        run_log.append(f"归一化 {lifted} 条扁平形态命令（字段已收进 payload）。")
                 except EmptyDecision:
                     # caller 直接返回空串（例如自定义 caller）：同样不重试。
                     result.status = "paused"
@@ -1043,3 +1080,5 @@ class KeeperAgentRunner:
             result.status = "paused"
             result.stop_reason = "cancelled"
             raise
+        finally:
+            await self._flush_pauses(world_id, deliver, broadcast)

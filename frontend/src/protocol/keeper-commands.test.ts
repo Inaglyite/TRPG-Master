@@ -19,6 +19,7 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
     expect(KEEPER_COMMANDS.map((command) => command.kind).sort()).toEqual(
       [
         "adjust_stat",
+        "control_keeper",
         "advance_time",
         "grant_clue",
         "move_party",

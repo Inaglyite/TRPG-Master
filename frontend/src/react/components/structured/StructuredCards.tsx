@@ -9,6 +9,8 @@
  */
 
 import { useMemo, useState } from "react";
+import { useAppStore } from "../../../state/app-store";
+import { useOnlineStore } from "../../../state/online-store";
 
 import {
   freeRollReason,
@@ -341,6 +343,17 @@ export function StructuredDock() {
   const protocolNotice = useStructuredStore((state) => state.protocolNotice);
   const keeperDraft = useStructuredStore((state) => state.keeperDraft);
   const keeperControl = useStructuredStore((state) => state.keeperControl);
+  const supportsControl = useStructuredStore((state) =>
+    state.capabilities.commands.includes("control_keeper"),
+  );
+  const appMode = useAppStore((state) => state.mode);
+  const onlineKeeper = useOnlineStore((state) =>
+    state.members.some(
+      (member) =>
+        member.user_id === state.user?.id && member.can_keeper === true,
+    ),
+  );
+  const canControl = supportsControl && (appMode === "local" || onlineKeeper);
   const unknownEventTypes = useStructuredStore(
     (state) => state.unknownEventTypes,
   );
@@ -383,7 +396,8 @@ export function StructuredDock() {
     unknownEventTypes.length === 0 &&
     !protocolNotice &&
     keeperDraft === null &&
-    keeperControl === null
+    keeperControl === null &&
+    !canControl
   ) {
     return null;
   }

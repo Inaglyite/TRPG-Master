@@ -401,6 +401,118 @@ describe("StructuredDock", () => {
 });
 
 describe("assisted 草稿与 agent 控制权（按能力渲染）", () => {
+  it("批准期间保留草稿；服务端拒绝后仍能处理，不假装已执行", () => {
+    const sent: Record<string, unknown>[] = [];
+    setStructuredSender((payload) => {
+      sent.push(payload as Record<string, unknown>);
+      return true;
+    });
+    useStructuredStore.getState().applyCapabilities({
+      ...STRUCTURED_CAPABILITIES_WIRE,
+      assisted_draft: true,
+    });
+    useStructuredStore
+      .getState()
+      .applySnapshot(EVENT_FIXTURES.snapshot.payload, WORLD_ID);
+    act(() => {
+      useStructuredStore.getState().applyEvent({
+        event_id: 100,
+        world_id: WORLD_ID,
+        revision: 12,
+        type: "keeper_draft",
+        payload: {
+          draft_id: "d1",
+          kind: "commands",
+          summary: "移动建议",
+          narration: "抵达图书馆。",
+          proposed_commands: [
+            {
+              kind: "move_party",
+              payload: { destination_scene_id: "library" },
+            },
+          ],
+        },
+      });
+    });
+    render(<StructuredDock />);
+    expect(screen.getByText(/将执行：move_party/)).toBeInTheDocument();
+    expect(screen.getByText(/叙事草稿：抵达图书馆/)).toBeInTheDocument();
+    act(() => {
+      screen.getByTestId("draft-approve").click();
+    });
+    expect(screen.getByTestId("keeper-draft-card")).toBeInTheDocument();
+    expect(screen.getByTestId("draft-approve")).toBeDisabled();
+    act(() => {
+      useStructuredStore.getState().applyEvent({
+        event_id: 101,
+        world_id: WORLD_ID,
+        revision: 12,
+        type: "request_error",
+        payload: {
+          request_id: sent[0].command_id,
+          code: "revision_conflict",
+          message: "世界已变化",
+          retryable: true,
+        },
+      });
+    });
+    expect(screen.getByTestId("keeper-draft-card")).toBeInTheDocument();
+    expect(screen.getByTestId("draft-approve")).toBeEnabled();
+  });
+
+  it("支持显式接管时发送唯一主持命令；玩家身份没有入口", () => {
+    const sent: Record<string, unknown>[] = [];
+    setStructuredSender((payload) => {
+      sent.push(payload as Record<string, unknown>);
+      return true;
+    });
+    useStructuredStore.getState().applyCapabilities({
+      ...STRUCTURED_CAPABILITIES_WIRE,
+      commands: [...STRUCTURED_CAPABILITIES_WIRE.commands, "control_keeper"],
+      agent_takeover: true,
+    });
+    useStructuredStore.getState().applySnapshot(
+      {
+        ...EVENT_FIXTURES.snapshot.payload,
+        server_capabilities: {
+          ...STRUCTURED_CAPABILITIES_WIRE,
+          commands: [
+            ...STRUCTURED_CAPABILITIES_WIRE.commands,
+            "control_keeper",
+          ],
+          agent_takeover: true,
+        },
+      },
+      WORLD_ID,
+    );
+    const { rerender } = render(<StructuredDock />);
+    act(() => {
+      screen.getByRole("button", { name: "接管主持" }).click();
+    });
+    expect(sent[0]).toMatchObject({
+      kind: "control_keeper",
+      payload: { action: "take" },
+    });
+    act(() => {
+      useAppStore.setState({ mode: "online" });
+      useOnlineStore.setState({
+        user: { id: "player", username: "player" },
+        members: [
+          {
+            user_id: "player",
+            username: "player",
+            role: "owner",
+            can_keeper: false,
+            investigator: null,
+          },
+        ],
+      });
+    });
+    rerender(<StructuredDock />);
+    expect(
+      screen.queryByRole("button", { name: "接管主持" }),
+    ).not.toBeInTheDocument();
+  });
   it("服务端未声明 assisted 能力时不渲染草稿卡", () => {
     useStructuredStore.setState((state) => ({
       ...state,

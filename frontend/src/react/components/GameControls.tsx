@@ -158,7 +158,12 @@ export function GameControls() {
           disabled={!enabled}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") submit();
+            if (
+              event.key === "Enter" &&
+              !event.nativeEvent.isComposing &&
+              event.keyCode !== 229
+            )
+              submit();
           }}
         />
         <button id="btn-send" disabled={!enabled} onClick={submit}>

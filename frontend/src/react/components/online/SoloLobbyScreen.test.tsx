@@ -204,6 +204,23 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
       structured: true,
+      keeperMode: "human",
+    });
+  });
+
+  it("云端单人冒险可以选择 AI 辅助主持", async () => {
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
+    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.change(screen.getByLabelText(/主持方式/), {
+      target: { value: "assisted" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
+    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
+      structured: true,
+      keeperMode: "assisted",
     });
   });
 

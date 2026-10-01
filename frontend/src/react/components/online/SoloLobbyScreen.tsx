@@ -6,6 +6,7 @@ import {
   enterRoom,
   logout,
   refreshWorlds,
+  ensureModules,
 } from "../../../online";
 import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
@@ -14,6 +15,8 @@ import { ModuleSelect } from "../ModuleSelect";
 import { usePhaseTransition } from "../transitions";
 import { roomStatusLabel } from "./room-status";
 import { SoloTimelinePanel } from "./SoloTimelinePanel";
+import { KeeperModeSelect } from "./KeeperModeSelect";
+import type { KeeperMode } from "../../../protocol/structured";
 
 function formatTime(value?: string): string {
   if (!value) return "";
@@ -36,6 +39,8 @@ export function SoloLobbyScreen() {
   const worldsError = useOnlineStore((state) => state.worldsError);
   const modules = useOnlineStore((state) => state.modules);
   const modulesStatus = useOnlineStore((state) => state.modulesStatus);
+  const modulesError = useOnlineStore((state) => state.modulesError);
+  const authError = useOnlineStore((state) => state.authError);
   const createBusy = useOnlineStore((state) => state.createBusy);
   const createError = useOnlineStore((state) => state.createError);
   const authBusy = useOnlineStore((state) => state.authBusy);
@@ -45,6 +50,7 @@ export function SoloLobbyScreen() {
   const [worldName, setWorldName] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [structuredWorld, setStructuredWorld] = useState(false);
+  const [keeperMode, setKeeperMode] = useState<KeeperMode>("human");
   // 「开始新冒险」CTA ↔ 创建卡成对换场：CTA 淡出下沉后创建卡弹入，
   // 「收起」反向播回；reduced-motion 由钩子直接落定。
   const createSwap = usePhaseTransition(
@@ -131,6 +137,22 @@ export function SoloLobbyScreen() {
           </button>
         </div>
       </header>
+      {authError && (
+        <p className="online-notice online-notice--error" role="alert">
+          {authError}
+        </p>
+      )}
+      {modulesStatus === "error" && (
+        <div className="online-empty">
+          <p role="alert">{modulesError || "无法读取模组列表"}</p>
+          <button
+            className="btn-ghost lobby-refresh"
+            onClick={() => void ensureModules()}
+          >
+            重试读取模组
+          </button>
+        </div>
+      )}
 
       <section
         className="solo-lobby-section"
@@ -314,6 +336,7 @@ export function SoloLobbyScreen() {
                   onClick={() =>
                     void createSoloWorld(selectedModule, worldName, {
                       structured: structuredWorld,
+                      ...(structuredWorld ? { keeperMode } : {}),
                     })
                   }
                 >
@@ -335,10 +358,15 @@ export function SoloLobbyScreen() {
                   disabled={createBusy}
                   onChange={(event) => setStructuredWorld(event.target.checked)}
                 />
-                <span>
-                  结构化操作模式（人类主持）：按钮提交明确操作，不需要模型配置
-                </span>
+                <span>结构化操作模式：按钮提交行动，由主持判断并执行</span>
               </label>
+              {structuredWorld && (
+                <KeeperModeSelect
+                  value={keeperMode}
+                  disabled={createBusy}
+                  onChange={setKeeperMode}
+                />
+              )}
               {createError && (
                 <p className="online-notice online-notice--error" role="alert">
                   {createError}

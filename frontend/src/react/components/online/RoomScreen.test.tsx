@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assignActor,
   changeMemberRole,
+  changeKeeperAuthorization,
   claimByKey,
   deleteCurrentRoom,
   enterLobby,
@@ -26,6 +27,7 @@ import { RoomScreen } from "./RoomScreen";
 vi.mock("../../../online", () => ({
   assignActor: vi.fn(),
   changeMemberRole: vi.fn(),
+  changeKeeperAuthorization: vi.fn(),
   claimByKey: vi.fn(),
   deleteCurrentRoom: vi.fn(),
   dismissInvite: vi.fn(),
@@ -98,6 +100,22 @@ describe("RoomScreen 连接状态", () => {
 });
 
 describe("RoomScreen 成员列表", () => {
+  it("房主显式确认主持授权，不把房主身份当作主持权限", () => {
+    setupRoom({
+      roomMetadata: {
+        execution_profile: "structured_v1",
+        keeper_mode: "human",
+      },
+    });
+    render(<RoomScreen />);
+    const buttons = screen.getAllByRole("button", { name: "授权主持" });
+    fireEvent.click(buttons[0]);
+    expect(changeKeeperAuthorization).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认授权（可见主持秘密）" }),
+    );
+    expect(changeKeeperAuthorization).toHaveBeenCalledWith("u1", true);
+  });
   it("渲染角色、在线、准备与调查员徽章", () => {
     setupRoom();
     render(<RoomScreen />);

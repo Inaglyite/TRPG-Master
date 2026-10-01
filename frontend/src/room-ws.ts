@@ -15,6 +15,7 @@ import {
 } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
 import { rebindStructuredWorld } from "./structured-transport";
+import { useStructuredStore } from "./state/structured-store";
 import { useStartStore } from "./state/start-store";
 import {
   announceSoloWorldSwitch,
@@ -256,6 +257,7 @@ function open(): void {
       bumpOnlineRequestEpoch();
       sendQueue.length = 0;
       clearPrivatePresentationState();
+      useStructuredStore.getState().reset();
       useOnlineStore.setState({
         privateEvents: [],
         privateState: null,

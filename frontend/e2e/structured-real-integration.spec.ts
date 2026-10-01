@@ -219,6 +219,110 @@ function collectFrames(page: Page): { sent: string[]; received: string[] } {
   return { sent, received };
 }
 
+function seedRecoveryFixture(worldId: string, scenario: "draft" | "paused") {
+  const result = spawnSync(
+    pythonPath(),
+    [
+      "-c",
+      [
+        "import json, sys",
+        "from src.structured.gateway import StructuredGateway",
+        "from src.structured.principal import Principal, bind_agent_control",
+        "from src.storage.database import session_scope",
+        "from src.storage.database import database_url",
+        "from pathlib import Path",
+        "import os",
+        "db = database_url(Path(os.environ['TRPG_RUNTIME_ROOT']))",
+        "world_id, scenario = sys.argv[1:]",
+        "gateway = StructuredGateway(db)",
+        "keeper = gateway.connection_principal(world_id, None)",
+        "player = Principal(kind='player', user_id=keeper.user_id, investigator_ids=keeper.investigator_ids)",
+        "gateway.service.submit_action_request(world_id=world_id, principal=player, request={'request_id': 'recovery-player', 'investigator_id': keeper.investigator_ids[0], 'action': {'kind': 'move', 'destination_scene_id': 'miskatonic_medical'}})",
+        "if scenario == 'draft':",
+        "    gateway.service.create_keeper_draft(world_id=world_id, summary='验收移动草稿', proposed_commands=[{'kind': 'move_party', 'payload': {'destination_scene_id': 'miskatonic_medical', 'travel_minutes': 15}}], narration='你已抵达医学院。', related_request_id='recovery-player')",
+        "else:",
+        "    gateway.service.execute_command(world_id=world_id, principal=keeper, kind='resolve_intent', payload={'request_id': 'recovery-player', 'resolution': 'paused', 'note': '验收模拟模型断线'}, command_id='seed-pause', expected_revision=None)",
+        "    with session_scope(db) as session: bind_agent_control(session, world_id, 'stalled-agent')",
+      ].join("\n"),
+      worldId,
+      scenario,
+    ],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        TRPG_RUNTIME_ROOT: runtimeRoot,
+        TRPG_DATABASE_URL: `sqlite:///${join(runtimeRoot, "e2e.db")}`,
+        TRPG_WRITE_COMPAT_EXPORTS: "0",
+      },
+      encoding: "utf-8",
+    },
+  );
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+}
+
+for (const scenario of ["draft", "paused"] as const) {
+  test(`真实恢复链：${scenario === "draft" ? "刷新恢复草稿、批准执行" : "暂停可见、显式接管后执行"}`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    const frames = collectFrames(page);
+    await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+    await page.locator(".module-select-trigger").click();
+    await page.getByRole("option", { name: /猩红文档/ }).click();
+    await page.locator("#btn-start").click();
+    await page.locator("#btn-character-confirm").click();
+    await expect(page.locator("#user-input")).toBeEnabled({ timeout: 90_000 });
+    const worldId = await page.evaluate(
+      () => localStorage.getItem("trpg-active-world-id") || "",
+    );
+    expect(worldId).not.toBe("");
+    enableStructuredWorld(worldId);
+    seedRecoveryFixture(worldId, scenario);
+    const callsBefore = modelRequests.length;
+    await page.reload();
+    await expect(page.locator(".boot-loader")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("btn-keeper-console")).toBeVisible({
+      timeout: 60_000,
+    });
+    if (scenario === "draft") {
+      await expect(page.getByTestId("keeper-draft-card")).toContainText(
+        "验收移动草稿",
+      );
+      await page.getByTestId("draft-approve").click();
+      await expect(page.getByTestId("keeper-draft-card")).toHaveCount(0);
+      await expect(page.locator("#messages")).toContainText("你已抵达医学院。");
+    } else {
+      await expect(page.getByTestId("structured-dock")).toContainText(
+        "验收模拟模型断线",
+      );
+      await page.getByRole("button", { name: "接管主持", exact: true }).click();
+      await expect(page.getByTestId("keeper-control-notice")).toContainText(
+        "人类已接管",
+      );
+      await page.getByTestId("btn-keeper-console").click();
+      await page.getByTestId("keeper-cmd-move_party").click();
+      await page
+        .locator('[data-field="destination_scene_id"] select')
+        .selectOption("miskatonic_medical");
+      await page.getByTestId("keeper-submit").click();
+      await page.getByRole("button", { name: "关闭主持台" }).click();
+    }
+    await expect(page.locator(".header-scene-name")).toContainText("医学院");
+    expect(
+      frames.received.filter((frame) =>
+        frame.includes('"type":"scene_changed"'),
+      ),
+    ).toHaveLength(1);
+    expect(modelRequests.length).toBe(callsBefore);
+    await page.reload();
+    await expect(page.locator(".header-scene-name")).toContainText("医学院");
+    expect(modelRequests.length).toBe(callsBefore);
+  });
+}
+
 test("真实后端 + structured_v1：快照驱动界面、结构请求落账、无需模型调用", async ({
   page,
 }) => {

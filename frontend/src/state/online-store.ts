@@ -63,6 +63,7 @@ export type OnlineState = {
   worldsError: string | null;
   modules: ModuleInfo[];
   modulesStatus: AsyncStatus;
+  modulesError: string | null;
   createBusy: boolean;
   createError: string | null;
   joinBusy: boolean;
@@ -118,6 +119,7 @@ export const initialOnlineState: OnlineState = {
   worldsError: null,
   modules: [],
   modulesStatus: "idle",
+  modulesError: null,
   createBusy: false,
   createError: null,
   joinBusy: false,

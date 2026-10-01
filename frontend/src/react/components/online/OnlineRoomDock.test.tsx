@@ -38,6 +38,27 @@ beforeEach(() => {
 });
 
 describe("OnlineRoomDock", () => {
+  it("跳过行动者绕开离线成员，选择下一位在线玩家", async () => {
+    const { assignActor } = await import("../../../online");
+    setupOnline({
+      currentActorUserId: "u1",
+      onlineUserIds: ["u1", "u3"],
+      members: [
+        { user_id: "u1", username: "alice", role: "owner", investigator: null },
+        { user_id: "u2", username: "bob", role: "player", investigator: null },
+        {
+          user_id: "u3",
+          username: "carol",
+          role: "player",
+          investigator: null,
+        },
+      ],
+    });
+    render(<OnlineRoomDock />);
+    fireEvent.click(screen.getByRole("button", { name: /周五调查夜/ }));
+    fireEvent.click(screen.getByRole("button", { name: "跳过行动者" }));
+    expect(assignActor).toHaveBeenCalledWith("u3");
+  });
   it("非 playing 或房间管理页打开时不渲染", () => {
     setupOnline({ roomStatus: "lobby" });
     const { container, rerender } = render(<OnlineRoomDock />);

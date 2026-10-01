@@ -104,8 +104,27 @@ describe("LobbyScreen 房间列表", () => {
       "example.whispering-archive@1.0.0",
       "",
       4,
-      { structured: true },
+      { structured: true, keeperMode: "human" },
     );
+  });
+
+  it("结构化房间可以显式选择 AI 主持", () => {
+    render(<LobbyScreen />);
+    fireEvent.change(screen.getByLabelText("选择模组"), {
+      target: { value: "example.whispering-archive@1.0.0" },
+    });
+    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.change(screen.getByLabelText(/主持方式/), {
+      target: { value: "agent" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建房间" }));
+    expect(createRoom).toHaveBeenCalledWith(
+      "example.whispering-archive@1.0.0",
+      "",
+      4,
+      { structured: true, keeperMode: "agent" },
+    );
+    expect(screen.getByText(/尚无完整战斗和结局结算/)).toBeInTheDocument();
   });
 
   it("无房间名称时回退模组标题", () => {

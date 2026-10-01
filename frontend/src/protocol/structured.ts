@@ -186,6 +186,7 @@ export const KEEPER_COMMAND_KINDS = [
   "resolve_draft",
   // M5：主持显式记录角色记忆（长期记忆层；不是权威世界状态）。
   "record_memory",
+  "control_keeper",
 ] as const;
 export type KeeperCommandKind = (typeof KEEPER_COMMAND_KINDS)[number];
 

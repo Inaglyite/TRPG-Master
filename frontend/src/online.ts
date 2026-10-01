@@ -22,6 +22,7 @@ import {
   revokeInvite,
   transferOwnership,
   updateMember,
+  updateKeeperAuthorization,
 } from "./api/worlds";
 import {
   clearPendingSoloSwitch,
@@ -242,12 +243,18 @@ export async function refreshWorlds(): Promise<void> {
 export async function ensureModules(): Promise<void> {
   const { modulesStatus } = useOnlineStore.getState();
   if (modulesStatus === "loading" || modulesStatus === "ready") return;
-  useOnlineStore.setState({ modulesStatus: "loading" });
+  const scope = captureRequestScope();
+  useOnlineStore.setState({ modulesStatus: "loading", modulesError: null });
   try {
     const modules = await listModules();
+    if (!requestScopeIsCurrent(scope)) return;
     useOnlineStore.setState({ modules: modules ?? [], modulesStatus: "ready" });
-  } catch {
-    useOnlineStore.setState({ modulesStatus: "error" });
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
+    useOnlineStore.setState({
+      modulesStatus: "error",
+      modulesError: errorMessage(error, "无法读取模组列表，请重试"),
+    });
   }
 }
 
@@ -302,7 +309,10 @@ export async function createRoom(
   module: string,
   name: string,
   maxPlayers: number,
-  options: { structured?: boolean } = {},
+  options: {
+    structured?: boolean;
+    keeperMode?: "human" | "assisted" | "agent";
+  } = {},
 ): Promise<void> {
   const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
@@ -314,7 +324,7 @@ export async function createRoom(
       ...(options.structured
         ? {
             execution_profile: "structured_v1" as const,
-            keeper_mode: "human" as const,
+            keeper_mode: options.keeperMode ?? "human",
           }
         : {}),
     });
@@ -337,7 +347,10 @@ export async function createRoom(
 export async function createSoloWorld(
   module: string,
   name: string,
-  options: { structured?: boolean } = {},
+  options: {
+    structured?: boolean;
+    keeperMode?: "human" | "assisted" | "agent";
+  } = {},
 ): Promise<void> {
   const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
@@ -350,7 +363,7 @@ export async function createSoloWorld(
       ...(options.structured
         ? {
             execution_profile: "structured_v1" as const,
-            keeper_mode: "human" as const,
+            keeper_mode: options.keeperMode ?? "human",
           }
         : {}),
     });
@@ -860,6 +873,28 @@ export async function revokeInviteById(inviteId: string): Promise<void> {
 }
 
 /** 移交房主。 */
+export async function changeKeeperAuthorization(
+  userId: string,
+  enabled: boolean,
+): Promise<void> {
+  const { activeWorldId } = useOnlineStore.getState();
+  if (!activeWorldId) return;
+  const scope = captureRequestScope(activeWorldId);
+  useOnlineStore.setState({ roomBusy: true, roomError: null });
+  try {
+    await updateKeeperAuthorization(activeWorldId, userId, enabled);
+    if (!requestScopeIsCurrent(scope)) return;
+    useOnlineStore.setState({ roomBusy: false });
+    await refreshRoom();
+  } catch (error) {
+    if (!requestScopeIsCurrent(scope)) return;
+    useOnlineStore.setState({
+      roomBusy: false,
+      roomError: errorMessage(error, "主持授权更新失败"),
+    });
+  }
+}
+
 export async function handOverOwnership(userId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;

@@ -83,6 +83,28 @@ const TARGET_FIELD: CommandField = {
 
 export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
   {
+    kind: "control_keeper",
+    label: "主持控制权",
+    group: "结算与事实",
+    help: "接管会停止旧 AI 运行；归还后新行动交给 AI；重试只恢复选定的暂停请求。",
+    fields: [
+      {
+        name: "action",
+        label: "操作",
+        kind: "enum",
+        required: true,
+        enumValues: ["take", "release", "retry"],
+      },
+      {
+        name: "request_id",
+        label: "暂停请求（重试时必填）",
+        kind: "id",
+        required: false,
+        candidate: "requests",
+      },
+    ],
+  },
+  {
     kind: "publish_message",
     label: "以某个身份发言",
     group: "发言与线索",
@@ -701,7 +723,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     kind: "resolve_draft",
     label: "处理主持草稿",
     group: "结算与事实",
-    help: "assisted 模式：批准 / 拒绝 / 修改后执行 Agent 提出的草稿。",
+    help: "批准会执行原草稿；拒绝不会执行；edited 仅关闭原草稿，修改内容需另行提交。",
     fields: [
       { name: "draft_id", label: "草稿", kind: "id", required: true },
       {

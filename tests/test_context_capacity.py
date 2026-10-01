@@ -105,7 +105,8 @@ def test_max_output_keeps_a_compaction_band(monkeypatch: pytest.MonkeyPatch) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_plan_defaults_65536_window_and_78_percent_target() -> None:
+def test_plan_defaults_65536_window_and_78_percent_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reload_config(monkeypatch, {})
     plan = build_plan()
     assert plan.window_tokens == 65_536
     assert plan.target_ratio == 0.78

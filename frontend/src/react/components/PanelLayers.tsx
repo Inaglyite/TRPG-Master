@@ -1030,7 +1030,7 @@ export function SavePanel() {
                                 <span>
                                   删除此存档位？其{" "}
                                   {adventure.timeline_count ?? 1}{" "}
-                                  条时间线将一并归档（数据保留可恢复）。
+                                  条时间线将一并归档。历史数据保留，但目前没有自助恢复入口。
                                 </span>
                                 <button
                                   type="button"

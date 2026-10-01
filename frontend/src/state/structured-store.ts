@@ -131,8 +131,10 @@ export type CheckRequestState = {
 export type KeeperDraft = {
   draftId: string;
   summary: string;
-  /** 草稿提议的命令（批准即按冻结契约提交这一条命令）。 */
+  /** 旧事件的单命令兼容字段；新协议用 proposed_commands。 */
   command: { kind: string; payload: Record<string, unknown> } | null;
+  commands?: { kind: string; payload: Record<string, unknown> }[];
+  narration?: string;
   /** 处理草稿时附带的说明（resolve_draft 的 note）。 */
   note: string;
   createdAt: number;
@@ -173,6 +175,47 @@ function num(value: unknown, fallback = 0): number {
 
 function bool(value: unknown): boolean {
   return value === true;
+}
+
+function readKeeperDraft(value: unknown): KeeperDraft | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as Record<string, unknown>;
+  const draftId = str(payload.draft_id);
+  if (!draftId) return null;
+  const command =
+    payload.command && typeof payload.command === "object"
+      ? (payload.command as Record<string, unknown>)
+      : null;
+  const commands = Array.isArray(payload.proposed_commands)
+    ? payload.proposed_commands.flatMap((item) => {
+        if (
+          !item ||
+          typeof item !== "object" ||
+          typeof item.kind !== "string" ||
+          !item.payload ||
+          typeof item.payload !== "object" ||
+          Array.isArray(item.payload)
+        )
+          return [];
+        return [
+          { kind: item.kind, payload: item.payload as Record<string, unknown> },
+        ];
+      })
+    : [];
+  return {
+    draftId,
+    summary: str(payload.summary) || str(payload.text),
+    commands,
+    narration: str(payload.narration),
+    command: command
+      ? {
+          kind: str(command.kind),
+          payload: (command.payload as Record<string, unknown>) ?? {},
+        }
+      : null,
+    note: str(payload.note),
+    createdAt: Date.now(),
+  };
 }
 
 export function asStatus(value: unknown): ActionStatusKind {
@@ -630,7 +673,10 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             revision,
             investigatorId:
               str(payload.investigator_id) || state.identity.investigatorId,
-            keeperUserId: str(keeper.user_id) || state.identity.keeperUserId,
+            keeperUserId:
+              payload.keeper !== undefined
+                ? str(keeper.user_id)
+                : state.identity.keeperUserId,
             // M0 的 keeper_mode 是 payload 必填字段；keeper 本身可为 null
             // （KeeperControl 行缺失时），因此模式优先取 keeper_mode。
             keeperMode:
@@ -662,6 +708,9 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           checkOrder,
           requests,
           requestOrder,
+          keeperDraft: Array.isArray(payload.keeper_drafts)
+            ? readKeeperDraft(payload.keeper_drafts.at(-1))
+            : state.keeperDraft,
         };
       }),
 
@@ -822,28 +871,8 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             };
           }
           case "keeper_draft": {
-            const draftId = str(payload.draft_id);
-            if (!draftId) return base;
-            const command =
-              payload.command && typeof payload.command === "object"
-                ? (payload.command as Record<string, unknown>)
-                : null;
-            return {
-              ...base,
-              keeperDraft: {
-                draftId,
-                summary: str(payload.summary) || str(payload.text),
-                command: command
-                  ? {
-                      kind: str(command.kind),
-                      payload:
-                        (command.payload as Record<string, unknown>) ?? {},
-                    }
-                  : null,
-                note: str(payload.note),
-                createdAt: now,
-              },
-            };
+            const draft = readKeeperDraft(payload);
+            return draft ? { ...base, keeperDraft: draft } : base;
           }
           case "keeper_draft_resolved": {
             if (!state.keeperDraft) return base;
@@ -856,7 +885,12 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             return { ...base, keeperDraft: null };
           }
           case "keeper_control": {
-            const rawState = str(payload.state, "active");
+            const controller = payload.controller as
+              { kind?: string; id?: string } | undefined;
+            const rawState = str(
+              payload.state,
+              controller?.kind === "human" ? "takeover" : "active",
+            );
             const allowed = [
               "active",
               "paused",
@@ -873,7 +907,7 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               ...base,
               keeperControl: {
                 state: controlState,
-                detail: str(payload.detail),
+                detail: str(payload.detail) || str(payload.reason),
                 takeoverAvailable: bool(payload.takeover_available),
                 updatedAt: now,
               },

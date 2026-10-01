@@ -67,6 +67,36 @@ beforeEach(() => {
 });
 
 describe("SoloCharacterSelectScreen", () => {
+  it("预览另一角色但认领失败时，不能以旧认领确认开局", () => {
+    useOnlineStore.setState({
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "owner",
+          investigator: { id: "claim", character_key: "default:alice" },
+        },
+      ],
+    });
+    render(<SoloCharacterSelectScreen />);
+    expect(
+      screen.getByRole("button", { name: "以此调查员开始" }),
+    ).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /罗伯特/ }));
+    expect(claimByKey).toHaveBeenCalledWith("default:bob");
+    expect(
+      screen.getByRole("button", { name: "以此调查员开始" }),
+    ).toBeDisabled();
+    expect(startGame).not.toHaveBeenCalled();
+  });
+
+  it("角色库打开时 Escape 不穿透到冒险列表", () => {
+    useAppStore.setState({ characterLibraryOpen: true });
+    render(<SoloCharacterSelectScreen />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(enterSoloLobby).not.toHaveBeenCalled();
+    useAppStore.setState({ characterLibraryOpen: false });
+  });
   it("展示角色卡并把选择提交给房间接口（点卡即认领）", () => {
     render(<SoloCharacterSelectScreen />);
     expect(screen.getByText("雾中宅邸")).toBeInTheDocument();

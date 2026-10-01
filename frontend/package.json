@@ -1,7 +1,7 @@
 {
   "name": "trpg-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TRPG Game 桌面应用",
   "main": "electron/main.cjs",
   "type": "module",

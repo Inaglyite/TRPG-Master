@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acknowledgePendingAction,
   onDecision,
+  renderOptions,
   rollbackPendingAction,
   sendAction,
   sendDecisionReply,
@@ -42,6 +43,12 @@ beforeEach(() => {
 });
 
 describe("行动乐观 UI", () => {
+  it("普通选项未附自由行动时，选项与输入仍可操作", () => {
+    useAppStore.setState({ inputEnabled: false });
+    renderOptions([{ label: "检查门锁", isFree: false }]);
+    expect(useAppStore.getState().inputEnabled).toBe(true);
+    expect(useAppStore.getState().choices[0].label).toBe("检查门锁");
+  });
   it("聊天式行动预演使用底部选项而不打开弹窗", () => {
     onDecision({
       id: "action-preview-1",

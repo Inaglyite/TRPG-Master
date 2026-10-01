@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   assignActor,
   changeMemberRole,
+  changeKeeperAuthorization,
   claimByKey,
   deleteCurrentRoom,
   dismissInvite,
@@ -70,6 +71,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingKick, setConfirmingKick] = useState<string | null>(null);
+  const [confirmingKeeper, setConfirmingKeeper] = useState<string | null>(null);
   const [confirmingTransfer, setConfirmingTransfer] = useState<string | null>(
     null,
   );
@@ -109,6 +111,8 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   // keeper_required / room_not_ready 为准。
   const structuredRoom = roomMetadata?.execution_profile === "structured_v1";
   const startBlockers: string[] = [];
+  if (structuredRoom && isOwner && !me?.can_keeper)
+    startBlockers.push("你尚无主持授权，请在成员列表授权主持后开局");
   for (const member of players) {
     if (!onlineUserIds.includes(member.user_id)) {
       startBlockers.push(`${member.username} 离线`);
@@ -117,7 +121,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
       startBlockers.push(`${member.username} 未准备`);
     }
     if (member.investigator) continue;
-    if (structuredRoom && member.role === "owner") continue;
+    if (structuredRoom && member.can_keeper === true) continue;
     startBlockers.push(`${member.username} 未选择调查员`);
   }
   if (roomConnection !== "connected") {
@@ -258,6 +262,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                     )}
                   </span>
                   <span className="member-badges">
+                    {member.can_keeper && (
+                      <span className="online-badge">主持</span>
+                    )}
                     <span className="online-badge">
                       {ROLE_LABELS[member.role] ?? member.role}
                     </span>
@@ -292,6 +299,43 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                       </span>
                     )}
                   </span>
+                  {isOwner && structuredRoom && (
+                    <span className="member-actions">
+                      {confirmingKeeper === member.user_id ? (
+                        <>
+                          <button
+                            className="btn-ghost"
+                            disabled={roomBusy}
+                            onClick={() => {
+                              setConfirmingKeeper(null);
+                              void changeKeeperAuthorization(
+                                member.user_id,
+                                !member.can_keeper,
+                              );
+                            }}
+                          >
+                            {member.can_keeper
+                              ? "确认撤销主持"
+                              : "确认授权（可见主持秘密）"}
+                          </button>
+                          <button
+                            className="btn-ghost"
+                            onClick={() => setConfirmingKeeper(null)}
+                          >
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn-ghost"
+                          disabled={roomBusy}
+                          onClick={() => setConfirmingKeeper(member.user_id)}
+                        >
+                          {member.can_keeper ? "撤销主持" : "授权主持"}
+                        </button>
+                      )}
+                    </span>
+                  )}
                   {isOwner && member.user_id !== user?.id && (
                     <span className="member-actions">
                       {member.role !== "viewer" && (

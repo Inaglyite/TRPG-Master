@@ -96,6 +96,17 @@ export async function updateLibraryEntry(
   );
 }
 
+/** 编辑保存须读取完整卡面，列表投影不能用来覆盖原卡。 */
+export async function getLibraryCard(
+  id: string,
+): Promise<Record<string, unknown>> {
+  const data = await apiFetch(
+    `/api/character-library/${encodeURIComponent(id)}`,
+    z.object({ card: z.record(z.string(), z.unknown()) }),
+  );
+  return data.card;
+}
+
 export async function duplicateLibraryEntry(id: string): Promise<LibraryEntry> {
   const data = await apiFetch(
     `/api/character-library/${encodeURIComponent(id)}/duplicate`,

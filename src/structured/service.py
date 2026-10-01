@@ -40,10 +40,11 @@ from .checks import (
     resolve_pending_check,
     roll_free,
 )
+from .control import cmd_control_keeper
 from .domains import COMMAND_HANDLERS, CommandContext, CommandResult, EventSpec
 from .errors import StructuredError
 from .ids import canonical_digest, new_row_id
-from .principal import Principal, check_command_authority
+from .principal import Principal, check_command_authority, current_control, resolve_keeper_principal
 from .registries import ensure_clue_registry, ensure_item_registry
 
 logger = logging.getLogger("trpg.structured_service")
@@ -52,6 +53,7 @@ _KIND_HANDLERS = {
     **COMMAND_HANDLERS,
     "request_check": _cmd_request_check,
     "resolve_check": _cmd_resolve_check,
+    "control_keeper": cmd_control_keeper,
 }
 
 _ACTION_KINDS = {"present_clue", "use_item", "move", "freeform"}
@@ -208,7 +210,12 @@ class StructuredPlayService:
                     "同一 command_id 提交了不同内容，已拒绝。",
                 )
             self._check_revision(expected_revision, int(row.revision))
-            if principal.kind == "player" and kind in _PLAYER_COMMANDS:
+            if kind == "control_keeper":
+                if principal.kind != "keeper":
+                    raise StructuredError("keeper_required", "该操作需要人类主持授权。")
+                resolve_keeper_principal(session, world_id, principal.user_id)
+                epoch = int(current_control(session, world_id).epoch)
+            elif principal.kind == "player" and kind in _PLAYER_COMMANDS:
                 epoch = 0  # 玩家直接命令不持有主持控制权；载荷级授权在下面复核
             else:
                 epoch = check_command_authority(session, world_id, principal)
@@ -222,6 +229,8 @@ class StructuredPlayService:
                 revision=int(row.revision),
             )
             outcome = handler(state, payload, ctx)
+            if kind == "control_keeper":
+                epoch = int(current_control(session, world_id).epoch)
             if not isinstance(outcome, CommandResult):
                 raise StructuredError("internal_error", f"命令 {kind} 返回了非法结果。")
             # 命令卡的收尾事件：以 command_id 为键，让发起方的“主持操作”卡
@@ -438,6 +447,7 @@ class StructuredPlayService:
         proposed_commands: list[dict],
         narration: str = "",
         related_request_id: str = "",
+        source_revision: int | None = None,
     ) -> dict:
         """assisted 草稿：只持久化 + 通知 keeper，不执行任何命令。
 
@@ -446,6 +456,7 @@ class StructuredPlayService:
         """
         from .ids import new_stable_id
 
+        narration = str(narration or "")[:4000]
         draft_id = new_stable_id("draft")
         digest = canonical_digest(
             {
@@ -465,11 +476,15 @@ class StructuredPlayService:
                     investigator_id="",
                     submitted_by=None,
                     payload={
+                        "related_request_id": related_request_id,
+                        "source_revision": (
+                            int(row.revision) if source_revision is None else int(source_revision)
+                        ),
                         "draft": {
                             "summary": summary,
                             "commands": proposed_commands,
                             "narration": narration,
-                        }
+                        },
                     },
                     payload_digest=digest,
                     status="queued",
@@ -490,6 +505,7 @@ class StructuredPlayService:
                             "kind": "commands" if proposed_commands else "narrative",
                             **({"request_id": related_request_id} if related_request_id else {}),
                             "summary": summary,
+                            **({"narration": narration} if narration else {}),
                             **(
                                 {"proposed_commands": proposed_commands}
                                 if proposed_commands
@@ -867,13 +883,32 @@ class StructuredPlayService:
                     # 做什么、哪项尚未执行、已被告知什么（仅本人或主持可见）。
                     **(
                         {"awaiting": copy.deepcopy((req.payload or {}).get("awaiting"))}
-                        if req.status == "awaiting_player"
-                        and (req.payload or {}).get("awaiting")
+                        if req.status == "awaiting_player" and (req.payload or {}).get("awaiting")
                         else {}
                     ),
                 }
                 for req in requests
                 if is_keeper or req.investigator_id in own
+            ]
+            draft_entries = [
+                {
+                    "draft_id": req.request_id,
+                    "kind": "commands"
+                    if (req.payload or {}).get("draft", {}).get("commands")
+                    else "narrative",
+                    "summary": str((req.payload or {}).get("draft", {}).get("summary") or ""),
+                    "proposed_commands": copy.deepcopy(
+                        (req.payload or {}).get("draft", {}).get("commands") or []
+                    ),
+                    "narration": str((req.payload or {}).get("draft", {}).get("narration") or ""),
+                    **(
+                        {"request_id": (req.payload or {})["related_request_id"]}
+                        if (req.payload or {}).get("related_request_id")
+                        else {}
+                    ),
+                }
+                for req in sorted(requests, key=lambda entry: entry.created_at)
+                if is_keeper and req.request_type == "keeper_draft" and req.status == "queued"
             ]
 
         clues = self._visible_clues(state, own, is_keeper)
@@ -897,6 +932,7 @@ class StructuredPlayService:
             "clues": clues,
             "items": self._visible_items(state, own, is_keeper),
             "requests": request_entries,
+            "keeper_drafts": draft_entries,
             "interactions": open_threads,
             "pending_checks": pending_checks,
             "cursor": {
@@ -1023,8 +1059,9 @@ class StructuredPlayService:
                 "max_hp": int(sheet.get("max_hp", 0) or 0),
                 "san": int(sheet.get("san", 0) or 0),
                 "max_san": int(sheet.get("max_san", 0) or 0),
-                "skills": {str(k): int(v) for k, v in skills.items()
-                           if isinstance(v, (int, float))},
+                "skills": {
+                    str(k): int(v) for k, v in skills.items() if isinstance(v, (int, float))
+                },
             }
 
         sheets: list[dict] = []
@@ -1090,9 +1127,7 @@ class StructuredPlayService:
     ) -> dict:
         """主持侧只读记忆查询帧：结果作为 keeper 定向事件落 outbox 并返回。"""
         if principal.kind not in {"keeper", "agent"}:
-            raise StructuredError(
-                "not_authorized", "记忆查询是主持侧能力。", retryable=False
-            )
+            raise StructuredError("not_authorized", "记忆查询是主持侧能力。", retryable=False)
         query_id = str(frame.get("query_id") or "")
         if not query_id:
             raise StructuredError("invalid_action", "缺少 query_id。")
@@ -1370,6 +1405,8 @@ class StructuredPlayService:
             "set_npc_presence",
             "record_fact",
             "record_memory",
+            "resolve_draft",
+            "control_keeper",
         ]
         return {
             "protocol_version": 1,

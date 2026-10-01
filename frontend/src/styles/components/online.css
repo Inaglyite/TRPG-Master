@@ -152,9 +152,7 @@
   box-shadow: none;
   /* 外侧金色光晕：0 偏移 drop-shadow 沿框图雕花轮廓向外晕染，
      卡片内部（alpha 不透明区）不会渗进光 */
-  filter:
-    brightness(1.08)
-    drop-shadow(0 12px 18px rgba(0, 0, 0, 0.6))
+  filter: brightness(1.08) drop-shadow(0 12px 18px rgba(0, 0, 0, 0.6))
     drop-shadow(0 0 16px color-mix(in srgb, var(--gold) 40%, transparent));
 }
 @media (prefers-reduced-motion: reduce) {
@@ -427,6 +425,7 @@
 }
 
 .online-field input,
+.online-field select,
 .online-inline-form input,
 .online-inline-form select,
 .online-server-form input {
@@ -445,6 +444,7 @@
 }
 
 .online-field input:focus,
+.online-field select:focus,
 .online-inline-form input:focus,
 .online-inline-form select:focus,
 .online-server-form input:focus {
@@ -453,6 +453,7 @@
 }
 
 .online-field input:disabled,
+.online-field select:disabled,
 .online-inline-form input:disabled,
 .online-inline-form select:disabled {
   opacity: 0.62;
@@ -1831,6 +1832,7 @@
 .online-room-screen .member-actions .btn-primary,
 .online-room-screen .online-server-actions > .btn-ghost,
 .online-room-screen .online-server-actions > .btn-primary {
+  flex: 0 0 auto;
   min-height: 42px;
   padding: 0 14px;
   font-size: 13px;

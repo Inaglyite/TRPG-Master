@@ -15,6 +15,7 @@ from src.gameplay.characters import list_character_options
 from src.modules.module_registry import ModuleRegistry
 from src.multiplayer.archive_http import register_archive_world_route
 from src.multiplayer.character_options_http import register_character_options_route
+from src.multiplayer.keeper_http import register_keeper_routes
 from src.multiplayer.private_state import release_world_controller
 from src.multiplayer.room_events import broadcast_investigator_change
 from src.multiplayer.room_runtime import GameRoom, RoomManager
@@ -63,6 +64,7 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
     router = APIRouter()
     db_url = deps.database_url
     register_character_options_route(router, deps)
+    register_keeper_routes(router, deps)
     register_archive_world_route(router, database_url=db_url, room_manager=deps.room_manager)
     register_solo_timeline_http_routes(
         router,

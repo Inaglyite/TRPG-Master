@@ -58,6 +58,11 @@ export function OnlineRoomDock() {
   const actor = members.find((member) => member.user_id === currentActorUserId);
   const myTurn = currentActorUserId != null && currentActorUserId === user?.id;
   const players = members.filter((member) => member.role !== "viewer");
+  const nextOnlineActor = players.find(
+    (member) =>
+      member.user_id !== currentActorUserId &&
+      onlineUserIds.includes(member.user_id),
+  );
   const roomTitle =
     roomMetadata?.name ||
     modules.find((module) => module.id === roomModule)?.title ||
@@ -73,7 +78,10 @@ export function OnlineRoomDock() {
     const index = players.findIndex(
       (member) => member.user_id === currentActorUserId,
     );
-    const next = players[(index + 1) % players.length];
+    const next = Array.from(
+      { length: players.length - 1 },
+      (_, offset) => players[(index + offset + 1) % players.length],
+    ).find((member) => onlineUserIds.includes(member.user_id));
     if (next && next.user_id !== currentActorUserId) {
       void assignActor(next.user_id);
     }
@@ -195,7 +203,17 @@ export function OnlineRoomDock() {
 
           <div className="online-room-dock-actions">
             {isOwner && players.length > 1 && (
-              <button type="button" className="btn-ghost" onClick={skipActor}>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={!nextOnlineActor || roomConnection !== "connected"}
+                title={
+                  !nextOnlineActor
+                    ? "没有其他在线玩家可接替"
+                    : "跳到下一位在线玩家"
+                }
+                onClick={skipActor}
+              >
                 跳过行动者
               </button>
             )}

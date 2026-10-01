@@ -98,7 +98,13 @@ export function SoloCharacterSelectScreen() {
   }, [pendingLibraryId, groups]);
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && canChoose) void enterSoloLobby();
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !useAppStore.getState().characterLibraryOpen &&
+        canChoose
+      )
+        void enterSoloLobby();
     };
     document.addEventListener("keydown", listener);
     return () => document.removeEventListener("keydown", listener);
@@ -262,7 +268,7 @@ export function SoloCharacterSelectScreen() {
         </span>
         <button
           id="btn-character-confirm"
-          disabled={!claimedKey || !canChoose}
+          disabled={!claimedKey || claimedKey !== focusedId || !canChoose}
           onClick={() => void startGame()}
         >
           {roomConnection === "connected" ? "以此调查员开始" : "正在连接房间…"}

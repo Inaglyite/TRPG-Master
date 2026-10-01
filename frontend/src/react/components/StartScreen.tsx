@@ -105,7 +105,12 @@ export function StartScreen() {
   useEffect(() => {
     if (state.view !== "characters") return;
     const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !state.gameStarting)
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !useAppStore.getState().characterLibraryOpen &&
+        !state.gameStarting
+      )
         useStartStore.setState({ view: "menu" });
     };
     document.addEventListener("keydown", listener);

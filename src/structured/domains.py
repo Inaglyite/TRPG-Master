@@ -861,52 +861,9 @@ def _awaiting_record(payload: dict) -> dict:
 
 
 def cmd_resolve_draft(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
-    """assisted 草稿收尾：approved/edited → completed，rejected → declined。
+    from .drafts import resolve_draft
 
-    批准本身不执行命令——主持以各自的 command_request 单独提交（幂等）；
-    edited 表示主持改过内容再发，同样只收尾草稿。
-    """
-    from sqlalchemy import select
-
-    from src.storage.database import PlayerRequest
-
-    if ctx.session is None:
-        raise StructuredError("internal_error", "resolve_draft 需要数据库会话。")
-    draft_id = _require_text(payload, "draft_id", limit=160)
-    decision = str(payload.get("decision") or "")
-    if decision not in {"approved", "rejected", "edited"}:
-        raise StructuredError("invalid_action", "decision 只支持 approved/rejected/edited。")
-    row = ctx.session.execute(
-        select(PlayerRequest).where(
-            PlayerRequest.world_id == ctx.world_id,
-            PlayerRequest.request_id == draft_id,
-            PlayerRequest.request_type == "keeper_draft",
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise StructuredError("request_not_found", f"没有找到草稿：{draft_id}")
-    if row.status != "queued":
-        raise StructuredError("invalid_action", f"草稿已处理：{row.status}")
-    note = str(payload.get("note") or "")[:500]
-    row.status = "declined" if decision == "rejected" else "completed"
-    row.detail = note or f"草稿{decision}"
-    row.updated_at = utcnow()
-    ctx.session.flush()
-    return CommandResult(
-        result={"status": "success", "draft_id": draft_id, "decision": decision},
-        events=[
-            EventSpec(
-                "keeper_draft_resolved",
-                {
-                    "draft_id": draft_id,
-                    "decision": decision,
-                    **({"note": note} if note else {}),
-                },
-                dict(KEEPER),
-            )
-        ],
-        bump_revision=False,
-    )
+    return resolve_draft(state, payload, ctx)
 
 
 def cmd_record_memory(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:

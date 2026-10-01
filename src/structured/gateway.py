@@ -92,9 +92,7 @@ class StructuredGateway:
             # 认证用户的缺失世界由成员解析自然给出 not_authorized（不暴露世界
             # 是否存在），两条路径分工不同是刻意的对偶。
             if session.get(World, world_id) is None:
-                raise StructuredError(
-                    "unknown_world", f"世界不存在：{world_id}", retryable=False
-                )
+                raise StructuredError("unknown_world", f"世界不存在：{world_id}", retryable=False)
             ensure_local_operator(session, world_id)
             user_id = LOCAL_OPERATOR_USER_ID
         if frame_type in {"command_request", "memory_query"}:
@@ -153,7 +151,7 @@ class StructuredGateway:
             self._locks[world_id] = lock
         return lock
 
-    def _execute(self, world_id: str, user_id: str | None, frame: dict) -> list[dict]:
+    def _execute(self, world_id: str, user_id: str | None, frame: dict) -> tuple[list[dict], bool]:
         frame_type = str(frame.get("type") or "")
         validate_frame(frame_type, frame)
         frame_world = str(frame.get("world_id") or "")
@@ -164,27 +162,29 @@ class StructuredGateway:
         with session_scope(self.database_url) as session:
             principal = self._resolve_principal(session, world_id, user_id, frame_type)
         if frame_type == "action_request":
-            self.service.submit_action_request(
+            outcome = self.service.submit_action_request(
                 world_id=world_id, principal=principal, request=frame
             )
         elif frame_type == "free_roll_request":
-            self.service.submit_free_roll(world_id=world_id, principal=principal, request=frame)
+            outcome = self.service.submit_free_roll(
+                world_id=world_id, principal=principal, request=frame
+            )
         elif frame_type == "check_response":
-            self.service.submit_check_response(
+            outcome = self.service.submit_check_response(
                 world_id=world_id, principal=principal, request=frame
             )
         elif frame_type == "cancel_request":
-            self.service.cancel_action_request(
+            outcome = self.service.cancel_action_request(
                 world_id=world_id, principal=principal, request=frame
             )
         elif frame_type == "memory_query":
             # 主持侧只读记忆查询：principal 解析按 keeper 授权（与 command_request
             # 同一入口），服务层再按角色过滤可见范围。
-            self.service.execute_memory_query(
+            outcome = self.service.execute_memory_query(
                 world_id=world_id, principal=principal, frame=frame
             )
         else:
-            self.service.execute_command(
+            outcome = self.service.execute_command(
                 world_id=world_id,
                 principal=principal,
                 kind=str(frame.get("kind") or ""),
@@ -195,7 +195,7 @@ class StructuredGateway:
             )
         # 已提交事件从 outbox 重读（按 cause 归集）：发出的就是落库的；
         # 幂等重试也因此拿到原始 ack 事件（前端按 event_id 去重）。
-        return self._committed_events(world_id, frame)
+        return self._committed_events(world_id, frame), bool(outcome.get("deduplicated"))
 
     @staticmethod
     def _cause_id(frame: dict) -> str:
@@ -248,7 +248,9 @@ class StructuredGateway:
         """处理一帧：错误只回发起方；已提交事件按各连接 principal 过滤投递。"""
         async with self._world_lock(world_id):
             try:
-                events = await asyncio.to_thread(self._execute, world_id, user_id, frame)
+                events, deduplicated = await asyncio.to_thread(
+                    self._execute, world_id, user_id, frame
+                )
             except StructuredError as exc:
                 error = await asyncio.to_thread(self._persist_request_error, world_id, frame, exc)
                 await deliver(error)
@@ -280,13 +282,22 @@ class StructuredGateway:
         # 发起玩家也必须收到 agent 产生的场景/消息事件）按各连接 principal
         # 过滤；本地单连接场景沿用 deliver（本地操作者同时持有两顶帽子）。
         frame_type = str(frame.get("type") or "")
-        if frame_type in _AGENT_TRIGGER_FRAMES:
+        retry_keeper = (
+            frame_type == "command_request"
+            and frame.get("kind") == "control_keeper"
+            and (frame.get("payload") or {}).get("action") == "retry"
+        )
+        if (frame_type in _AGENT_TRIGGER_FRAMES or retry_keeper) and not deduplicated:
             from .agent_runtime import maybe_schedule_keeper_agent
 
             maybe_schedule_keeper_agent(
                 database_url=self.database_url,
                 world_id=world_id,
-                trigger_request_id=str(frame.get("request_id") or ""),
+                trigger_request_id=str(
+                    (frame.get("payload") or {}).get("request_id")
+                    if retry_keeper
+                    else frame.get("request_id") or ""
+                ),
                 deliver=deliver if broadcast is None else None,
                 broadcast=agent_broadcast if agent_broadcast is not None else broadcast,
             )
@@ -328,9 +339,7 @@ class StructuredGateway:
                 row = session.get(WorldState, world_id)
                 revision = int(row.revision) if row is not None else 0
                 sequence = session.execute(
-                    select(func.max(EventOutbox.sequence)).where(
-                        EventOutbox.world_id == world_id
-                    )
+                    select(func.max(EventOutbox.sequence)).where(EventOutbox.world_id == world_id)
                 ).scalar_one()
                 event = EventOutbox(
                     world_id=world_id,

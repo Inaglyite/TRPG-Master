@@ -5,6 +5,7 @@ import {
   deleteLibraryEntry,
   duplicateLibraryEntry,
   exportLibraryEntry,
+  getLibraryCard,
   inspectLibraryCard,
   listCharacterLibrary,
   updateLibraryEntry,
@@ -65,6 +66,13 @@ function emptyDraft(): EditorDraft {
   };
 }
 
+function inventoryLabel(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return "";
+  const value = item as Record<string, unknown>;
+  return String(value.label ?? value.name ?? value.id ?? "");
+}
+
 function draftFromEntry(entry: LibraryEntry): EditorDraft {
   const backstory = entry.backstory || {};
   const text = (value: unknown) => (typeof value === "string" ? value : "");
@@ -83,11 +91,7 @@ function draftFromEntry(entry: LibraryEntry): EditorDraft {
       value: String(value),
     })),
     inventoryText: (entry.inventory || [])
-      .map((item) =>
-        typeof item === "string"
-          ? item
-          : ((item as { label?: string })?.label ?? ""),
-      )
+      .map(inventoryLabel)
       .filter(Boolean)
       .join("\n"),
     description: text(backstory.description),
@@ -97,7 +101,10 @@ function draftFromEntry(entry: LibraryEntry): EditorDraft {
 }
 
 /** 编辑器草稿 → 卡面 payload。数值解析失败时抛出带字段名的中文错误。 */
-function draftToCard(draft: EditorDraft): Record<string, unknown> {
+function draftToCard(
+  draft: EditorDraft,
+  original: Record<string, unknown> = {},
+): Record<string, unknown> {
   const attributes: Record<string, number> = {};
   for (const id of ATTRIBUTE_IDS) {
     const value = Number(draft.attributes[id]);
@@ -120,20 +127,38 @@ function draftToCard(draft: EditorDraft): Record<string, unknown> {
     if (!Number.isInteger(value)) throw new Error(`技能 ${id} 的值必须是整数`);
     skills[id] = value;
   }
+  const originalInventory = Array.isArray(original.inventory)
+    ? original.inventory
+    : [];
+  const remaining = [...originalInventory];
+  const inventory = draft.inventoryText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((label) => {
+      const index = remaining.findIndex(
+        (item) => inventoryLabel(item) === label,
+      );
+      return index < 0 ? label : remaining.splice(index, 1)[0];
+    });
+  // 未能在文本编辑器表示的扩展物品仍保留，不能静默删除。
+  inventory.push(...remaining.filter((item) => !inventoryLabel(item)));
   return {
+    ...original,
     name: draft.name.trim(),
     occupation: draft.occupation.trim(),
     era: draft.era.trim(),
     age: draft.age.trim() ? Number(draft.age) : null,
-    attributes,
+    attributes: {
+      ...(original.attributes as Record<string, unknown>),
+      ...attributes,
+    },
     skills,
     credit_rating: credit,
-    derived: { LUCK: luck },
-    inventory: draft.inventoryText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean),
+    derived: { ...(original.derived as Record<string, unknown>), LUCK: luck },
+    inventory,
     backstory: {
+      ...(original.backstory as Record<string, unknown>),
       description: draft.description.trim(),
       background: draft.background.trim(),
       key_connection: draft.keyConnection.trim(),
@@ -264,12 +289,14 @@ export function CharacterLibraryPanel() {
   useEffect(() => {
     if (!open) return;
     const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) {
-        useAppStore.getState().setCharacterLibraryOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!busy) useAppStore.getState().setCharacterLibraryOpen(false);
       }
     };
-    document.addEventListener("keydown", listener);
-    return () => document.removeEventListener("keydown", listener);
+    document.addEventListener("keydown", listener, true);
+    return () => document.removeEventListener("keydown", listener, true);
   }, [open, busy]);
 
   if (!rendered) return null;
@@ -377,7 +404,8 @@ export function CharacterLibraryPanel() {
             onSave={async (draft) => {
               setBusy(true);
               try {
-                const payload = draftToCard(draft);
+                const original = view.id ? await getLibraryCard(view.id) : {};
+                const payload = draftToCard(draft, original);
                 const result = view.id
                   ? await updateLibraryEntry(view.id, payload)
                   : await createLibraryEntry(payload);

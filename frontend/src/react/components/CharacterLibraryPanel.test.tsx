@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   duplicateLibraryEntry: vi.fn(),
   deleteLibraryEntry: vi.fn(),
   exportLibraryEntry: vi.fn(),
+  getLibraryCard: vi.fn(),
 }));
 
 vi.mock("../../api/characterLibrary", () => api);
@@ -58,6 +59,7 @@ describe("CharacterLibraryPanel", () => {
     useAppStore.setState({ characterLibraryOpen: true, mode: "local" });
     useStartStore.setState({ pendingLibraryCharacterId: null });
     api.listCharacterLibrary.mockResolvedValue([makeEntry()]);
+    api.getLibraryCard.mockResolvedValue(makeEntry());
   });
 
   it("列出角色并预览详情", async () => {
@@ -65,6 +67,38 @@ describe("CharacterLibraryPanel", () => {
     const row = await screen.findByText("测试调查员");
     fireEvent.click(row);
     expect(await screen.findByText(/跑社会新闻|短发/)).toBeInTheDocument();
+  });
+
+  it("只改姓名时完整保留扩展资料与对象型物品", async () => {
+    const original = {
+      ...makeEntry(),
+      career: { cases: 2 },
+      portrait: "portrait.png",
+      psychological_profile: { fears: ["高处"] },
+      inventory: [
+        { id: "kit", name: "急救箱", quantity: 3 },
+        { label: "手枪", ammo: 6 },
+      ],
+      backstory: { description: "短发", beliefs: "相信证据" },
+    };
+    api.listCharacterLibrary.mockResolvedValue([original]);
+    api.getLibraryCard.mockResolvedValue(original);
+    api.updateLibraryEntry.mockResolvedValue({ entry: original, warnings: [] });
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText(/姓名/), {
+      target: { value: "新名字" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(api.updateLibraryEntry).toHaveBeenCalled());
+    expect(api.updateLibraryEntry.mock.calls[0][1]).toMatchObject({
+      name: "新名字",
+      inventory: original.inventory,
+      career: original.career,
+      portrait: original.portrait,
+      psychological_profile: original.psychological_profile,
+      backstory: original.backstory,
+    });
   });
 
   it("空状态引导新建/导入", async () => {

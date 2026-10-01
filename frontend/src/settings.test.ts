@@ -9,6 +9,7 @@ vi.mock("./state/app-store", async (importOriginal) => {
 import { safeSend } from "./ws";
 import {
   fetchSettings,
+  closeSettings,
   onModelSettings,
   onModelSettingsError,
   onModelSettingsTestResult,
@@ -16,6 +17,7 @@ import {
   restoreDefaultSettings,
   saveSettings,
   testConnection,
+  updateServiceDraft,
 } from "./settings";
 import {
   draftFromView,
@@ -92,6 +94,52 @@ describe("settings commands", () => {
       loading: false,
       loadError: null,
     });
+  });
+
+  it("保存无回执时有界解锁，保留草稿且允许关闭", () => {
+    vi.useFakeTimers();
+    try {
+      useModelStore.setState({ confirmSharing: true });
+      const drafts = useModelStore.getState().drafts;
+      saveSettings();
+      expect(useModelStore.getState().saving).toBe(true);
+      vi.advanceTimersByTime(15001);
+      expect(useModelStore.getState().saving).toBe(false);
+      expect(useModelStore.getState().status).toContain("尚未确认结果");
+      expect(useModelStore.getState().drafts).toEqual(drafts);
+      closeSettings();
+      expect(useModelStore.getState().open).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("保存中断线即解锁，草稿不会被清空", () => {
+    useAppStore.setState({ connection: "connected" });
+    useModelStore.setState({ confirmSharing: true });
+    const drafts = useModelStore.getState().drafts;
+    saveSettings();
+    useAppStore.setState({ connection: "disconnected" });
+    expect(useModelStore.getState().saving).toBe(false);
+    expect(useModelStore.getState().status).toContain("连接已断开");
+    expect(useModelStore.getState().drafts).toEqual(drafts);
+  });
+
+  it("超时后继续编辑，旧保存回执不覆盖新草稿", () => {
+    vi.useFakeTimers();
+    try {
+      useModelStore.setState({ confirmSharing: true });
+      saveSettings();
+      vi.advanceTimersByTime(15001);
+      updateServiceDraft("narrative", { model_id: "new-model" });
+      onModelSettings({ ...view, saved: true });
+      expect(useModelStore.getState().drafts.narrative.service.model_id).toBe(
+        "new-model",
+      );
+      expect(useModelStore.getState().status).toContain("迟到回执");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("旧协议响应（仅 narrative_model）明确报后端过旧，不再静默卡加载", () => {

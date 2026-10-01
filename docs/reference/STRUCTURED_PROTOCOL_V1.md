@@ -18,7 +18,7 @@
 | `schemas/structured-play/v1/memory_query.json` | 主持侧只读记忆查询帧（keeper 专用；结果以 memory_query_result 事件返回） |
 | `schemas/structured-play/v1/free_roll_request.json` | 普通掷骰请求（受限表达式） |
 | `schemas/structured-play/v1/check_response.json` | 待检定卡回应（roll / decline，不携带参数） |
-| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 16 种命令的严格载荷（M3 新增 resolve_draft；上下文/记忆批新增 record_memory） |
+| `schemas/structured-play/v1/command_request.json` | 主持命令信封 + 17 种命令的严格载荷（含 resolve_draft、record_memory、control_keeper） |
 | `schemas/structured-play/v1/events.json` | 事件信封与载荷（含 session_snapshot / server_capabilities / handout_presented / interaction_updated / memory_recorded / memory_query_result；完整清单以 schema 为准） |
 | `schemas/structured-play/v1/permission-matrix.json` | 权限矩阵机器可读正本 |
 | `schemas/structured-play/v1/fixtures/` | 协议正例与反例，随契约增补 |
@@ -51,7 +51,7 @@ human 房间的模型就绪门禁：structured_v1 + human 不经 `_room_model_re
 agent/assisted 仍走 BYOK 校验，**不**因此放开平台 Key 兜底。
 
 Agent 触发语义（M3 实现冻结）：`action_request` / `check_response` 提交成功后调度一次
-守秘人运行；`free_roll_request`（普通骰）与主持自己的 `command_request` 不触发剧情。
+守秘人运行；`free_roll_request`（普通骰）与一般主持 `command_request` 不触发剧情。例外是 `control_keeper` 的显式 `retry`：选定暂停请求成功重新排队后调度；幂等重放只回原事件，不再次调用模型。
 同一世界同一时刻至多一个活动运行；运行中到达的新触发由下一轮上下文重建吸收。
 模型路由不可用（BYOK 未配置/被阻断）时不消耗模型、触发请求置 paused 并给主持可见提示；
 人类在控时运行返回 blocked 不抢占。
@@ -124,10 +124,21 @@ queued → completed（主持 resolve_draft decision=approved/edited）
 ```
 
 - 草稿携带 `summary`、`proposed_commands`（无 command_id 的建议命令列表）、
-  `narration`；批准本身**不执行**任何命令——主持批准后以各自的
-  `command_request` 单独提交（幂等），edited 表示主持改过内容再发。
+  `narration`。`approved` 复核持久化的 `source_revision`，在批准命令的同一事务中执行最多 12 条建议命令并发布叙事；任一失败整体回滚，草稿保持可处理。不允许递归批准草稿或夹带控制权操作。外层 `command_id` 保证重复批准不重复移动、扣费或掷骰。
+- `rejected` 与 `edited` 仅收尾草稿，不执行内容；edited 表示主持将自行另发修改后的命令。
 - 终态草稿不能重复收尾（invalid_action）；未知 draft_id 报 request_not_found。
-- 模型不可用时不产草稿、不消耗后续调用，运行记 draft_unavailable 暂停。
+- 模型不可用时不产草稿，请求持久化为 paused，并向有权限的连接投递原因。
+- 重连快照的可选 `keeper_drafts[]` 恢复尚未处理的草稿及叙事；仅主持投影包含内容，普通玩家为空。旧草稿没有 `source_revision` 时走兼容路径，仍按当前权限与领域约束校验，不等同于完成了旧草稿版本一致性检查。
+
+### 3.5 主持控制与授权
+
+`control_keeper` 仅获 `can_keeper` 授权的人类可用；不接受 Agent 调用，也不把房主身份当作主持授权。
+
+- `take`：递增 epoch、显式取得控制权，旧 Agent 的后续命令失效。
+- `release`：交还 AI（仅 assisted/agent 世界），不会自动重跑旧请求。
+- `retry` + `request_id`：仅将本世界 paused/failed 的玩家请求重新排队并交还 AI；已提交命令不回滚。
+
+房主可通过 `PATCH /api/worlds/{world_id}/members/{user_id}/keeper`、`{can_keeper: boolean}` 显式授予或撤销主持权限。不得撤销最后一位主持；移交房主不隐式授予秘密读取权。权限变更断开目标旧连接并按新权限重连；成员投影提供 `can_keeper`。
 
 ## 4. 错误码
 

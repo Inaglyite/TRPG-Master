@@ -6,11 +6,14 @@ import {
   joinWithToken,
   logout,
   refreshWorlds,
+  ensureModules,
 } from "../../../online";
 import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 import { roomStatusLabel } from "./room-status";
+import { KeeperModeSelect } from "./KeeperModeSelect";
+import type { KeeperMode } from "../../../protocol/structured";
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "房主",
@@ -32,6 +35,8 @@ export function LobbyScreen() {
   const worldsError = useOnlineStore((state) => state.worldsError);
   const modules = useOnlineStore((state) => state.modules);
   const modulesStatus = useOnlineStore((state) => state.modulesStatus);
+  const modulesError = useOnlineStore((state) => state.modulesError);
+  const authError = useOnlineStore((state) => state.authError);
   const createBusy = useOnlineStore((state) => state.createBusy);
   const createError = useOnlineStore((state) => state.createError);
   const joinBusy = useOnlineStore((state) => state.joinBusy);
@@ -43,6 +48,7 @@ export function LobbyScreen() {
   const [roomName, setRoomName] = useState("");
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [structuredRoom, setStructuredRoom] = useState(false);
+  const [keeperMode, setKeeperMode] = useState<KeeperMode>("human");
   const [token, setToken] = useState("");
 
   const moduleTitle = (id: string) =>
@@ -89,6 +95,22 @@ export function LobbyScreen() {
           </button>
         </div>
       </header>
+      {authError && (
+        <p className="online-notice online-notice--error" role="alert">
+          {authError}
+        </p>
+      )}
+      {modulesStatus === "error" && (
+        <div className="online-empty">
+          <p role="alert">{modulesError || "无法读取模组列表"}</p>
+          <button
+            className="btn-ghost lobby-refresh"
+            onClick={() => void ensureModules()}
+          >
+            重试读取模组
+          </button>
+        </div>
+      )}
 
       <section
         className="online-section lobby-section"
@@ -213,7 +235,11 @@ export function LobbyScreen() {
             disabled={createBusy || modulesStatus !== "ready"}
             aria-label="选择模组"
           >
-            {modulesStatus !== "ready" && <option>正在读取模组……</option>}
+            {modulesStatus !== "ready" && (
+              <option>
+                {modulesStatus === "error" ? "模组读取失败" : "正在读取模组……"}
+              </option>
+            )}
             {modules.map((module) => (
               <option key={module.id} value={module.id}>
                 {module.title}
@@ -239,6 +265,7 @@ export function LobbyScreen() {
             onClick={() =>
               void createRoom(selectedModule, roomName, maxPlayers, {
                 structured: structuredRoom,
+                ...(structuredRoom ? { keeperMode } : {}),
               })
             }
           >
@@ -252,10 +279,15 @@ export function LobbyScreen() {
             disabled={createBusy}
             onChange={(event) => setStructuredRoom(event.target.checked)}
           />
-          <span>
-            结构化操作模式（人类主持）：按钮提交明确操作，不需要模型配置
-          </span>
+          <span>结构化操作模式：按钮提交行动，由主持判断并执行</span>
         </label>
+        {structuredRoom && (
+          <KeeperModeSelect
+            value={keeperMode}
+            disabled={createBusy}
+            onChange={setKeeperMode}
+          />
+        )}
         {createError && (
           <p className="online-notice online-notice--error" role="alert">
             {createError}

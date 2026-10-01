@@ -214,6 +214,13 @@
                 "$ref": "#/$defs/request_status_entry"
               }
             },
+            "keeper_drafts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/keeper_draft/properties/payload"
+              },
+              "description": "仅主持收到待处理草稿；普通玩家为空。"
+            },
             "pending_checks": {
               "type": "array",
               "items": {
@@ -1271,6 +1278,10 @@
                   }
                 }
               }
+            },
+            "narration": {
+              "type": "string",
+              "maxLength": 4000
             }
           }
         }

@@ -140,9 +140,8 @@ function completePresentedTurn(structuredChoices?: ActionChoice[]) {
 export function renderOptions(opts: { label: string; isFree: boolean }[]) {
   useAppStore.getState().setChoices(opts);
   useAppStore.getState().setEnding(null);
-  // 自由行动时同时启用输入框
-  const hasFree = opts.some((o) => o.isFree);
-  enableInput(hasFree);
+  // 选项已就绪；模型遗漏自由行动标签也不能关闭整条操作通路。
+  enableInput(true);
 }
 
 // ---- 启用 / 禁用输入 ----
