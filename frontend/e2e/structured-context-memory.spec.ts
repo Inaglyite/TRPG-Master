@@ -337,6 +337,10 @@ test("交互线程：主持开线程 → 卡片出现 → 刷新恢复 → 位�
   });
   await closeConsole(page);
 
+  // A request acknowledgement can arrive before the command's thread event.
+  // Wait for the actual UI result before inspecting the collected WS frames.
+  const card = page.getByTestId("structured-interaction-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
   expect(
     framesOf(frames, "interaction_updated").length,
     `收到的帧类型：${JSON.stringify(
@@ -355,8 +359,6 @@ test("交互线程：主持开线程 → 卡片出现 → 刷新恢复 → 位�
       }),
     )}`,
   ).toBeGreaterThan(0);
-  const card = page.getByTestId("structured-interaction-card");
-  await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(
     card.getByText(/尚未执行：尚未出发前往医学院停尸间/),
   ).toBeVisible();
