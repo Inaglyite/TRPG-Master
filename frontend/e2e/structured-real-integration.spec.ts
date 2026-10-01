@@ -144,7 +144,12 @@ async function waitForServer(): Promise<void> {
   throw new Error(`E2E server did not start:\n${serverOutput.slice(-4000)}`);
 }
 
-test.beforeAll(async () => {
+// Recovery scenarios change execution profiles and keeper control. Each test
+// needs its own world: a previous structured world must not be restarted via
+// the legacy `start` frame (the server correctly rejects that frame).
+test.beforeEach(async () => {
+  serverOutput = "";
+  modelRequests.length = 0;
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-structured-integration-"));
   const modelBaseUrl = await startModelStub();
   server = spawn(
@@ -189,7 +194,7 @@ test.beforeAll(async () => {
   await waitForServer();
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   if (server && server.exitCode === null) {
     server.kill("SIGTERM");
     await new Promise<void>((resolveWait) => {
@@ -207,6 +212,9 @@ test.afterAll(async () => {
     );
   }
   if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
+  server = null;
+  modelServer = null;
+  runtimeRoot = "";
 });
 
 function collectFrames(page: Page): { sent: string[]; received: string[] } {
