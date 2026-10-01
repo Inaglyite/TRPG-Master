@@ -169,6 +169,11 @@ def test_postgresql_migration_schema_matches_orm() -> None:
         for column in inspect(get_engine(POSTGRES_URL)).get_columns("model_service_configs")
     }
     assert isinstance(columns["payload_json"]["type"], JSONB)
+    card_columns = {
+        column["name"]: column
+        for column in inspect(get_engine(POSTGRES_URL)).get_columns("character_library_entries")
+    }
+    assert isinstance(card_columns["card_json"]["type"], JSONB)
     env = {
         **os.environ,
         "TRPG_DATABASE_URL": POSTGRES_URL,
@@ -216,6 +221,45 @@ def test_postgresql_model_config_jsonb_migration_preserves_payload() -> None:
                         text(
                             "SELECT payload_json, pg_typeof(payload_json)::text "
                             "FROM model_service_configs"
+                        )
+                    ).one()
+                    assert row[0] == payload
+                    assert row[1] == expected
+        finally:
+            transaction.rollback()
+
+
+def test_postgresql_character_card_jsonb_migration_preserves_payload() -> None:
+    path = PROJECT_ROOT / "migrations/versions/20261002_0018_character_library_jsonb.py"
+    spec = importlib.util.spec_from_file_location("character_card_jsonb_migration", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    payload = {"name": "测试调查员", "inventory": [{"name": "手电", "count": 2}], "custom": None}
+    with get_engine(POSTGRES_URL).connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(
+                text(
+                    "CREATE TEMP TABLE character_library_entries "
+                    "(card_json JSON NOT NULL) ON COMMIT DROP"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO character_library_entries VALUES (CAST(:payload AS JSON))"),
+                {"payload": json.dumps(payload)},
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                for operation, expected in (
+                    (migration.upgrade, "jsonb"),
+                    (migration.downgrade, "json"),
+                    (migration.upgrade, "jsonb"),
+                ):
+                    operation()
+                    row = connection.execute(
+                        text(
+                            "SELECT card_json, pg_typeof(card_json)::text "
+                            "FROM character_library_entries"
                         )
                     ).one()
                     assert row[0] == payload
