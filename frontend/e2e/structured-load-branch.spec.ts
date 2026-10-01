@@ -623,15 +623,8 @@ test("分支：结构化世界可从当前进度分叉，且检索不到原世�
   expect(branchWorldId).not.toBe("");
   expect(branchWorldId).not.toBe(sourceWorldId);
   expect(branched.source_turn_id ?? "").toBe("");
-  // 分支创建后存档面板可能已自行关闭；没关就手动关掉，避免遮挡主界面
-  if (
-    await page
-      .locator("#save-panel-close")
-      .isVisible()
-      .catch(() => false)
-  ) {
-    await page.locator("#save-panel-close").click();
-  }
+  // The branch reply closes the panel automatically. Wait for that UI result;
+  // clicking a button while it is being unmounted creates a check/click race.
   await expect(page.locator("#save-panel-overlay")).toBeHidden({
     timeout: 30_000,
   });
