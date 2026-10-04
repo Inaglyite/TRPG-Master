@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAppStore } from "../../../state/app-store";
 import { useInvestigatorPanelStore } from "../../../state/investigator-panel-store";
+import { usePanelClues } from "../../../investigator-panel-view";
+import { useOnlineStore } from "../../../state/online-store";
+import { useStructuredStore } from "../../../state/structured-store";
+import { ClueImagePreview, type ClueImageSelection } from "./ClueImagePreview";
 import { CharacterStatusCard } from "./CharacterStatusCard";
 import { ClueCard, groupClues } from "./ClueCard";
 import { InventoryCard } from "./InventoryCard";
@@ -15,12 +19,43 @@ import { StructuredActionDialog } from "./StructuredActionDialog";
  */
 export function InvestigatorPanel() {
   const activeWorldId = useAppStore((state) => state.activeWorldId);
-  const clues = useAppStore((state) => state.clues);
+  const mode = useAppStore((state) => state.mode);
+  const { clues, path } = usePanelClues();
+  const investigatorId = useStructuredStore(
+    (state) => state.identity.investigatorId,
+  );
+  const onlineIdentity = useOnlineStore((state) => {
+    const member = state.members.find(
+      (entry) => entry.user_id === state.user?.id,
+    );
+    return JSON.stringify([
+      state.authOrigin,
+      state.user?.id,
+      member?.role,
+      member?.investigator?.character_key,
+    ]);
+  });
+  const scope = JSON.stringify([
+    mode,
+    activeWorldId,
+    path,
+    investigatorId,
+    mode === "online" ? onlineIdentity : null,
+  ]);
   const syncWorld = useInvestigatorPanelStore((state) => state.syncWorld);
   const reconcileClues = useInvestigatorPanelStore(
     (state) => state.reconcileClues,
   );
-  const [image, setImage] = useState<{ src: string; alt: string } | null>(null);
+  const [image, setImage] = useState<ClueImageSelection | null>(null);
+  const imageTrigger = useRef<HTMLButtonElement>(null);
+  const closeImage = useCallback(() => setImage(null), []);
+  const authorizedSources = Object.values(clues)
+    .flatMap((items) =>
+      items.map(
+        (item) => item.asset?.asset_data_uri || item.asset?.asset_url || "",
+      ),
+    )
+    .filter(Boolean);
 
   // 世界/时间线作用域：切世界关闭编辑器草稿、重置为该世界的 UI 偏好。
   useEffect(() => {
@@ -35,34 +70,28 @@ export function InvestigatorPanel() {
     reconcileClues(keys);
   }, [clues, reconcileClues]);
 
-  useEffect(() => {
-    if (!image) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setImage(null);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [image]);
-
   return (
     <>
       <div className="dossier-eyebrow">
         调查员档案<span>INVESTIGATOR</span>
       </div>
       <CharacterStatusCard />
-      <ClueCard onImage={(src, alt) => setImage({ src, alt })} />
+      <ClueCard
+        onImage={(source, label, trigger) => {
+          imageTrigger.current = trigger;
+          setImage({ source, label, scope });
+        }}
+      />
       <InventoryCard />
       <PanelActionDialog />
       <StructuredActionDialog />
-      {image && (
-        <div
-          className="handout-overlay"
-          onClick={() => setImage(null)}
-          role="presentation"
-        >
-          <img src={image.src} alt={image.alt} />
-        </div>
-      )}
+      <ClueImagePreview
+        selection={image}
+        scope={scope}
+        authorizedSources={authorizedSources}
+        returnFocus={imageTrigger}
+        onClose={closeImage}
+      />
     </>
   );
 }

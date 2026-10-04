@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { focusableControls, trapDialogTab } from "../dialogFocus";
 
 import {
   compileStructuredAction,
@@ -56,7 +57,9 @@ export function StructuredActionDialog() {
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const requestClose = useCallback(() => {
-    if (closing) return;
+    // A reopened draft can render before the previous closing state/effect has
+    // flushed. The live timer, not a stale closure, owns the pending close.
+    if (closeTimerRef.current !== null) return;
     const reduce =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -70,7 +73,7 @@ export function StructuredActionDialog() {
       setClosing(false);
       close();
     }, 150);
-  }, [close, closing]);
+  }, [close]);
 
   useEffect(
     () => () => {
@@ -98,43 +101,37 @@ export function StructuredActionDialog() {
     if (!open) return;
     restoreFocusRef.current = document.activeElement;
     const dialog = dialogRef.current;
+    const controls = dialog ? focusableControls(dialog) : [];
     const first =
-      dialog?.querySelector<HTMLElement>(
-        'input:not([type="radio"]), select, textarea',
-      ) || dialog?.querySelector<HTMLElement>("button");
+      controls.find((node) =>
+        node.matches('input:not([type="radio"]),select,textarea'),
+      ) ?? controls[0];
     first?.focus();
     return () => {
       const restore = restoreFocusRef.current;
-      if (restore instanceof HTMLElement) restore.focus();
+      if (restore instanceof HTMLElement && restore.isConnected)
+        restore.focus();
     };
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (
+        !dialog ||
+        event.isComposing ||
+        !dialog.contains(document.activeElement)
+      )
+        return;
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
         requestClose();
         return;
       }
       if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusables = Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button, input, textarea, select, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((element) => !element.hasAttribute("disabled"));
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      trapDialogTab(event, dialog);
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
@@ -176,6 +173,7 @@ export function StructuredActionDialog() {
         aria-modal="true"
         aria-labelledby="structured-action-title"
         ref={dialogRef}
+        tabIndex={-1}
       >
         <header className="panel-action-header">
           <h3 id="structured-action-title">
@@ -273,7 +271,8 @@ export function StructuredActionDialog() {
                       update({ targetKind: "unresolved", targetId: "" });
                       return;
                     }
-                    const [kind, id] = value.split(":");
+                    const [kind, ...idParts] = value.split(":");
+                    const id = idParts.join(":");
                     update({
                       targetKind: (kind as typeof draft.targetKind) || "",
                       targetId: id || "",
@@ -375,7 +374,8 @@ export function StructuredActionDialog() {
                       update({ targetKind: "unresolved", targetId: "" });
                       return;
                     }
-                    const [kind, id] = value.split(":");
+                    const [kind, ...idParts] = value.split(":");
+                    const id = idParts.join(":");
                     update({
                       targetKind: (kind as typeof draft.targetKind) || "",
                       targetId: id || "",

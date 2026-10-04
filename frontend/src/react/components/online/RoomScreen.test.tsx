@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assignActor,
@@ -84,8 +84,32 @@ function setupRoom(patch: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
 });
+afterEach(() => vi.useRealTimers());
 
 describe("RoomScreen 连接状态", () => {
+  it("仍在同步时不谎报连接已断开", () => {
+    setupRoom({ roomConnection: "connecting" });
+    render(<RoomScreen />);
+    expect(screen.getByText(/尚不能开始/)).toHaveTextContent(
+      "房间正在连接／同步",
+    );
+    expect(screen.getByText(/尚不能开始/)).not.toHaveTextContent(
+      "房间连接已断开",
+    );
+  });
+  it("断线时不能准备；同步恢复后才允许主动准备", () => {
+    setupRoom({ roomConnection: "disconnected" });
+    render(<RoomScreen />);
+    const ready = screen.getByRole("button", { name: "准备" });
+    expect(ready).toBeDisabled();
+    fireEvent.click(ready);
+    expect(toggleReady).not.toHaveBeenCalled();
+    act(() => useOnlineStore.setState({ roomConnection: "connected" }));
+    expect(ready).toBeEnabled();
+    expect(toggleReady).not.toHaveBeenCalled();
+    fireEvent.click(ready);
+    expect(toggleReady).toHaveBeenCalledWith(true);
+  });
   it("显示连接状态徽章", () => {
     setupRoom();
     render(<RoomScreen />);
@@ -100,6 +124,33 @@ describe("RoomScreen 连接状态", () => {
 });
 
 describe("RoomScreen 成员列表", () => {
+  it("explains the human keeper role without requiring a character or a model", () => {
+    setupRoom({
+      roomMetadata: {
+        execution_profile: "structured_v1",
+        keeper_mode: "human",
+      },
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "owner",
+          investigator: null,
+          can_keeper: true,
+        },
+      ],
+    });
+    render(<RoomScreen />);
+    expect(
+      screen.getByRole("region", { name: "人类主持说明" }),
+    ).toHaveTextContent("无需模型或 API Key");
+    expect(
+      screen.getByRole("region", { name: "人类主持说明" }),
+    ).toHaveTextContent("可以不认领调查员");
+    expect(
+      screen.getByRole("region", { name: "人类主持说明" }),
+    ).toHaveTextContent("两个权限相互独立");
+  });
   it("房主显式确认主持授权，不把房主身份当作主持权限", () => {
     setupRoom({
       roomMetadata: {
@@ -144,6 +195,23 @@ describe("RoomScreen 成员列表", () => {
 });
 
 describe("RoomScreen 房主管理", () => {
+  it("structured rooms have no turn assignment UI; legacy still does", () => {
+    setupRoom({
+      roomMetadata: { name: "周五调查夜", execution_profile: "structured_v1" },
+      currentActorUserId: "u2",
+    });
+    const { rerender } = render(<RoomScreen />);
+    expect(
+      screen.queryByRole("button", { name: "指定行动" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("行动中")).not.toBeInTheDocument();
+    expect(assignActor).not.toHaveBeenCalled();
+    setupRoom({
+      roomMetadata: { name: "周五调查夜", execution_profile: "legacy" },
+    });
+    rerender(<RoomScreen />);
+    expect(screen.getByRole("button", { name: "指定行动" })).toBeVisible();
+  });
   it("房主可将成员设为旁观/玩家", () => {
     setupRoom();
     render(<RoomScreen />);
@@ -355,6 +423,122 @@ describe("RoomScreen 调查员认领", () => {
 });
 
 describe("RoomScreen 邀请、退出与标题", () => {
+  it("邀请条件有始终可见且关联输入的标签，而非只有无障碍名称", () => {
+    setupRoom();
+    render(<RoomScreen />);
+    for (const name of ["邀请角色", "有效期（小时）", "使用次数"]) {
+      const control = screen.getByLabelText(name);
+      const label = control.closest("label");
+      expect(label).not.toBeNull();
+      expect(label?.querySelector("span")).toHaveTextContent(name);
+      expect(label?.querySelector("span")).toBeVisible();
+    }
+  });
+  it.each(["", "0", "169", "2.5", "oops"])(
+    "保留无效有效期 %s，不生成被改写的邀请",
+    (value) => {
+      setupRoom();
+      render(<RoomScreen />);
+      fireEvent.change(screen.getByLabelText("有效期（小时）"), {
+        target: { value },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "生成邀请码" }));
+      expect(newInvite).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("1 至 168");
+      expect(screen.getByLabelText("有效期（小时）")).toHaveValue(value);
+    },
+  );
+
+  it("使用次数超限时保留输入并解释，不请求服务端钳制", () => {
+    setupRoom();
+    render(<RoomScreen />);
+    fireEvent.change(screen.getByLabelText("使用次数"), {
+      target: { value: "17" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "生成邀请码" }));
+    expect(newInvite).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("1 至 16");
+    expect(screen.getByLabelText("使用次数")).toHaveValue("17");
+  });
+
+  it("剪贴板拒绝时提示手动复制，成功重试才显示已复制", async () => {
+    const writeText = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("denied"))
+      .mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    setupRoom({ invite: { invite_id: "inv", token: "TOKEN" } });
+    render(<RoomScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "复制邀请码" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("手动复制");
+    fireEvent.click(screen.getByRole("button", { name: "复制邀请码" }));
+    expect(await screen.findByRole("button", { name: "已复制" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("复制无响应有界结束，迟到成功不伪装成已复制", async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const writeText = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    setupRoom({ invite: { invite_id: "inv", token: "TOKEN" } });
+    render(<RoomScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "复制邀请码" }));
+    expect(screen.getByRole("button", { name: "复制中…" })).toBeDisabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("未能确认");
+    await act(async () => {
+      finish();
+    });
+    expect(screen.getByRole("button", { name: "复制邀请码" })).toBeEnabled();
+  });
+
+  it("换房间取消旧确认并忽略旧邀请码迟到的复制结果", async () => {
+    let finish!: () => void;
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      },
+      configurable: true,
+    });
+    setupRoom({ invite: { invite_id: "inv", token: "TOKEN" } });
+    render(<RoomScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "复制邀请码" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除房间" }));
+    expect(
+      screen.getByRole("button", { name: "确认删除房间" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      useOnlineStore.setState({
+        activeWorldId: "world-2",
+        invite: { invite_id: "new", token: "NEW" },
+      });
+      finish();
+    });
+    expect(
+      screen.queryByRole("button", { name: "确认删除房间" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制邀请码" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "已复制" }),
+    ).not.toBeInTheDocument();
+  });
   it("按选择的角色/有效期/次数生成邀请码", () => {
     setupRoom();
     render(<RoomScreen />);

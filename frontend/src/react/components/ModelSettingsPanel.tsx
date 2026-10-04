@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   getNarrationSpeed,
@@ -28,6 +28,8 @@ import {
   type TurnDiagnostics,
 } from "../../state/model-store";
 import { useDelayedClose } from "./transitions";
+import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
+import { useDialogKeyboard } from "./useDialogKeyboard";
 
 const reasons: Record<string, string> = {
   selected: "已选",
@@ -608,6 +610,7 @@ function ContextTab() {
   const summary = useModelStore((state) => state.contextSummary);
   const diagnostics = useModelStore((state) => state.diagnostics);
   const loading = useModelStore((state) => state.diagnosticsLoading);
+  const diagnosticsError = useModelStore((state) => state.diagnosticsError);
   const [roleFilter, setRoleFilter] = useState("all");
   const calls = diagnostics?.model_calls || [];
   const rolesPresent = Array.from(
@@ -624,6 +627,11 @@ function ContextTab() {
   return (
     <div className="model-settings-tab-body">
       <section className="context-overview">
+        {diagnosticsError && (
+          <p className="model-settings-load-error" role="alert">
+            {diagnosticsError}
+          </p>
+        )}
         <h3>最近叙述调用</h3>
         {!summary && <p className="model-service-hint">暂无调用数据</p>}
         {summary && (
@@ -727,10 +735,12 @@ function ContextTab() {
           </div>
           <button
             id="turn-diagnostics-refresh"
+            type="button"
+            aria-label={loading ? "正在读取上下文" : "刷新上下文"}
             disabled={loading}
             onClick={() => requestTurnDiagnostics()}
           >
-            ↻
+            {loading ? "…" : "↻"}
           </button>
         </div>
         {!loading && calls.length === 0 && (
@@ -768,6 +778,7 @@ function LoreBlock({ data }: { data: TurnDiagnostics }) {
 /* ---------------------------------------------------------------- 面板主体 */
 
 export function ModelSettingsPanel() {
+  const panel = useRef<HTMLElement>(null);
   const open = useModelStore((state) => state.open);
   const tab = useModelStore((state) => state.tab);
   const view = useModelStore((state) => state.view);
@@ -778,16 +789,8 @@ export function ModelSettingsPanel() {
   const statusKind = useModelStore((state) => state.statusKind);
   const mode = useAppStore((state) => state.mode);
 
-  useEffect(() => {
-    if (!open) return;
-    const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) closeSettings();
-    };
-    document.addEventListener("keydown", listener);
-    return () => document.removeEventListener("keydown", listener);
-  }, [open, saving]);
-
   const { rendered, closing } = useDelayedClose(open);
+  useDialogKeyboard(panel, open && rendered, saving, closeSettings);
   if (!rendered) return <div id="model-settings-overlay" className="hidden" />;
   const readOnly = Boolean(view) && !view!.can_edit;
   const blocked = Boolean(view?.blocked);
@@ -799,8 +802,12 @@ export function ModelSettingsPanel() {
         if (event.target === event.currentTarget && !saving) closeSettings();
       }}
     >
-      <div
+      <ArchiveFolderPanel
+        ref={panel}
+        variant="wide"
+        className="settings-folder"
         id="model-settings-panel"
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="model-settings-title"
@@ -810,14 +817,47 @@ export function ModelSettingsPanel() {
             <div className="model-settings-eyebrow">KEEPER / MODEL ROUTING</div>
             <h2 id="model-settings-title">模型设置</h2>
           </div>
-          <button id="model-settings-close" onClick={() => closeSettings()}>
+          <button
+            id="model-settings-close"
+            type="button"
+            disabled={saving}
+            aria-label="关闭模型设置"
+            onClick={() => closeSettings()}
+          >
             ✕
           </button>
         </header>
-        <div className="model-settings-tabs" role="tablist">
+        <div
+          className="model-settings-tabs"
+          role="tablist"
+          aria-label="模型设置分页"
+          onKeyDown={(event) => {
+            if (
+              event.nativeEvent.isComposing ||
+              !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+            )
+              return;
+            event.preventDefault();
+            const next =
+              event.key === "Home"
+                ? "models"
+                : event.key === "End"
+                  ? "context"
+                  : tab === "models"
+                    ? "context"
+                    : "models";
+            useModelStore.setState({ tab: next });
+            panel.current
+              ?.querySelector<HTMLButtonElement>(`#model-settings-tab-${next}`)
+              ?.focus();
+          }}
+        >
           <button
             type="button"
             role="tab"
+            id="model-settings-tab-models"
+            aria-controls="model-settings-tab-panel"
+            tabIndex={tab === "models" ? 0 : -1}
             aria-selected={tab === "models"}
             className={tab === "models" ? "selected" : ""}
             onClick={() => useModelStore.setState({ tab: "models" })}
@@ -827,6 +867,9 @@ export function ModelSettingsPanel() {
           <button
             type="button"
             role="tab"
+            id="model-settings-tab-context"
+            aria-controls="model-settings-tab-panel"
+            tabIndex={tab === "context" ? 0 : -1}
             aria-selected={tab === "context"}
             className={tab === "context" ? "selected" : ""}
             onClick={() => useModelStore.setState({ tab: "context" })}
@@ -834,14 +877,25 @@ export function ModelSettingsPanel() {
             上下文
           </button>
         </div>
-        <div className="model-settings-body">
+        <div
+          className="model-settings-body"
+          data-dialog-scroll
+          id="model-settings-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`model-settings-tab-${tab}`}
+        >
           {tab === "models" ? (
             <ModelsTab disabled={readOnly || saving} />
           ) : (
             <ContextTab />
           )}
         </div>
-        <div id="model-settings-status" data-state={statusKind || undefined}>
+        <div
+          id="model-settings-status"
+          role="status"
+          aria-live="polite"
+          data-state={statusKind || undefined}
+        >
           {status}
         </div>
         <footer className="model-settings-actions">
@@ -856,20 +910,34 @@ export function ModelSettingsPanel() {
             </button>
           )}
           <span className="model-settings-footer-space" />
-          <button id="model-settings-cancel" onClick={() => closeSettings()}>
+          <button
+            id="model-settings-cancel"
+            disabled={saving}
+            onClick={() => closeSettings()}
+          >
             {readOnly ? "关闭" : "取消"}
           </button>
           {tab === "models" && !readOnly && (
             <button
               id="model-settings-save"
+              title="保存配置（下回合生效）"
               disabled={saving || loading || blocked || !view}
               onClick={() => saveSettings()}
             >
-              {saving ? "正在保存…" : "保存配置（下回合生效）"}
+              {saving ? (
+                "正在保存…"
+              ) : (
+                <>
+                  保存配置
+                  <span className="model-settings-save-context">
+                    （下回合生效）
+                  </span>
+                </>
+              )}
             </button>
           )}
         </footer>
-      </div>
+      </ArchiveFolderPanel>
     </div>
   );
 }

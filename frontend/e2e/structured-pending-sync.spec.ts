@@ -252,7 +252,7 @@ function eventPayload(frames: string[], type: string) {
 
 async function fillKeeperField(page: Page, field: string, value: string) {
   const locator = page.locator(
-    `[data-field="${field}"] select, [data-field="${field}"] input, [data-field="${field}"] textarea`,
+    `[data-field="${field}"] select, [data-field="${field}"] input:not([type="checkbox"]), [data-field="${field}"] textarea`,
   );
   const tag = await locator.evaluate((node) => node.tagName);
   if (tag === "SELECT") await locator.selectOption(value);
@@ -260,16 +260,16 @@ async function fillKeeperField(page: Page, field: string, value: string) {
 }
 
 async function openConsole(page: Page) {
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
   await page.getByTestId("btn-keeper-console").click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
 }
 
 async function closeConsole(page: Page) {
   await page.getByRole("button", { name: "关闭主持台" }).click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
 }
@@ -368,9 +368,7 @@ async function openMoveDialog(
       name: (
         node.querySelector(".structured-destination-name")?.textContent ?? ""
       ).trim(),
-      id: (
-        node.querySelector(".structured-destination-id")?.textContent ?? ""
-      ).trim(),
+      id: node.getAttribute("data-scene-id") ?? "",
     })),
   );
 }
@@ -391,7 +389,7 @@ test("A. 移动请求完成后旧「尚未出发」消失，实时与刷新一�
   const destinations = await openMoveDialog(page);
   const target = destinations.find((item) => item.name !== sceneBefore)!;
   expect(target, "前往列表里应有不是当前场景的目的地").toBeTruthy();
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
 
   const wishId = await playerText(
     page,
@@ -464,7 +462,7 @@ test("B. 复合请求抵达后仍保留未完成调查，只清掉已完成的�
   const sceneBefore = await page.locator(".header-scene-name").innerText();
   const destinations = await openMoveDialog(page);
   const target = destinations.find((item) => item.name !== sceneBefore)!;
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
 
   // 复合意图：过去看遗体 + 到了还要翻值班记录
   const compoundId = await playerText(

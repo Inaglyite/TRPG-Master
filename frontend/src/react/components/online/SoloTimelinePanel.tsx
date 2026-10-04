@@ -10,6 +10,8 @@ import {
   type WorldSummary,
 } from "../../../api/worlds";
 import { enterRoom, errorMessage, refreshWorlds } from "../../../online";
+import { trapDialogTab } from "../dialogFocus";
+import { ArchiveFolderPanel } from "../ArchiveFolderPanel";
 
 function formatRelativeTime(value?: string): string {
   if (!value) return "未知时间";
@@ -52,7 +54,11 @@ export function SoloTimelinePanel({
   const [confirmingArchiveId, setConfirmingArchiveId] = useState<string | null>(
     null,
   );
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const restoreRowAction = useRef<{
+    id: string;
+    action: "rename" | "archive";
+  } | null>(null);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -73,13 +79,70 @@ export function SoloTimelinePanel({
   }, [load]);
 
   useEffect(() => {
-    dialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+    const previous =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dialogRef.current
+      ?.querySelector<HTMLElement>(".solo-timeline-close")
+      ?.focus();
+    return () => {
+      if (previous?.isConnected) previous.focus();
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [busy, onClose]);
+  }, []);
+
+  useEffect(() => {
+    const restore = restoreRowAction.current;
+    if (
+      !restore ||
+      busy ||
+      status !== "ready" ||
+      (restore.action === "rename" && renamingId) ||
+      (restore.action === "archive" && confirmingArchiveId)
+    )
+      return;
+    const row = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>("[data-world]") ?? [],
+    ).find((node) => node.dataset.world === restore.id);
+    const button = row?.querySelector<HTMLButtonElement>(
+      `.timeline-${restore.action}`,
+    );
+    if (button && !button.disabled) {
+      button.focus();
+      restoreRowAction.current = null;
+    } else if (!row) {
+      // Successfully deleted rows cannot receive focus again.
+      restoreRowAction.current = null;
+    }
+  }, [busy, renamingId, confirmingArchiveId, status]);
+
+  useEffect(() => {
+    const panel = dialogRef.current;
+    if (!panel) return;
+    const active = document.activeElement;
+    if (
+      !panel.contains(active) ||
+      (active === panel && !busy) ||
+      (active instanceof HTMLElement && active.matches(":disabled"))
+    ) {
+      const close = panel.querySelector<HTMLButtonElement>(
+        ".solo-timeline-close",
+      );
+      (close && !close.disabled ? close : panel).focus();
+    }
+  }, [busy, status, renamingId, confirmingArchiveId, timelines]);
+
+  function cancelRename() {
+    if (renamingId)
+      restoreRowAction.current = { id: renamingId, action: "rename" };
+    setRenamingId(null);
+  }
+
+  function cancelArchive() {
+    if (confirmingArchiveId)
+      restoreRowAction.current = { id: confirmingArchiveId, action: "archive" };
+    setConfirmingArchiveId(null);
+  }
 
   /** mutation 成功后刷新面板数据，并同步大厅列表（resume_world_id 可能已变）。 */
   async function reloadAfterMutation() {
@@ -110,6 +173,7 @@ export function SoloTimelinePanel({
 
   async function confirmRename(timeline: SoloTimeline) {
     const label = renameValue.trim();
+    restoreRowAction.current = { id: timeline.world_id, action: "rename" };
     setRenamingId(null);
     if (!label || busy) return;
     setActionError(null);
@@ -126,6 +190,7 @@ export function SoloTimelinePanel({
   }
 
   async function confirmArchive(timeline: SoloTimeline) {
+    restoreRowAction.current = { id: timeline.world_id, action: "archive" };
     setConfirmingArchiveId(null);
     if (busy) return;
     setActionError(null);
@@ -153,7 +218,11 @@ export function SoloTimelinePanel({
     return (
       <div
         className={`timeline-entry${active ? " active" : ""}${isBranch ? " branch" : ""}`}
-        style={isBranch ? { marginLeft: `${(depth - 1) * 22}px` } : undefined}
+        style={
+          isBranch
+            ? { marginLeft: `${Math.min(4, Math.max(0, depth - 1)) * 12}px` }
+            : undefined
+        }
         key={id}
         data-world={id}
       >
@@ -169,8 +238,11 @@ export function SoloTimelinePanel({
                   aria-label="时间线名称"
                   onChange={(event) => setRenameValue(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") void confirmRename(timeline);
-                    if (event.key === "Escape") setRenamingId(null);
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void confirmRename(timeline);
+                    }
                   }}
                 />
                 <button
@@ -185,7 +257,7 @@ export function SoloTimelinePanel({
                   type="button"
                   className="save-rename-cancel"
                   aria-label="取消重命名时间线"
-                  onClick={() => setRenamingId(null)}
+                  onClick={cancelRename}
                 >
                   ×
                 </button>
@@ -198,6 +270,7 @@ export function SoloTimelinePanel({
               </span>
             )}
             <span className="timeline-meta">
+              {depth > 4 && `第 ${depth} 层分支 · `}
               {timeline.scene_name || "未知场景"} ·{" "}
               {timeline.character_name || "未知调查员"} ·{" "}
               {formatRelativeTime(timeline.updated_at)}
@@ -257,7 +330,7 @@ export function SoloTimelinePanel({
                     type="button"
                     className="world-archive-cancel"
                     disabled={busy}
-                    onClick={() => setConfirmingArchiveId(null)}
+                    onClick={cancelArchive}
                   >
                     取消
                   </button>
@@ -267,7 +340,9 @@ export function SoloTimelinePanel({
                   type="button"
                   className="timeline-archive"
                   disabled={busy}
-                  onClick={() => setConfirmingArchiveId(id)}
+                  onClick={() => {
+                    setConfirmingArchiveId(id);
+                  }}
                 >
                   删除
                 </button>
@@ -288,17 +363,38 @@ export function SoloTimelinePanel({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
-      <div
+      <ArchiveFolderPanel
+        variant="wide"
         ref={dialogRef}
         className="solo-timeline-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="solo-timeline-panel-title"
         tabIndex={-1}
+        aria-busy={busy}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            if (busy) return;
+            const inArchive =
+              event.target instanceof Element &&
+              event.target.closest(".world-archive-confirmation");
+            if (confirmingArchiveId && inArchive) cancelArchive();
+            else if (renamingId) cancelRename();
+            else if (confirmingArchiveId) cancelArchive();
+            else onClose();
+          } else if (dialogRef.current) {
+            trapDialogTab(event, dialogRef.current);
+          }
+        }}
       >
         <div className="solo-timeline-header">
           <div className="solo-timeline-heading">
-            <h2 id="solo-timeline-panel-title">{title}</h2>
+            <h2 id="solo-timeline-panel-title" title={title}>
+              {title}
+            </h2>
             <p className="solo-timeline-subtitle">时间线</p>
           </div>
           <button
@@ -313,6 +409,11 @@ export function SoloTimelinePanel({
         </div>
 
         <div className="solo-timeline-body">
+          {busy && (
+            <p className="online-loading" role="status">
+              正在提交，请稍候……
+            </p>
+          )}
           {status === "loading" && (
             <p className="online-loading" role="status">
               正在读取时间线……
@@ -359,7 +460,7 @@ export function SoloTimelinePanel({
             </p>
           )}
         </div>
-      </div>
+      </ArchiveFolderPanel>
     </div>,
     document.body,
   );

@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import ValidationError
 
 from src.ai.context.lorebook import LorebookEnvelope, validate_lorebook_references
+from src.ai.skills.module_budget import module_skill_budget
 from src.modules.module_compiler import compile_module
 from src.modules.module_format import (
     ModuleDefinition,
@@ -503,9 +504,16 @@ def _validate_package_content(
         _load_json_entry(read, path)
     for path in skill_files + scene_files:
         try:
-            read(path).decode("utf-8")
+            content = read(path).decode("utf-8")
         except UnicodeDecodeError as exc:
             raise ModulePackageError("invalid_encoding", f"{path} 必须使用 UTF-8") from exc
+        if path in skill_files:
+            try:
+                module_skill_budget(content)
+            except ValueError as exc:
+                raise ModulePackageError(
+                    "skill_budget_exceeded", f"{path}: {exc}", details=[path]
+                ) from exc
 
     warnings = []
     if "custom_skills" in declared:

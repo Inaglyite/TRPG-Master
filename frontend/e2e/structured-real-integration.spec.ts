@@ -30,6 +30,204 @@ let serverOutput = "";
 let modelServer: Server | null = null;
 const modelRequests: string[] = [];
 
+test("私人笔记：真实保存回执丢失后保留草稿，重新读取确认结果", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  let dropped = false;
+  await page.routeWebSocket(/\/ws(?:\?|$)/, (socket) => {
+    const upstream = socket.connectToServer();
+    upstream.onMessage((message) => {
+      const frame = JSON.parse(String(message));
+      if (!dropped && frame.type === "player_notes" && frame.saved === true) {
+        dropped = true;
+        return;
+      }
+      socket.send(message);
+    });
+  });
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+  await page.locator(".module-select-trigger").click();
+  await page.getByRole("option", { name: /猩红文档/ }).click();
+  await page.locator("#btn-start").click();
+  await page.locator("#btn-character-confirm").click();
+  await expect(page.locator("#user-input")).toBeEnabled({ timeout: 90_000 });
+  await page.locator("#btn-notes").click();
+  await expect(page.locator("#player-notes-input")).toBeEnabled();
+  await page
+    .locator("#player-notes-input")
+    .fill("保存确认丢失时必须保留的草稿");
+  await page.locator("#player-notes-save").click();
+  await expect.poll(() => dropped).toBe(true);
+  await expect(page.locator("#player-notes-status")).toContainText("尚未收到", {
+    timeout: 20000,
+  });
+  await expect(page.locator("#player-notes-input")).toHaveValue(
+    "保存确认丢失时必须保留的草稿",
+  );
+  await expect(page.locator("#player-notes-save")).toBeEnabled();
+  const retry = page.getByRole("button", { name: "重新读取", exact: true });
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 480 });
+    const geometry = await retry.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const css = getComputedStyle(node);
+      const panel = node.closest("#utility-panel")!.getBoundingClientRect();
+      return {
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        panelLeft: panel.left,
+        panelRight: panel.right,
+        padding: parseFloat(css.paddingLeft),
+        nowrap: css.whiteSpace,
+        hit: node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        ),
+      };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(width);
+    expect(geometry.left).toBeGreaterThanOrEqual(geometry.panelLeft);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.panelRight);
+    expect(geometry.padding).toBeGreaterThanOrEqual(10);
+    expect(geometry.nowrap).toBe("nowrap");
+    expect(geometry.hit).toBe(true);
+    await page.screenshot({
+      path: `test-results/notes-confirmation-recovery-${width}.png`,
+    });
+  }
+  await retry.click();
+  await expect(page.locator("#player-notes-status")).toContainText("已保存");
+  await expect(page.locator("#player-notes-save")).toBeDisabled();
+  await expect(page.locator("#player-notes-input")).toHaveValue(
+    "保存确认丢失时必须保留的草稿",
+  );
+});
+
+test("调查笔记：真实人类主持快捷行动、四宽度按钮与超长输入诚实拒绝", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const frames = collectFrames(page);
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+  await page.locator(".module-select-trigger").click();
+  await page.getByRole("option", { name: /猩红文档/ }).click();
+  await page.locator("#btn-start").click();
+  await page.locator("#btn-character-confirm").click();
+  await expect(page.locator("#user-input")).toBeEnabled({ timeout: 90_000 });
+  const worldId = await page.evaluate(
+    () => localStorage.getItem("trpg-active-world-id") || "",
+  );
+  enableStructuredWorld(worldId);
+  const callsBefore = modelRequests.length;
+  await page.reload();
+  await expect(page.getByTestId("structured-tool-row")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.locator(".boot-loader")).toHaveCount(0);
+  const scene = await page.locator(".header-scene-name").innerText();
+  await page.locator("#btn-notes").click();
+  await expect(page.getByRole("dialog", { name: "调查笔记" })).toBeVisible();
+  // Screenshot/button measurements are taken after the documented open transition.
+  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "快捷行动", exact: true }).click();
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 650 });
+    for (const selector of [
+      "#utility-close",
+      "#quick-actions button",
+      "#player-notes-cancel",
+      "#player-notes-save",
+    ]) {
+      for (const button of await page.locator(selector).all()) {
+        await button.scrollIntoViewIfNeeded();
+        const geometry = await button.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          const css = getComputedStyle(node);
+          return {
+            height: rect.height,
+            left: rect.left,
+            right: rect.right,
+            nowrap: css.whiteSpace,
+            hit: node.contains(
+              document.elementFromPoint(
+                rect.x + rect.width / 2,
+                rect.y + rect.height / 2,
+              ),
+            ),
+          };
+        });
+        expect(geometry.height).toBeGreaterThanOrEqual(44);
+        expect(geometry.left).toBeGreaterThanOrEqual(0);
+        expect(geometry.right).toBeLessThanOrEqual(width);
+        expect(geometry.nowrap).toBe("nowrap");
+        expect(geometry.hit).toBe(true);
+      }
+    }
+    await page.screenshot({
+      path: `test-results/investigator-notes-${width}.png`,
+    });
+  }
+  await page.locator("#player-notes-input").fill("只有我知道的私人备忘");
+  await page.locator("#player-notes-save").click();
+  await expect(page.locator("#player-notes-status")).toContainText("已保存");
+  const sentBefore = frames.sent.length;
+  await page.getByRole("button", { name: "观察环境", exact: true }).click();
+  await expect(page.locator("#utility-panel")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      frames.sent.slice(sentBefore).some((frame) => {
+        const parsed = JSON.parse(frame);
+        return (
+          parsed.type === "action_request" &&
+          parsed.action?.kind === "freeform" &&
+          parsed.action?.text === "观察当前环境"
+        );
+      }),
+    )
+    .toBe(true);
+  expect(
+    frames.sent
+      .slice(sentBefore)
+      .some((frame) => JSON.parse(frame).type === "action"),
+  ).toBe(false);
+  await expect(page.locator(".header-scene-name")).toHaveText(scene);
+  const beforeLong = frames.sent.length;
+  const draft = "查".repeat(2001);
+  await page.locator("#user-input").fill(draft);
+  await page.locator("#btn-send").click();
+  await expect(page.locator("#player-input-error")).toContainText("2000");
+  await expect(page.locator("#user-input")).toHaveValue(draft);
+  expect(
+    frames.sent
+      .slice(beforeLong)
+      .some((frame) => JSON.parse(frame).type === "action_request"),
+  ).toBe(false);
+  await page.reload();
+  await expect(page.getByTestId("structured-tool-row")).toBeVisible({
+    timeout: 60_000,
+  });
+  await page.locator("#btn-notes").click();
+  await expect(page.locator("#player-notes-input")).toHaveValue(
+    "只有我知道的私人备忘",
+  );
+  await page.setViewportSize({ width: 640, height: 360 });
+  await page.locator("#utility-close").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.locator("#player-notes-cancel")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#utility-close")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#utility-panel")).toHaveCount(0);
+  await expect(page.locator("#btn-notes")).toBeFocused();
+  expect(modelRequests.length).toBe(callsBefore);
+});
+
 function pythonPath(): string {
   return (
     process.env.TRPG_E2E_PYTHON ??
@@ -308,8 +506,19 @@ for (const scenario of ["draft", "paused"] as const) {
       );
       await page.getByRole("button", { name: "接管主持", exact: true }).click();
       await expect(page.getByTestId("keeper-control-notice")).toContainText(
-        "人类已接管",
+        "你正在主持",
       );
+      await expect(page.getByTestId("keeper-control-notice")).toContainText(
+        "服务端已确认主持操作。",
+      );
+      await expect
+        .poll(() => {
+          const control = frames.received
+            .filter((frame) => frame.includes('"type":"keeper_control"'))
+            .map((frame) => JSON.parse(frame));
+          return control.at(-1)?.payload?.controller?.kind;
+        })
+        .toBe("human");
       await page.getByTestId("btn-keeper-console").click();
       await page.getByTestId("keeper-cmd-move_party").click();
       await page
@@ -421,7 +630,7 @@ test("真实后端 + structured_v1：快照驱动界面、结构请求落账、�
 
   // 6) 玩家侧：普通掷骰走真实服务端结算。
   await page.getByRole("button", { name: "关闭主持台" }).click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden();
   await page.getByTestId("btn-free-roll").click();
   await page.getByTestId("roll-confirm").click();
   await expect
@@ -440,6 +649,42 @@ test("真实后端 + structured_v1：快照驱动界面、结构请求落账、�
   expect(modelRequests.length).toBe(modelCallsBefore);
 
   // 7) 位置仍未被无关命令改写。
+  expect(await page.locator(".header-scene-name").innerText()).toBe(
+    sceneBefore,
+  );
+
+  // Durable declarations remain explicitly unexecuted after an authenticated
+  // reconnect. No synthetic HTTP response or model call supplies this history.
+  const declaration = "我想先询问医生，但现在并未打开抽屉。".repeat(8);
+  await page.locator("#user-input").fill(declaration);
+  const acknowledgementsBefore = frames.received.filter((frame) =>
+    frame.includes('"type":"action_ack"'),
+  ).length;
+  await page.locator("#btn-send").click();
+  await expect(
+    page.locator('[data-entry-kind="action_request"]'),
+  ).toContainText(declaration);
+  await expect
+    .poll(
+      () =>
+        frames.received.filter((frame) => frame.includes('"type":"action_ack"'))
+          .length,
+    )
+    .toBeGreaterThan(acknowledgementsBefore);
+  await page.reload();
+  const recovered = page.locator('[data-entry-kind="action_request"]');
+  await expect(recovered).toContainText(declaration, { timeout: 30_000 });
+  await expect(recovered).toContainText("行动申报 · 不代表已执行");
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await recovered.scrollIntoViewIfNeeded();
+    const bounds = await recovered.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+    await page.screenshot({ path: `test-results/action-history-${width}.png` });
+  }
+  expect(modelRequests.length).toBe(modelCallsBefore);
   expect(await page.locator(".header-scene-name").innerText()).toBe(
     sceneBefore,
   );

@@ -22,7 +22,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from src.app.config import AUTO_SAVE_SLOT
 from src.app.runtime import RuntimeContext
@@ -98,6 +98,11 @@ def create_structured_branch(
             )
         source_metadata = dict(source_world.metadata_json or {})
         source_created_by = source_world.created_by
+        source_branch = source_metadata.get("branch")
+        incomplete_history = isinstance(source_branch, dict) and (
+            source_branch.get("history_archive_version") != 1
+            or source_branch.get("history_archive_incomplete") is True
+        )
 
     # 与旧分支同一纪律：先锁定源世界行并冻结记忆 cutoff，再复制状态。
     memory_cutoff_at = service._capture_memory_cutoff(source_context)
@@ -115,6 +120,21 @@ def create_structured_branch(
             )
         branch_state = copy.deepcopy(row.state or {})
         branch_revision = int(row.revision)
+        from .history_archive import source_archive_entries
+        from .history_archive_capture import capture_local_history
+
+        history_sequence = int(
+            session.scalar(
+                select(func.max(EventOutbox.sequence)).where(
+                    EventOutbox.world_id == source_context.world_id
+                )
+            )
+            or 0
+        )
+        history_entries = source_archive_entries(session, source_context.world_id)
+        history_entries.extend(
+            capture_local_history(session, source_context.world_id, branch_state, history_sequence)
+        )
 
     scene = branch_state.get("current_scene") or {}
     scene_name = scene.get("name") if isinstance(scene, dict) else ""
@@ -152,11 +172,16 @@ def create_structured_branch(
                 "source_world_revision": branch_revision,
                 "created_at": memory_cutoff_at,
                 "memory_cutoff_at": memory_cutoff_at,
+                "history_archive_version": 1,
+                "history_archive_incomplete": incomplete_history,
             }
             world.metadata_json = metadata
             world.root_world_id = _inherited_root(source_context)
             world.created_by = source_created_by
             world.updated_at = utcnow()
+            from .history_archive import store_archive
+
+            store_archive(session, world_id, history_entries)
 
             # 权限与认领：复制（不是搬走），源世界成员不受影响。
             members = (
@@ -373,11 +398,24 @@ def restore_structured_save(
     from src.storage.database_store import StaleRevisionError
     from src.storage.world_migrations import migrate_world_state
 
-    _messages, snapshot, _metadata = load_game_artifacts(slot_id, context=context)
+    _messages, snapshot, metadata = load_game_artifacts(slot_id, context=context)
     if snapshot is None:
         raise SaveNotFoundError(slot_id or AUTO_SAVE_SLOT)
     snapshot, _ = migrate_world_state(copy.deepcopy(snapshot))
     restored_revision = max(0, int(snapshot.get("revision", 0)))
+    cursor = (metadata or {}).get("structured_event_cursor")
+    saved_sequence = None
+    if cursor is not None:
+        if (
+            not isinstance(cursor, dict)
+            or cursor.get("world_id") != context.world_id
+            or type(cursor.get("revision")) is not int
+            or cursor["revision"] != restored_revision
+            or type(cursor.get("sequence")) is not int
+            or cursor["sequence"] < 0
+        ):
+            raise StructuredError("invalid_action", "存档事件游标与世界不一致，已拒绝读档。")
+        saved_sequence = cursor["sequence"]
     expected_revision = context.world_store.revision
 
     with session_scope(context.database_url) as session:
@@ -425,11 +463,14 @@ def restore_structured_save(
         for check in pending_checks:
             check.status = "cancelled"
             check.updated_at = now
+        future_events = EventOutbox.revision > restored_revision
+        if saved_sequence is not None:
+            future_events = or_(future_events, EventOutbox.sequence > saved_sequence)
         late_events = (
             session.execute(
                 select(EventOutbox).where(
                     EventOutbox.world_id == context.world_id,
-                    EventOutbox.revision > restored_revision,
+                    future_events,
                 )
             )
             .scalars()
@@ -450,7 +491,9 @@ def restore_structured_save(
             .all()
         )
         for thread in threads:
-            if int(thread.created_revision) > restored_revision:
+            if int(thread.created_revision) > restored_revision or (
+                saved_sequence is not None and int(thread.created_sequence) > saved_sequence
+            ):
                 session.delete(thread)
             elif int(thread.updated_revision) > restored_revision or thread.status == "open":
                 thread.status = "cancelled"
@@ -465,7 +508,9 @@ def restore_structured_save(
             .all()
         )
         for memory in memories:
-            if int(memory.created_revision) > restored_revision:
+            if int(memory.created_revision) > restored_revision or (
+                saved_sequence is not None and int(memory.created_sequence) > saved_sequence
+            ):
                 session.delete(memory)
             elif int(memory.updated_revision) > restored_revision:
                 memory.status = "active"

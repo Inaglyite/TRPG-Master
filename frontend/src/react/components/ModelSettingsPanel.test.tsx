@@ -21,6 +21,7 @@ import {
 } from "../../state/model-store";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
+import { closeSettings } from "../../settings";
 import {
   ContextSummaryButton,
   ModelSettingsGateButton,
@@ -97,6 +98,64 @@ function seed(view: ModelSettingsView | null) {
     contextSummary: null,
   });
 }
+
+describe("ModelSettingsPanel keyboard boundaries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seed(makeView());
+  });
+
+  it("focuses a named close control and contains Tab at both ends", () => {
+    render(<ModelSettingsPanel />);
+    const close = screen.getByRole("button", { name: "关闭模型设置" });
+    const save = screen.getByRole("button", { name: /保存配置/ });
+    expect(close).toHaveFocus();
+    save.focus();
+    fireEvent.keyDown(save, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(save).toHaveFocus();
+  });
+
+  it("switches tabs with arrows and only the selected tab is in the Tab order", () => {
+    render(<ModelSettingsPanel />);
+    const models = screen.getByRole("tab", { name: "模型配置" });
+    const context = screen.getByRole("tab", { name: "上下文" });
+    models.focus();
+    fireEvent.keyDown(models, { key: "ArrowRight" });
+    expect(context).toHaveFocus();
+    expect(context).toHaveAttribute("aria-selected", "true");
+    expect(models).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "model-settings-tab-context",
+    );
+  });
+
+  it("ignores composing Escape and consumes ordinary Escape inside the dialog", () => {
+    render(<ModelSettingsPanel />);
+    const field = screen.getByDisplayValue("qwen3:32b");
+    field.focus();
+    fireEvent.keyDown(field, { key: "Escape", isComposing: true });
+    expect(closeSettings).not.toHaveBeenCalled();
+    const outer = vi.fn();
+    document.addEventListener("keydown", outer);
+    try {
+      fireEvent.keyDown(field, { key: "Escape" });
+      expect(closeSettings).toHaveBeenCalledOnce();
+      expect(outer).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", outer);
+    }
+  });
+
+  it("does not leave apparently clickable close/cancel buttons while saving", () => {
+    useModelStore.setState({ saving: true });
+    render(<ModelSettingsPanel />);
+    expect(screen.getByRole("button", { name: "关闭模型设置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+  });
+});
 
 describe("ModelSettingsPanel", () => {
   beforeEach(() => {

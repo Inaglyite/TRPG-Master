@@ -128,6 +128,9 @@ describe("SoloLobbyScreen 冒险列表", () => {
 describe("SoloLobbyScreen 操作", () => {
   it("点击存档卡主体打开时间线面板，不进入房间", async () => {
     render(<SoloLobbyScreen />);
+    expect(
+      screen.getByRole("button", { name: "雾中宅邸：管理时间线" }),
+    ).toHaveProperty("tagName", "BUTTON");
     fireEvent.click(screen.getByText("雾中宅邸"));
     expect(enterRoom).not.toHaveBeenCalled();
     expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
@@ -200,7 +203,7 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
     fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
     fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
-    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.click(screen.getByRole("radio", { name: "人类主持" }));
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
       structured: true,
@@ -213,10 +216,7 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
     fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
     fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
-    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
-    fireEvent.change(screen.getByLabelText(/主持方式/), {
-      target: { value: "assisted" },
-    });
+    fireEvent.click(screen.getByRole("radio", { name: "AI 辅助主持" }));
     fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
     expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
       structured: true,
@@ -256,37 +256,80 @@ describe("SoloLobbyScreen 操作", () => {
     }
   });
 
-  it("删除存档需要行内二次确认", async () => {
+  it("归档需要明确说明整棵时间线影响，再第二次确认", async () => {
     vi.mocked(deleteSoloWorld).mockResolvedValue(null);
     render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "删除存档" }));
+    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
+    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
+      "整场冒险及其分支",
+    );
+    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
+      "归档不代表结案或通关",
+    );
+    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
+      "当前界面没有恢复入口",
+    );
+    expect(screen.getByRole("button", { name: "继续保留" })).toHaveFocus();
     expect(deleteSoloWorld).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
     await waitFor(() => expect(deleteSoloWorld).toHaveBeenCalledWith("w-solo"));
   });
 
   it("删除失败时报错内联挂在对应冒险卡上，而不是创建卡片", async () => {
     vi.mocked(deleteSoloWorld).mockResolvedValue("删除存档失败，请重试");
     render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "删除存档" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("删除存档失败");
     expect(alert.closest('[data-world="w-solo"]')).not.toBeNull();
-    // 恢复可重试态
+    // Refusal keeps the consequence summary and enables the same confirmation.
     expect(
-      screen.getByRole("button", { name: "删除存档" }),
+      screen.getByRole("button", { name: "确认归档" }),
     ).toBeInTheDocument();
   });
 
   it("取消二次确认不删除", () => {
     render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "删除存档" }));
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续保留" }));
     expect(deleteSoloWorld).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("button", { name: "删除存档" }),
+      screen.getByRole("button", { name: "归档冒险" }),
     ).toBeInTheDocument();
+  });
+
+  it("归档处理中不会连点提交，也不能误继续冒险", async () => {
+    let finish!: (result: string | null) => void;
+    vi.mocked(deleteSoloWorld).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
+    fireEvent.click(screen.getByRole("button", { name: "正在归档…" }));
+    expect(deleteSoloWorld).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "继续冒险" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "继续保留" })).toBeDisabled();
+    await act(async () => finish("归档被拒"));
+    expect(screen.getByRole("button", { name: "确认归档" })).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("归档被拒");
+  });
+
+  it("Escape 取消确认并把焦点还给归档入口", () => {
+    render(<SoloLobbyScreen />);
+    const trigger = screen.getByRole("button", { name: "归档冒险" });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("button", { name: "继续保留" }), {
+      key: "Escape",
+    });
+    expect(
+      screen.queryByTestId("adventure-archive-confirm"),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(deleteSoloWorld).not.toHaveBeenCalled();
   });
 
   it("浏览器环境返回模式选择", () => {

@@ -1,14 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import * as panels from "../../panels";
-import {
-  useAppStore,
-  type Handout,
-  type SaveEntry,
-} from "../../state/app-store";
+import { useAppStore, type SaveEntry } from "../../state/app-store";
 import type { TimelineEntry } from "../../state/app-store";
 import {
   useTimelineCapabilities,
+  useOnlineStore,
+  isRoomOwner,
   type TimelineCapabilities,
 } from "../../state/online-store";
 import { CharacterPanelContent } from "./CharacterPanelContent";
@@ -19,6 +17,14 @@ import {
 } from "./transitions";
 import { interactionPath } from "../../protocol/structured";
 import { useStructuredStore } from "../../state/structured-store";
+import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
+import { useDialogKeyboard } from "./useDialogKeyboard";
+import { HandoutCard } from "./HandoutCard";
+import {
+  SavePointActions,
+  SavePointConfirmation,
+  type SavePointAction,
+} from "./SavePointActions";
 
 function panelCommand(name: string, ...args: unknown[]) {
   const command = (panels as Record<string, (...values: any[]) => void>)[name];
@@ -33,49 +39,6 @@ export function CharacterPanel() {
         <CharacterPanelContent />
       </div>
     </aside>
-  );
-}
-
-function HandoutCard({ handout }: { handout: Handout }) {
-  const dismiss = useAppStore((state) => state.dismissHandout);
-  const [expanded, setExpanded] = useState(false);
-  const [leaving, setLeaving] = useState(false);
-  const close = () => {
-    if (leaving) return;
-    setLeaving(true);
-    window.setTimeout(() => dismiss(handout.id), 280);
-  };
-  useEffect(() => {
-    const timer = window.setTimeout(close, 10000);
-    return () => window.clearTimeout(timer);
-  });
-  const source = handout.asset_data_uri || handout.asset_url;
-  return (
-    <>
-      <div className={`handout-card${leaving ? " leaving" : ""}`}>
-        <div className="handout-header">
-          <span className="handout-label">{handout.label || handout.file}</span>
-          <button className="handout-close" onClick={close}>
-            ✕
-          </button>
-        </div>
-        <img
-          src={source}
-          alt={handout.label || handout.file}
-          loading="lazy"
-          onClick={() => setExpanded(true)}
-        />
-      </div>
-      {expanded && (
-        <div
-          className="handout-overlay"
-          role="presentation"
-          onClick={() => setExpanded(false)}
-        >
-          <img src={source} alt={handout.label || handout.file} />
-        </div>
-      )}
-    </>
   );
 }
 
@@ -128,16 +91,21 @@ function SaveRow({
   latest,
   selected,
   onSelect,
+  canOperate,
+  manage,
+  onRequest,
 }: {
   save: SaveEntry;
   latest: boolean;
   selected: boolean;
   onSelect: (saveId: string) => void;
+  canOperate: boolean;
+  manage: boolean;
+  onRequest: (action: SavePointAction) => void;
 }) {
   const renameSlotId = useAppStore((state) => state.renameSlotId);
   const [name, setName] = useState(save.label || save.scene_name || "");
   const renaming = renameSlotId === save.id;
-  const isAuto = save.id === "slot_000";
   const time = formatSaveTime(save.created_at);
   // 存档列表聚合整个分支树；属于其他时间线的存档只能先切换过去再读取，
   // 因为读取/重命名/删除协议都作用于当前时间线。
@@ -150,7 +118,17 @@ function SaveRow({
       <div className="save-slot-info">
         <div className="save-slot-title">
           {renaming && !foreign ? (
-            <div className="save-rename-form">
+            <div
+              className="save-rename-form"
+              data-dialog-escape
+              onKeyDown={(event) => {
+                if (!event.nativeEvent.isComposing && event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  useAppStore.setState({ renameSlotId: null });
+                }
+              }}
+            >
               <input
                 autoFocus
                 className="save-rename-input"
@@ -158,6 +136,7 @@ function SaveRow({
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === "Enter")
                     void panelCommand("renameSave", save.id, name);
                   if (event.key === "Escape")
@@ -220,33 +199,19 @@ function SaveRow({
         {foreign ? (
           <button
             className="save-action-switch"
+            disabled={!canOperate}
             onClick={() => void panelCommand("switchWorld", save.world_id)}
           >
             切换到该时间线
           </button>
         ) : (
-          <>
-            <button
-              className="save-action-load"
-              onClick={() => void panelCommand("loadSave", save.id)}
-            >
-              读取
-            </button>
-            <button
-              className="save-action-rename"
-              onClick={() => useAppStore.setState({ renameSlotId: save.id })}
-            >
-              重命名
-            </button>
-            {!isAuto && (
-              <button
-                className="save-action-del"
-                onClick={() => void panelCommand("deleteSave", save.id)}
-              >
-                删除
-              </button>
-            )}
-          </>
+          <SavePointActions
+            save={save}
+            manage={manage}
+            canOperate={canOperate}
+            onRequest={onRequest}
+            onRename={() => useAppStore.setState({ renameSlotId: save.id })}
+          />
         )}
       </div>
     </div>
@@ -259,7 +224,17 @@ function formatSlotTime(createdAt?: string) {
 }
 
 /** 时间线内的一个存档点（槽位），紧凑行。 */
-function SlotRow({ save, manage }: { save: SaveEntry; manage: boolean }) {
+function SlotRow({
+  save,
+  manage,
+  canOperate,
+  onRequest,
+}: {
+  save: SaveEntry;
+  manage: boolean;
+  canOperate: boolean;
+  onRequest: (action: SavePointAction) => void;
+}) {
   const renameSlotId = useAppStore((state) => state.renameSlotId);
   const [name, setName] = useState(save.label || save.scene_name || "");
   const isAuto = save.id === "slot_000";
@@ -268,7 +243,17 @@ function SlotRow({ save, manage }: { save: SaveEntry; manage: boolean }) {
     <div className="slot-row" data-slot={save.id}>
       <div className="slot-row-info">
         {renaming ? (
-          <span className="save-rename-form">
+          <span
+            className="save-rename-form"
+            data-dialog-escape
+            onKeyDown={(event) => {
+              if (!event.nativeEvent.isComposing && event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                useAppStore.setState({ renameSlotId: null });
+              }
+            }}
+          >
             <input
               autoFocus
               className="save-rename-input"
@@ -276,6 +261,7 @@ function SlotRow({ save, manage }: { save: SaveEntry; manage: boolean }) {
               value={name}
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter")
                   void panelCommand("renameSave", save.id, name);
                 if (event.key === "Escape")
@@ -308,34 +294,20 @@ function SlotRow({ save, manage }: { save: SaveEntry; manage: boolean }) {
         <span className="slot-row-meta">{formatSlotTime(save.created_at)}</span>
       </div>
       <div className="slot-row-actions">
-        <button
-          className="save-action-load"
-          onClick={() => void panelCommand("loadSave", save.id)}
-        >
-          读取
-        </button>
-        {manage && !isAuto && (
-          <>
-            <button
-              className="save-action-rename"
-              onClick={() => useAppStore.setState({ renameSlotId: save.id })}
-            >
-              重命名
-            </button>
-            <button
-              className="save-action-del"
-              onClick={() => void panelCommand("deleteSave", save.id)}
-            >
-              删除
-            </button>
-          </>
-        )}
+        <SavePointActions
+          save={save}
+          manage={manage && !isAuto}
+          canOperate={canOperate}
+          onRequest={onRequest}
+          onRename={() => useAppStore.setState({ renameSlotId: save.id })}
+        />
       </div>
     </div>
   );
 }
 
 export function SavePanel() {
+  const panel = useRef<HTMLElement>(null);
   const open = useAppStore((state) => state.savePanelOpen);
   const mode = useAppStore((state) => state.savePanelMode);
   // 延迟关闭：退出动画期间保留面板内容，完全隐藏后再重置内部视图状态。
@@ -354,6 +326,60 @@ export function SavePanel() {
   );
   const seededView = useAppStore((state) => state.savePanelView);
   const onlineCaps = useTimelineCapabilities();
+  useOnlineStore((state) => state.members);
+  useOnlineStore((state) => state.user);
+  const canOperate =
+    appMode === "local" || (appMode === "online" && isRoomOwner());
+  const [pointAction, setPointAction] = useState<
+    (SavePointAction & { worldId: string | null; appMode: string }) | null
+  >(null);
+  const requestPoint = (action: SavePointAction) =>
+    setPointAction({ ...action, worldId: activeWorldId, appMode });
+  const cancelPoint = () => {
+    const target = pointAction?.returnFocus;
+    setPointAction(null);
+    if (target?.isConnected) target.focus();
+  };
+  const confirmPoint = () => {
+    if (
+      !pointAction ||
+      !canOperate ||
+      pointAction.worldId !== activeWorldId ||
+      pointAction.appMode !== appMode
+    )
+      return;
+    const { kind, save } = pointAction;
+    const current = saves.find(
+      (entry) => entry.id === save.id && entry.world_active !== false,
+    );
+    if (!current || (current.world_id && current.world_id !== activeWorldId))
+      return;
+    cancelPoint();
+    panelCommand(kind === "load" ? "loadSave" : "deleteSave", save.id);
+  };
+  useEffect(() => {
+    if (
+      !open ||
+      (pointAction &&
+        (pointAction.worldId !== activeWorldId ||
+          pointAction.appMode !== appMode ||
+          !saves.some((save) => save.id === pointAction.save.id)))
+    )
+      setPointAction(null);
+  }, [open, activeWorldId, appMode, saves, pointAction]);
+  useDialogKeyboard(panel, open && rendered, false, panels.closeSavePanel);
+  const confirmation =
+    pointAction &&
+    pointAction.worldId === activeWorldId &&
+    pointAction.appMode === appMode ? (
+      <SavePointConfirmation
+        action={pointAction}
+        canOperate={canOperate}
+        online={appMode === "online"}
+        onCancel={cancelPoint}
+        onConfirm={confirmPoint}
+      />
+    ) : null;
   // 本地模式时间线能力全允许；联机按 timelineCapabilities（solo + 房主）。
   const caps: TimelineCapabilities =
     appMode === "local"
@@ -380,7 +406,15 @@ export function SavePanel() {
   const [worldName, setWorldName] = useState("");
   const [branchLabel, setBranchLabel] = useState("");
   const [selectedSaveId, setSelectedSaveId] = useState<string | null>(null);
-  // 正在播放「抽走」离场动画的存档位：动画结束后才真正下发删除命令。
+  // 动画仅作视觉反馈；命令在确认时已发出，不能延迟到另一会话。
+  const archiveTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (archiveTimer.current !== null)
+        window.clearTimeout(archiveTimer.current);
+    },
+    [],
+  );
   const [leavingAdventureId, setLeavingAdventureId] = useState<string | null>(
     null,
   );
@@ -470,7 +504,7 @@ export function SavePanel() {
 
   if (!rendered) return <div id="save-panel-overlay" className="hidden" />;
 
-  const manage = mode !== "load";
+  const manage = mode !== "load" && canOperate;
   const overlayClass = closing ? "overlay-closing" : undefined;
   // 换场阶段 class：leaving 播旧页出场，entering 播新页入场；方向由目标页决定
   const pageClass =
@@ -483,6 +517,8 @@ export function SavePanel() {
     <button
       id="save-panel-close"
       className="panel-close-btn"
+      type="button"
+      aria-label="关闭存档管理"
       onClick={() => void panelCommand("closeSavePanel")}
     >
       关闭
@@ -504,14 +540,28 @@ export function SavePanel() {
             void panelCommand("closeSavePanel");
         }}
       >
-        <div id="save-panel">
+        <ArchiveFolderPanel
+          ref={panel}
+          variant="wide"
+          id="save-panel"
+          className="save-folder"
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="save-panel-title"
+        >
           <div id="save-panel-header">
             <h3 id="save-panel-title">
               {mode === "load" ? "从存档开始" : "存档管理"}
             </h3>
             {closeButton}
           </div>
-          <div id="save-panel-body">
+          <div id="save-panel-body" data-dialog-scroll>
+            {!canOperate && (
+              <p className="save-readonly-note">
+                仅房主可管理房间存档；你可以查看现有存档。
+              </p>
+            )}
             {worlds.length > 0 && (
               <section
                 id="world-panel-section"
@@ -524,7 +574,7 @@ export function SavePanel() {
                     const active =
                       Boolean(world.active) || id === activeWorldId;
                     const resumable = world.resumable !== false;
-                    const switchDisabled = active || !resumable;
+                    const switchDisabled = active || !resumable || !canOperate;
                     const canArchive =
                       appMode === "local" &&
                       !active &&
@@ -620,6 +670,9 @@ export function SavePanel() {
                     latest={index === 0}
                     selected={save.id === selectedSaveId}
                     onSelect={setSelectedSaveId}
+                    canOperate={canOperate}
+                    manage={manage}
+                    onRequest={requestPoint}
                   />
                 ))
               ) : (
@@ -627,7 +680,8 @@ export function SavePanel() {
               )}
             </div>
           </div>
-        </div>
+          {confirmation}
+        </ArchiveFolderPanel>
       </div>
     );
   }
@@ -649,14 +703,31 @@ export function SavePanel() {
     return (
       <div
         className={`timeline-entry${active ? " active" : ""}${isBranch ? " branch" : ""}`}
-        style={isBranch ? { marginLeft: `${(depth - 1) * 22}px` } : undefined}
+        style={
+          isBranch
+            ? { marginLeft: `${Math.min(3, Math.max(0, depth - 1)) * 12}px` }
+            : undefined
+        }
         key={id}
         data-world={id}
       >
         <div className="timeline-row">
           <div className="timeline-info">
             {renaming ? (
-              <span className="save-rename-form">
+              <span
+                className="save-rename-form"
+                data-dialog-escape
+                onKeyDown={(event) => {
+                  if (
+                    !event.nativeEvent.isComposing &&
+                    event.key === "Escape"
+                  ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRenamingWorldId(null);
+                  }
+                }}
+              >
                 <input
                   autoFocus
                   className="save-rename-input"
@@ -664,6 +735,7 @@ export function SavePanel() {
                   value={worldName}
                   onChange={(event) => setWorldName(event.target.value)}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
                     if (event.key === "Enter") {
                       void panelCommand("renameWorld", id, worldName);
                       setRenamingWorldId(null);
@@ -782,7 +854,13 @@ export function SavePanel() {
         {active && timelineSaves.length > 0 && (
           <div className="timeline-slots">
             {timelineSaves.map((save) => (
-              <SlotRow key={save.id} save={save} manage={manage} />
+              <SlotRow
+                key={save.id}
+                save={save}
+                manage={manage}
+                canOperate={canOperate}
+                onRequest={requestPoint}
+              />
             ))}
           </div>
         )}
@@ -836,7 +914,16 @@ export function SavePanel() {
           void panelCommand("closeSavePanel");
       }}
     >
-      <div id="save-panel">
+      <ArchiveFolderPanel
+        ref={panel}
+        variant="wide"
+        id="save-panel"
+        className="save-folder"
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-panel-title"
+      >
         {displayedView.name === "adventures" ? (
           <div className={pageClass}>
             <div id="save-panel-header">
@@ -845,7 +932,11 @@ export function SavePanel() {
               </h3>
               {closeButton}
             </div>
-            <div id="save-panel-body" data-testid="save-panel-adventures">
+            <div
+              id="save-panel-body"
+              data-dialog-scroll
+              data-testid="save-panel-adventures"
+            >
               {adventures.length === 0 ? (
                 <div className="save-empty-slots">
                   <div className="save-empty-slots-title">还没有存档位</div>
@@ -910,7 +1001,20 @@ export function SavePanel() {
                                   )}
                                 </div>
                                 {renamingSlot ? (
-                                  <span className="save-rename-form">
+                                  <span
+                                    className="save-rename-form"
+                                    data-dialog-escape
+                                    onKeyDown={(event) => {
+                                      if (
+                                        !event.nativeEvent.isComposing &&
+                                        event.key === "Escape"
+                                      ) {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setRenamingSlotId(null);
+                                      }
+                                    }}
+                                  >
                                     <input
                                       autoFocus
                                       className="save-rename-input"
@@ -921,6 +1025,8 @@ export function SavePanel() {
                                         setSlotName(event.target.value)
                                       }
                                       onKeyDown={(event) => {
+                                        if (event.nativeEvent.isComposing)
+                                          return;
                                         if (event.key === "Enter") {
                                           void panelCommand(
                                             "renameAdventure",
@@ -1037,28 +1143,25 @@ export function SavePanel() {
                                   className="world-archive-confirm"
                                   onClick={() => {
                                     setSlotConfirmationId(null);
-                                    // 先播「抽走 + 收拢」离场动画（save-panel.css），
-                                    // 结束后再真正下发删除；reduced-motion 直接删。
+                                    // Commands belong to the confirmed session, never to
+                                    // a later animation callback or replacement transport.
+                                    panelCommand("archiveAdventure", rootId);
                                     if (prefersReducedMotion()) {
-                                      panelCommand("archiveAdventure", rootId);
                                       return;
                                     }
                                     setLeavingAdventureId(rootId);
-                                    window.setTimeout(
-                                      () =>
-                                        panelCommand(
-                                          "archiveAdventure",
-                                          rootId,
-                                        ),
-                                      500,
-                                    );
                                     // 删除失败兜底（服务端拒绝、存档位仍在列表中）：
                                     // 恢复卡片显示，不装作删掉了。
-                                    window.setTimeout(() => {
-                                      setLeavingAdventureId((current) =>
-                                        current === rootId ? null : current,
-                                      );
-                                    }, 2000);
+                                    if (archiveTimer.current !== null)
+                                      window.clearTimeout(archiveTimer.current);
+                                    archiveTimer.current = window.setTimeout(
+                                      () => {
+                                        setLeavingAdventureId((current) =>
+                                          current === rootId ? null : current,
+                                        );
+                                      },
+                                      2000,
+                                    );
                                   }}
                                 >
                                   确认删除
@@ -1100,7 +1203,11 @@ export function SavePanel() {
               </h3>
               {closeButton}
             </div>
-            <div id="save-panel-body" data-testid="save-panel-timelines">
+            <div
+              id="save-panel-body"
+              data-dialog-scroll
+              data-testid="save-panel-timelines"
+            >
               {(focusedAdventure?.timelines || []).some(
                 (timeline) => !timeline.is_branch,
               ) && (
@@ -1124,7 +1231,8 @@ export function SavePanel() {
             </div>
           </div>
         )}
-      </div>
+        {confirmation}
+      </ArchiveFolderPanel>
     </div>
   );
 }

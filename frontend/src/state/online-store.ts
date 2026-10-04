@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { invalidateCloudRequests } from "../api/request-context";
 
 import type { AuthUser } from "../api/auth";
 import type { ModuleInfo } from "../api/modules";
@@ -50,8 +51,11 @@ export type OnlineState = {
   // 认证状态机
   authStatus: AuthStatus;
   user: AuthUser | null;
+  /** The origin at which this identity was verified; IDs are not global. */
+  authOrigin: string | null;
   authBusy: boolean;
   authError: string | null;
+  authErrorCode: string | null;
   sessionExpired: boolean;
   // 联机外壳内的界面
   view: OnlineView;
@@ -109,8 +113,10 @@ export type OnlineState = {
 export const initialOnlineState: OnlineState = {
   authStatus: "checking",
   user: null,
+  authOrigin: null,
   authBusy: false,
   authError: null,
+  authErrorCode: null,
   sessionExpired: false,
   view: "auth",
   pendingIntent: "lobby",
@@ -165,6 +171,7 @@ let onlineRequestEpoch = 0;
 
 export function bumpOnlineRequestEpoch(): number {
   onlineRequestEpoch += 1;
+  invalidateCloudRequests();
   return onlineRequestEpoch;
 }
 

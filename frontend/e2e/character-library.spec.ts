@@ -263,3 +263,161 @@ test("本地角色库：导入→预览→列表→重载持久化→开局选�
     timeout: 30_000,
   });
 });
+
+test("角色档案夹：四种视口管理与编辑可达，本地忽略保存的云端地址", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  const name = "档案夹布局调查员";
+  const created = await request.post(`${baseUrl}/api/character-library`, {
+    data: {
+      ...IMPORT_CARD,
+      card: {
+        ...IMPORT_CARD.card,
+        name,
+        backstory: {
+          description: "档案应当可读，按钮应当可达。",
+          background: "调查笔记。".repeat(160),
+        },
+      },
+    },
+  });
+  expect(created.ok()).toBe(true);
+  await page.addInitScript(() =>
+    localStorage.setItem("trpg-cloud-origin", "https://unused.example.test"),
+  );
+  const destinations: string[] = [];
+  page.on("request", (req) => {
+    if (req.url().includes("/api/character-library"))
+      destinations.push(req.url());
+  });
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+  const trigger = page
+    .locator("#start-menu-view")
+    .getByRole("button", { name: "角色库" });
+  await trigger.click();
+  const panel = page.getByRole("dialog", { name: "角色库" });
+  await panel.locator(".library-row-main", { hasText: name }).click();
+  const widths = [
+    { width: 1280, height: 900 },
+    { width: 939, height: 900 },
+    { width: 640, height: 480 },
+    { width: 390, height: 360 },
+  ];
+  for (const size of widths) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(1000);
+    await expect(
+      panel.getByRole("searchbox", { name: "查找档案" }),
+    ).toBeVisible();
+    await expect(panel.getByRole("heading", { name })).toBeAttached();
+    for (const label of [
+      "关闭",
+      "新建角色",
+      "导入角色卡",
+      "编辑",
+      "复制",
+      "导出",
+      "删除",
+    ]) {
+      const button = panel.getByRole("button", { name: label, exact: true });
+      await expect(button).toBeInViewport();
+      expect(
+        await button.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          const hit = document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          );
+          return {
+            height: rect.height,
+            padding: parseFloat(style.paddingLeft),
+            nowrap: style.whiteSpace,
+            hit: hit === node || node.contains(hit),
+          };
+        }),
+      ).toMatchObject({
+        height: 44,
+        padding: expect.any(Number),
+        nowrap: "nowrap",
+        hit: true,
+      });
+    }
+    expect(
+      await panel.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `/tmp/trpg-library-dossier-${size.width}.png`,
+    });
+    await panel.getByRole("button", { name: "编辑", exact: true }).click();
+    const save = panel.getByRole("button", { name: "保存修改" });
+    await expect(save).toBeInViewport();
+    await expect(
+      panel.getByRole("button", { name: "取消", exact: true }),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: `/tmp/trpg-library-editor-${size.width}.png`,
+    });
+    await panel.getByRole("button", { name: "取消", exact: true }).click();
+  }
+  await page.setViewportSize({ width: 939, height: 900 });
+  await panel.getByLabel("查找档案").fill("查无此人");
+  await expect(panel.getByText(/没有匹配的档案/)).toBeVisible();
+  await expect(panel.getByRole("heading", { name })).toBeVisible();
+  await panel.getByLabel("查找档案").fill("古董商");
+  await expect(
+    panel.locator(".library-row-main", { hasText: name }),
+  ).toBeVisible();
+  // Hold an actual successful save response. The server mutation is not
+  // cancelled by Escape; the busy UI must keep focus inside the dialog.
+  let release!: () => void;
+  const gate = new Promise<void>((resolveGate) => {
+    release = resolveGate;
+  });
+  let received!: () => void;
+  const ready = new Promise<void>((resolveReady) => {
+    received = resolveReady;
+  });
+  await page.route(`${baseUrl}/api/character-library/*`, async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    expect(response.ok()).toBe(true);
+    received();
+    await gate;
+    await route.fulfill({ response });
+  });
+  try {
+    await panel.getByRole("button", { name: "编辑", exact: true }).click();
+    await panel.getByRole("button", { name: "保存修改" }).click();
+    await ready;
+    await expect(panel).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(panel).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeVisible();
+    release();
+    await expect(
+      panel.getByRole("button", { name: "编辑", exact: true }),
+    ).toBeVisible();
+  } finally {
+    release();
+    await page.unroute(`${baseUrl}/api/character-library/*`);
+  }
+  await panel.getByRole("button", { name: "关闭" }).focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(
+    panel.getByRole("button", { name: "删除", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(panel.getByRole("button", { name: "关闭" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(panel).not.toBeAttached();
+  await expect(trigger).toBeFocused();
+  expect(destinations.length).toBeGreaterThan(0);
+  expect(destinations.every((url) => url.startsWith(baseUrl))).toBe(true);
+});

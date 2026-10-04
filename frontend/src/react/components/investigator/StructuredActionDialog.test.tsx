@@ -102,6 +102,34 @@ beforeEach(() => {
 });
 
 describe("线索卡的路径切换", () => {
+  it("出示编辑器的 Tab 排除隐藏末尾；外部浮层的 Escape 不清除草稿", () => {
+    structuredClueStore();
+    render(
+      <>
+        <ClueCard onImage={vi.fn()} />
+        <StructuredActionDialog />
+      </>,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "出示" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "出示线索" });
+    const probe = document.createElement("div");
+    probe.innerHTML =
+      "<button>末尾控件</button><div hidden><input /></div><fieldset disabled><button>禁用末尾</button></fieldset>";
+    dialog.append(probe);
+    const button = probe.querySelector("button")!;
+    button.focus();
+    fireEvent.keyDown(button, { key: "Tab" });
+    expect(screen.getByRole("button", { name: "取消并关闭" })).toHaveFocus();
+    const other = document.createElement("button");
+    document.body.append(other);
+    other.focus();
+    fireEvent.keyDown(other, { key: "Escape" });
+    expect(dialog.parentElement).not.toHaveClass("closing");
+    expect(useStructuredEditorStore.getState().draft).not.toBeNull();
+    expect(sent).toHaveLength(0);
+    other.remove();
+    probe.remove();
+  });
   it("legacy 世界：出示按钮打开旧编辑器，发的是文字行动", () => {
     useStructuredStore.getState().applyCapabilities(LEGACY_CAPABILITIES);
     useAppStore.setState({
@@ -163,6 +191,33 @@ describe("线索卡的路径切换", () => {
 });
 
 describe("道具卡的路径切换", () => {
+  it("preserves the full investigator ID when requesting item use", () => {
+    structuredClueStore();
+    useStructuredStore.setState({
+      targets: [
+        { kind: "investigator", id: "profile:character:42", name: "调查员乙" },
+      ],
+    });
+    useStructuredEditorStore.getState().openUse({
+      itemId: "item_bandage",
+      subject: "绷带",
+      operations: ["apply"],
+      availableQuantity: 3,
+      worldId: WORLD_ID,
+    });
+    render(<StructuredActionDialog />);
+    fireEvent.change(screen.getByLabelText("常见用法"), {
+      target: { value: "apply" },
+    });
+    fireEvent.change(screen.getByLabelText("目标 / 对象（可选）"), {
+      target: { value: "investigator:profile:character:42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+    expect((sent[0].action as { target: unknown }).target).toEqual({
+      kind: "investigator",
+      id: "profile:character:42",
+    });
+  });
   it("legacy：使用按钮打开旧编辑器", () => {
     useStructuredStore.getState().applyCapabilities(LEGACY_CAPABILITIES);
     render(<InventoryCard />);
@@ -188,6 +243,33 @@ describe("道具卡的路径切换", () => {
 });
 
 describe("结构化出示编辑器", () => {
+  it("preserves the full investigator ID when presenting information", () => {
+    structuredClueStore();
+    useStructuredStore.setState({
+      targets: [
+        { kind: "investigator", id: "default:调查员乙", name: "调查员乙" },
+      ],
+    });
+    useStructuredEditorStore.getState().openPresent({
+      clueId: "clue_death_certificate",
+      subject: "死亡证明",
+      presentations: ["describe"],
+      allowedPhysicalItemIds: [],
+      worldId: WORLD_ID,
+    });
+    render(<StructuredActionDialog />);
+    fireEvent.change(screen.getByLabelText("向谁出示 / 说明"), {
+      target: { value: "investigator:default:调查员乙" },
+    });
+    expect(useStructuredEditorStore.getState().draft?.targetId).toBe(
+      "default:调查员乙",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+    expect((sent[0].action as { target: unknown }).target).toEqual({
+      kind: "investigator",
+      id: "default:调查员乙",
+    });
+  });
   it("出示方式只有服务端允许的可选，其余禁用并说明原因", () => {
     structuredClueStore();
     useStructuredEditorStore.getState().openPresent({
@@ -444,5 +526,10 @@ describe("重新打开与延迟关闭的竞态", () => {
     });
     expect(useStructuredEditorStore.getState().draft).not.toBeNull();
     expect(screen.getByLabelText("想询问什么（可选）")).toBeInTheDocument();
+    // Reopening must not leave a stale "closing" callback that ignores Escape.
+    fireEvent.keyDown(document, { key: "Escape" });
+    act(() => vi.advanceTimersByTime(150));
+    expect(useStructuredEditorStore.getState().draft).toBeNull();
+    expect(sent).toHaveLength(1);
   });
 });

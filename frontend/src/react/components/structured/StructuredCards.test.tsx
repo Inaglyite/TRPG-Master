@@ -43,6 +43,7 @@ function request(over: Record<string, unknown> = {}) {
     createdAt: now,
     updatedAt: now,
     awaitingAck: false,
+    serverReceived: false,
     awaiting: null,
     ...over,
   };
@@ -76,6 +77,37 @@ beforeEach(() => {
 });
 
 describe("ActionStatusCard：接收不等于成功", () => {
+  it("queued 在收到回执后提示待主持处理，不再说未获服务端确认", () => {
+    render(
+      <ActionStatusCard
+        request={request({ status: "queued", serverReceived: true })}
+      />,
+    );
+    expect(screen.getByText("已收件，待守秘人处理")).toBeInTheDocument();
+    expect(
+      screen.getByText(/还未执行行动，不需要重复提交/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/等待服务端确认/)).toBeNull();
+    expect(screen.queryByText(/结果：成功/)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+  it("未能发送不伪装成主持队列，原草稿仍可重试", () => {
+    render(
+      <ActionStatusCard
+        request={request({
+          status: "queued",
+          serverReceived: false,
+          errorCode: "not_sent",
+          errorMessage: "请求未能发出",
+        })}
+      />,
+    );
+    expect(screen.getByText("未能发出")).toBeInTheDocument();
+    expect(screen.queryByText("已收件，待守秘人处理")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /重试（同一请求 ID）/ }),
+    ).toBeInTheDocument();
+  });
   it("processing 只说明守秘人处理中，不显示成功字样", () => {
     render(<ActionStatusCard request={request({ status: "processing" })} />);
     expect(screen.getByText("守秘人处理中")).toBeInTheDocument();
@@ -414,6 +446,11 @@ describe("assisted 草稿与 agent 控制权（按能力渲染）", () => {
     useStructuredStore
       .getState()
       .applySnapshot(EVENT_FIXTURES.snapshot.payload, WORLD_ID);
+    useStructuredStore.getState().applyCapabilities({
+      ...STRUCTURED_CAPABILITIES_WIRE,
+      commands: [...STRUCTURED_CAPABILITIES_WIRE.commands, "resolve_draft"],
+      assisted_draft: true,
+    });
     act(() => {
       useStructuredStore.getState().applyEvent({
         event_id: 100,
@@ -544,6 +581,11 @@ describe("assisted 草稿与 agent 控制权（按能力渲染）", () => {
         EVENT_FIXTURES.snapshot.payload as Record<string, unknown>,
         WORLD_ID,
       );
+    useStructuredStore.getState().applyCapabilities({
+      ...STRUCTURED_CAPABILITIES_WIRE,
+      commands: [...STRUCTURED_CAPABILITIES_WIRE.commands, "resolve_draft"],
+      assisted_draft: true,
+    });
     useStructuredStore.setState((state) => ({
       ...state,
       keeperDraft: {
@@ -601,8 +643,10 @@ describe("assisted 草稿与 agent 控制权（按能力渲染）", () => {
     });
     render(<StructuredDock />);
     const notice = screen.getByTestId("keeper-control-notice");
-    expect(notice).toHaveTextContent("Agent 已超预算，等待接管");
+    expect(notice).toHaveTextContent("AI 已超预算，等待接管");
     expect(notice).toHaveTextContent("已用尽本轮预算");
-    expect(notice).toHaveTextContent("服务端未开放接管入口");
+    expect(notice).toHaveTextContent(
+      "服务端未开放主持控制操作，当前状态仅供查看。",
+    );
   });
 });

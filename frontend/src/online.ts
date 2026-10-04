@@ -1,4 +1,5 @@
-import { ApiError, onUnauthorized } from "./api/client";
+import { ApiError, apiHttpOrigin, onUnauthorized } from "./api/client";
+import { invalidateCloudRequests } from "./api/request-context";
 import {
   fetchMe,
   login as apiLogin,
@@ -28,7 +29,7 @@ import {
   clearPendingSoloSwitch,
   disconnectRoom,
   newActionId,
-  roomSend,
+  roomSendNow,
 } from "./room-ws";
 import {
   bumpOnlineRequestEpoch,
@@ -64,6 +65,7 @@ let inviteRequestSerial = 0;
 
 type RequestScope = {
   epoch: number;
+  origin: string;
   userId: string | null;
   worldId?: string | null;
 };
@@ -72,6 +74,7 @@ function captureRequestScope(worldId?: string | null): RequestScope {
   const state = useOnlineStore.getState();
   return {
     epoch: currentOnlineRequestEpoch(),
+    origin: apiHttpOrigin(),
     userId: state.user?.id ?? null,
     ...(worldId !== undefined ? { worldId } : {}),
   };
@@ -81,6 +84,7 @@ function requestScopeIsCurrent(scope: RequestScope): boolean {
   const state = useOnlineStore.getState();
   return (
     scope.epoch === currentOnlineRequestEpoch() &&
+    scope.origin === apiHttpOrigin() &&
     scope.userId === (state.user?.id ?? null) &&
     (scope.worldId === undefined || scope.worldId === state.activeWorldId)
   );
@@ -88,28 +92,55 @@ function requestScopeIsCurrent(scope: RequestScope): boolean {
 
 // —— 认证状态机 ——
 
-export async function checkSession(): Promise<void> {
+export async function checkSession(): Promise<boolean> {
+  const previous = useOnlineStore.getState();
+  const origin = apiHttpOrigin();
+  if (previous.authOrigin && previous.authOrigin !== origin) {
+    disconnectRoom();
+    resetOnlineState({ pendingIntent: previous.pendingIntent });
+  }
   const epoch = bumpOnlineRequestEpoch();
-  useOnlineStore.setState({ authStatus: "checking", authError: null });
+  useOnlineStore.setState({
+    authStatus: "checking",
+    authError: null,
+    authErrorCode: null,
+  });
   try {
     const user = await fetchMe();
-    if (epoch !== currentOnlineRequestEpoch()) return;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
+    if (previous.user && previous.user.id !== user.id) {
+      disconnectRoom();
+      resetOnlineState({ pendingIntent: previous.pendingIntent });
+    }
     useOnlineStore.setState({
       authStatus: "authenticated",
       user,
+      authOrigin: origin,
       sessionExpired: false,
     });
+    return true;
   } catch (error) {
-    if (epoch !== currentOnlineRequestEpoch()) return;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
     if (error instanceof ApiError && error.isUnauthorized) {
-      useOnlineStore.setState({ authStatus: "anonymous", user: null });
+      disconnectRoom();
+      resetOnlineState({
+        pendingIntent: previous.pendingIntent,
+        sessionExpired:
+          previous.authStatus === "authenticated" || previous.sessionExpired,
+      });
     } else {
-      useOnlineStore.setState({
-        authStatus: "anonymous",
-        user: null,
+      // If verification falls back to anonymous, revoke the previous view as
+      // well; a connection failure is not evidence that a new viewer owns it.
+      disconnectRoom();
+      resetOnlineState({
+        pendingIntent: previous.pendingIntent,
         authError: errorMessage(error, "无法连接服务器"),
+        authErrorCode: error instanceof ApiError ? error.code : null,
       });
     }
+    return false;
   }
 }
 
@@ -117,27 +148,33 @@ export async function login(
   username: string,
   password: string,
 ): Promise<boolean> {
+  const origin = apiHttpOrigin();
   const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     authBusy: true,
     authError: null,
+    authErrorCode: null,
     sessionExpired: false,
   });
   try {
     const user = await apiLogin(username, password);
-    if (epoch !== currentOnlineRequestEpoch()) return false;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
     useOnlineStore.setState({
       authBusy: false,
       authStatus: "authenticated",
       user,
+      authOrigin: origin,
     });
     return true;
   } catch (error) {
-    if (epoch !== currentOnlineRequestEpoch()) return false;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
     useOnlineStore.setState({
       authStatus: "anonymous",
       authBusy: false,
       authError: errorMessage(error, "登录失败，请重试"),
+      authErrorCode: error instanceof ApiError ? error.code : null,
     });
     return false;
   }
@@ -147,27 +184,33 @@ export async function register(
   username: string,
   password: string,
 ): Promise<boolean> {
+  const origin = apiHttpOrigin();
   const epoch = bumpOnlineRequestEpoch();
   useOnlineStore.setState({
     authBusy: true,
     authError: null,
+    authErrorCode: null,
     sessionExpired: false,
   });
   try {
     const user = await registerAccount(username, password);
-    if (epoch !== currentOnlineRequestEpoch()) return false;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
     useOnlineStore.setState({
       authBusy: false,
       authStatus: "authenticated",
       user,
+      authOrigin: origin,
     });
     return true;
   } catch (error) {
-    if (epoch !== currentOnlineRequestEpoch()) return false;
+    if (epoch !== currentOnlineRequestEpoch() || origin !== apiHttpOrigin())
+      return false;
     useOnlineStore.setState({
       authStatus: "anonymous",
       authBusy: false,
       authError: errorMessage(error, "注册失败，请重试"),
+      authErrorCode: error instanceof ApiError ? error.code : null,
     });
     return false;
   }
@@ -178,7 +221,11 @@ export async function logout(): Promise<boolean> {
   // 用户刚才所在的页面，而不是因为 resetOnlineState 的默认值误进多人大厅。
   const pendingIntent = useOnlineStore.getState().pendingIntent;
   const epoch = bumpOnlineRequestEpoch();
-  useOnlineStore.setState({ authBusy: true, authError: null });
+  useOnlineStore.setState({
+    authBusy: true,
+    authError: null,
+    authErrorCode: null,
+  });
   try {
     await apiLogout();
   } catch (error) {
@@ -189,6 +236,7 @@ export async function logout(): Promise<boolean> {
       useOnlineStore.setState({
         authBusy: false,
         authError: errorMessage(error, "退出登录失败，请重试"),
+        authErrorCode: error instanceof ApiError ? error.code : null,
       });
       return false;
     }
@@ -201,7 +249,7 @@ export async function logout(): Promise<boolean> {
 
 /** 订阅云端 API 的全部 401；已认证状态下降级为“会话过期”。返回取消订阅函数。 */
 export function initOnlineSession(): () => void {
-  return onUnauthorized(() => {
+  const unsubscribe = onUnauthorized(() => {
     const state = useOnlineStore.getState();
     if (state.authStatus === "authenticated") {
       const pendingIntent = state.pendingIntent;
@@ -209,6 +257,29 @@ export function initOnlineSession(): () => void {
       resetOnlineState({ sessionExpired: true, pendingIntent });
     }
   });
+  function onServerPreference(event: StorageEvent): void {
+    // sessionStorage also emits clear events to same-tab frames. Only local
+    // server preferences can invalidate the cloud identity in another tab.
+    if (event.storageArea && event.storageArea !== window.localStorage) return;
+    if (event.key !== "trpg-cloud-origin" && event.key !== null) return;
+    if (event.key === "trpg-cloud-origin" && event.oldValue === event.newValue)
+      return;
+    invalidateCloudRequests();
+    const pendingIntent = useOnlineStore.getState().pendingIntent;
+    disconnectRoom();
+    resetOnlineState({ pendingIntent });
+    void (async () => {
+      if (!(await checkSession())) return;
+      if (useOnlineStore.getState().pendingIntent === "solo")
+        await enterSoloLobby();
+      else await enterLobby();
+    })();
+  }
+  window.addEventListener("storage", onServerPreference);
+  return () => {
+    unsubscribe();
+    window.removeEventListener("storage", onServerPreference);
+  };
 }
 
 // —— 大厅 ——
@@ -393,7 +464,7 @@ export async function deleteSoloWorld(worldId: string): Promise<string | null> {
     await abandonWorld(worldId);
   } catch (error) {
     if (!requestScopeIsCurrent(scope)) return null;
-    return errorMessage(error, "删除存档失败，请重试");
+    return errorMessage(error, "归档冒险失败，请重试");
   }
   if (!requestScopeIsCurrent(scope)) return null;
   try {
@@ -481,12 +552,14 @@ export async function joinWithToken(token: string): Promise<void> {
 // —— 房间 ——
 
 const LAST_ROOM_KEY = "trpg-online-world-id";
+const LAST_ROOM_ORIGIN_KEY = "trpg-online-world-origin";
 
 export async function enterRoom(worldId: string): Promise<void> {
   disconnectRoom();
   bumpOnlineRequestEpoch();
   try {
     localStorage.setItem(LAST_ROOM_KEY, worldId);
+    localStorage.setItem(LAST_ROOM_ORIGIN_KEY, apiHttpOrigin());
   } catch {
     /* localStorage 不可用时忽略 */
   }
@@ -612,6 +685,16 @@ export async function resumeLastRoom(): Promise<void> {
   let worldId: string | null = null;
   try {
     worldId = localStorage.getItem(LAST_ROOM_KEY);
+    // Old unscoped bookmarks must not be guessed to belong to a new server.
+    // Worlds are still reachable explicitly through the authenticated lobby.
+    if (
+      worldId &&
+      localStorage.getItem(LAST_ROOM_ORIGIN_KEY) !== apiHttpOrigin()
+    ) {
+      localStorage.removeItem(LAST_ROOM_KEY);
+      localStorage.removeItem(LAST_ROOM_ORIGIN_KEY);
+      return;
+    }
   } catch {
     return;
   }
@@ -795,12 +878,25 @@ export async function kickMember(userId: string): Promise<void> {
   }
 }
 
+/** Only submit room controls now; refused sends never become reconnect work. */
+function sendRoomControl(payload: Record<string, unknown>): void {
+  useOnlineStore.setState({ roomError: null, roomErrorCode: null });
+  if (
+    useOnlineStore.getState().roomConnection !== "connected" ||
+    !roomSendNow(payload)
+  ) {
+    useOnlineStore.setState({
+      roomError: "房间连接尚未同步，操作尚未发送。请等待连接恢复后重新操作。",
+      roomErrorCode: "room_not_connected",
+    });
+  }
+}
+
 /** 通过房间 WS 发送准备状态；结果以下一次 room_state 广播为准。 */
 export async function toggleReady(ready: boolean): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
-  useOnlineStore.setState({ roomError: null });
-  roomSend({ type: "room_ready", ready });
+  sendRoomControl({ type: "room_ready", ready });
 }
 
 export async function newInvite(options: {
@@ -943,14 +1039,12 @@ export async function dismissInvite(): Promise<void> {
 export async function startGame(): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
-  useOnlineStore.setState({ roomError: null });
-  roomSend({ type: "start", action_id: newActionId() });
+  sendRoomControl({ type: "start", action_id: newActionId() });
 }
 
 /** 房主指定当前行动者（actor_assign，仅房主）。 */
 export async function assignActor(userId: string): Promise<void> {
   const { activeWorldId } = useOnlineStore.getState();
   if (!activeWorldId) return;
-  useOnlineStore.setState({ roomError: null });
-  roomSend({ type: "actor_assign", user_id: userId });
+  sendRoomControl({ type: "actor_assign", user_id: userId });
 }

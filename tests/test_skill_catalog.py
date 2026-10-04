@@ -234,7 +234,7 @@ def test_local_author_budget_cap_and_v2_pin_roundtrip(tmp_path: Path):
     """local-author 预算硬顶 + catalog_version=2 新 pin 完整往返。"""
     from src.ai.skills.skill_manifest import SkillCatalog, SkillEntry
 
-    # local-author 预算超过 4000 → 拒绝
+    # 长篇模组可超过旧的 4000，但不能超过统一单篇硬顶。
     entry = SkillEntry(
         id="module.demo.big",
         path="module://skills/big.skill",
@@ -243,9 +243,15 @@ def test_local_author_budget_cap_and_v2_pin_roundtrip(tmp_path: Path):
         residency="core",
         max_context_tokens=4_001,
     )
+    validate_catalog(SkillCatalog(catalog_version=2, skills=[entry]))
+    from src.ai.skills.module_budget import LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS
+
+    oversized = entry.model_copy(update={
+        "max_context_tokens": LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS + 1,
+    })
     with pytest.raises(CatalogError, match="local-author"):
         validate_catalog(
-            SkillCatalog(catalog_version=2, skills=[entry]),
+            SkillCatalog(catalog_version=2, skills=[oversized]),
             known_tool_names=frozenset(),
         )
 

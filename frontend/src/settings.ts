@@ -16,6 +16,11 @@ const modelIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,119}$/;
 
 const LOAD_TIMEOUT_MS = 8000;
 let loadTimer: ReturnType<typeof setTimeout> | null = null;
+let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null;
+function clearDiagnosticsTimer() {
+  if (diagnosticsTimer !== null) clearTimeout(diagnosticsTimer);
+  diagnosticsTimer = null;
+}
 let operationTimer: ReturnType<typeof setTimeout> | null = null;
 let unconfirmedOperation = false;
 
@@ -67,6 +72,21 @@ function clearLoadTimer() {
   }
 }
 
+/** Room/account departure revokes cached diagnostics and write-only secrets. */
+export function resetSettings() {
+  clearDiagnosticsTimer();
+  clearLoadTimer();
+  clearOperationTimer();
+  unconfirmedOperation = false;
+  useModelStore.setState({
+    ...useModelStore.getInitialState(),
+    drafts: {
+      narrative: draftFromView(undefined),
+      judgement: draftFromView(undefined),
+    },
+  });
+}
+
 /** 编辑前等待本次权威视图，避免迟到响应覆盖已经填写的草稿。 */
 export function fetchSettings() {
   unconfirmedOperation = false;
@@ -109,8 +129,10 @@ export function openSettings(tab?: "models" | "context") {
 export function closeSettings() {
   if (useModelStore.getState().saving) return;
   clearLoadTimer();
+  clearDiagnosticsTimer();
   useModelStore.setState({
     open: false,
+    diagnosticsLoading: false,
     status: "",
     statusKind: "",
     loading: false,
@@ -119,7 +141,16 @@ export function closeSettings() {
 }
 
 export function requestTurnDiagnostics() {
-  useModelStore.setState({ diagnosticsLoading: true });
+  clearDiagnosticsTimer();
+  useModelStore.setState({ diagnosticsLoading: true, diagnosticsError: null });
+  diagnosticsTimer = setTimeout(() => {
+    diagnosticsTimer = null;
+    useModelStore.setState({
+      diagnosticsLoading: false,
+      diagnosticsError:
+        "上下文读取超时，已有数据未更新。请检查连接后重新刷新。",
+    });
+  }, LOAD_TIMEOUT_MS);
   safeSend(JSON.stringify({ type: "turn_diagnostics_get" }));
 }
 
@@ -387,8 +418,10 @@ export function onModelSettingsTestResult(data: TestResult) {
 }
 
 export function onTurnDiagnostics(payload: TurnDiagnostics | null | undefined) {
+  clearDiagnosticsTimer();
   useModelStore.setState({
     diagnosticsLoading: false,
+    diagnosticsError: null,
     diagnostics: payload || null,
   });
 }

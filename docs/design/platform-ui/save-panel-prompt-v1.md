@@ -1,0 +1,10 @@
+# 存档档案夹参考图
+
+内置 imagegen 生成，素材：`save-panel-concept-v1.png`。
+原始产物：`/home/inaglyite/.codex/generated_images/01a06c3d-3b8c-7263-82c5-de1bee5f9328/exec-f3515d29-1678-457a-9083-ef68f0f97d86.png`。
+
+只采用档案夹材质、时间线层级及确认操作布局。图中虚构的调查员人数、日期、预览图片及自动存档频率说明不进入实际 UI；全部存档内容来自服务端，标题和按钮由 DOM 渲染。生产组件复用 portrait/wide 九宫格的 1x/2x 素材，不拉伸整张效果图。
+
+## 提示词原文
+
+Use case: ui-mockup. Asset type: high-fidelity reference board for an existing Chinese Call of Cthulhu browser tabletop platform save-management overlay. Primary request: two complete straight-on DOM-like dialog layouts side by side, a wide archive-folder timeline list and a narrower manual save-point action confirmation. Stylized hand-painted flat UI folder tab and paper edge, not a photographed physical folder. Quiet matte charcoal brown #24201b over #181511 backdrop, muted old brass #baa16a, warm readable text #e4dccd, secondary #b3a998; subtle texture only at edges, no glow or bright paper. Chinese serif title '存档管理', sans-serif body. Wide pane: persistent header with '关闭', visible grouping '主时间线' / '分支时间线', a real-looking current timeline card with scene and investigator summary, manual and automatic save points with timestamp; restrained actions '读取', '重命名', '删除'; automatic point has no delete. Body independent scroll and clearly separated current state. Narrow pane: heading '确认读取', selected point '图书馆调查', concise warning '读取将恢复到此存档，未保存进度不会保留。', two well-padded 44px buttons '取消' and '确认读取', cancel is safer default focus. Include a quiet member read-only caption '仅房主可管理房间存档' as a caption example, not a functional toggle. No fake cloud backup, no restore guarantee, no credential text, no new gameplay or authority features, no invented success badge. Main composition landscape board, implementable hierarchy and comfortable spacing. Must also be plausible to stack in a 390px narrow short window, fixed title/actions while text scrolls. Reuse archive-folder visual family, no ornamental frame, no perspective or device mockup, no watermark. This is reference only, all live copy and controls will be HTML/CSS.

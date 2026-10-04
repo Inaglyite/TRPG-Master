@@ -479,9 +479,13 @@ export function addMsg(
   kind: string,
   text: string,
   forceScroll = false,
+  entryKind?: "action_request",
 ): string {
   const id = nextId();
-  append({ id, kind, text, turnId: displayTurnId || undefined }, forceScroll);
+  append(
+    { id, kind, text, turnId: displayTurnId || undefined, entryKind },
+    forceScroll,
+  );
   return id;
 }
 

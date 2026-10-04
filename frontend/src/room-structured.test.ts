@@ -8,7 +8,7 @@
  *   聊天事件全部渲染，重复帧只 ACK 不重复分发；
  * - **房间传输不会给结构化信封注入 `action_id`**（M0 是
  *   `additionalProperties: false`，多一个字段就等于协议不兼容）；
- * - 快照前排队、快照后立刻发出；换世界后旧世界事件被丢弃。
+ * - 完整权威同步前不受理玩家行动；换世界后旧世界事件被丢弃。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectRoom();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -224,7 +225,7 @@ describe("房间路径：结构化事件路由", () => {
     expect(request).not.toHaveProperty("room_event_id");
   });
 
-  it("拿到能力快照即可提交；房间镜像未到时按房间队列排队，镜像到达后立即发出", () => {
+  it("能力快照和房间镜像都到达后才能提交，不提前排队玩家行动", () => {
     // 房间镜像（room_full_state）之前不允许往 socket 写：房间传输会排队。
     connectRoom(ROOM_WORLD);
     const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
@@ -238,7 +239,7 @@ describe("房间路径：结构化事件路由", () => {
       }).ok,
     ).toBe(false);
 
-    // 结构化快照先到：能力协商完成，提交被受理但仍在房间队列里（镜像未到）。
+    // 能力协商不能代替完整房间状态；玩家行动不能在这里提前排队。
     socket.deliver(
       structuredFrame(1, "session_snapshot", EVENT_FIXTURES.snapshot.payload, {
         roomEventId: 2,
@@ -249,16 +250,75 @@ describe("房间路径：结构化事件路由", () => {
         kind: "move",
         destination_scene_id: "miskatonic_medical",
       }).ok,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       socket.sentFrames().filter((frame) => frame.type === "action_request"),
     ).toHaveLength(0);
 
-    // 房间镜像到达 → 队列清空 → 结构化请求立刻出现在 socket 上。
+    // 房间镜像到达后还没有任何行动；只有新的明确提交才发送。
     socket.deliver(roomFullState(2));
     expect(
       socket.sentFrames().filter((frame) => frame.type === "action_request"),
+    ).toHaveLength(0);
+    expect(
+      sendStructuredAction({
+        kind: "move",
+        destination_scene_id: "miskatonic_medical",
+      }).ok,
+    ).toBe(true);
+    expect(
+      socket.sentFrames().filter((frame) => frame.type === "action_request"),
     ).toHaveLength(1);
+  });
+
+  it("重连不借用旧调查员身份；新提交必须使用恢复快照的调查员与版本", () => {
+    vi.useFakeTimers();
+    let socket = openRoom();
+    socket.deliver(
+      structuredFrame(1, "session_snapshot", EVENT_FIXTURES.snapshot.payload),
+    );
+    expect(useStructuredStore.getState().identity.investigatorId).toBe(
+      "inv-alice",
+    );
+    socket.close();
+    socket.onclose?.({ code: 1012, reason: "service restart" });
+    vi.advanceTimersByTime(1000);
+    socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    socket.open();
+    socket.deliver(roomFullState(2));
+    expect(
+      sendStructuredAction({
+        kind: "move",
+        destination_scene_id: "miskatonic_medical",
+      }).ok,
+    ).toBe(false);
+    expect(
+      socket.sentFrames().filter((frame) => frame.type === "action_request"),
+    ).toHaveLength(0);
+    socket.deliver(
+      structuredFrame(
+        10,
+        "session_snapshot",
+        {
+          ...EVENT_FIXTURES.snapshot.payload,
+          investigator_id: "inv-reclaimed",
+          revision: 25,
+        },
+        { revision: 25 },
+      ),
+    );
+    expect(
+      sendStructuredAction({
+        kind: "move",
+        destination_scene_id: "miskatonic_medical",
+      }).ok,
+    ).toBe(true);
+    expect(
+      socket.sentFrames().find((frame) => frame.type === "action_request"),
+    ).toMatchObject({
+      investigator_id: "inv-reclaimed",
+      expected_revision: 25,
+    });
   });
 
   it("room_event_id 游标与 event_id 同时生效：重复帧只 ACK，不重复分发", () => {
@@ -344,13 +404,16 @@ describe("房间路径：结构化事件路由", () => {
   });
 
   it("换世界（新 session_snapshot）后旧世界事件不污染新世界", () => {
-    const socket = openRoom();
+    let socket = openRoom();
     socket.deliver(
       structuredFrame(1, "session_snapshot", EVENT_FIXTURES.snapshot.payload, {
         roomEventId: 2,
       }),
     );
-    // 服务端把房间切到另一个世界。
+    // 切世界必须建立对应世界的连接；其他世界的快照不能劫持当前房间。
+    connectRoom("world-room-2");
+    socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+    socket.open();
     socket.deliver(
       structuredFrame(
         50,

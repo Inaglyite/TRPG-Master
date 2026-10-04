@@ -324,6 +324,16 @@ class StructuredM2Tests(unittest.TestCase):
             },
         )
 
+    def test_snapshot_own_request_metadata_supports_cancellation_without_leaking_action(self):
+        self._queue_move("req-own-metadata")
+        own = self.service.session_snapshot(world_id="sp-world", principal=self.alice)
+        entry = next(row for row in own["requests"] if row["request_id"] == "req-own-metadata")
+        self.assertEqual("action_request", entry["request_type"])
+        self.assertEqual("inv-alice", entry["investigator_id"])
+        self.assertNotIn("action", entry)
+        other = self.service.session_snapshot(world_id="sp-world", principal=self.bob)
+        self.assertNotIn("req-own-metadata", [row["request_id"] for row in other["requests"]])
+
     def test_cancel_own_queued_request(self):
         self._queue_move("req-c1")
         _state, revision = self.persisted()

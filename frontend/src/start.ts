@@ -13,7 +13,23 @@ import {
   type CharacterGroup,
   type ModuleOption,
 } from "./state/start-store";
-import { safeSend } from "./ws";
+import { safeSend, sendImmediately } from "./ws";
+import { useStructuredStore } from "./state/structured-store";
+import { newRequestId } from "./protocol/structured";
+
+let localCreationRequest: Record<string, unknown> | null = null;
+let localCreationTimer: number | null = null;
+
+function clearLocalCreationTimer() {
+  if (localCreationTimer !== null) window.clearTimeout(localCreationTimer);
+  localCreationTimer = null;
+}
+
+/** User explicitly leaves creation; an already committed world is not deleted. */
+export function discardLocalCreationRequest() {
+  clearLocalCreationTimer();
+  localCreationRequest = null;
+}
 
 let retryTimer: number | null = null;
 let retryAttempt = 0;
@@ -27,6 +43,24 @@ function clearRetry() {
 function sendStartRequest() {
   const state = useStartStore.getState();
   if (!state.gameStarting || !state.selectedCharacterRef) return;
+  if (localCreationRequest) {
+    clearLocalCreationTimer();
+    if (!sendImmediately(JSON.stringify(localCreationRequest))) {
+      useStartStore.setState({
+        gameStarting: false,
+        hint: "连接未就绪，尚未发送新建请求；请重连后重试。",
+      });
+      return;
+    }
+    localCreationTimer = window.setTimeout(() => {
+      localCreationTimer = null;
+      useStartStore.setState({
+        gameStarting: false,
+        hint: "尚未确认新建结果；可重试原请求，或先查看存档。",
+      });
+    }, 15_000);
+    return;
+  }
   safeSend(
     JSON.stringify({
       type: "start",
@@ -54,6 +88,7 @@ export function returnToStartMenu() {
   if (getGameStarting()) return;
   clearRetry();
   retryAttempt = 0;
+  discardLocalCreationRequest();
   enableInput(false);
   useAppStore.getState().setChoices([]);
   useAppStore.getState().setDialog(null);
@@ -97,6 +132,7 @@ function resetLocalGamePresentation() {
 }
 
 export function onGmTurnStart() {
+  clearLocalCreationTimer();
   if (!getGameStarted()) {
     const startWasRequested = getGameStarting();
     clearRetry();
@@ -127,13 +163,89 @@ export function startGame() {
   if (state.gameStarting || !state.selectedCharacterRef) return;
   clearRetry();
   retryAttempt = 0;
+  const app = useAppStore.getState();
+  if (
+    app.mode === "local" &&
+    (state.executionProfile === "structured_v1" ||
+      useStructuredStore.getState().capabilities?.executionProfile ===
+        "structured_v1")
+  ) {
+    if (!app.activeWorldId) {
+      useStartStore.setState({ hint: "当前世界尚未同步，请等待连接恢复。" });
+      return;
+    }
+    const draft = {
+      source_world_id: app.activeWorldId,
+      character_ref: state.selectedCharacterRef,
+      execution_profile: state.executionProfile,
+      keeper_mode: state.keeperMode,
+    };
+    const prior = localCreationRequest;
+    // world_context precedes the receipt. A lost receipt may therefore leave
+    // activeWorldId pointing at the newly created world already. Retrying must
+    // preserve the original source and nonce rather than create another world.
+    const same =
+      prior &&
+      Object.entries(draft)
+        .filter(([key]) => key !== "source_world_id")
+        .every(
+          ([key, value]) =>
+            JSON.stringify(prior[key]) === JSON.stringify(value),
+        );
+    if (prior && !same) {
+      useStartStore.setState({
+        hint: "此前的新建结果尚未确认，请先重试原设置或查看存档；返回开局选择后才可另建。",
+      });
+      return;
+    }
+    if (!same)
+      localCreationRequest = {
+        type: "local_start",
+        request_id: newRequestId(),
+        ...draft,
+      };
+  } else {
+    localCreationRequest = null;
+  }
   useStartStore.setState({ gameStarting: true, hint: "" });
   sendStartRequest();
+}
+
+/** Correlated server commit, before the fresh authoritative snapshot. */
+export function onLocalStartResult(data: Record<string, unknown>) {
+  if (
+    useAppStore.getState().mode !== "local" ||
+    !localCreationRequest ||
+    data.request_id !== localCreationRequest.request_id
+  )
+    return;
+  if (
+    data.ok === true &&
+    data.world_id !== useAppStore.getState().activeWorldId
+  )
+    return;
+  clearLocalCreationTimer();
+  clearRetry();
+  if (data.ok !== true) {
+    useStartStore.setState({
+      gameStarting: false,
+      hint: String(data.message || "新建尚未确认，请核对存档。"),
+    });
+    return;
+  }
+  if (!useStartStore.getState().gameStarted) resetLocalGamePresentation();
+  localCreationRequest = null;
+  useStartStore.setState({ gameStarting: false, gameStarted: true, hint: "" });
 }
 
 export function onStartTurnRejected(message: string, retryable: boolean) {
   if (!getGameStarting()) return false;
   clearRetry();
+  if (localCreationRequest) {
+    clearLocalCreationTimer();
+    useStartStore.setState({ gameStarting: false, hint: message });
+    return true; // Explicit local creation is retried only by its user.
+  }
   if (retryable && retryAttempt < retryDelays.length) {
     const delay = retryDelays[retryAttempt++];
     useStartStore.setState({ hint: `${message} 正在自动重试……` });

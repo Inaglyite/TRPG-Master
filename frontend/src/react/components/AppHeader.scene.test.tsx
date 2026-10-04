@@ -5,6 +5,12 @@ import { useAppStore } from "../../state/app-store";
 import { useSceneStore } from "../../state/scene-store";
 import { useStartStore } from "../../state/start-store";
 import { AppHeader } from "./AppHeader";
+import {
+  initialStructuredState,
+  useStructuredStore,
+} from "../../state/structured-store";
+import { initialOnlineState, useOnlineStore } from "../../state/online-store";
+import { STRUCTURED_CAPABILITIES } from "../../protocol/structured-fixtures";
 
 vi.mock("../../start", () => ({
   returnToStartMenu: vi.fn(),
@@ -23,6 +29,8 @@ function sceneLine(container: HTMLElement) {
 
 describe("AppHeader 当前场景行", () => {
   beforeEach(() => {
+    useStructuredStore.setState({ ...initialStructuredState });
+    useOnlineStore.setState({ ...initialOnlineState });
     useAppStore.setState({
       connection: "connected",
       title: "猩红文档",
@@ -30,6 +38,69 @@ describe("AppHeader 当前场景行", () => {
     });
     useStartStore.setState({ gameStarted: false, gameStarting: false });
     useSceneStore.getState().reset();
+  });
+
+  it("the move entry follows live viewer/keeper/character authority rather than stale identity", () => {
+    useAppStore.setState({
+      mode: "online",
+      dialog: null,
+      ending: null,
+      choices: [],
+    });
+    useStructuredStore.setState({
+      capabilities: STRUCTURED_CAPABILITIES,
+      identity: {
+        ...initialStructuredState.identity,
+        worldId: "room-world",
+        revision: 1,
+        investigatorId: "old-pc",
+      },
+    });
+    useOnlineStore.setState({
+      user: { id: "me", username: "我" },
+      members: [
+        { user_id: "me", username: "我", role: "viewer", investigator: null },
+      ],
+    });
+    startGame();
+    render(<AppHeader />);
+    expect(screen.getByTestId("btn-move")).toBeDisabled();
+    expect(screen.getByTestId("btn-move")).toHaveAttribute(
+      "title",
+      expect.stringContaining("旁观模式"),
+    );
+    act(() =>
+      useOnlineStore.setState({
+        members: [
+          {
+            user_id: "me",
+            username: "我",
+            role: "player",
+            investigator: { id: "my-claim", character_key: "my-pc" },
+          },
+        ],
+      }),
+    );
+    expect(screen.getByTestId("btn-move")).toBeEnabled();
+    act(() => {
+      useOnlineStore.setState({
+        members: [
+          {
+            user_id: "me",
+            username: "我",
+            role: "player",
+            can_keeper: true,
+            investigator: null,
+          },
+        ],
+      });
+      useStructuredStore.getState().setInvestigator("");
+    });
+    expect(screen.getByTestId("btn-move")).toBeDisabled();
+    expect(screen.getByTestId("btn-move")).toHaveAttribute(
+      "title",
+      expect.stringContaining("调查员"),
+    );
   });
 
   it("开局前不显示场景行", () => {

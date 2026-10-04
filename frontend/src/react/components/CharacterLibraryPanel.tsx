@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import {
   createLibraryEntry,
@@ -12,7 +18,11 @@ import {
   type LibraryEntry,
   type LibraryIssue,
 } from "../../api/characterLibrary";
-import { ApiError } from "../../api/client";
+import { ApiError, apiHttpOrigin } from "../../api/client";
+import {
+  currentCloudRequestGeneration,
+  subscribeCloudRequests,
+} from "../../api/request-context";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
 import { useStartStore, type CharacterOption } from "../../state/start-store";
@@ -22,7 +32,8 @@ import {
   CHARACTER_SKILL_LABELS,
   CharacterDossier,
 } from "./CharacterDossier";
-import { useDelayedClose } from "./transitions";
+import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
+import { trapDialogTab } from "./dialogFocus";
 
 /**
  * 角色库管理面板：列表 / 详情预览 / 新建与编辑 / 导入角色卡。
@@ -249,7 +260,78 @@ function notifyLibraryChanged(selectId?: string) {
 
 export function CharacterLibraryPanel() {
   const open = useAppStore((state) => state.characterLibraryOpen);
-  const { rendered, closing } = useDelayedClose(open, 160);
+  const mode = useAppStore((state) => state.mode);
+  const userId = useOnlineStore((state) => state.user?.id);
+  const authStatus = useOnlineStore((state) => state.authStatus);
+  const authOrigin = useOnlineStore((state) => state.authOrigin);
+  useSyncExternalStore(subscribeCloudRequests, currentCloudRequestGeneration);
+  const origin = apiHttpOrigin();
+  const unavailable =
+    mode === "online" &&
+    (!userId ||
+      authStatus === "anonymous" ||
+      Boolean(authOrigin && authOrigin !== origin));
+  useEffect(() => {
+    // Expiry must not reopen an old management workflow at the next login.
+    if (open && unavailable)
+      useAppStore.getState().setCharacterLibraryOpen(false);
+  }, [open, unavailable]);
+  // Identity changes discard private state immediately, not after an exit timer.
+  // Rechecking the same identity keeps its draft, but temporarily disables writes.
+  if (!open || unavailable) return null;
+  return (
+    <LibraryWorkspace
+      key={JSON.stringify([
+        mode,
+        mode === "online" ? origin : "local",
+        mode === "online" ? userId : "local",
+      ])}
+      checking={mode === "online" && authStatus === "checking"}
+    />
+  );
+}
+
+function LibraryWorkspace({ checking }: { checking: boolean }) {
+  const alive = useRef(true);
+  const panelRef = useRef<HTMLElement>(null);
+  const reloadSerial = useRef(0);
+  const scope = useRef({
+    mode: useAppStore.getState().mode,
+    origin: apiHttpOrigin(),
+    userId: useOnlineStore.getState().user?.id,
+  }).current;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  // Every multi-stage operation retains its original session, including A→B→A.
+  const beginOperation = () => {
+    const generation = currentCloudRequestGeneration();
+    const assertCurrent = () => {
+      const app = useAppStore.getState();
+      const online = useOnlineStore.getState();
+      if (
+        !alive.current ||
+        !app.characterLibraryOpen ||
+        app.mode !== scope.mode ||
+        (scope.mode === "online" &&
+          (generation !== currentCloudRequestGeneration() ||
+            apiHttpOrigin() !== scope.origin ||
+            online.user?.id !== scope.userId ||
+            online.authStatus !== "authenticated"))
+      ) {
+        throw new ApiError(
+          "服务器或账号已变化，旧操作已停止；已发出的服务端操作不会因此撤销",
+          0,
+          "request_context_changed",
+        );
+      }
+    };
+    assertCurrent();
+    return assertCurrent;
+  };
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState("");
@@ -261,15 +343,48 @@ export function CharacterLibraryPanel() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (busy) panel?.focus();
+    else if (panel && document.activeElement === panel)
+      panel.querySelector<HTMLButtonElement>(".panel-close-btn")?.focus();
+  }, [busy]);
+  useEffect(() => {
+    if (checking)
+      panelRef.current
+        ?.querySelector<HTMLButtonElement>(".panel-close-btn")
+        ?.focus();
+  }, [checking]);
+  const previousView = useRef(view.name);
+  useEffect(() => {
+    if (previousView.current !== view.name) {
+      const panel = panelRef.current;
+      (
+        panel?.querySelector<HTMLElement>("input:not([hidden])") ??
+        panel?.querySelector<HTMLElement>(".panel-close-btn")
+      )?.focus();
+      previousView.current = view.name;
+    }
+  }, [view.name]);
 
   async function reload(selectId?: string) {
+    const serial = ++reloadSerial.current;
     try {
+      const assertCurrent = beginOperation();
       const list = await listCharacterLibrary();
+      assertCurrent();
+      if (serial !== reloadSerial.current) return null;
       setEntries(list);
       setLoadError("");
       if (selectId) setSelectedId(selectId);
       return list;
     } catch (error) {
+      if (
+        !alive.current ||
+        serial !== reloadSerial.current ||
+        (error instanceof ApiError && error.code === "request_context_changed")
+      )
+        return null;
       setLoadError(
         error instanceof ApiError ? error.message : "读取角色库失败，请重试",
       );
@@ -278,17 +393,35 @@ export function CharacterLibraryPanel() {
   }
 
   useEffect(() => {
-    if (!open) return;
-    setView({ name: "list" });
-    setConfirmingDeleteId(null);
-    setNotice("");
-    void reload();
-  }, [open]);
+    if (!checking && entries === null) void reload();
+  }, [checking]);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    panelRef.current
+      ?.querySelector<HTMLButtonElement>(".panel-close-btn")
+      ?.focus();
+    return () => {
+      if (
+        !useAppStore.getState().characterLibraryOpen &&
+        previous instanceof HTMLElement &&
+        previous.isConnected
+      )
+        previous.focus();
+    };
+  }, []);
 
   // Escape 关闭（与其它面板一致）；忙碌（保存/导入中）时不打断。
   useEffect(() => {
-    if (!open) return;
     const listener = (event: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (
+        !panel ||
+        event.isComposing ||
+        !panel.contains(document.activeElement)
+      )
+        return;
+      trapDialogTab(event, panel);
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -297,9 +430,7 @@ export function CharacterLibraryPanel() {
     };
     document.addEventListener("keydown", listener, true);
     return () => document.removeEventListener("keydown", listener, true);
-  }, [open, busy]);
-
-  if (!rendered) return null;
+  }, [busy]);
 
   const close = () => useAppStore.getState().setCharacterLibraryOpen(false);
 
@@ -307,19 +438,30 @@ export function CharacterLibraryPanel() {
 
   return (
     <div
-      className={`character-library-overlay${closing ? " overlay-closing" : ""}`}
+      className="character-library-overlay"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) close();
       }}
     >
-      <div
+      <ArchiveFolderPanel
+        variant="wide"
+        ref={panelRef}
+        tabIndex={-1}
         className="character-library-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="character-library-title"
       >
         <header className="character-library-header">
-          <h2 id="character-library-title">角色库</h2>
+          <div>
+            <p className="library-eyebrow">INVESTIGATOR ARCHIVE</p>
+            <h2 id="character-library-title">角色库</h2>
+            <p className="library-scope">
+              {scope.mode === "online"
+                ? "当前账号的调查员档案"
+                : "此设备的调查员档案"}
+            </p>
+          </div>
           <button
             type="button"
             className="panel-close-btn"
@@ -329,125 +471,151 @@ export function CharacterLibraryPanel() {
             关闭
           </button>
         </header>
-        {view.name === "list" && (
-          <LibraryListView
-            entries={entries}
-            loadError={loadError}
-            notice={notice}
-            selected={selected}
-            selectedId={selectedId}
-            confirmingDeleteId={confirmingDeleteId}
-            busy={busy}
-            onSelect={setSelectedId}
-            onCreate={() => setView({ name: "edit", id: null })}
-            onImport={() => setView({ name: "import" })}
-            onEdit={(id) => setView({ name: "edit", id })}
-            onDuplicate={async (id) => {
-              setBusy(true);
-              try {
-                const clone = await duplicateLibraryEntry(id);
-                await reload(clone.id);
-                notifyLibraryChanged();
-                setNotice(`已复制为「${clone.name}」`);
-              } catch (error) {
-                setNotice(
-                  error instanceof ApiError
-                    ? error.message
-                    : "复制失败，请重试",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-            onExport={async (entry) => {
-              setBusy(true);
-              try {
-                await exportLibraryEntry(entry.id, entry.name);
-                setNotice(`已导出「${entry.name}」`);
-              } catch (error) {
-                setNotice(
-                  error instanceof ApiError
-                    ? error.message
-                    : "导出失败，请重试",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-            onDelete={async (id) => {
-              setBusy(true);
-              try {
-                await deleteLibraryEntry(id);
+        {checking && (
+          <p className="library-notice" role="status">
+            正在复核登录状态，草稿保留；暂不发送操作。
+          </p>
+        )}
+        <fieldset className="library-workspace" disabled={checking || busy}>
+          {view.name === "list" && (
+            <LibraryListView
+              entries={entries}
+              loadError={loadError}
+              notice={notice}
+              selected={selected}
+              selectedId={selectedId}
+              confirmingDeleteId={confirmingDeleteId}
+              busy={busy}
+              onRetry={() => void reload()}
+              onSelect={(id) => {
+                setSelectedId(id);
                 setConfirmingDeleteId(null);
-                if (selectedId === id) setSelectedId(null);
-                await reload();
-                notifyLibraryChanged();
-                setNotice("已删除。已开局世界中的同名角色不受影响。");
-              } catch (error) {
-                setNotice(
-                  error instanceof ApiError
-                    ? error.message
-                    : "删除失败，请重试",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-            onConfirmingDelete={setConfirmingDeleteId}
-          />
-        )}
-        {view.name === "edit" && (
-          <LibraryEditorView
-            entry={entries?.find((entry) => entry.id === view.id) ?? null}
-            busy={busy}
-            onCancel={() => setView({ name: "list" })}
-            onSave={async (draft) => {
-              setBusy(true);
-              try {
-                const original = view.id ? await getLibraryCard(view.id) : {};
-                const payload = draftToCard(draft, original);
-                const result = view.id
-                  ? await updateLibraryEntry(view.id, payload)
-                  : await createLibraryEntry(payload);
-                await reload(result.entry.id);
-                notifyLibraryChanged(view.id ? undefined : result.entry.id);
-                setView({ name: "list" });
-                setNotice(
-                  [
-                    `已保存「${result.entry.name}」`,
-                    ...(result.warnings || []),
-                  ].join("\n"),
-                );
-              } catch (error) {
-                // 保存失败保留草稿：错误抛回编辑器内联展示，不离开编辑视图。
-                if (
-                  error instanceof ApiError &&
-                  error.code === "invalid_card"
-                ) {
-                  throw error;
+              }}
+              onCreate={() => setView({ name: "edit", id: null })}
+              onImport={() => setView({ name: "import" })}
+              onEdit={(id) => setView({ name: "edit", id })}
+              onDuplicate={async (id) => {
+                setBusy(true);
+                try {
+                  const assertCurrent = beginOperation();
+                  const clone = await duplicateLibraryEntry(id);
+                  assertCurrent();
+                  await reload(clone.id);
+                  assertCurrent();
+                  notifyLibraryChanged();
+                  setNotice(`已复制为「${clone.name}」`);
+                } catch (error) {
+                  setNotice(
+                    error instanceof ApiError
+                      ? error.message
+                      : "复制失败，请重试",
+                  );
+                } finally {
+                  setBusy(false);
                 }
-                if (error instanceof ApiError) throw error;
-                throw new ApiError("保存失败，请重试", 0, null);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          />
-        )}
-        {view.name === "import" && (
-          <LibraryImportView
-            busy={busy}
-            setBusy={setBusy}
-            onCancel={() => setView({ name: "list" })}
-            onDone={async (entryId, warnings) => {
-              await reload(entryId);
-              notifyLibraryChanged(entryId);
-              setView({ name: "list" });
-              setNotice(["导入成功。", ...warnings].join("\n"));
-            }}
-          />
-        )}
-      </div>
+              }}
+              onExport={async (entry) => {
+                setBusy(true);
+                try {
+                  const assertCurrent = beginOperation();
+                  await exportLibraryEntry(entry.id, entry.name);
+                  assertCurrent();
+                  setNotice(`已导出「${entry.name}」`);
+                } catch (error) {
+                  setNotice(
+                    error instanceof ApiError
+                      ? error.message
+                      : "导出失败，请重试",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onDelete={async (id) => {
+                setBusy(true);
+                try {
+                  const assertCurrent = beginOperation();
+                  await deleteLibraryEntry(id);
+                  assertCurrent();
+                  setConfirmingDeleteId(null);
+                  if (selectedId === id) setSelectedId(null);
+                  await reload();
+                  assertCurrent();
+                  notifyLibraryChanged();
+                  setNotice("已删除。已开局世界中的同名角色不受影响。");
+                } catch (error) {
+                  setNotice(
+                    error instanceof ApiError
+                      ? error.message
+                      : "删除失败，请重试",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onConfirmingDelete={setConfirmingDeleteId}
+            />
+          )}
+          {view.name === "edit" && (
+            <LibraryEditorView
+              entry={entries?.find((entry) => entry.id === view.id) ?? null}
+              busy={busy}
+              onCancel={() => setView({ name: "list" })}
+              onSave={async (draft) => {
+                setBusy(true);
+                try {
+                  const assertCurrent = beginOperation();
+                  const original = view.id ? await getLibraryCard(view.id) : {};
+                  assertCurrent();
+                  const payload = draftToCard(draft, original);
+                  const result = view.id
+                    ? await updateLibraryEntry(view.id, payload)
+                    : await createLibraryEntry(payload);
+                  assertCurrent();
+                  await reload(result.entry.id);
+                  assertCurrent();
+                  notifyLibraryChanged(view.id ? undefined : result.entry.id);
+                  setView({ name: "list" });
+                  setNotice(
+                    [
+                      `已保存「${result.entry.name}」`,
+                      ...(result.warnings || []),
+                    ].join("\n"),
+                  );
+                } catch (error) {
+                  // 保存失败保留草稿：错误抛回编辑器内联展示，不离开编辑视图。
+                  if (
+                    error instanceof ApiError &&
+                    error.code === "invalid_card"
+                  ) {
+                    throw error;
+                  }
+                  if (error instanceof ApiError) throw error;
+                  throw new ApiError("保存失败，请重试", 0, null);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          )}
+          {view.name === "import" && (
+            <LibraryImportView
+              busy={busy}
+              setBusy={setBusy}
+              beginOperation={beginOperation}
+              onCancel={() => setView({ name: "list" })}
+              onDone={async (entryId, warnings) => {
+                const assertCurrent = beginOperation();
+                await reload(entryId);
+                assertCurrent();
+                notifyLibraryChanged(entryId);
+                setView({ name: "list" });
+                setNotice(["导入成功。", ...warnings].join("\n"));
+              }}
+            />
+          )}
+        </fieldset>
+      </ArchiveFolderPanel>
     </div>
   );
 }
@@ -470,6 +638,7 @@ function LibraryListView({
   onExport,
   onDelete,
   onConfirmingDelete,
+  onRetry,
 }: {
   entries: LibraryEntry[] | null;
   loadError: string;
@@ -486,138 +655,192 @@ function LibraryListView({
   onExport: (entry: LibraryEntry) => void;
   onDelete: (id: string) => void;
   onConfirmingDelete: (id: string | null) => void;
+  onRetry: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const search = query.trim().toLocaleLowerCase();
+  const filtered = (entries ?? []).filter((entry) =>
+    `${entry.name} ${entry.occupation}`.toLocaleLowerCase().includes(search),
+  );
   return (
-    <div className="library-body">
-      <div className="library-list-pane">
-        <div className="library-toolbar">
-          <button
-            type="button"
-            className="btn-primary library-toolbar-btn"
-            onClick={onCreate}
-          >
-            新建角色
-          </button>
-          <button
-            type="button"
-            className="btn-ghost library-toolbar-btn"
-            onClick={onImport}
-          >
-            导入角色卡
-          </button>
-        </div>
-        {loadError && (
-          <p className="online-notice online-notice--error" role="alert">
-            {loadError}
-          </p>
-        )}
-        {entries === null && !loadError && (
-          <p className="library-empty-hint">正在读取角色库…</p>
-        )}
-        {entries !== null && entries.length === 0 && (
-          <div className="library-empty">
-            <p className="library-empty-title">角色库还是空的</p>
-            <p className="library-empty-hint">
-              新建一个角色，或导入 JSON
-              角色卡。这里的角色可以在每次开局时直接选用。
-            </p>
-          </div>
-        )}
-        <ul className="library-list">
-          {(entries ?? []).map((entry) => (
-            <li key={entry.id}>
-              <div
-                className={`library-row${selectedId === entry.id ? " selected" : ""}`}
+    <>
+      <div className="library-toolbar">
+        <button
+          type="button"
+          className="btn-primary library-toolbar-btn"
+          disabled={busy}
+          onClick={onCreate}
+        >
+          新建角色
+        </button>
+        <button
+          type="button"
+          className="btn-ghost library-toolbar-btn"
+          disabled={busy}
+          onClick={onImport}
+        >
+          导入角色卡
+        </button>
+        <span className="library-count">
+          {entries === null ? "读取中" : `${entries.length} 份档案`}
+        </span>
+      </div>
+      <div className="library-body">
+        <div className="library-list-pane">
+          <label className="library-search library-field">
+            <span>查找档案</span>
+            <input
+              type="search"
+              aria-label="查找档案"
+              placeholder="姓名或职业"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          {loadError && (
+            <div>
+              <p className="online-notice online-notice--error" role="alert">
+                {loadError}
+              </p>
+              <button
+                type="button"
+                className="btn-ghost library-toolbar-btn"
+                disabled={busy}
+                onClick={onRetry}
               >
-                <button
-                  type="button"
-                  className="library-row-main"
-                  onClick={() => onSelect(entry.id)}
+                重新读取
+              </button>
+            </div>
+          )}
+          {entries !== null && entries.length > 0 && filtered.length === 0 && (
+            <p className="library-empty-hint" role="status">
+              没有匹配的档案，试试其他姓名或职业。
+            </p>
+          )}
+          {entries === null && !loadError && (
+            <p className="library-empty-hint">正在读取角色库…</p>
+          )}
+          {entries !== null && entries.length === 0 && (
+            <div className="library-empty">
+              <p className="library-empty-title">角色库还是空的</p>
+              <p className="library-empty-hint">
+                新建一个角色，或导入 JSON
+                角色卡。这里的角色可以在每次开局时直接选用。
+              </p>
+            </div>
+          )}
+          <ul className="library-list">
+            {filtered.map((entry) => (
+              <li key={entry.id}>
+                <div
+                  className={`library-row${selectedId === entry.id ? " selected" : ""}`}
                 >
-                  <span className="library-row-name">{entry.name}</span>
-                  <span className="library-row-meta">
-                    {entry.occupation || "调查员"} · HP {entry.hp} · SAN{" "}
-                    {entry.san}
-                  </span>
-                  <span className="library-row-time">
-                    {formatTime(entry.updated_at)}
-                  </span>
-                </button>
-                <div className="library-row-actions">
                   <button
                     type="button"
-                    className="btn-ghost library-row-btn"
-                    onClick={() => onEdit(entry.id)}
+                    className="library-row-main"
+                    aria-pressed={selectedId === entry.id}
+                    onClick={() => onSelect(entry.id)}
                   >
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost library-row-btn"
-                    disabled={busy}
-                    onClick={() => onDuplicate(entry.id)}
-                  >
-                    复制
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost library-row-btn"
-                    disabled={busy}
-                    onClick={() => onExport(entry)}
-                  >
-                    导出
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost library-row-btn library-row-delete"
-                    disabled={busy}
-                    onClick={() => onConfirmingDelete(entry.id)}
-                  >
-                    删除
+                    <span className="library-row-name">{entry.name}</span>
+                    <span className="library-row-meta">
+                      {entry.occupation || "调查员"} · HP {entry.hp} · SAN{" "}
+                      {entry.san}
+                    </span>
+                    <span className="library-row-time">
+                      {formatTime(entry.updated_at)}
+                    </span>
                   </button>
                 </div>
-              </div>
-              {confirmingDeleteId === entry.id && (
-                <div className="library-delete-confirm" role="group">
-                  <span>
-                    确认删除「{entry.name}
-                    」？已开局世界与历史存档中的该角色不受影响。
-                  </span>
-                  <button
-                    type="button"
-                    className="btn-ghost library-row-btn library-row-delete"
-                    disabled={busy}
-                    onClick={() => onDelete(entry.id)}
-                  >
-                    确认删除
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost library-row-btn"
-                    disabled={busy}
-                    onClick={() => onConfirmingDelete(null)}
-                  >
-                    取消
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-        {notice && (
-          <p className="library-notice" role="status">
-            {notice}
-          </p>
-        )}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="library-detail-pane">
+          {selected ? (
+            <CharacterDossier
+              key={selected.id}
+              character={toOption(selected)}
+            />
+          ) : (
+            <div className="character-detail-empty">
+              选择一份角色档案查看详情
+            </div>
+          )}
+        </div>
       </div>
-      <div className="library-detail-pane">
-        {selected ? (
-          <CharacterDossier key={selected.id} character={toOption(selected)} />
-        ) : (
-          <div className="character-detail-empty">选择左侧角色查看档案</div>
-        )}
-      </div>
-    </div>
+      {notice && (
+        <p className="library-notice" role="status">
+          {notice}
+        </p>
+      )}
+      {selected && (
+        <footer className="library-management" aria-label="所选角色管理">
+          {confirmingDeleteId === selected.id ? (
+            <div
+              className="library-delete-confirm"
+              role="group"
+              aria-label="确认删除角色"
+            >
+              <span>
+                确认删除「{selected.name}
+                」？已开局世界与历史存档中的该角色不受影响。
+              </span>
+              <button
+                type="button"
+                className="btn-ghost library-row-btn library-row-delete"
+                disabled={busy}
+                onClick={() => onDelete(selected.id)}
+              >
+                确认删除
+              </button>
+              <button
+                type="button"
+                className="btn-ghost library-row-btn"
+                disabled={busy}
+                onClick={() => onConfirmingDelete(null)}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <div className="library-row-actions">
+              <button
+                type="button"
+                className="btn-primary library-row-btn"
+                disabled={busy}
+                onClick={() => onEdit(selected.id)}
+              >
+                编辑
+              </button>
+              <button
+                type="button"
+                className="btn-ghost library-row-btn"
+                disabled={busy}
+                onClick={() => onDuplicate(selected.id)}
+              >
+                复制
+              </button>
+              <button
+                type="button"
+                className="btn-ghost library-row-btn"
+                disabled={busy}
+                onClick={() => onExport(selected)}
+              >
+                导出
+              </button>
+              <button
+                type="button"
+                className="btn-ghost library-row-btn library-row-delete"
+                disabled={busy}
+                onClick={() => onConfirmingDelete(selected.id)}
+              >
+                删除
+              </button>
+            </div>
+          )}
+        </footer>
+      )}
+    </>
   );
 }
 
@@ -877,11 +1100,13 @@ function LibraryEditorView({
 function LibraryImportView({
   busy,
   setBusy,
+  beginOperation,
   onCancel,
   onDone,
 }: {
   busy: boolean;
   setBusy: (busy: boolean) => void;
+  beginOperation: () => () => void;
   onCancel: () => void;
   onDone: (entryId: string, warnings: string[]) => Promise<void>;
 }) {
@@ -895,8 +1120,18 @@ function LibraryImportView({
     preview: LibraryEntry | null;
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const alive = useRef(true);
+  const fileSerial = useRef(0);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const inspectFile = async (file: File) => {
+    const serial = ++fileSerial.current;
+    let assertCurrent: () => void;
     setFileError("");
     setResult(null);
     if (file.size > MAX_FILE_BYTES) {
@@ -907,14 +1142,22 @@ function LibraryImportView({
     }
     let payload: unknown;
     try {
+      assertCurrent = beginOperation();
       payload = JSON.parse(await readFileText(file));
-    } catch {
-      setFileError("文件不是合法的 JSON");
+      assertCurrent();
+      if (!alive.current || serial !== fileSerial.current) return;
+    } catch (error) {
+      if (!alive.current || serial !== fileSerial.current) return;
+      setFileError(
+        error instanceof ApiError ? error.message : "文件不是合法的 JSON",
+      );
       return;
     }
     setInspecting(true);
     try {
       const inspected = await inspectLibraryCard(payload);
+      assertCurrent();
+      if (!alive.current || serial !== fileSerial.current) return;
       setResult({
         payload,
         ok: inspected.ok,
@@ -923,11 +1166,12 @@ function LibraryImportView({
         preview: inspected.preview ?? null,
       });
     } catch (error) {
+      if (!alive.current || serial !== fileSerial.current) return;
       setFileError(
         error instanceof ApiError ? error.message : "校验请求失败，请重试",
       );
     } finally {
-      setInspecting(false);
+      if (alive.current && serial === fileSerial.current) setInspecting(false);
     }
   };
 
@@ -935,12 +1179,16 @@ function LibraryImportView({
     if (!result?.ok) return;
     setBusy(true);
     try {
+      const assertCurrent = beginOperation();
       const created = await createLibraryEntry(result.payload);
+      assertCurrent();
+      if (!alive.current) return;
       await onDone(created.entry.id, [
         ...(result.warnings || []),
         ...(created.warnings || []),
       ]);
     } catch (error) {
+      if (!alive.current) return;
       setFileError(
         error instanceof ApiError ? error.message : "导入失败，请重试",
       );

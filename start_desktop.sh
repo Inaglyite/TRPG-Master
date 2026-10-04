@@ -40,9 +40,73 @@ backend_dependencies_available() {
     return 1
 }
 
+backend_virtualenv_usable() {
+    local environment="$1"
+    [ -f "$environment/bin/activate" ] && [ -x "$environment/bin/python3" ] || return 1
+    "$environment/bin/python3" -c '
+import pathlib
+import re
+import sys
+
+if sys.version_info < (3, 12) or sys.prefix == sys.base_prefix:
+    raise SystemExit(1)
+config = pathlib.Path(sys.prefix, "pyvenv.cfg").read_text(encoding="utf-8")
+recorded = re.search(r"(?m)^(?:version|version_info)\s*=\s*(\d+)\.(\d+)", config)
+if recorded is None or tuple(map(int, recorded.groups())) != sys.version_info[:2]:
+    raise SystemExit(1)
+' >/dev/null 2>&1
+}
+
+activate_backend_environment() {
+    local environment
+    local existing_environment=false
+    for environment in venv .venv; do
+        if [ ! -d "$environment" ]; then
+            continue
+        fi
+        existing_environment=true
+        if backend_virtualenv_usable "$environment"; then
+            # shellcheck disable=SC1090
+            source "$environment/bin/activate"
+            return 0
+        fi
+        echo "⚠️  $environment 虚拟环境已失效或 Python 版本不匹配，尝试其他环境..."
+    done
+
+    if backend_dependencies_available; then
+        # Reuse an already provisioned CI/container/development interpreter.
+        return 0
+    fi
+    if [ "$existing_environment" = true ]; then
+        echo "❌ 没有可用的后端虚拟环境；系统升级可能改变了 Python 版本。"
+        echo "请先备份旧环境，再使用 Python 3.12+ 修复或重建，勿直接覆盖旧依赖。"
+        return 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1 \
+        || ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+        echo "❌ 未找到 Python 3.12+，无法启动本地单机后端"
+        return 1
+    fi
+    echo "首次启动：创建 Python 虚拟环境..."
+    python3 -m venv venv || {
+        echo "❌ 虚拟环境创建失败；Debian/Ubuntu 请先安装 python3-venv"
+        return 1
+    }
+    # shellcheck disable=SC1091
+    source venv/bin/activate
+}
+
 ensure_backend_dependencies() {
     if backend_dependencies_available; then
         return 0
+    fi
+
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        echo "虚拟环境缺少 pip，尝试修复..."
+        python3 -m ensurepip --upgrade || {
+            echo "❌ 无法修复 pip；请安装对应版本的 python3-venv 并重建虚拟环境"
+            return 1
+        }
     fi
 
     echo "安装/更新后端依赖..."
@@ -56,30 +120,7 @@ run_backend() {
     # Backend setup is intentionally inside this function. Merely opening the
     # desktop launcher or choosing cloud multiplayer must not touch local
     # Python dependencies, the SQLite database, or legacy world files.
-    if [ -f venv/bin/activate ]; then
-        # shellcheck disable=SC1091
-        source venv/bin/activate
-    elif [ -f .venv/bin/activate ]; then
-        # shellcheck disable=SC1091
-        source .venv/bin/activate
-    elif backend_dependencies_available; then
-        # CI、容器或开发机可能已经在受控 Python 环境中安装完整依赖。
-        # 此时直接复用，避免为了“形式上的 venv”再次联网安装。
-        :
-    else
-        if ! command -v python3 >/dev/null 2>&1; then
-            echo "❌ 未找到 Python 3.12+，无法启动本地单机后端"
-            return 1
-        fi
-        echo "首次启动：创建 Python 虚拟环境..."
-        python3 -m venv venv || {
-            echo "❌ 虚拟环境创建失败；Debian/Ubuntu 请先安装 python3-venv"
-            return 1
-        }
-        # shellcheck disable=SC1091
-        source venv/bin/activate
-    fi
-
+    activate_backend_environment || return 1
     ensure_backend_dependencies || return 1
 
     local runtime_root="${TRPG_RUNTIME_ROOT:-$SCRIPT_DIR}"

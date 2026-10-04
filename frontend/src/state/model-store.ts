@@ -194,6 +194,7 @@ type ModelState = {
   statusKind: string;
   diagnostics: TurnDiagnostics | null;
   diagnosticsLoading: boolean;
+  diagnosticsError: string | null;
   contextSummary: ContextSummary | null;
 };
 
@@ -216,5 +217,6 @@ export const useModelStore = create<ModelState>(() => ({
   statusKind: "",
   diagnostics: null,
   diagnosticsLoading: false,
+  diagnosticsError: null,
   contextSummary: null,
 }));

@@ -5,9 +5,9 @@
  * 测试连接（连通性/生成/能力探针）→ 保存（下回合生效）→ 真实回合确实切到
  * 自定义模型 → 上下文摘要出现 → 刷新后配置回填且 Key 不回显 → 恢复默认。
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -19,6 +19,7 @@ const port = 8778;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 let runtimeRoot = "";
+let packagePath = "";
 let server: ChildProcess | null = null;
 let serverOutput = "";
 let modelServer: Server | null = null;
@@ -148,6 +149,19 @@ test.beforeAll(async () => {
   const python =
     process.env.TRPG_E2E_PYTHON ??
     (existsSync(repositoryPython) ? repositoryPython : "python");
+  packagePath = join(runtimeRoot, "review.trpgmod");
+  const packed = spawnSync(
+    python,
+    [
+      "tools/module_packager.py",
+      "pack",
+      "examples/module-template",
+      packagePath,
+    ],
+    { cwd: repositoryRoot, encoding: "utf8" },
+  );
+  if (packed.status !== 0)
+    throw new Error(`E2E package creation failed: ${packed.stderr}`);
   server = spawn(
     python,
     [
@@ -311,4 +325,204 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
   await expect(
     narrativeCard2.getByRole("button", { name: "跟随默认" }),
   ).toHaveAttribute("aria-pressed", "true");
+});
+
+const viewports = [
+  { width: 1280, height: 800 },
+  { width: 939, height: 620 },
+  { width: 640, height: 520 },
+  { width: 390, height: 360 },
+];
+async function verifyFooter(page: Page, panelId: string, selector: string) {
+  const metrics = await page.locator(panelId).evaluate((panel, selector) => {
+    const box = panel.getBoundingClientRect();
+    return Array.from(panel.querySelectorAll<HTMLButtonElement>(selector)).map(
+      (button) => {
+        const b = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return {
+          label: button.textContent?.trim(),
+          width: b.width,
+          height: b.height,
+          left: b.left,
+          right: b.right,
+          top: b.top,
+          bottom: b.bottom,
+          panelLeft: box.left,
+          panelRight: box.right,
+          padding: parseFloat(style.paddingLeft),
+          whiteSpace: style.whiteSpace,
+          hit: button.contains(
+            document.elementFromPoint(
+              b.left + b.width / 2,
+              b.top + b.height / 2,
+            ),
+          ),
+        };
+      },
+    );
+  }, selector);
+  for (const metric of metrics) {
+    expect(metric.height, metric.label).toBeGreaterThanOrEqual(44);
+    expect(metric.padding, metric.label).toBeGreaterThanOrEqual(10);
+    expect(metric.whiteSpace, metric.label).toBe("nowrap");
+    expect(metric.hit, metric.label).toBe(true);
+    expect(metric.left).toBeGreaterThanOrEqual(metric.panelLeft);
+    expect(metric.right).toBeLessThanOrEqual(metric.panelRight + 1);
+    expect(metric.top).toBeGreaterThanOrEqual(0);
+    expect(metric.bottom).toBeLessThanOrEqual(page.viewportSize()!.height);
+  }
+}
+
+test("档案夹模型设置：四种窗口、真实配置读取、键盘分页、独立正文滚动", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+  await page.locator("#btn-settings").click();
+  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  await expect(dialog.locator('[data-role="narrative"]')).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "关闭模型设置" }),
+  ).toBeFocused();
+  for (const role of ["narrative", "judgement"]) {
+    await dialog
+      .locator(`[data-role="${role}"]`)
+      .getByRole("button", { name: "自定义服务" })
+      .click();
+  }
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(1000); // Screenshots after nonessential enter/resize effects settle.
+    await page.locator(".model-settings-body").evaluate((node) => {
+      node.scrollTop = 0;
+    });
+    await verifyFooter(
+      page,
+      "#model-settings-panel",
+      ".model-settings-actions button",
+    );
+    const body = await page
+      .locator(".model-settings-body")
+      .evaluate((node) => ({
+        client: node.clientHeight,
+        scroll: node.scrollHeight,
+      }));
+    // Even a 390x360 short window needs a real reading area, not a one-line
+    // viewport squeezed between the title/tabs and two rows of footer buttons.
+    expect(body.client).toBeGreaterThanOrEqual(100);
+    expect(body.scroll).toBeGreaterThan(body.client);
+    await page.screenshot({
+      path: `/tmp/trpg-model-settings-${viewport.width}.png`,
+    });
+    const save = dialog.locator("#model-settings-save");
+    await save.focus();
+    await page.keyboard.press("Tab");
+    await expect(
+      dialog.getByRole("button", { name: "关闭模型设置" }),
+    ).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(save).toBeFocused();
+  }
+  const lastField = dialog
+    .locator('[data-role="judgement"]')
+    .getByPlaceholder("deepseek-flash");
+  await lastField.fill("layout-test-unsaved");
+  await expect
+    .poll(async () => {
+      const fieldBox = await lastField.boundingBox();
+      const bodyBox = await page.locator(".model-settings-body").boundingBox();
+      return (
+        fieldBox!.y >= bodyBox!.y &&
+        fieldBox!.y + fieldBox!.height <= bodyBox!.y + bodyBox!.height
+      );
+    })
+    .toBe(true);
+  await page.screenshot({ path: "/tmp/trpg-model-settings-short-field.png" });
+  const modelsTab = dialog.getByRole("tab", { name: "模型配置" });
+  await modelsTab.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(dialog.getByRole("tab", { name: "上下文" })).toBeFocused();
+  await expect(dialog.getByRole("tabpanel")).toHaveAttribute(
+    "aria-labelledby",
+    "model-settings-tab-context",
+  );
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#btn-settings")).toBeFocused();
+});
+
+test("档案夹模组导入：真实打包检查与安装，四种窗口，检查失败后原文件重试", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+  let rejectFirst = true;
+  let failNetwork = true;
+  await page.route("**/api/modules/inspect", async (route) => {
+    if (!rejectFirst) {
+      if (failNetwork) {
+        failNetwork = false;
+        return route.abort("failed");
+      }
+      return route.continue();
+    }
+    rejectFirst = false;
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: false,
+        error: "测试：暂时无法检查",
+        details: ["请重试原文件"],
+      }),
+    });
+  });
+  await page.locator("#btn-import-module").focus();
+  // Real packager output, transferred as bytes so Snap Chromium does not
+  // need to read the Node process's distinct /tmp filesystem namespace.
+  await page.locator("#module-file-input").setInputFiles({
+    name: "review.trpgmod",
+    mimeType: "application/zip",
+    buffer: readFileSync(packagePath),
+  });
+  const dialog = page.getByRole("dialog", { name: "导入模组" });
+  await expect(dialog.getByText(/请重试原文件/)).toBeVisible();
+  await dialog.getByRole("button", { name: "重新检查" }).click();
+  await expect(dialog.getByText(/可能是连接中断或文件无法读取/)).toBeVisible();
+  await dialog.getByRole("button", { name: "重新检查" }).click();
+  await expect(dialog.locator("#module-import-name")).toHaveText("低语档案馆");
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(1000);
+    await verifyFooter(
+      page,
+      "#module-import-panel",
+      ".module-import-actions button",
+    );
+    await page.screenshot({
+      path: `/tmp/trpg-module-import-${viewport.width}.png`,
+    });
+  }
+  const confirm = dialog.getByRole("button", { name: "导入并切换" });
+  await confirm.focus();
+  await page.keyboard.press("Tab");
+  await expect(
+    dialog.getByRole("button", { name: "关闭模组导入" }),
+  ).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(confirm).toBeFocused();
+  await confirm.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#start-title")).toHaveText("低语档案馆");
+  const installed = await page.request.get(`${baseUrl}/api/modules`);
+  expect((await installed.json()).modules).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "example.whispering-archive@1.0.0",
+        source: "user",
+      }),
+    ]),
+  );
+  await expect(page.locator("#btn-import-module")).toBeFocused();
 });

@@ -379,6 +379,7 @@ class StructuredPlayService:
                                     "request_id": request_id,
                                     "investigator_id": investigator_id,
                                     "summary": self._request_summary(action),
+                                    "action": copy.deepcopy(action),
                                 },
                                 {"kind": "keeper"},
                             ),
@@ -432,6 +433,7 @@ class StructuredPlayService:
                             "request_id": request_id,
                             "investigator_id": investigator_id,
                             "summary": summary,
+                            "action": copy.deepcopy(action),
                         },
                         {"kind": "keeper"},
                     ),
@@ -835,6 +837,21 @@ class StructuredPlayService:
                 .all()
             )
             cursor = self._next_sequence(session, world_id) - 1
+            from .message_history import visible_message_history
+
+            message_history = (
+                visible_message_history(session, world_id, principal, state)
+                if principal.kind != "agent"
+                else None
+            )
+            from .history_archive import visible_archive_history
+
+            branch_metadata = meta.get("branch") or {}
+            inherited_history = (
+                visible_archive_history(session, world_id, principal)
+                if principal.kind != "agent" and branch_metadata.get("history_archive_version") == 1
+                else None
+            )
             last_event_id = session.execute(
                 select(func.max(EventOutbox.id)).where(EventOutbox.world_id == world_id)
             ).scalar_one()
@@ -866,11 +883,21 @@ class StructuredPlayService:
             request_entries = [
                 {
                     "request_id": req.request_id,
+                    "request_type": req.request_type,
+                    **({"investigator_id": req.investigator_id} if req.investigator_id else {}),
                     "status": req.status,
                     "summary": (
                         str((req.payload or {}).get("draft", {}).get("summary") or "")[:200]
                         if req.request_type == "keeper_draft"
                         else self._request_summary((req.payload or {}).get("action") or {})
+                    ),
+                    **(
+                        {
+                            "investigator_id": req.investigator_id,
+                            "action": copy.deepcopy((req.payload or {})["action"]),
+                        }
+                        if principal.kind == "keeper" and (req.payload or {}).get("action")
+                        else {}
                     ),
                     # 暂停/失败原因对本人与主持可见（可操作提示：缺 BYOK、被截断等），
                     # 刷新后客户端不只能看到「已暂停」而不知道发生了什么。
@@ -941,6 +968,32 @@ class StructuredPlayService:
                 "sequence": max(cursor, 0),
             },
         }
+        # Room lobby recovery precedes roster materialization. Include the
+        # member's own card on structured start/reconnect; no model is needed.
+        if principal.kind != "agent":
+            from .materials import own_character
+            from .received_materials import received_assets
+
+            payload["character"] = own_character(state, sorted(own)[0] if own else "")
+            payload["received_assets"] = received_assets(state, tuple(own))
+            payload["message_history"] = message_history
+            if inherited_history is not None:
+                payload["inherited_message_history"] = inherited_history
+                if branch_metadata.get("history_archive_incomplete") is True:
+                    payload["inherited_history_incomplete"] = True
+            elif branch_metadata:
+                payload["inherited_history_unavailable"] = True
+        # Human references are opt-in private UI data. Do not inflate Agent
+        # contexts: its grounding/retrieval paths already have their own budgets.
+        if principal.kind == "keeper":
+            from .domains import _inventory_projection
+            from .materials import keeper_assets, keeper_investigators, keeper_material
+
+            payload["keeper_material"] = keeper_material(state)
+            payload["keeper_assets"] = keeper_assets(state)
+            payload["keeper_investigators"] = keeper_investigators(state)
+            for sheet in payload["keeper_investigators"]:
+                sheet["inventory"] = _inventory_projection(state, sheet["investigator_id"])
         return payload
 
     def replay_events(

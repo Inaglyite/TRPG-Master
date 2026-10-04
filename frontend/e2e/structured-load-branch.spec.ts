@@ -18,7 +18,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { expect, request, test, type Page } from "@playwright/test";
+import {
+  expect,
+  request,
+  test,
+  type Page,
+  type Locator,
+} from "@playwright/test";
 
 import { openLocalStartScreen } from "./readiness";
 
@@ -276,7 +282,7 @@ function eventPayload(frames: string[], type: string) {
 
 async function fillKeeperField(page: Page, field: string, value: string) {
   const locator = page.locator(
-    `[data-field="${field}"] select, [data-field="${field}"] input, [data-field="${field}"] textarea`,
+    `[data-field="${field}"] select, [data-field="${field}"] input:not([type="checkbox"]), [data-field="${field}"] textarea`,
   );
   const tag = await locator.evaluate((node) => node.tagName);
   if (tag === "SELECT") await locator.selectOption(value);
@@ -284,16 +290,16 @@ async function fillKeeperField(page: Page, field: string, value: string) {
 }
 
 async function openConsole(page: Page) {
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
   await page.getByTestId("btn-keeper-console").click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
 }
 
 async function closeConsole(page: Page) {
   await page.getByRole("button", { name: "关闭主持台" }).click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
 }
@@ -374,6 +380,18 @@ async function keeperMove(page: Page, destinationId: string) {
   await closeConsole(page);
 }
 
+async function publishNarrative(page: Page, text: string) {
+  await openConsole(page);
+  await page.getByTestId("keeper-cmd-publish_message").click();
+  await fillKeeperField(page, "speaker_kind", "keeper");
+  await fillKeeperField(page, "audience_kind", "public");
+  await fillKeeperField(page, "text", text);
+  await page.getByTestId("keeper-submit").click();
+  await expect(page.getByTestId("keeper-submit")).toBeEnabled();
+  await closeConsole(page);
+  await expect(page.locator("#messages")).toContainText(text);
+}
+
 /** 主持记录一条角色记忆（保持主持台打开，便于接着查询）。 */
 async function recordMemory(
   page: Page,
@@ -418,21 +436,27 @@ async function queryMemories(page: Page, topic: string): Promise<string> {
 /** 打开「前往」对话框并读取实时目的地列表。 */
 async function openMoveDialog(
   page: Page,
+  frames: Frames,
 ): Promise<Array<{ id: string; name: string }>> {
   await page.getByTestId("btn-move").click();
   await expect(page.getByRole("dialog", { name: /前往/ })).toBeVisible({
     timeout: 10_000,
   });
-  return page.locator(".structured-destination").evaluateAll((nodes) =>
-    nodes.map((node) => ({
-      name: (
-        node.querySelector(".structured-destination-name")?.textContent ?? ""
-      ).trim(),
-      id: (
-        node.querySelector(".structured-destination-id")?.textContent ?? ""
-      ).trim(),
-    })),
-  );
+  // Player-facing cards intentionally no longer print technical IDs. Resolve
+  // the visible names against the actual public snapshot, not removed markup.
+  const snapshot = JSON.parse(framesOf(frames, "session_snapshot").at(-1)!);
+  const destinations = snapshot.payload.destinations as Array<{
+    id: string;
+    name: string;
+  }>;
+  const names = await page
+    .locator(".structured-destination-name")
+    .allTextContents();
+  return names.map((name) => {
+    const matches = destinations.filter((entry) => entry.name === name.trim());
+    expect(matches, "公开目的地名称须能唯一对应真实快照标识").toHaveLength(1);
+    return matches[0];
+  });
 }
 
 /** 主持快速存档，等到服务端回执 ok。 */
@@ -470,6 +494,172 @@ async function loadAutoSave(page: Page, frames: Frames) {
     .toBeGreaterThan(snapshotsBefore);
 }
 
+async function saveButtonGeometry(button: Locator) {
+  const measured = await button.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return {
+      height: box.height,
+      padding: parseFloat(getComputedStyle(node).paddingLeft),
+      nowrap: getComputedStyle(node).whiteSpace,
+      inside:
+        box.top >= 0 &&
+        box.bottom <= innerHeight &&
+        box.left >= 0 &&
+        box.right <= innerWidth,
+      hit: node.contains(
+        document.elementFromPoint(
+          box.x + box.width / 2,
+          box.y + box.height / 2,
+        ),
+      ),
+    };
+  });
+  expect(measured.height).toBeGreaterThanOrEqual(44);
+  expect(measured.padding).toBeGreaterThanOrEqual(10);
+  expect(measured.nowrap).toBe("nowrap");
+  expect(measured.inside).toBe(true);
+  expect(measured.hit).toBe(true);
+}
+
+test("存档档案夹：真实后端确认读档与删除、短窗口键盘和按钮可达", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const frames = collectFrames(page);
+  await bootWorld(page, frames);
+  const modelCount = modelRequests.length;
+  await openConsole(page);
+  await page.getByTestId("keeper-save-panel").click();
+  const panel = page.locator("#save-panel");
+  await panel.locator(".adventure-card.current .adventure-manage").click();
+  await expect(page.getByTestId("save-panel-timelines")).toBeVisible();
+  const savedBefore = framesOf(frames, "saved").length;
+  await panel.getByRole("button", { name: "新建存档点", exact: true }).click();
+  await expect
+    .poll(() => framesOf(frames, "saved").length)
+    .toBeGreaterThan(savedBefore);
+  const manual = panel.locator('.slot-row:not([data-slot="slot_000"])').first();
+  await expect(manual).toBeVisible();
+  const slotId = await manual.getAttribute("data-slot");
+  expect(slotId).toBeTruthy();
+  // A cancellation must not produce a save_load frame or loaded acknowledgement.
+  const countSent = (type: string) =>
+    frames.sent.filter((item) => JSON.parse(item).type === type).length;
+  const loadBefore = countSent("save_load");
+  await manual.getByRole("button", { name: "读取", exact: true }).click();
+  const group = panel.locator(".save-point-confirmation");
+  await expect(
+    group.getByRole("button", { name: "取消", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(group).toHaveCount(0);
+  await expect(
+    manual.getByRole("button", { name: "读取", exact: true }),
+  ).toBeFocused();
+  expect(countSent("save_load")).toBe(loadBefore);
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 360 : 600 });
+    await manual.getByRole("button", { name: "读取", exact: true }).click();
+    await expect(group).toBeVisible();
+    await saveButtonGeometry(
+      panel.getByRole("button", { name: "关闭存档管理" }),
+    );
+    await saveButtonGeometry(
+      group.getByRole("button", { name: "取消", exact: true }),
+    );
+    await saveButtonGeometry(
+      group.getByRole("button", { name: "确认读取", exact: true }),
+    );
+    await page.screenshot({ path: `/tmp/trpg-save-panel-${width}.png` });
+    await group.getByRole("button", { name: "取消", exact: true }).click();
+    expect(countSent("save_load")).toBe(loadBefore);
+  }
+  await page.setViewportSize({ width: 939, height: 600 });
+  await manual.getByRole("button", { name: "重命名", exact: true }).click();
+  const rename = manual.locator("input");
+  await rename.fill("真实测试 · 图书馆存档");
+  const renameBefore = countSent("save_rename");
+  await rename.dispatchEvent("keydown", { key: "Enter", isComposing: true });
+  expect(countSent("save_rename")).toBe(renameBefore);
+  await page.keyboard.press("Enter");
+  await expect(manual).toContainText("真实测试 · 图书馆存档");
+  await manual.getByRole("button", { name: "读取", exact: true }).click();
+  const loadedBefore = framesOf(frames, "loaded").length;
+  await group.getByRole("button", { name: "确认读取", exact: true }).click();
+  await expect
+    .poll(() => framesOf(frames, "loaded").length)
+    .toBeGreaterThan(loadedBefore);
+  expect(
+    JSON.parse(
+      frames.sent
+        .filter((item) => JSON.parse(item).type === "save_load")
+        .at(-1)!,
+    ).slot_id,
+  ).toBe(slotId);
+  await expect(panel).toBeHidden();
+  // Save management is layered over, not destructive to, the keeper dialog.
+  // Loading closes only that layer; the original console remains available.
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
+  await page.getByTestId("keeper-save-panel").click();
+  await panel.locator(".adventure-card.current .adventure-manage").click();
+  const deletedBefore = framesOf(frames, "save_deleted").length;
+  const deleteBefore = countSent("save_delete");
+  await manual.getByRole("button", { name: "删除", exact: true }).click();
+  await group.getByRole("button", { name: "取消", exact: true }).click();
+  expect(countSent("save_delete")).toBe(deleteBefore);
+  await manual.getByRole("button", { name: "删除", exact: true }).click();
+  await group.getByRole("button", { name: "确认删除存档点" }).click();
+  await expect
+    .poll(() => framesOf(frames, "save_deleted").length)
+    .toBeGreaterThan(deletedBefore);
+  await expect(panel.locator(`.slot-row[data-slot="${slotId}"]`)).toHaveCount(
+    0,
+  );
+  expect(modelRequests.length).toBe(modelCount);
+});
+
+test("玩家取消：刷新恢复的本人 queued 行动可申请取消，回执前不假装成功", async ({
+  page,
+}) => {
+  const frames = collectFrames(page);
+  await bootWorld(page, frames);
+  const modelBefore = modelRequests.length;
+  const scene = await page.locator(".header-scene-name").innerText();
+  const id = await playerText(
+    page,
+    frames,
+    "我想先调查图书馆，请暂时记在待办里。",
+  );
+  const card = page.locator(`.action-status-card[data-request-id="${id}"]`);
+  await expect(card).toContainText("已收件，待守秘人处理");
+  await page.reload();
+  await expect(page.locator(".boot-loader")).toBeHidden();
+  const cancel = card.getByTestId("structured-cancel-action");
+  await expect(cancel).toBeEnabled();
+  for (const width of [1280, 939, 640]) {
+    await page.setViewportSize({ width, height: 700 });
+    await cancel.scrollIntoViewIfNeeded();
+    await saveButtonGeometry(cancel);
+    await page.screenshot({ path: `/tmp/trpg-action-cancel-${width}.png` });
+  }
+  const sentBefore = frames.sent.filter(
+    (item) => JSON.parse(item).type === "cancel_request",
+  ).length;
+  await cancel.click();
+  await expect(card).toContainText("已取消");
+  const cancellations = frames.sent.filter(
+    (item) => JSON.parse(item).type === "cancel_request",
+  );
+  expect(cancellations.length).toBe(sentBefore + 1);
+  const frame = JSON.parse(cancellations.at(-1)!);
+  expect(frame.target_request_id).toBe(id);
+  expect(frame.request_id).not.toBe(id);
+  await expect(cancel).toHaveCount(0);
+  expect(await page.locator(".header-scene-name").innerText()).toBe(scene);
+  expect(eventPayload(frames.received, "scene_changed")).toHaveLength(0);
+  expect(modelRequests.length).toBe(modelBefore);
+});
+
 test("主动读档：存档点之后的进度不复活；重连不等于读档", async ({ page }) => {
   test.setTimeout(600_000);
   page.setDefaultTimeout(30_000);
@@ -485,10 +675,15 @@ test("主动读档：存档点之后的进度不复活；重连不等于读档",
   await openConsole(page);
   await recordMemory(page, investigatorId, preMemory, "e2e-readsave");
   expect(await queryMemories(page, "e2e-readsave")).toContain(preMemory);
+  const preNarrative = "存档之前的公开叙事：雨停了。";
+  await closeConsole(page);
+  await publishNarrative(page, preNarrative);
 
   // 1) 存档：此后的一切都属于「被回滚的未来」
-  await closeConsole(page);
   await quickSave(page, frames);
+
+  const postNarrative = "同版本的未来叙事：窗外又响起钟声。";
+  await publishNarrative(page, postNarrative); // narration itself does not bump revision
 
   // 2) 存档点之后：一条记忆、一条未执行待办、一次真实移动、又一条未执行待办
   const postMemory = "存档点之后：在码头找到了失窃的木箱。";
@@ -500,8 +695,12 @@ test("主动读档：存档点之后的进度不复活；重连不等于读档",
   ).toContain(postMemory);
   await closeConsole(page);
 
-  const destinations = await openMoveDialog(page);
+  const destinations = await openMoveDialog(page, frames);
   const target = destinations[0];
+  expect(
+    target.id,
+    "目的地稳定标识来自权威快照，而非已移除的玩家侧技术 ID 文案",
+  ).not.toBe("");
   await page.getByRole("button", { name: "取消" }).click();
 
   const pendingId = await playerText(
@@ -555,6 +754,8 @@ test("主动读档：存档点之后的进度不复活；重连不等于读档",
   await expect(page.getByTestId("structured-interaction-card")).toHaveCount(0);
   await expect(page.getByTestId("structured-awaiting")).toHaveCount(0);
   await expect(page.getByText("等你回应")).toHaveCount(0);
+  await expect(page.locator("#messages")).toContainText(preNarrative);
+  await expect(page.locator("#messages")).not.toContainText(postNarrative);
   // 存档点之后的记忆查不到，存档点之前的仍在
   await openConsole(page);
   const afterLoad = await queryMemories(page, "e2e-readsave");
@@ -584,6 +785,27 @@ test("分支：结构化世界可从当前进度分叉，且检索不到原世�
   const investigatorId = String(snapshot.payload?.investigator_id || "pc");
 
   // 分叉点之前的共同经历
+  const modelCallsBeforeBranch = modelRequests.length;
+  const sharedNarrative = "分叉前的公开叙事：窗外的雨声没有停。";
+  await publishNarrative(page, sharedNarrative);
+  runBackend(
+    [
+      "import os, sys",
+      "from pathlib import Path",
+      "from sqlalchemy import select",
+      "from src.storage.database import WorldMember, session_scope, database_url",
+      "from src.structured.service import StructuredPlayService",
+      "from src.structured.principal import Principal",
+      "url = database_url(Path(os.environ['TRPG_RUNTIME_ROOT']))",
+      "with session_scope(url) as session:",
+      "    keeper = session.execute(select(WorldMember).where(WorldMember.world_id == sys.argv[1], WorldMember.can_keeper.is_(True))).scalars().first()",
+      "    keeper_id = keeper.user_id",
+      "service = StructuredPlayService(url)",
+      "for index in range(53):",
+      "    service.execute_command(world_id=sys.argv[1], principal=Principal(kind='keeper', user_id=keeper_id), kind='publish_message', command_id=f'archive-message-{index}', expected_revision=None, payload={'speaker': {'kind': 'keeper'}, 'text': f'共同档案 {index}', 'audience': {'kind': 'public'}})",
+    ].join("\n"),
+    [sourceWorldId],
+  );
   const sharedMemory = "分叉点之前的共同经历：在图书馆查到了报纸缩微胶卷。";
   await openConsole(page);
   await recordMemory(page, investigatorId, sharedMemory, "e2e-fork");
@@ -631,6 +853,71 @@ test("分支：结构化世界可从当前进度分叉，且检索不到原世�
   await expect(page.getByTestId("structured-tool-row")).toBeVisible({
     timeout: 60_000,
   });
+  const archive = page.getByTestId("inherited-history");
+  await expect(
+    archive.getByRole("button", { name: "查看分叉前历史" }),
+  ).toBeVisible();
+  await expect(archive.getByText("共同档案 52", { exact: true })).toHaveCount(
+    0,
+  );
+  await archive.getByRole("button", { name: "查看分叉前历史" }).click();
+  await expect(archive.getByText("共同档案 52", { exact: true })).toBeVisible();
+  await expect(archive.getByText(sharedNarrative, { exact: true })).toHaveCount(
+    0,
+  );
+  await archive.getByRole("button", { name: "载入更早的档案" }).click();
+  await expect(
+    archive.getByText(sharedNarrative, { exact: true }),
+  ).toBeVisible();
+  await expect(archive.getByText("共同档案 0", { exact: true })).toBeVisible();
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(".boot-loader")).toHaveCount(0);
+    const control = archive.getByRole("button", { name: "收起分叉前历史" });
+    await control.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1000);
+    const geometry = await control.evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const css = getComputedStyle(node);
+      return {
+        height: bounds.height,
+        left: bounds.left,
+        right: bounds.right,
+        padding: parseFloat(css.paddingLeft),
+        nowrap: css.whiteSpace,
+        hit: node.contains(
+          document.elementFromPoint(
+            bounds.left + bounds.width / 2,
+            bounds.top + bounds.height / 2,
+          ),
+        ),
+      };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.padding).toBeGreaterThanOrEqual(10);
+    expect(geometry.nowrap).toBe("nowrap");
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(width);
+    expect(geometry.hit).toBe(true);
+    await page.screenshot({
+      path: `test-results/inherited-history-${width}.png`,
+    });
+  }
+  await archive.getByRole("button", { name: "收起分叉前历史" }).focus();
+  await archive.getByRole("button", { name: "收起分叉前历史" }).press("Enter");
+  await expect(
+    archive.getByRole("button", { name: "查看分叉前历史" }),
+  ).toBeFocused();
+  await expect(archive.getByText(sharedNarrative, { exact: true })).toHaveCount(
+    0,
+  );
+  await page.reload();
+  await expect(
+    page
+      .getByTestId("inherited-history")
+      .getByRole("button", { name: "查看分叉前历史" }),
+  ).toBeVisible({ timeout: 30_000 });
+  expect(modelRequests.length).toBe(modelCallsBeforeBranch);
 
   // 回到原世界再新增一条记忆（分叉之后才发生）：界面此时在分支世界，
   // 所以这一步直接调用同一个真实后端的命令服务写源世界。

@@ -186,65 +186,69 @@ export function SoloCharacterSelectScreen() {
               <p className="character-detail-empty">该模组暂无可选角色卡。</p>
             )}
           <div id="character-choice-list">
-            {rosterGroups.map((group) => (
-              <section className="character-group" key={group.id}>
-                {groups.length > 0 && (
-                  <div className="character-group-title">
-                    {group.id === "module"
-                      ? `${activeModuleTitle} 特色调查员`
-                      : group.title}
+            {rosterGroups
+              .filter((group) => group.characters.length > 0)
+              .map((group) => (
+                <section className="character-group" key={group.id}>
+                  {groups.length > 0 && (
+                    <div className="character-group-title">
+                      {group.id === "module"
+                        ? `${activeModuleTitle} 特色调查员`
+                        : group.title}
+                    </div>
+                  )}
+                  <div className="character-card-row">
+                    {group.characters.map((character) => {
+                      const isClaimed = claimedKey === character.id;
+                      const holder = members.find(
+                        (member) =>
+                          member.investigator?.character_key === character.id,
+                      );
+                      const occupiedByOther = holder != null && !isClaimed;
+                      return (
+                        <button
+                          className={`character-card${focusedId === character.id ? " selected" : ""}`}
+                          aria-pressed={focusedId === character.id}
+                          key={character.id}
+                          disabled={!canChoose || occupiedByOther}
+                          onClick={() => {
+                            setFocusId(character.id);
+                            void claimByKey(character.id);
+                          }}
+                        >
+                          <span className="character-card-name">
+                            {character.name}
+                          </span>
+                          {character.source_label ? (
+                            <span className="character-card-source">
+                              {character.source_label}
+                            </span>
+                          ) : null}
+                          <span className="character-card-meta">
+                            {character.occupation || "调查员"}
+                          </span>
+                          {typeof character.hp === "number" ? (
+                            <span className="character-card-vitals">
+                              HP {character.hp}/{character.max_hp} · SAN{" "}
+                              {character.san}/{character.max_san}
+                            </span>
+                          ) : null}
+                          {isClaimed && (
+                            <span className="character-card-claimed">
+                              已选择
+                            </span>
+                          )}
+                          {occupiedByOther && (
+                            <span className="character-card-claimed">
+                              已被占用
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
-                <div className="character-card-row">
-                  {group.characters.map((character) => {
-                    const isClaimed = claimedKey === character.id;
-                    const holder = members.find(
-                      (member) =>
-                        member.investigator?.character_key === character.id,
-                    );
-                    const occupiedByOther = holder != null && !isClaimed;
-                    return (
-                      <button
-                        className={`character-card${focusedId === character.id ? " selected" : ""}`}
-                        aria-pressed={focusedId === character.id}
-                        key={character.id}
-                        disabled={!canChoose || occupiedByOther}
-                        onClick={() => {
-                          setFocusId(character.id);
-                          void claimByKey(character.id);
-                        }}
-                      >
-                        <span className="character-card-name">
-                          {character.name}
-                        </span>
-                        {character.source_label ? (
-                          <span className="character-card-source">
-                            {character.source_label}
-                          </span>
-                        ) : null}
-                        <span className="character-card-meta">
-                          {character.occupation || "调查员"}
-                        </span>
-                        {typeof character.hp === "number" ? (
-                          <span className="character-card-vitals">
-                            HP {character.hp}/{character.max_hp} · SAN{" "}
-                            {character.san}/{character.max_san}
-                          </span>
-                        ) : null}
-                        {isClaimed && (
-                          <span className="character-card-claimed">已选择</span>
-                        )}
-                        {occupiedByOther && (
-                          <span className="character-card-claimed">
-                            已被占用
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
+                </section>
+              ))}
           </div>
         </section>
         <aside id="character-detail" ref={detailRef}>

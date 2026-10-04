@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { STRUCTURED_EVENT_TYPES } from "./structured";
 
 export const serverMessageTypes = [
   "narrative_chunk",
@@ -24,6 +25,7 @@ export const serverMessageTypes = [
   "turn_rewrite_failed",
   "turn_recovery",
   "world_context",
+  "local_start_result",
   "world_list",
   "turn_branched",
   "turn_branch_failed",
@@ -82,31 +84,8 @@ export const serverMessageTypes = [
   // 结构化操作协议 v1（schemas/structured-play/v1）：信封由
   // structured.ts 的 parseStructuredEvent 校验，这里只登记判别式，
   // 否则未知 type 会被当成“无法识别的协议消息”直接丢掉。
-  "session_snapshot",
-  "action_ack",
-  "action_status",
-  "check_requested",
-  "check_resolved",
-  "check_cancelled",
-  "roll_resolved",
-  "message_started",
-  "message_chunk",
-  "message_completed",
-  "scene_changed",
-  "clue_granted",
-  "inventory_changed",
-  "state_changed",
-  "request_error",
-  "keeper_draft",
-  "keeper_draft_resolved",
-  "keeper_control",
-  "intent_pending",
-  // M5 上下文与记忆改造：交互线程、主持侧记忆记录与只读查询结果。
-  // 这里是**入口白名单**：漏登记会在 parseServerMessage 就被丢掉
-  //（handout_presented 与 interaction_updated 都踩过同一个坑）。
-  "interaction_updated",
-  "memory_recorded",
-  "memory_query_result",
+  // Use the protocol's single source; a second list silently dropped handouts.
+  ...STRUCTURED_EVENT_TYPES,
 ] as const;
 
 const serverMessageSchema = z.looseObject({
@@ -298,6 +277,27 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   // Last-resort display boundary: a backend regression must still never render
   // textual tool calls or their private arguments in Electron.
   if (containsToolProtocol(decoded)) return null;
+  if (result.data.type === "local_start_result") {
+    const receipt = z
+      .discriminatedUnion("ok", [
+        z.looseObject({
+          type: z.literal("local_start_result"),
+          request_id: z.string().max(96),
+          ok: z.literal(true),
+          world_id: z.string().min(1).max(160),
+          execution_profile: z.enum(["legacy", "structured_v1"]),
+        }),
+        z.looseObject({
+          type: z.literal("local_start_result"),
+          request_id: z.string().max(96),
+          ok: z.literal(false),
+          code: z.string().min(1).max(160),
+          message: z.string().max(2000),
+        }),
+      ])
+      .safeParse(decoded);
+    return receipt.success ? (receipt.data as ServerMessage) : null;
+  }
   if (result.data.type === "chat_events") {
     const chatResult = chatEventsMessageSchema.safeParse(decoded);
     return chatResult.success ? (chatResult.data as ServerMessage) : null;

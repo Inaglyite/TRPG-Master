@@ -9,13 +9,14 @@ import {
   resendStructuredRequest,
   sendCheckResponse,
   sendFreeRoll,
+  sendFreeformIntent,
   sendKeeperCommand,
   sendStructuredAction,
   setStructuredSender,
   structuredCursor,
 } from "./structured-transport";
 import { useAppStore } from "./state/app-store";
-import { useOnlineStore } from "./state/online-store";
+import { initialOnlineState, useOnlineStore } from "./state/online-store";
 import {
   activeRequests,
   initialStructuredState,
@@ -47,7 +48,7 @@ beforeEach(() => {
     inputEnabled: true,
     activeWorldId: WORLD_ID,
   });
-  useOnlineStore.setState({ activeInvestigatorId: null });
+  useOnlineStore.setState({ ...initialOnlineState });
   sent = [];
   setStructuredSender((payload) => {
     sent.push(payload as Record<string, unknown>);
@@ -56,6 +57,48 @@ beforeEach(() => {
 });
 
 describe("能力门禁", () => {
+  it("拒绝超长自由行动而不静默截断，也不登记或发送半句行动", () => {
+    enableStructured();
+    const result = sendFreeformIntent("查".repeat(2001));
+    expect(result).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("2000"),
+    });
+    expect(sent).toHaveLength(0);
+    expect(activeRequests(useStructuredStore.getState())).toHaveLength(0);
+  });
+
+  it("自由行动按 Unicode 字符限制，边界上的表情文字保持完整", () => {
+    enableStructured();
+    const text = "🔍".repeat(2000);
+    expect(sendFreeformIntent(text)?.ok).toBe(true);
+    expect(sent[0]).toMatchObject({ action: { kind: "freeform", text } });
+  });
+  it("a viewer cannot send player actions even with a stale character binding", () => {
+    enableStructured();
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      user: { id: "watcher", username: "旁观者" },
+      members: [
+        {
+          user_id: "watcher",
+          username: "旁观者",
+          role: "viewer",
+          investigator: { id: "old-claim", character_key: "old-pc" },
+        },
+      ],
+    });
+    useStructuredStore.getState().setInvestigator("old-pc");
+    const result = sendStructuredAction({
+      kind: "move",
+      destination_scene_id: "s1",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("旁观模式"),
+    });
+    expect(sent).toHaveLength(0);
+  });
   it("服务端没有结构化能力时拒绝提交，且一个字节都不发", () => {
     useStructuredStore.getState().applyCapabilities(LEGACY_CAPABILITIES);
     const result = sendStructuredAction({
@@ -360,6 +403,35 @@ describe("请求生命周期", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].request_id).toBe(requestId);
   });
+
+  it.each(["queued", "processing"])(
+    "ack 丢失但快照确认 %s 待办后，旧计时器不再自动重发",
+    (status) => {
+      vi.useFakeTimers();
+      try {
+        enableStructured();
+        sendStructuredAction({ kind: "move", destination_scene_id: "s1" });
+        const requestId = String(sent[0].request_id);
+        handleStructuredPayload({
+          ...EVENT_FIXTURES.snapshot,
+          event_id: 50,
+          sequence: 50,
+          payload: {
+            ...EVENT_FIXTURES.snapshot.payload,
+            requests: [{ request_id: requestId, status }],
+          },
+        });
+        vi.advanceTimersByTime(ACK_TIMEOUT_MS * 3);
+        expect(sent).toHaveLength(1);
+        expect(useStructuredStore.getState().requests[requestId]).toMatchObject(
+          { status, serverReceived: true, awaitingAck: false },
+        );
+      } finally {
+        resetStructuredTransport();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("revision 冲突给出可刷新重提的提示，并保留请求", () => {
     enableStructured();

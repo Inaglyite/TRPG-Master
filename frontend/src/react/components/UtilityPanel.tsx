@@ -1,6 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { sendAction } from "../../options";
+import { sendPlayerText } from "../../options";
+import { interactionPath } from "../../protocol/structured";
+import { useStructuredStore } from "../../state/structured-store";
+import { structuredPlayerRequestReason } from "../../structured-transport";
+import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
+import { NotebookSections } from "./NotebookSections";
+import "../../styles/components/notebook-sections.css";
+import { useDialogKeyboard } from "./useDialogKeyboard";
 import { closeUtility, requestNotes, saveNotes } from "../../utility";
 import { useAppStore } from "../../state/app-store";
 import { useOnlineStore } from "../../state/online-store";
@@ -20,11 +27,6 @@ function notesCommand(command: "requestNotes" | "saveNotes" | "closeUtility") {
   else closeUtility();
 }
 
-function submitQuickAction(action: string) {
-  useAppStore.getState().setUtilityOpen(false);
-  sendAction(action);
-}
-
 export function UtilityPanel() {
   const open = useAppStore((state) => state.utilityOpen);
   const { rendered, closing } = useDelayedClose(open);
@@ -36,17 +38,17 @@ export function UtilityPanel() {
   const statusKind = useAppStore((state) => state.notesStatusKind);
   const inputEnabled = useAppStore((state) => state.inputEnabled);
   const mode = useAppStore((state) => state.mode);
+  const connection = useAppStore((state) => state.connection);
+  const structuredState = useStructuredStore();
+  const panel = useRef<HTMLElement>(null);
+  const [actionError, setActionError] = useState("");
   const setDraft = useAppStore((state) => state.setNotesDraft);
-  const roomConnection = useOnlineStore((state) => state.roomConnection);
-  const roomStatus = useOnlineStore((state) => state.roomStatus);
-  const currentActorUserId = useOnlineStore(
-    (state) => state.currentActorUserId,
-  );
-  const userId = useOnlineStore((state) => state.user?.id);
-  const myRole = useOnlineStore(
-    (state) =>
-      state.members.find((member) => member.user_id === state.user?.id)?.role,
-  );
+  const online = useOnlineStore();
+  const { roomConnection, roomStatus, currentActorUserId } = online;
+  const userId = online.user?.id;
+  const myRole = online.members.find(
+    (member) => member.user_id === userId,
+  )?.role;
   const onlineCanAct =
     roomConnection === "connected" &&
     roomStatus === "playing" &&
@@ -54,19 +56,34 @@ export function UtilityPanel() {
     currentActorUserId === userId &&
     (myRole === "owner" || myRole === "player");
   const quickActionsEnabled =
-    inputEnabled && (mode !== "online" || onlineCanAct);
+    interactionPath(structuredState.capabilities) === "structured"
+      ? connection === "connected" &&
+        !structuredPlayerRequestReason() &&
+        (mode !== "online" ||
+          (roomConnection === "connected" &&
+            roomStatus === "playing" &&
+            online.roomSnapshotReady &&
+            online.authStatus === "authenticated" &&
+            !!userId &&
+            (myRole === "owner" || myRole === "player")))
+      : inputEnabled && (mode !== "online" || onlineCanAct);
+  const submitQuickAction = (action: string) => {
+    const result = sendPlayerText(action);
+    if (!result.ok) {
+      setActionError(result.reason || "行动未能发出，请检查连接后重试。");
+      return;
+    }
+    setActionError("");
+    // Close through the same notes-saving path as the explicit close button.
+    closeUtility();
+  };
+  useDialogKeyboard(panel, open, false, closeUtility);
 
   useEffect(() => {
-    if (open) void notesCommand("requestNotes");
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") void notesCommand("closeUtility");
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    if (open) {
+      setActionError("");
+      void notesCommand("requestNotes");
+    }
   }, [open]);
 
   if (!rendered) return <div id="utility-overlay" className="hidden" />;
@@ -79,8 +96,11 @@ export function UtilityPanel() {
           void notesCommand("closeUtility");
       }}
     >
-      <div
+      <ArchiveFolderPanel
         id="utility-panel"
+        ref={panel}
+        tabIndex={-1}
+        variant="wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="utility-title"
@@ -100,50 +120,75 @@ export function UtilityPanel() {
             ✕
           </button>
         </header>
-        <div className="utility-body">
-          <section
-            className="quick-actions-section"
-            aria-labelledby="quick-actions-title"
-          >
-            <h3 id="quick-actions-title">快捷行动</h3>
-            <div id="quick-actions" className="quick-actions-grid">
-              {quickActions.map((action, index) => (
-                <button
-                  key={action}
-                  type="button"
-                  disabled={!quickActionsEnabled}
-                  onClick={() => void submitQuickAction(action)}
-                >
-                  {quickLabels[index]}
-                </button>
-              ))}
-            </div>
-          </section>
-          <section
-            className="player-notes-section"
-            aria-labelledby="player-notes-title"
-          >
-            <div className="player-notes-heading">
-              <h3 id="player-notes-title">私人笔记</h3>
-              <span
-                id="player-notes-status"
-                data-state={statusKind || undefined}
-                aria-live="polite"
+        <div className="utility-body" data-dialog-scroll>
+          <NotebookSections
+            open={open}
+            actions={
+              <section
+                className="quick-actions-section"
+                aria-labelledby="quick-actions-title"
               >
-                {status}
-              </span>
-            </div>
-            <textarea
-              id="player-notes-input"
-              maxLength={20000}
-              spellCheck={false}
-              value={text}
-              disabled={loading}
-              onChange={(event) => setDraft(event.target.value)}
-            />
-          </section>
+                <p className="utility-help">
+                  提交给主持判断，不代表行动已执行。
+                </p>
+                <div id="quick-actions" className="quick-actions-grid">
+                  {quickActions.map((action, index) => (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={!quickActionsEnabled}
+                      onClick={() => void submitQuickAction(action)}
+                    >
+                      {quickLabels[index]}
+                    </button>
+                  ))}
+                </div>
+                {actionError && (
+                  <p role="alert" className="utility-help">
+                    {actionError}
+                  </p>
+                )}
+              </section>
+            }
+            notes={
+              <section
+                className="player-notes-section"
+                aria-labelledby="player-notes-title"
+              >
+                <div className="player-notes-heading">
+                  <h3 id="player-notes-title">私人笔记</h3>
+                  <span
+                    id="player-notes-status"
+                    data-state={statusKind || undefined}
+                    aria-live="polite"
+                  >
+                    {status}
+                  </span>
+                </div>
+                <textarea
+                  id="player-notes-input"
+                  aria-label="私人笔记"
+                  maxLength={20000}
+                  spellCheck={false}
+                  value={text}
+                  disabled={loading}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+              </section>
+            }
+          />
         </div>
         <footer className="utility-actions">
+          {statusKind === "error" && (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={loading || saving}
+              onClick={() => requestNotes()}
+            >
+              重新读取
+            </button>
+          )}
           <button
             id="player-notes-cancel"
             type="button"
@@ -160,7 +205,7 @@ export function UtilityPanel() {
             {saving ? "保存中…" : "保存笔记"}
           </button>
         </footer>
-      </div>
+      </ArchiveFolderPanel>
     </div>
   );
 }

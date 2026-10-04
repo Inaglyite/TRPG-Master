@@ -39,6 +39,7 @@ from src.multiplayer.solo_timeline_ws import (
     SOLO_TIMELINE_MESSAGE_TYPES,
     handle_solo_timeline_message,
 )
+from src.storage.notes_reply_context import notes_reply_context
 from src.storage.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.structured.room_integration import (
     STRUCTURED_FRAME_TYPES,
@@ -432,6 +433,16 @@ async def run_room_message_loop(
             await controller.broadcast_room_state(room)
             continue
         if message_type in {"player_notes_get", "player_notes_update"}:
+            reply_context = notes_reply_context(world_id, data)
+            if "world_id" in data and data["world_id"] != world_id:
+                await ws.send_json(
+                    {
+                        "type": "player_notes_error",
+                        "message": "笔记所属世界已变化，未读取或保存。请重新打开当前世界的笔记。",
+                        **reply_context,
+                    }
+                )
+                continue
             notes_store = PlayerNotesStore(
                 room.engine.context.world_dir,
                 user_id=user.id,
@@ -465,9 +476,9 @@ async def run_room_message_loop(
                     "message": "玩家笔记暂时不可用，请稍后重试",
                 }
             if broadcast:
-                await room.hub.broadcast(payload, visibility=f"user:{user.id}")
+                await room.hub.broadcast({**payload, **reply_context}, visibility=f"user:{user.id}")
             else:
-                await ws.send_json(payload)
+                await ws.send_json({**payload, **reply_context})
             continue
         if message_type == "state":
             try:
@@ -527,9 +538,7 @@ async def run_room_message_loop(
                         room.engine.context.module_name,
                         context=room.engine.context,
                         include_personal=False,
-                        library_scope=(
-                            user.id if room.play_mode == "solo" else None
-                        ),
+                        library_scope=(user.id if room.play_mode == "solo" else None),
                     ),
                 }
             )

@@ -1,11 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { recoverLatestTurn, safeSend, setActiveTransport } from "./ws";
+import {
+  recoverLatestTurn,
+  safeSend,
+  sendImmediately,
+  setActiveTransport,
+} from "./ws";
 
 describe("ws transport adapter", () => {
   beforeEach(() => {
     setActiveTransport(null);
     vi.clearAllMocks();
+  });
+
+  it("即时发送无通道时拒绝，不借用可排队的 send", () => {
+    const send = vi.fn();
+    setActiveTransport({ send });
+    expect(sendImmediately("private-write")).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("即时发送只使用 sendNow，传输异常可诊断为未发送", () => {
+    const send = vi.fn();
+    const sendNow = vi
+      .fn()
+      .mockReturnValueOnce(true)
+      .mockImplementationOnce(() => {
+        throw new Error("closed");
+      });
+    setActiveTransport({ send, sendNow });
+    expect(sendImmediately("private-write")).toBe(true);
+    expect(sendImmediately("private-write")).toBe(false);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("设置 transport 后 safeSend 全部改走 transport", () => {

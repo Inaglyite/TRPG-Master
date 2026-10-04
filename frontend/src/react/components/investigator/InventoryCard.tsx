@@ -44,9 +44,7 @@ export function InventoryCard() {
       )}
       {items.length === 0 && (
         <div className="clue-empty">
-          {path === "structured"
-            ? "等待服务端提供公开物品投影；结构化模式下不会用标签替代 ID。"
-            : "暂无随身道具"}
+          {path === "structured" ? "暂无可使用的随身道具" : "暂无随身道具"}
         </div>
       )}
       {items.map((item) => {

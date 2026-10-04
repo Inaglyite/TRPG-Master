@@ -83,13 +83,15 @@ export function usePanelItems(): { path: PanelPath; items: PanelItem[] } {
   if (path === "structured") {
     return {
       path,
-      items: structuredItems.map((item) => ({
-        id: item.id,
-        label: item.label,
-        quantity: item.quantity,
-        operations: item.operations,
-        legacyCount: 1,
-      })),
+      items: structuredItems
+        .filter((item) => item.quantity > 0)
+        .map((item) => ({
+          id: item.id,
+          label: item.label,
+          quantity: item.quantity,
+          operations: item.operations,
+          legacyCount: 1,
+        })),
     };
   }
   // legacy：同标签合并显示，但明确不冒充后端堆叠数量。

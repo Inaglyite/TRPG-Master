@@ -44,6 +44,7 @@ export type ChatMessage = {
   kind: string;
   text: string;
   turnId?: string;
+  entryKind?: "action_request";
   streaming?: boolean;
   hidden?: boolean;
   rewriteTarget?: boolean;
@@ -61,6 +62,8 @@ type MessageState = {
   scrollRequest: number;
   forceScrollRequest: number;
   actionReset: number;
+  /** Explicit older-page reads scroll to the newly loaded text, not the latest message. */
+  historyPrependRequest: number;
   replaceMessages: (messages: ChatMessage[]) => void;
   updateMessages: (updater: (messages: ChatMessage[]) => ChatMessage[]) => void;
   requestScroll: (force?: boolean) => void;
@@ -72,6 +75,7 @@ export const useMessageStore = create<MessageState>((set) => ({
   scrollRequest: 0,
   forceScrollRequest: 0,
   actionReset: 0,
+  historyPrependRequest: 0,
   replaceMessages: (messages) => set({ messages }),
   updateMessages: (updater) =>
     set((state) => ({ messages: updater(state.messages) })),

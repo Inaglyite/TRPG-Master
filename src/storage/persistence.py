@@ -9,6 +9,7 @@
   saves/slot_002/
 """
 
+import copy
 import json
 import os
 import re
@@ -205,7 +206,7 @@ def _catalog_skill_parts(
         # would silently make that mutable disk state authoritative.  Legacy
         # duck/no-world contexts remain the only compatibility fallback.
         if probe_world_pins(context).state == "empty":
-            raise PinUnavailable("世界尚未冻结 Skill 且 catalog 不可用") from exc
+            raise PinUnavailable(f"世界尚未冻结 Skill 且 catalog 不可用：{exc}") from exc
         log_error(f"Skill catalog 不可用，回退磁盘加载: {exc}")
         return [], [], None
     try:
@@ -215,8 +216,7 @@ def _catalog_skill_parts(
         raise
     if pins is None:
         log_error(
-            "世界 Skill pin 不可用，回退磁盘加载: "
-            f"world={getattr(context, 'world_id', '') or '?'}"
+            f"世界 Skill pin 不可用，回退磁盘加载: world={getattr(context, 'world_id', '') or '?'}"
         )
     official_parts: list[str] = []
     module_parts: list[str] = []
@@ -447,6 +447,33 @@ def save_game(
     if checkpoint is not None:
         meta = checkpoint.merge_into(meta)
     with session_scope(context.database_url) as session:
+        # Structured narration does not bump world revision. Capture its
+        # sequence at the same committed save point as the state, not from an
+        # earlier UI cursor or a wall clock. Legacy save metadata is unchanged.
+        from sqlalchemy import func, select
+
+        from src.storage.database import EventOutbox, World, WorldState
+
+        world = session.get(World, context.world_id)
+        if world and (world.metadata_json or {}).get("execution_profile") == "structured_v1":
+            state_row = session.get(WorldState, context.world_id, with_for_update=True)
+            if state_row is None:
+                raise ValueError("结构化世界状态缺失，无法存档。")
+            world_state = copy.deepcopy(state_row.state)
+            world_state["revision"] = int(state_row.revision)
+            meta = _slot_meta(serializable, world_state, context)
+            if checkpoint is not None:
+                meta = checkpoint.merge_into(meta)
+            sequence = session.scalar(
+                select(func.max(EventOutbox.sequence)).where(
+                    EventOutbox.world_id == context.world_id
+                )
+            )
+            meta["structured_event_cursor"] = {
+                "world_id": context.world_id,
+                "revision": int(state_row.revision),
+                "sequence": int(sequence or 0),
+            }
         row = (
             session.query(SaveSlot)
             .filter_by(world_id=context.world_id, slot_key=slot_id)
@@ -657,9 +684,7 @@ def list_saves(*, context: RuntimeContext | None = None) -> list[dict]:
     with session_scope(context.database_url) as session:
         known_slots = {
             row.slot_key
-            for row in session.query(SaveSlot)
-            .filter_by(world_id=context.world_id)
-            .all()
+            for row in session.query(SaveSlot).filter_by(world_id=context.world_id).all()
         }
     # 旧文件式存档只做一次性迁移：仅导入数据库中还没有记录的槽位。
     # 每次列出都重复导入会堆积无引用的 legacy_import 快照（数据库膨胀），

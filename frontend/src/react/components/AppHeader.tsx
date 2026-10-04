@@ -14,10 +14,11 @@ import { MoveDialog } from "./structured/MoveDialog";
 import { returnToStartMenu } from "../../start";
 import { useStartStore } from "../../state/start-store";
 import { SoloAdventureExitControl } from "./online/SoloAdventureExitControl";
+import { structuredPlayerRequestReason } from "../../structured-transport";
 
 const connectionTitles = {
   connected: "已连接到守秘人",
-  connecting: "连接中…",
+  connecting: "连接／同步中…",
   disconnected: "连接已断开，正在重试",
 } as const;
 
@@ -64,6 +65,8 @@ export function AppHeader() {
   const panelPath = useStructuredStore((state) =>
     interactionPath(state.capabilities),
   );
+  useOnlineStore((state) => state.members);
+  useOnlineStore((state) => state.user);
   const submitReady = useAppStore(
     (state) =>
       state.connection === "connected" && !state.dialog && !state.ending,
@@ -75,7 +78,7 @@ export function AppHeader() {
     );
     if (unavailable) return unavailable;
     if (!state.capabilities.moveAction) return "服务端未开放移动命令。";
-    return narrationGuardReason();
+    return structuredPlayerRequestReason() ?? narrationGuardReason();
   });
   const sceneMoveAvailable = panelPath === "structured" && gameStarted;
   const [moveOpen, setMoveOpen] = useState(false);
@@ -85,11 +88,15 @@ export function AppHeader() {
       <div className="header-leading">
         <h1>
           <span className="header-candle" aria-hidden="true" />
-          {title}
+          <span className="header-title" title={title}>
+            {title}
+          </span>
           <span
             id="conn-status"
             className={connection}
             title={connectionTitles[connection]}
+            role="img"
+            aria-label={connectionTitles[connection]}
           />
         </h1>
         {/* 开局后持续显示“当前已结算位置”。地点名由服务端投影保证是玩家

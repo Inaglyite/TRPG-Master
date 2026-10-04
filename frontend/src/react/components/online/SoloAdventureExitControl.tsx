@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 
 import { abandonSoloWorld, enterSoloLobby } from "../../../online";
 import { useOnlineStore } from "../../../state/online-store";
+import { AdventureArchiveConfirmation } from "./AdventureArchiveConfirmation";
+import { focusableControls, trapDialogTab } from "../dialogFocus";
+import { ArchiveFolderPanel } from "../ArchiveFolderPanel";
 
 type ExitStep = "menu" | "confirm-abandon";
 
@@ -15,6 +18,7 @@ type ExitStep = "menu" | "confirm-abandon";
 export function SoloAdventureExitControl() {
   const view = useOnlineStore((state) => state.view);
   const roomStatus = useOnlineStore((state) => state.roomStatus);
+  const worldId = useOnlineStore((state) => state.activeWorldId);
   const roomMetadata = useOnlineStore((state) => state.roomMetadata);
   const roomBusy = useOnlineStore((state) => state.roomBusy);
   const roomError = useOnlineStore((state) => state.roomError);
@@ -31,15 +35,17 @@ export function SoloAdventureExitControl() {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<ExitStep>("menu");
   const [pausing, setPausing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const archiveInFlight = useRef(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
 
   const visible =
     view === "room" &&
     isOwner &&
     roomMetadata?.play_mode === "solo" &&
     (roomStatus === "starting" || roomStatus === "playing");
-  const busy = roomBusy || pausing;
+  const busy = roomBusy || pausing || archiving;
 
   // 离开单人世界、归档成功或角色变更后，不让上个世界的对话框残留。
   useEffect(() => {
@@ -51,18 +57,35 @@ export function SoloAdventureExitControl() {
   }, [visible]);
 
   useEffect(() => {
+    setOpen(false);
+    setStep("menu");
+  }, [worldId]);
+
+  useEffect(() => {
     if (!open) return;
-    dialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) {
-        setOpen(false);
-        setStep("menu");
-        window.setTimeout(() => triggerRef.current?.focus(), 0);
-      }
+    dialogRef.current?.querySelector<HTMLElement>(".solo-exit-keep")?.focus();
+    return () => {
+      const trigger = triggerRef.current;
+      if (trigger?.isConnected && !trigger.disabled) trigger.focus();
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [busy, open]);
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    const active = document.activeElement;
+    if (
+      !dialog.contains(active) ||
+      (active instanceof HTMLElement && active.matches(":disabled")) ||
+      active === dialog
+    ) {
+      const safe = dialog.querySelector<HTMLButtonElement>(
+        ".solo-exit-keep, .adventure-archive-actions .btn-ghost",
+      );
+      const controls = focusableControls(dialog);
+      (safe && !safe.disabled ? safe : (controls[0] ?? dialog)).focus();
+    }
+  }, [open, busy, step]);
 
   if (!visible) return null;
 
@@ -70,7 +93,6 @@ export function SoloAdventureExitControl() {
     if (busy) return;
     setOpen(false);
     setStep("menu");
-    window.setTimeout(() => triggerRef.current?.focus(), 0);
   }
 
   async function returnToAdventureList() {
@@ -83,11 +105,18 @@ export function SoloAdventureExitControl() {
   }
 
   async function confirmAbandon() {
-    if (busy) return;
-    const abandoned = await abandonSoloWorld();
-    if (abandoned) {
-      setOpen(false);
-      setStep("menu");
+    if (busy || archiveInFlight.current) return;
+    archiveInFlight.current = true;
+    setArchiving(true);
+    try {
+      const abandoned = await abandonSoloWorld();
+      if (abandoned) {
+        setOpen(false);
+        setStep("menu");
+      }
+    } finally {
+      archiveInFlight.current = false;
+      setArchiving(false);
     }
   }
 
@@ -98,80 +127,81 @@ export function SoloAdventureExitControl() {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div
+      <ArchiveFolderPanel
+        variant="wide"
         ref={dialogRef}
         className="solo-adventure-exit-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="solo-adventure-exit-title"
+        aria-labelledby={
+          step === "menu" ? "solo-adventure-exit-title" : undefined
+        }
+        aria-label={step === "confirm-abandon" ? "归档这场冒险？" : undefined}
         tabIndex={-1}
+        aria-busy={busy}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            if (busy) return;
+            if (step === "confirm-abandon") setStep("menu");
+            else close();
+          } else if (dialogRef.current) trapDialogTab(event, dialogRef.current);
+        }}
       >
-        <div className="solo-adventure-exit-eyebrow">
-          INVESTIGATOR / CURRENT ADVENTURE
-        </div>
         {step === "menu" ? (
           <>
-            <h2 id="solo-adventure-exit-title">离开当前冒险</h2>
-            <p className="solo-adventure-exit-description">
-              返回会保留当前进度。若守秘人已经开始本回合，叙事会在服务器继续完成；你稍后可从“我的冒险”继续调查。
-            </p>
-            <div className="solo-adventure-exit-actions">
+            <div className="solo-exit-heading">
+              <div className="solo-adventure-exit-eyebrow">
+                当前冒险 / INVESTIGATOR
+              </div>
+              <h2 id="solo-adventure-exit-title">离开当前冒险</h2>
+            </div>
+            <div className="solo-exit-body">
+              <p className="solo-adventure-exit-description">
+                返回会保留当前进度。若守秘人已经开始本回合，叙事会在服务器继续完成；你稍后可从“我的冒险”继续调查。
+              </p>
+              <div className="solo-adventure-exit-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => void returnToAdventureList()}
+                >
+                  {pausing ? "正在返回…" : "返回我的冒险（保留进度）"}
+                </button>
+              </div>
               <button
                 type="button"
-                className="btn-primary"
+                className="solo-adventure-exit-abandon-link"
                 disabled={busy}
-                onClick={() => void returnToAdventureList()}
+                onClick={() => setStep("confirm-abandon")}
               >
-                {pausing ? "正在返回…" : "返回我的冒险（保留进度）"}
+                放弃并归档冒险
               </button>
-              <button type="button" className="btn-ghost" onClick={close}>
+            </div>
+            <footer className="solo-exit-footer">
+              <button
+                type="button"
+                className="btn-ghost solo-exit-keep"
+                disabled={busy}
+                onClick={close}
+              >
                 继续调查
               </button>
-            </div>
-            <button
-              type="button"
-              className="solo-adventure-exit-abandon-link"
-              disabled={busy}
-              onClick={() => setStep("confirm-abandon")}
-            >
-              放弃并删除存档
-            </button>
+            </footer>
           </>
         ) : (
-          <>
-            <h2 id="solo-adventure-exit-title">确认放弃冒险？</h2>
-            <p className="solo-adventure-exit-description">
-              当前云端存档（含全部分支时间线）将被归档且无法恢复。这不会被记作结案或通关。
-            </p>
-            <p className="solo-adventure-exit-warning">
-              若守秘人仍在处理本回合，该回合会被立即中断。
-            </p>
-            {roomError && (
-              <p className="online-notice online-notice--error" role="alert">
-                {roomError}
-              </p>
-            )}
-            <div className="solo-adventure-exit-actions">
-              <button
-                type="button"
-                className="online-danger"
-                disabled={busy}
-                onClick={() => void confirmAbandon()}
-              >
-                {roomBusy ? "正在放弃…" : "确认放弃并删除"}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={busy}
-                onClick={() => setStep("menu")}
-              >
-                返回
-              </button>
-            </div>
-          </>
+          <AdventureArchiveConfirmation
+            title={String(roomMetadata?.name || "当前冒险")}
+            busy={busy}
+            error={roomError}
+            onConfirm={() => void confirmAbandon()}
+            onCancel={() => setStep("menu")}
+          />
         )}
-      </div>
+      </ArchiveFolderPanel>
     </div>
   ) : null;
 

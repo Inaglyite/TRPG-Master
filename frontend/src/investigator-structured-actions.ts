@@ -35,6 +35,8 @@ export type SubmitResult = { ok: true } | { ok: false; reason: string };
  */
 export function narrationGuardReason(): string | null {
   const app = useAppStore.getState();
+  if (app.connection === "connecting")
+    return "正在连接并同步权威状态，完成后可提交。";
   if (app.connection !== "connected") return "连接已断开，暂时无法提交。";
   if (app.dialog) return "请先完成当前的检定或决定。";
   if (app.ending) return "请先处理结局确认。";

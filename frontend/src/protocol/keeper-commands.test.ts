@@ -104,6 +104,54 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
 });
 
 describe("主持表单 → M0 payload", () => {
+  it("multi-line conditions preserve the schema's eight-by-200 boundary without silently truncating", () => {
+    const spec = findKeeperCommand("resolve_intent")!;
+    const values = fill("resolve_intent", {
+      request_id: "request-1",
+      resolution: "awaiting_player",
+      pending_action_note: "尚未前往停尸房",
+      disclosed: "医生需要确认身份\n\n先询问开放时间",
+    });
+    expect(validateKeeperFields(spec, values)).toEqual([]);
+    expect(buildKeeperPayload(spec, values).disclosed).toEqual([
+      "医生需要确认身份",
+      "先询问开放时间",
+    ]);
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        disclosed: Array(8).fill("条".repeat(200)).join("\n"),
+      }),
+    ).toEqual([]);
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        disclosed: Array(9).fill("条件").join("\n"),
+      }).join(" "),
+    ).toContain("最多 8 条");
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        disclosed: "条".repeat(201),
+      }).join(" "),
+    ).toContain("每条不能超过 200 字");
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        thread_action: "open",
+        resolution: "completed",
+        disclosed: Array(9).fill("条件").join("\n"),
+      }).join(" "),
+    ).toContain("最多 8 条");
+    // Completed without a thread does not send stale conditions at all.
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        resolution: "completed",
+        disclosed: Array(9).fill("条件").join("\n"),
+      }),
+    ).toEqual([]);
+  });
   it("定向发放线索按接收者记录知情，并可同时展示素材", () => {
     const payload = buildKeeperPayload(
       findKeeperCommand("grant_clue")!,
@@ -177,6 +225,17 @@ describe("主持表单 → M0 payload", () => {
   });
 
   it("物品转移的 from/to 用 {kind:'investigator', id} 形态", () => {
+    expect(
+      validateKeeperFields(
+        findKeeperCommand("transfer_item")!,
+        fill("transfer_item", {
+          item_id: "item_bandage",
+          quantity: "2",
+          from_investigator_id: "inv-alice",
+          to_investigator_id: "inv-bob",
+        }),
+      ),
+    ).toEqual([]);
     const payload = buildKeeperPayload(
       findKeeperCommand("transfer_item")!,
       fill("transfer_item", {

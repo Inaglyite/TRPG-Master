@@ -249,8 +249,8 @@ async function bootCloudStructured(page: Page): Promise<string> {
   await page.getByText("开始新冒险", { exact: true }).first().click();
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
-  await expect(page.getByLabel(/结构化操作模式/)).toBeVisible();
-  await page.getByLabel(/结构化操作模式/).check();
+  await expect(page.getByRole("radio", { name: "人类主持" })).toBeVisible();
+  await page.getByRole("radio", { name: "人类主持" }).click();
   await page.getByRole("button", { name: /创建冒险/ }).click();
 
   const confirmCharacter = page.locator("#btn-character-confirm");
@@ -281,7 +281,7 @@ test("云端单人结构化：从当前进度创建分支真的成功（不依�
   // 房主（solo）：先存一次档（云端的存档管理面板在没有存档位时是空态，
   // 时间线/分支管理挂在存档条目下），再打开存档管理 → 管理时间线。
   await page.getByTestId("btn-keeper-console").click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
   const savedBefore = framesOf(frames, "saved").length;
   await page.getByTestId("keeper-save").click();
   await expect

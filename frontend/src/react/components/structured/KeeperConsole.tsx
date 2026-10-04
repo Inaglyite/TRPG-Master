@@ -3,15 +3,20 @@
  *
  * 职责：把主持操作变成明确的 `command_request`，并显示服务端返回的状态。
  * 不做任何“看起来成功”的本地推断：命令提交后只是 `queued`，结果以服务端
- * 事件为准；没有对应能力的按钮不渲染，而不是画一个假的入口。
+ * 事件为准；没有对应能力的操作明确禁用，而不是画一个假的可用入口。
  *
  * 授权：keeper 身份来自服务端投影（`session_snapshot.keeper`）。房主
  * （owner）不等于 keeper；只有服务端把当前用户标为 keeper 才显示控制台。
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { focusableControls, trapDialogTab } from "../dialogFocus";
 
-import { sendKeeperCommand } from "../../../structured-transport";
+import {
+  keeperCommandBlockReason,
+  resubmitWithFreshRevision,
+  sendKeeperCommand,
+} from "../../../structured-transport";
 import {
   KEEPER_COMMANDS,
   buildKeeperPayload,
@@ -26,18 +31,97 @@ import {
 } from "../../../protocol/keeper-commands";
 import { loadSave, openSavePanel, quickSave } from "../../../panels";
 import { useAppStore } from "../../../state/app-store";
-import { structuredUnavailableReason } from "../../../protocol/structured";
+import {
+  structuredUnavailableReason,
+  type StructuredAction,
+} from "../../../protocol/structured";
 import { sendMemoryQuery } from "../../../structured-transport";
 import {
   activeRequests,
   openInteractions,
   useStructuredStore,
+  type KeeperInvestigator,
 } from "../../../state/structured-store";
 import { useOnlineStore } from "../../../state/online-store";
+import { KeeperLibrary } from "./KeeperLibrary";
 
 /** keeper 判据：服务端投影为准，本地单机允许 keeperUserId 为空。 */
 /** 旧世界名册缺失时 public_investigator_roster 的兜底 id（不是真实调查员）。 */
 const LEGACY_PLACEHOLDER_ID = "legacy-pc";
+
+// Labels are presentation only. Wire values still follow the frozen schema.
+const CHOICE_LABELS: Record<string, string> = {
+  queued: "待主持处理",
+  processing: "处理中",
+  failed: "处理失败",
+  take: "接管主持",
+  release: "归还给 AI",
+  retry: "重试暂停请求",
+  keeper: "仅主持",
+  npc: "人物",
+  investigator: "调查员",
+  system: "系统通知",
+  public: "所有人",
+  investigators: "指定调查员",
+  describe: "说明内容",
+  image: "展示图片",
+  original: "展示原件",
+  regular: "普通",
+  hard: "困难",
+  extreme: "极难",
+  hp: "生命值（HP）",
+  san: "理智值（SAN）",
+  max_hp: "生命上限",
+  max_san: "理智上限",
+  enter: "进入场景",
+  leave: "离开场景",
+  completed: "已处理",
+  declined: "拒绝执行",
+  cancelled: "取消",
+  paused: "暂停",
+  awaiting_player: "等待玩家回应",
+  open: "开启",
+  continue: "继续",
+  close: "关闭",
+  replace: "替换",
+  move: "移动",
+  freeform: "自由行动",
+  present_clue: "出示线索",
+  use_item: "使用道具",
+  other: "其他",
+  success: "已执行 · 成功",
+  failure: "已执行 · 失败",
+  not_executed: "尚未执行",
+  experienced: "亲历",
+  told: "他人告知",
+  rumor: "传闻",
+  belief: "角色看法",
+  approved: "批准",
+  rejected: "驳回",
+  edited: "修改后批准",
+  module: "模组设定",
+  ruling: "主持裁定",
+};
+
+function actionBody(action: StructuredAction | undefined): string {
+  if (!action) return "服务端未提供完整请求正文。";
+  const target =
+    "target" in action && action.target
+      ? "id" in action.target
+        ? action.target.id
+        : action.target.text
+      : "未指定";
+  switch (action.kind) {
+    case "freeform":
+      return action.text;
+    case "move":
+      return `申请前往：${action.destination_scene_id}`;
+    case "present_clue":
+      return `线索：${action.clue_id}\n方式：${CHOICE_LABELS[action.presentation]}\n目标：${target}\n${action.question || ""}`;
+    case "use_item":
+      return `物品：${action.item_id} ×${action.quantity}\n用法：${action.operation}\n目标：${target}\n${action.approach || ""}`;
+  }
+}
 
 export function keeperAuthorized(
   keeperUserId: string | null,
@@ -65,6 +149,10 @@ export function KeeperConsole() {
   const clues = useStructuredStore((state) => state.clues);
   const items = useStructuredStore((state) => state.items);
   const keeperMaterial = useStructuredStore((state) => state.keeperMaterial);
+  const keeperAssets = useStructuredStore((state) => state.keeperAssets);
+  const keeperInvestigators = useStructuredStore(
+    (state) => state.keeperInvestigators,
+  );
   const requestsMap = useStructuredStore((state) => state.requests);
   const requestOrder = useStructuredStore((state) => state.requestOrder);
   const interactionMap = useStructuredStore((state) => state.interactions);
@@ -76,12 +164,17 @@ export function KeeperConsole() {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<Element | null>(null);
-  const [activeKind, setActiveKind] = useState<string>("");
-  const [values, setValues] = useState<FieldValues>({});
+  const [activeKind, setActiveKind] = useState<string>("publish_message");
+  const [values, setValues] = useState<FieldValues>(() =>
+    emptyKeeperValues(findKeeperCommand("publish_message")!),
+  );
+  const [drafts, setDrafts] = useState<Record<string, FieldValues>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<string>("");
+  const [submittedId, setSubmittedId] = useState<string | null>(null);
 
   const appMode = useAppStore((state) => state.mode);
+  const connection = useAppStore((state) => state.connection);
   const roomKeeper = useOnlineStore((state) => {
     const uid = state.user?.id;
     return (
@@ -91,26 +184,26 @@ export function KeeperConsole() {
       )
     );
   });
-  const roomStructured = useOnlineStore(
-    (state) =>
-      (state.roomMetadata as { execution_profile?: string } | null)
-        ?.execution_profile === "structured_v1",
-  );
   // 房主与主持授权独立；成员投影中的 can_keeper 是云端入口判据。
   const authorized =
-    keeperAuthorized(
-      identity.keeperUserId,
-      identity.keeperMode,
-      currentUserId,
-      appMode === "local",
-    ) ||
-    (appMode === "online" && roomStructured && roomKeeper);
-  const blocked = structuredUnavailableReason(capabilities, protocolNotice);
+    appMode === "online"
+      ? roomKeeper
+      : keeperAuthorized(
+          identity.keeperUserId,
+          identity.keeperMode,
+          currentUserId,
+          appMode === "local",
+        );
+  const blocked =
+    structuredUnavailableReason(capabilities, protocolNotice) ??
+    (connection === "connected"
+      ? null
+      : connection === "connecting"
+        ? "正在连接并同步权威状态，请求未提交。"
+        : "连接已断开，请求未提交。");
+  const commandBlocked = keeperCommandBlockReason(activeKind);
 
   const roomInvestigators = useOnlineStore((state) => state.roomInvestigators);
-  const roomCharacterOptions = useOnlineStore(
-    (state) => state.characterOptions,
-  );
   const roomMembers = useOnlineStore((state) => state.members);
   // 候选列表要在 candidates 之前算：主持台里 request_id / thread_id 都是稳定 ID，
   // 只能从服务端投影里挑，不能手抄。
@@ -127,6 +220,10 @@ export function KeeperConsole() {
       // 房间调查员名单来自房间镜像与成员信息：keeper 需要它指定线索接收者、
       // 检定对象与 HP/SAN 目标。房间快照的 targets 可能不含调查员，不能只靠它。
       investigators: [
+        ...keeperInvestigators.map((sheet) => ({
+          id: sheet.investigatorId,
+          name: sheet.name,
+        })),
         ...roomInvestigators.map((entry) => ({
           id: String(entry.investigator_id ?? ""),
           name: String(entry.name ?? entry.investigator_id ?? ""),
@@ -157,20 +254,41 @@ export function KeeperConsole() {
           (entry, _index, all) =>
             entry.id !== LEGACY_PLACEHOLDER_ID || all.length === 1,
         ),
-      npcs: targets
-        .filter((target) => target.kind === "npc")
-        .map((target) => ({ id: target.id, name: target.name })),
+      npcs: [
+        ...targets
+          .filter((target) => target.kind === "npc")
+          .map((target) => ({ id: target.id, name: target.name })),
+        ...keeperMaterial
+          .filter((entry) => entry.kind === "npc" && entry.id)
+          .map((entry) => ({ id: entry.id!, name: entry.title })),
+      ].filter(
+        (entry, index, all) =>
+          all.findIndex((other) => other.id === entry.id) === index,
+      ),
       scenes: destinations.map((scene) => ({ id: scene.id, name: scene.name })),
+      objects: targets
+        .filter((target) => target.kind === "scene_object")
+        .map((target) => ({ id: target.id, name: target.name })),
       clues: clues.map((clue) => ({
         id: clue.id,
         name: clue.text.slice(0, 40) || clue.id,
       })),
-      items: items.map((item) => ({
-        id: item.id,
-        name: `${item.label} ×${item.quantity}`,
+      items: (keeperInvestigators.length
+        ? keeperInvestigators.flatMap((sheet) => sheet.inventory)
+        : items
+      )
+        .filter(
+          (item, index, all) =>
+            all.findIndex((other) => other.id === item.id) === index,
+        )
+        .map((item) => ({
+          id: item.id,
+          name: `${item.label} ×${item.quantity}`,
+        })),
+      assets: keeperAssets.map((entry) => ({
+        id: entry.id,
+        name: entry.label,
       })),
-      // 素材由服务端投影；M0 未提供时保持空列表并说明。
-      assets: [],
       // 玩家请求与「当前交互」线程：主持收尾/关线程都要用稳定 ID，
       // 不能让主持手抄卡片上根本不显示的值（猜错 ID 服务端必拒）。
       requests: pendingRequests.map((request) => ({
@@ -193,6 +311,9 @@ export function KeeperConsole() {
       destinations,
       clues,
       items,
+      keeperAssets,
+      keeperMaterial,
+      keeperInvestigators,
       roomInvestigators,
       roomMembers,
       pendingRequests,
@@ -202,13 +323,55 @@ export function KeeperConsole() {
 
   const spec = findKeeperCommand(activeKind);
 
+  // Switching worlds must not carry private notes or object IDs into another game.
+  useEffect(() => {
+    setOpen(false);
+    setActiveKind("publish_message");
+    setValues(emptyKeeperValues(findKeeperCommand("publish_message")!));
+    setDrafts({});
+    setErrors([]);
+    setFeedback("");
+    setSubmittedId(null);
+  }, [identity.worldId, currentUserId, appMode]);
+
+  useEffect(() => {
+    if (authorized) return;
+    setOpen(false);
+    setErrors([]);
+    setValues(emptyKeeperValues(findKeeperCommand("publish_message")!));
+    setDrafts({});
+    setFeedback("");
+    setSubmittedId(null);
+  }, [authorized]);
+
+  const submitted = submittedId ? requestsMap[submittedId] : null;
+  const submissionPending =
+    submitted != null &&
+    !submitted.errorCode &&
+    (submitted.status === "queued" || submitted.status === "processing");
+  const resultFeedback = submitted?.errorMessage
+    ? `未完成：${submitted.errorMessage}。草稿已保留。`
+    : submitted?.status === "completed"
+      ? `服务端已确认提交${submitted.detail ? `：${submitted.detail}` : "。"}行动是否成功请以实际结算事件为准。`
+      : submitted?.status === "declined" || submitted?.status === "failed"
+        ? `未完成：${submitted.detail || "服务端未能执行本次命令"}。草稿已保留。`
+        : submitted?.status === "paused" ||
+            submitted?.status === "cancelled" ||
+            submitted?.status === "awaiting_player"
+          ? `${CHOICE_LABELS[submitted.status]}：${submitted.detail || "请查看待处理行动"}。草稿已保留。`
+          : submitted?.awaitingAck
+            ? "尚未收到服务端确认，正在查询原请求状态；不要重复执行同一操作。"
+            : submitted?.serverReceived
+              ? "服务端已收件，等待本次命令结算；不要重复提交。"
+              : feedback;
+
   const submit = () => {
-    if (!spec) return;
+    if (!spec || submissionPending) return;
     const problems = validateKeeperFields(spec, values);
     setErrors(problems);
     if (problems.length) return;
-    if (blocked) {
-      setErrors([blocked]);
+    if (commandBlocked) {
+      setErrors([commandBlocked]);
       return;
     }
     const payload = buildKeeperPayload(spec, values);
@@ -219,32 +382,66 @@ export function KeeperConsole() {
       return;
     }
     setFeedback(
-      `已提交命令 ${spec.kind}（command_id=${result.requestId}）。命令已被服务端接收不代表执行成功，结果以事件为准。`,
+      `正在提交「${spec.label}」，等待服务端确认；发出请求不代表执行成功。`,
     );
+    setSubmittedId(result.requestId);
+  };
+
+  const prepareCommand = (kind: string, fields: FieldValues) => {
+    const next = findKeeperCommand(kind);
+    if (!next) return;
+    setDrafts((old) => ({ ...old, [activeKind]: { ...values } }));
+    setActiveKind(kind);
+    setValues({ ...emptyKeeperValues(next), ...fields });
+    setErrors([]);
+    setFeedback("");
+    setSubmittedId(null);
+    window.requestAnimationFrame(() => {
+      const field = dialogRef.current?.querySelector<HTMLElement>(
+        ".keeper-workspace-editor .keeper-command-form select, .keeper-workspace-editor .keeper-command-form input, .keeper-workspace-editor .keeper-command-form textarea",
+      );
+      field?.scrollIntoView({ block: "center" });
+      field?.focus({ preventScroll: true });
+    });
   };
 
   // 键盘可用：打开时聚焦表单首个控件，Escape 关闭，关闭后焦点回到触发按钮。
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = document.activeElement;
-    const first = dialogRef.current?.querySelector<HTMLElement>(
-      "button, input, select, textarea",
-    );
+    const controls = dialogRef.current
+      ? focusableControls(dialogRef.current)
+      : [];
+    const first =
+      controls.find((node) => node.matches("textarea")) ?? controls[0];
     first?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setOpen(false);
+      const dialog = dialogRef.current;
+      if (
+        !dialog ||
+        event.isComposing ||
+        !dialog.contains(document.activeElement)
+      )
+        return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+      } else if (event.key === "Tab") {
+        trapDialogTab(event, dialog);
+      }
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
       const restore = restoreFocusRef.current;
-      if (restore instanceof HTMLElement) restore.focus();
+      if (restore instanceof HTMLElement && restore.isConnected)
+        restore.focus();
     };
   }, [open]);
 
-  if (!capabilities.keeperConsole && !protocolNotice) return null;
+  if (!authorized || (!capabilities.keeperConsole && !protocolNotice))
+    return null;
 
   return (
     <>
@@ -268,7 +465,12 @@ export function KeeperConsole() {
             ref={dialogRef}
           >
             <header className="panel-action-header">
-              <h3 id="keeper-console-title">主持台</h3>
+              <div>
+                <span className="keeper-workspace-eyebrow">
+                  {authorized ? "仅主持可见" : "需要主持授权"}
+                </span>
+                <h3 id="keeper-console-title">主持工作台</h3>
+              </div>
               <button
                 type="button"
                 className="btn-ghost panel-action-close"
@@ -285,6 +487,11 @@ export function KeeperConsole() {
                   {protocolNotice}
                 </p>
               )}
+              {blocked && !protocolNotice && (
+                <p className="online-notice" role="status">
+                  {blocked}
+                </p>
+              )}
               {!authorized && (
                 <p className="online-notice" data-testid="keeper-unauthorized">
                   你不是本场主持。房主身份不等于主持权限，需要服务端把 keeper
@@ -292,222 +499,431 @@ export function KeeperConsole() {
                 </p>
               )}
 
-              <section aria-label="待处理行动">
-                <h4 className="keeper-section-title">待处理行动</h4>
-                {pendingRequests.length === 0 ? (
-                  <p className="clue-empty">暂无待处理请求</p>
-                ) : (
-                  <ul className="keeper-pending-list">
-                    {pendingRequests.map((request) => (
-                      <li key={request.requestId}>
-                        <span className="keeper-pending-label">
-                          {request.label}
-                        </span>
-                        <code className="keeper-pending-id">
-                          {request.requestId}
-                        </code>
-                        <span
-                          className={`structured-badge structured-badge--${request.status}`}
-                        >
-                          {request.status}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+              {authorized && (
+                <KeeperLibrary
+                  investigators={candidates.investigators}
+                  blocked={blocked}
+                  onPrepare={prepareCommand}
+                />
+              )}
 
-              <section aria-label="授权资料">
-                <h4 className="keeper-section-title">授权模组资料</h4>
-                <p className="keeper-note">
-                  这是**服务端按 keeper 身份过滤后**下发的资料投影： keeper
-                  拿到完整线索登记表与物品 ID/数量，玩家只拿到自己那条。
-                  主持秘密（未公开场景文档、NPC 私设）需要服务端的 keeper
-                  查询出口， M0 未定义该出口；服务端一旦在快照里给出{" "}
-                  <code>keeper_material</code>， 这里会直接显示。
-                </p>
-                <dl className="structured-facts">
-                  <div>
-                    <dt>线索登记表</dt>
-                    <dd>{clues.length} 条</dd>
-                  </div>
-                  <div>
-                    <dt>物品</dt>
-                    <dd>{items.length} 项</dd>
-                  </div>
-                  <div>
-                    <dt>可交互目标</dt>
-                    <dd>{targets.length} 个</dd>
-                  </div>
-                  <div>
-                    <dt>公开目的地</dt>
-                    <dd>{destinations.length} 处</dd>
-                  </div>
-                </dl>
-                {keeperMaterial.length > 0 ? (
-                  <ul
-                    className="keeper-material-list"
-                    data-testid="keeper-material"
-                  >
-                    {keeperMaterial.map((entry) => (
-                      <li key={`${entry.title}-${entry.text.slice(0, 12)}`}>
-                        <strong>{entry.title}</strong>
-                        <p>{entry.text}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p
-                    className="keeper-note"
-                    data-testid="keeper-material-missing"
-                  >
-                    服务端未提供主持专属资料条目（<code>keeper_material</code>
-                    ）。 这里不显示、也不假装可读。
-                  </p>
-                )}
-                {clues.length > 0 && (
-                  <details className="keeper-clue-details">
-                    <summary>完整线索登记表（{clues.length}）</summary>
-                    <ul className="keeper-clue-list">
-                      {clues.map((clue) => (
-                        <li key={clue.id}>
-                          <code>{clue.id}</code> {clue.text.slice(0, 60)}
+              <aside
+                className="keeper-workspace-reference"
+                aria-label="本场参考资料"
+              >
+                <section aria-label="待处理行动">
+                  <h4 className="keeper-section-title">待处理行动</h4>
+                  {pendingRequests.length === 0 ? (
+                    <p className="clue-empty">暂无待处理请求</p>
+                  ) : (
+                    <ul className="keeper-pending-list">
+                      {pendingRequests.map((request) => (
+                        <li
+                          key={request.requestId}
+                          data-testid="keeper-pending-request"
+                        >
+                          {request.investigatorId && (
+                            <p className="keeper-note">
+                              来自{" "}
+                              {candidates.investigators.find(
+                                (entry) => entry.id === request.investigatorId,
+                              )?.name || request.investigatorId}
+                            </p>
+                          )}
+                          <span className="keeper-pending-label">
+                            {request.label}
+                          </span>
+                          <code className="keeper-pending-id">
+                            {request.requestId}
+                          </code>
+                          <span
+                            className={`structured-badge structured-badge--${request.status}`}
+                          >
+                            {CHOICE_LABELS[request.status] ?? request.status}
+                          </span>
+                          <details>
+                            <summary>查看完整请求</summary>
+                            <p className="keeper-pending-body">
+                              {actionBody(request.keeperAction)}
+                            </p>
+                          </details>
+                          <p className="keeper-note">
+                            请求尚未收尾；下方只准备表单，不自动批准或结算。
+                          </p>
+                          <div className="keeper-pending-actions">
+                            {request.investigatorId &&
+                              request.keeperAction?.kind === "use_item" && (
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  disabled={
+                                    blocked !== null ||
+                                    !capabilities.commands.includes("use_item")
+                                  }
+                                  onClick={() => {
+                                    const action = request.keeperAction;
+                                    if (action?.kind !== "use_item") return;
+                                    prepareCommand("use_item", {
+                                      investigator_id: request.investigatorId!,
+                                      item_id: action.item_id,
+                                      quantity: action.quantity,
+                                      operation: action.operation,
+                                      approach: action.approach || "",
+                                      consume: false,
+                                      ...(action.target
+                                        ? {
+                                            target_kind: action.target.kind,
+                                            target_id:
+                                              "id" in action.target
+                                                ? action.target.id
+                                                : action.target.text,
+                                          }
+                                        : {}),
+                                    });
+                                  }}
+                                >
+                                  准备使用
+                                </button>
+                              )}
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              disabled={
+                                blocked !== null ||
+                                !capabilities.commands.includes(
+                                  "publish_message",
+                                )
+                              }
+                              onClick={() =>
+                                prepareCommand(
+                                  "publish_message",
+                                  request.investigatorId
+                                    ? {
+                                        audience_kind: "investigators",
+                                        audience_investigator_ids:
+                                          request.investigatorId,
+                                      }
+                                    : {},
+                                )
+                              }
+                            >
+                              准备回应
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              disabled={
+                                blocked !== null ||
+                                !capabilities.commands.includes(
+                                  "resolve_intent",
+                                )
+                              }
+                              onClick={() =>
+                                prepareCommand("resolve_intent", {
+                                  request_id: request.requestId,
+                                  outcome: "not_executed",
+                                })
+                              }
+                            >
+                              准备裁定
+                            </button>
+                            {request.investigatorId && (
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                disabled={
+                                  blocked !== null ||
+                                  !capabilities.commands.includes(
+                                    "request_check",
+                                  )
+                                }
+                                onClick={() =>
+                                  prepareCommand("request_check", {
+                                    related_request_id: request.requestId,
+                                    investigator_id: request.investigatorId!,
+                                  })
+                                }
+                              >
+                                准备检定
+                              </button>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>
-                  </details>
-                )}
-              </section>
-
-              {capabilities.memoryQuery && (
-                <MemoryQueryPanel candidates={candidates} />
-              )}
-              <section aria-label="存档与续团">
-                <h4 className="keeper-section-title">存档与续团</h4>
-                <p className="keeper-note">
-                  主持可以直接存档、读档或打开存档管理；服务端仍会按房间权限复核
-                  （多人房间的存档操作是房主权限）。
-                </p>
-                <div className="structured-card-actions">
-                  <button
-                    type="button"
-                    className="btn-ghost structured-btn"
-                    data-testid="keeper-save"
-                    onClick={() => quickSave()}
-                  >
-                    快速存档
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost structured-btn"
-                    data-testid="keeper-load"
-                    onClick={() => loadSave("slot_000")}
-                  >
-                    读取自动存档
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost structured-btn"
-                    data-testid="keeper-save-panel"
-                    onClick={() => openSavePanel("manage")}
-                  >
-                    存档管理
-                  </button>
-                </div>
-              </section>
-
-              <section aria-label="主持操作">
-                <h4 className="keeper-section-title">主持操作</h4>
-                <div className="keeper-command-groups">
-                  {KEEPER_COMMANDS.map((command) => {
-                    const disabled =
-                      blocked !== null ||
-                      !authorized ||
-                      (command.kind === "move_party" &&
-                        !capabilities.moveAction) ||
-                      (command.kind === "request_check" &&
-                        !capabilities.checkRequest);
-                    return (
-                      <button
-                        key={command.kind}
-                        type="button"
-                        className={
-                          activeKind === command.kind
-                            ? "btn-ghost keeper-command is-active"
-                            : "btn-ghost keeper-command"
-                        }
-                        data-testid={`keeper-cmd-${command.kind}`}
-                        disabled={disabled}
-                        title={
-                          !authorized
-                            ? "需要主持权限"
-                            : (blocked ??
-                              (disabled
-                                ? "服务端未声明该能力"
-                                : (command.help ?? command.label)))
-                        }
-                        onClick={() => {
-                          setActiveKind(command.kind);
-                          setValues(emptyKeeperValues(command));
-                          setErrors([]);
-                          setFeedback("");
-                        }}
-                      >
-                        {command.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              {spec && (
-                <section aria-label="命令表单" className="keeper-command-form">
-                  <h4 className="keeper-section-title">{spec.label}</h4>
-                  {spec.help && <p className="keeper-note">{spec.help}</p>}
-                  {spec.fields.map((field) => (
-                    <div
-                      className="keeper-field-slot"
-                      data-field={field.name}
-                      key={`${field.name}-slot`}
-                    >
-                      <KeeperField
-                        field={field}
-                        spec={spec}
-                        values={values}
-                        candidates={candidates}
-                        roomCharacterOptions={roomCharacterOptions}
-                        disabled={blocked !== null || !authorized}
-                        onChange={(name, value) =>
-                          setValues((current) => ({
-                            ...current,
-                            [name]: value,
-                          }))
-                        }
-                      />
-                    </div>
-                  ))}
-                  {errors.length > 0 && (
-                    <ul className="panel-action-error" role="alert">
-                      {errors.map((error) => (
-                        <li key={error}>{error}</li>
-                      ))}
-                    </ul>
                   )}
-                  {feedback && <p className="keeper-feedback">{feedback}</p>}
+                </section>
+
+                <section aria-label="授权资料">
+                  <h4 className="keeper-section-title">授权模组资料</h4>
+                  <p className="keeper-note">
+                    本场已授权给你的模组资料。分发线索时请选择接收调查员；未授权的玩家不会看到主持资料。
+                  </p>
+                  <dl className="structured-facts">
+                    <div>
+                      <dt>线索登记表</dt>
+                      <dd>{clues.length} 条</dd>
+                    </div>
+                    <div>
+                      <dt>物品</dt>
+                      <dd>{items.length} 项</dd>
+                    </div>
+                    <div>
+                      <dt>可交互目标</dt>
+                      <dd>{targets.length} 个</dd>
+                    </div>
+                    <div>
+                      <dt>公开目的地</dt>
+                      <dd>{destinations.length} 处</dd>
+                    </div>
+                  </dl>
+                  {authorized && keeperMaterial.length > 0 ? (
+                    <details className="keeper-clue-details">
+                      <summary>
+                        主持参考（{keeperMaterial.length} 条）·
+                        上方资料库可分类查阅
+                      </summary>
+                      <ul
+                        className="keeper-material-list"
+                        data-testid="keeper-material"
+                      >
+                        {keeperMaterial.map((entry) => (
+                          <li key={`${entry.title}-${entry.text.slice(0, 12)}`}>
+                            <strong>{entry.title}</strong>
+                            <p>{entry.text}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : (
+                    <p
+                      className="keeper-note"
+                      data-testid="keeper-material-missing"
+                    >
+                      本模组暂未提供额外的主持资料。可先使用线索登记表和下方主持操作。
+                    </p>
+                  )}
+                  {clues.length > 0 && (
+                    <details className="keeper-clue-details">
+                      <summary>完整线索登记表（{clues.length}）</summary>
+                      <ul className="keeper-clue-list">
+                        {clues.map((clue) => (
+                          <li key={clue.id}>
+                            <code>{clue.id}</code> {clue.text.slice(0, 60)}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </section>
+
+                {capabilities.memoryQuery && authorized && (
+                  <MemoryQueryPanel candidates={candidates} blocked={blocked} />
+                )}
+                <section aria-label="存档与续团">
+                  <h4 className="keeper-section-title">存档与续团</h4>
+                  <p className="keeper-note">
+                    主持可以直接存档、读档或打开存档管理；服务端仍会按房间权限复核
+                    （多人房间的存档操作是房主权限）。
+                  </p>
                   <div className="structured-card-actions">
                     <button
                       type="button"
-                      className="btn-primary structured-btn"
-                      data-testid="keeper-submit"
-                      disabled={blocked !== null || !authorized}
-                      title={blocked ?? "提交主持命令"}
-                      onClick={submit}
+                      className="btn-ghost structured-btn"
+                      data-testid="keeper-save"
+                      onClick={() => quickSave()}
                     >
-                      提交命令
+                      快速存档
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost structured-btn"
+                      data-testid="keeper-load"
+                      onClick={() => loadSave("slot_000")}
+                    >
+                      读取自动存档
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost structured-btn"
+                      data-testid="keeper-save-panel"
+                      onClick={() => openSavePanel("manage")}
+                    >
+                      存档管理
                     </button>
                   </div>
                 </section>
-              )}
+              </aside>
+              <div className="keeper-workspace-editor">
+                <section aria-label="主持操作">
+                  <h4 className="keeper-section-title">主持操作</h4>
+                  <div className="keeper-command-groups">
+                    {Array.from(
+                      new Set(KEEPER_COMMANDS.map((command) => command.group)),
+                    ).map((group) => (
+                      <fieldset className="keeper-operation-group" key={group}>
+                        <legend>{group}</legend>
+                        <div className="keeper-operation-buttons">
+                          {KEEPER_COMMANDS.filter(
+                            (command) => command.group === group,
+                          ).map((command) => {
+                            const disabled =
+                              blocked !== null ||
+                              !authorized ||
+                              !capabilities.commands.includes(command.kind) ||
+                              (command.kind === "move_party" &&
+                                !capabilities.moveAction) ||
+                              (command.kind === "request_check" &&
+                                !capabilities.checkRequest);
+                            return (
+                              <button
+                                key={command.kind}
+                                type="button"
+                                className={
+                                  activeKind === command.kind
+                                    ? "btn-ghost keeper-command is-active"
+                                    : "btn-ghost keeper-command"
+                                }
+                                data-testid={`keeper-cmd-${command.kind}`}
+                                aria-pressed={activeKind === command.kind}
+                                disabled={disabled}
+                                title={
+                                  !authorized
+                                    ? "需要主持权限"
+                                    : (blocked ??
+                                      (disabled
+                                        ? "服务端未声明该能力"
+                                        : (command.help ?? command.label)))
+                                }
+                                onClick={() => {
+                                  if (activeKind === command.kind) return;
+                                  setDrafts((current) => ({
+                                    ...current,
+                                    [activeKind]: values,
+                                  }));
+                                  setActiveKind(command.kind);
+                                  setValues(
+                                    drafts[command.kind] ??
+                                      emptyKeeperValues(command),
+                                  );
+                                  setErrors([]);
+                                  setFeedback("");
+                                  setSubmittedId(null);
+                                }}
+                              >
+                                {command.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    ))}
+                  </div>
+                </section>
+
+                {spec && authorized && blocked === null && (
+                  <section
+                    aria-label="命令表单"
+                    className="keeper-command-form"
+                  >
+                    <h4 className="keeper-section-title">{spec.label}</h4>
+                    {spec.help && <p className="keeper-note">{spec.help}</p>}
+                    {commandBlocked && (
+                      <p role="status" className="keeper-note">
+                        {commandBlocked}
+                      </p>
+                    )}
+                    {spec.fields.map((field) => (
+                      <div
+                        className="keeper-field-slot"
+                        data-field={field.name}
+                        key={`${field.name}-slot`}
+                      >
+                        <KeeperField
+                          field={field}
+                          spec={spec}
+                          values={values}
+                          candidates={candidates}
+                          keeperInvestigators={keeperInvestigators}
+                          disabled={commandBlocked !== null || !authorized}
+                          onChange={(name, value) =>
+                            setValues((current) => ({
+                              ...current,
+                              [name]: value,
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                    {errors.length > 0 && (
+                      <ul className="panel-action-error" role="alert">
+                        {errors.map((error) => (
+                          <li key={error}>{error}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {resultFeedback && (
+                      <p className="keeper-feedback" role="status">
+                        {resultFeedback}
+                      </p>
+                    )}
+                    {!resultFeedback.includes("不代表执行成功") && (
+                      <p className="keeper-note">
+                        请求已接收不代表执行成功；请以服务端结算结果为准。
+                      </p>
+                    )}
+                    <div className="structured-card-actions">
+                      {submitted?.errorCode === "revision_conflict" && (
+                        <button
+                          type="button"
+                          className="btn-ghost structured-btn"
+                          disabled={commandBlocked !== null || !authorized}
+                          onClick={() => {
+                            const result = resubmitWithFreshRevision(
+                              submitted.requestId,
+                            );
+                            if (!result) {
+                              setErrors([
+                                "尚未收到更新后的世界状态，请等待同步后再试。",
+                              ]);
+                            } else if (!result.ok) {
+                              setErrors([result.reason]);
+                            } else {
+                              setErrors([]);
+                              setSubmittedId(result.requestId);
+                              setFeedback(
+                                "已按最新世界版本重新提交，等待服务端确认。",
+                              );
+                            }
+                          }}
+                        >
+                          用最新版本重新提交
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-primary structured-btn"
+                        data-testid="keeper-submit"
+                        disabled={
+                          commandBlocked !== null ||
+                          !authorized ||
+                          submissionPending
+                        }
+                        title={commandBlocked ?? "提交主持命令"}
+                        onClick={submit}
+                      >
+                        {submissionPending
+                          ? submitted?.serverReceived
+                            ? "等待命令结算……"
+                            : "等待收件确认……"
+                          : spec.kind === "publish_message"
+                            ? "发布叙事"
+                            : "提交命令"}
+                      </button>
+                    </div>
+                  </section>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -521,7 +937,7 @@ function KeeperField({
   spec,
   values,
   candidates,
-  roomCharacterOptions,
+  keeperInvestigators,
   disabled,
   onChange,
 }: {
@@ -529,10 +945,16 @@ function KeeperField({
   spec: KeeperCommandSpec;
   values: FieldValues;
   candidates: KeeperCandidates;
-  roomCharacterOptions: readonly unknown[];
+  keeperInvestigators: readonly KeeperInvestigator[];
   disabled: boolean;
   onChange: (name: string, value: string | number | boolean) => void;
 }) {
+  if (
+    spec.kind === "publish_message" &&
+    field.name === "speaker_id" &&
+    !["npc", "investigator"].includes(String(values.speaker_kind))
+  )
+    return null;
   if (field.kind === "audience" || field.name.startsWith("audience_")) {
     if (field.name === "audience_investigator_ids") {
       const visible = String(values.audience_kind) === "investigators";
@@ -565,11 +987,19 @@ function KeeperField({
         <select
           value={String(values[field.name] ?? "")}
           disabled={disabled}
-          onChange={(event) => onChange(field.name, event.target.value)}
+          onChange={(event) => {
+            onChange(field.name, event.target.value);
+            if (field.name === "speaker_kind") onChange("speaker_id", "");
+          }}
         >
+          {!field.required && <option value="">未填写（不提交此项）</option>}
           {(field.enumValues ?? []).map((value) => (
             <option key={value} value={value}>
-              {value}
+              {spec.kind === "publish_message" &&
+              field.name === "speaker_kind" &&
+              value === "keeper"
+                ? "守秘人旁白"
+                : (CHOICE_LABELS[value] ?? value)}
             </option>
           ))}
         </select>
@@ -584,16 +1014,25 @@ function KeeperField({
         ...entry,
         kind: "investigator",
       })),
+      ...(candidates.objects ?? []).map((entry) => ({
+        ...entry,
+        kind: "scene_object",
+      })),
     ];
     return (
       <>
         <label className="panel-action-field">
           <span>{field.label}</span>
           <select
-            value={`${String(values.target_kind ?? "")}:${String(values.target_id ?? "")}`}
+            value={
+              values.target_kind === "unresolved"
+                ? "unresolved:"
+                : `${String(values.target_kind ?? "")}:${String(values.target_id ?? "")}`
+            }
             disabled={disabled}
             onChange={(event) => {
-              const [kind, id] = event.target.value.split(":");
+              const [kind, ...idParts] = event.target.value.split(":");
+              const id = idParts.join(":"); // IDs may themselves contain namespaces.
               onChange("target_kind", kind || "");
               onChange("target_id", id || "");
             }}
@@ -604,7 +1043,12 @@ function KeeperField({
                 key={`${option.kind}:${option.id}`}
                 value={`${option.kind}:${option.id}`}
               >
-                {option.kind === "npc" ? "人物" : "调查员"}·{option.name}
+                {option.kind === "npc"
+                  ? "人物"
+                  : option.kind === "scene_object"
+                    ? "场景物件"
+                    : "调查员"}
+                ·{option.name}
               </option>
             ))}
             <option value="unresolved:">描述其他对象…</option>
@@ -643,7 +1087,61 @@ function KeeperField({
     );
   }
 
-  const options = candidatesFor(field.candidate, candidates);
+  if (spec.kind === "publish_message" && field.name === "text") {
+    return (
+      <div className="keeper-narrative-field">
+        <label className="panel-action-field">
+          <span>{field.label}</span>
+          <textarea
+            id="keeper-field-text"
+            value={String(values[field.name] ?? "")}
+            rows={7}
+            maxLength={field.maxLength}
+            disabled={disabled}
+            placeholder="描述眼前的场景，回应调查员的行动，或让人物开口说话……"
+            onChange={(event) => onChange(field.name, event.target.value)}
+          />
+        </label>
+        <span className="keeper-text-count">
+          {String(values[field.name] ?? "").length} / {field.maxLength}
+        </span>
+      </div>
+    );
+  }
+
+  if (field.multiline) {
+    return (
+      <div className="keeper-multiline-field">
+        <label className="panel-action-field">
+          <span>{field.label}</span>
+          <textarea
+            id={`keeper-field-${field.name}`}
+            rows={3}
+            maxLength={field.maxLength}
+            value={String(values[field.name] ?? "")}
+            disabled={disabled}
+            aria-describedby={
+              field.help ? `keeper-hint-${field.name}` : undefined
+            }
+            onChange={(event) => onChange(field.name, event.target.value)}
+          />
+        </label>
+        {field.help && (
+          <p id={`keeper-hint-${field.name}`} className="keeper-note">
+            {field.help}
+          </p>
+        )}
+        <span className="keeper-text-count">
+          {String(values[field.name] ?? "").length} / {field.maxLength}
+        </span>
+      </div>
+    );
+  }
+
+  const options =
+    field.name === "speaker_id" && values.speaker_kind === "investigator"
+      ? candidates.investigators
+      : candidatesFor(field.candidate, candidates);
   // 提示文本放在 label 之外：label 的可访问名必须精确等于字段名，
   // 否则屏幕阅读器与 getByLabelText 都会读成整段提示。
   const hint = (() => {
@@ -669,26 +1167,13 @@ function KeeperField({
     </div>
   );
 
-  // 技能字段：给出房间里各角色卡上真实存在的技能键（服务端按技能键校验，
-  // 随便写一个中文技能名会被 invalid_action 拒掉）。
+  // Exact full skills of the selected PC, not lobby top-skills or another PC's
+  // numbers. Manual input remains available for older servers without sheets.
   if (field.name === "skill") {
-    const skillOptions = Array.from(
-      new Map(
-        roomCharacterOptions
-          .flatMap((option) => {
-            const skills = (option as { top_skills?: unknown } | null)
-              ?.top_skills;
-            return Array.isArray(skills)
-              ? (skills as { id?: unknown; value?: unknown }[])
-              : [];
-          })
-          .flatMap((skill) =>
-            typeof skill?.id === "string"
-              ? [[skill.id, Number(skill?.value ?? 0)] as const]
-              : [],
-          ),
-      ).entries(),
+    const selected = keeperInvestigators.find(
+      (sheet) => sheet.investigatorId === values.investigator_id,
     );
+    const skillOptions = selected ? Object.entries(selected.skills) : [];
     return withHint(
       <label className="panel-action-field">
         <span>{field.label}</span>
@@ -714,19 +1199,50 @@ function KeeperField({
   }
 
   if (field.kind === "id_list") {
+    const selected = String(values[field.name] ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
     return withHint(
-      <label className="panel-action-field">
-        <span>{field.label}</span>
-        <input
-          type="text"
-          value={String(values[field.name] ?? "")}
-          disabled={disabled}
-          placeholder={
-            options.length ? options.map((o) => o.id).join(",") : "逗号分隔 ID"
-          }
-          onChange={(event) => onChange(field.name, event.target.value)}
-        />
-      </label>,
+      <div>
+        {options.length > 0 && (
+          <fieldset className="keeper-recipient-picker" disabled={disabled}>
+            <legend>选择{field.label}</legend>
+            {options.map((option) => (
+              <label key={option.id}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(option.id)}
+                  onChange={(event) =>
+                    onChange(
+                      field.name,
+                      (event.target.checked
+                        ? Array.from(new Set([...selected, option.id]))
+                        : selected.filter((id) => id !== option.id)
+                      ).join(","),
+                    )
+                  }
+                />
+                <span>{option.name}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <label className="panel-action-field">
+          <span>{field.label}</span>
+          <input
+            type="text"
+            value={String(values[field.name] ?? "")}
+            disabled={disabled}
+            placeholder={
+              options.length
+                ? options.map((o) => o.id).join(",")
+                : "逗号分隔 ID"
+            }
+            onChange={(event) => onChange(field.name, event.target.value)}
+          />
+        </label>
+      </div>,
     );
   }
 
@@ -744,6 +1260,7 @@ function KeeperField({
           id={`keeper-field-${field.name}`}
           type="text"
           list={listId}
+          aria-label={field.label}
           value={String(values[field.name] ?? "")}
           disabled={disabled}
           placeholder="可直接输入 ID，或从候选里挑"
@@ -766,6 +1283,7 @@ function KeeperField({
       <label className="panel-action-field">
         <span>{field.label}</span>
         <select
+          aria-label={field.label}
           value={String(values[field.name] ?? "")}
           disabled={disabled}
           onChange={(event) => onChange(field.name, event.target.value)}
@@ -803,7 +1321,13 @@ function KeeperField({
  * 不做记忆编辑/删除，也不把记忆当权威世界状态；能力由服务端 `memory_query` 声明，
  * 真正的授权在服务端（玩家连接即使伪造帧也会被拒）。
  */
-function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
+function MemoryQueryPanel({
+  candidates,
+  blocked,
+}: {
+  candidates: KeeperCandidates;
+  blocked: string | null;
+}) {
   const [characterId, setCharacterId] = useState("");
   const [topics, setTopics] = useState("");
   const [text, setText] = useState("");
@@ -816,24 +1340,41 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
     })),
     ...candidates.npcs.map((entry) => ({ ...entry, kind: "npc" })),
   ];
+  const filters = queryState.filters;
+  const filterSummary = [
+    filters.character_id
+      ? `角色：${options.find((entry) => entry.id === filters.character_id)?.name || "指定角色"}`
+      : "全部角色",
+    Array.isArray(filters.topics) && filters.topics.length
+      ? `主题：${filters.topics.join("、")}`
+      : "",
+    typeof filters.text === "string" && filters.text
+      ? `文本：${filters.text}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const submit = () => {
     const topicList = topics
-      .split(",")
+      .split(/[,，]/)
       .map((entry) => entry.trim())
-      .filter(Boolean)
-      .slice(0, 6);
+      .filter(Boolean);
     const result = sendMemoryQuery({
       ...(characterId ? { characterId } : {}),
       ...(topicList.length ? { topics: topicList } : {}),
-      ...(text.trim() ? { text: text.trim().slice(0, 20) } : {}),
+      ...(text.trim() ? { text: text.trim() } : {}),
       limit: 10,
     });
     setError(result.ok ? null : result.reason);
   };
 
   return (
-    <section aria-label="记忆查询" data-testid="keeper-memory-query">
+    <section
+      className="keeper-memory-query"
+      aria-label="记忆查询"
+      data-testid="keeper-memory-query"
+    >
       <h4 className="keeper-section-title">记忆查询（主持只读）</h4>
       <div className="keeper-command-form">
         <div className="keeper-field-slot" data-field="memory_character_id">
@@ -854,7 +1395,7 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
         </div>
         <div className="keeper-field-slot" data-field="memory_topics">
           <label className="panel-action-field">
-            <span>主题（逗号分隔，≤6）</span>
+            <span>主题（逗号分隔，最多6个，每个40字）</span>
             <input
               type="text"
               value={topics}
@@ -864,11 +1405,10 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
         </div>
         <div className="keeper-field-slot" data-field="memory_text">
           <label className="panel-action-field">
-            <span>文本（≤20 字）</span>
-            <input
-              type="text"
+            <span>文本（最多200字）</span>
+            <textarea
+              rows={3}
               value={text}
-              maxLength={20}
               onChange={(event) => setText(event.target.value)}
             />
           </label>
@@ -877,12 +1417,18 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
           type="button"
           className="btn-ghost structured-btn"
           data-testid="keeper-memory-submit"
-          disabled={queryState.status === "querying"}
+          disabled={queryState.status === "querying" || blocked !== null}
+          title={blocked ?? "只读查询角色记忆，不改变世界状态"}
           onClick={submit}
         >
           {queryState.status === "querying" ? "查询中…" : "查询记忆"}
         </button>
       </div>
+      {blocked && (
+        <p className="structured-card-note" role="status">
+          {blocked}
+        </p>
+      )}
       {error && (
         <p className="structured-card-error" role="alert">
           {error}
@@ -900,8 +1446,7 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
       {queryState.status === "done" && (
         <div data-testid="keeper-memory-results">
           <p className="structured-card-note">
-            过滤：{JSON.stringify(queryState.filters)}｜命中{" "}
-            {queryState.entries.length} 条
+            筛选：{filterSummary}｜命中 {queryState.entries.length} 条
             {queryState.truncated ? "（已截断）" : ""}
           </p>
           {queryState.entries.length === 0 ? (
@@ -915,8 +1460,10 @@ function MemoryQueryPanel({ candidates }: { candidates: KeeperCandidates }) {
             <ul className="keeper-material-list">
               {queryState.entries.map((entry) => (
                 <li key={entry.memoryId}>
-                  <strong>{entry.knowledgeType}</strong>
-                  {`｜${entry.characterId}｜${entry.sceneId || "—"}｜`}
+                  <strong>
+                    {CHOICE_LABELS[entry.knowledgeType] || "角色看法"}
+                  </strong>
+                  {`｜${options.find((option) => option.id === entry.characterId)?.name || "未命名角色"}｜${candidates.scenes.find((scene) => scene.id === entry.sceneId)?.name || (entry.sceneId ? "地点资料未提供" : "—")}｜`}
                   {entry.content}
                   {entry.topics.length
                     ? `（主题：${entry.topics.join("/")}）`

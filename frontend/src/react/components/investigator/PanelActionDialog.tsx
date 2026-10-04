@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { focusableControls, trapDialogTab } from "../dialogFocus";
 
 import {
   buildPanelActionText,
@@ -81,13 +82,21 @@ export function PanelActionDialog() {
     if (!open) return;
     restoreFocusRef.current = document.activeElement;
     const dialog = dialogRef.current;
+    const controls = dialog ? focusableControls(dialog) : [];
     const first =
-      dialog?.querySelector<HTMLElement>("input, textarea, select") ||
-      dialog?.querySelector<HTMLElement>("button");
+      controls.find((node) => node.matches("input,textarea,select")) ??
+      controls[0];
     first?.focus();
     return () => {
       const restore = restoreFocusRef.current;
-      if (restore instanceof HTMLElement) restore.focus();
+      if (restore instanceof HTMLElement && restore.isConnected) {
+        // openEditor deliberately closes the narrow-screen drawer. Do not put
+        // keyboard focus back inside that hidden drawer when cancelling.
+        const target = restore.closest("#char-panel.collapsed")
+          ? document.getElementById("btn-panel")
+          : restore;
+        if (target && !target.matches(":disabled")) target.focus();
+      }
     };
   }, [open]);
 
@@ -95,29 +104,21 @@ export function PanelActionDialog() {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (
+        !dialog ||
+        event.isComposing ||
+        !dialog.contains(document.activeElement)
+      )
+        return;
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
         requestClose();
         return;
       }
       if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusables = Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button, input, textarea, select, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((element) => !element.hasAttribute("disabled"));
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      trapDialogTab(event, dialog);
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
@@ -161,6 +162,7 @@ export function PanelActionDialog() {
         aria-modal="true"
         aria-labelledby="panel-action-title"
         ref={dialogRef}
+        tabIndex={-1}
       >
         <header className="panel-action-header">
           <h3 id="panel-action-title">
@@ -176,95 +178,99 @@ export function PanelActionDialog() {
           </button>
         </header>
 
-        {draft.kind === "present" ? (
-          <div className="panel-action-body">
-            <div className="panel-action-subject">
-              线索：<strong>{draft.clueSummary}</strong>
+        <div className="panel-action-content">
+          {draft.kind === "present" ? (
+            <div className="panel-action-body">
+              <div className="panel-action-subject">
+                线索：<strong>{draft.clueSummary}</strong>
+              </div>
+              <label className="panel-action-field">
+                <span>向谁出示/说明（必填）</span>
+                <input
+                  type="text"
+                  value={draft.target}
+                  maxLength={40}
+                  placeholder="例如：惠特克罗夫特医生"
+                  onChange={(event) =>
+                    updateDraft({ target: event.target.value })
+                  }
+                />
+              </label>
+              <label className="panel-action-field">
+                <span>同时出示随身实物（可选）</span>
+                <select
+                  value={draft.physicalItem || ""}
+                  onChange={(event) =>
+                    updateDraft({ physicalItem: event.target.value || null })
+                  }
+                >
+                  <option value="">仅说明已知信息</option>
+                  {inventory.map((item, index) => (
+                    <option key={`${item}-${index}`} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="panel-action-field">
+                <span>想询问什么（可选）</span>
+                <input
+                  type="text"
+                  value={draft.question}
+                  maxLength={120}
+                  placeholder="例如：他是否见过这张便签"
+                  onChange={(event) =>
+                    updateDraft({ question: event.target.value })
+                  }
+                />
+              </label>
             </div>
-            <label className="panel-action-field">
-              <span>向谁出示/说明（必填）</span>
-              <input
-                type="text"
-                value={draft.target}
-                maxLength={40}
-                placeholder="例如：惠特克罗夫特医生"
-                onChange={(event) =>
-                  updateDraft({ target: event.target.value })
-                }
-              />
-            </label>
-            <label className="panel-action-field">
-              <span>同时出示随身实物（可选）</span>
-              <select
-                value={draft.physicalItem || ""}
-                onChange={(event) =>
-                  updateDraft({ physicalItem: event.target.value || null })
-                }
-              >
-                <option value="">仅说明已知信息</option>
-                {inventory.map((item, index) => (
-                  <option key={`${item}-${index}`} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="panel-action-field">
-              <span>想询问什么（可选）</span>
-              <input
-                type="text"
-                value={draft.question}
-                maxLength={120}
-                placeholder="例如：他是否见过这张便签"
-                onChange={(event) =>
-                  updateDraft({ question: event.target.value })
-                }
-              />
-            </label>
-          </div>
-        ) : (
-          <div className="panel-action-body">
-            <div className="panel-action-subject">
-              道具：<strong>{draft.itemLabel}</strong>
+          ) : (
+            <div className="panel-action-body">
+              <div className="panel-action-subject">
+                道具：<strong>{draft.itemLabel}</strong>
+              </div>
+              <label className="panel-action-field">
+                <span>如何使用（必填）</span>
+                <input
+                  type="text"
+                  value={draft.usage}
+                  maxLength={120}
+                  placeholder="例如：照亮床底，检查是否有可见物品"
+                  onChange={(event) =>
+                    updateDraft({ usage: event.target.value })
+                  }
+                />
+              </label>
+              <label className="panel-action-field">
+                <span>目标/对象（可选）</span>
+                <input
+                  type="text"
+                  value={draft.target}
+                  maxLength={40}
+                  placeholder="例如：自己、房门、惠特克罗夫特"
+                  onChange={(event) =>
+                    updateDraft({ target: event.target.value })
+                  }
+                />
+              </label>
             </div>
-            <label className="panel-action-field">
-              <span>如何使用（必填）</span>
-              <input
-                type="text"
-                value={draft.usage}
-                maxLength={120}
-                placeholder="例如：照亮床底，检查是否有可见物品"
-                onChange={(event) => updateDraft({ usage: event.target.value })}
-              />
-            </label>
-            <label className="panel-action-field">
-              <span>目标/对象（可选）</span>
-              <input
-                type="text"
-                value={draft.target}
-                maxLength={40}
-                placeholder="例如：自己、房门、惠特克罗夫特"
-                onChange={(event) =>
-                  updateDraft({ target: event.target.value })
-                }
-              />
-            </label>
-          </div>
-        )}
+          )}
 
-        <div className="panel-action-preview">
-          <div className="panel-action-preview-label">行动预览</div>
-          <div className="panel-action-preview-text">{preview}</div>
-          <div className="panel-action-preview-note">
-            这是一次行动请求，结果由守秘人与规则裁决。
+          <div className="panel-action-preview">
+            <div className="panel-action-preview-label">行动预览</div>
+            <div className="panel-action-preview-text">{preview}</div>
+            <div className="panel-action-preview-note">
+              这是一次行动请求，结果由守秘人与规则裁决。
+            </div>
           </div>
+
+          {(editor.error || disabledReason) && (
+            <div className="panel-action-error" role="alert">
+              {editor.error || disabledReason}
+            </div>
+          )}
         </div>
-
-        {(editor.error || disabledReason) && (
-          <div className="panel-action-error" role="alert">
-            {editor.error || disabledReason}
-          </div>
-        )}
 
         <footer className="panel-action-footer">
           <button

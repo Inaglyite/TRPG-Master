@@ -11,6 +11,10 @@
  */
 
 import { create } from "zustand";
+import {
+  narrativeHistorySchema,
+  type NarrativeHistoryPage,
+} from "../api/structuredHistory";
 
 import {
   ACTION_STATUSES,
@@ -20,6 +24,7 @@ import {
   readInteractionThread,
   readMemoryEntry,
   readServerCapabilities,
+  structuredActionSchema,
   requestErrorText,
   type ActionStatusKind,
   type DomainOutcome,
@@ -34,11 +39,29 @@ import {
 export type PublicTarget = { kind: TargetKind; id: string; name: string };
 
 /**
- * 主持专属资料条目。M0 的 `session_snapshot` **没有定义**这个字段；
- * 前端按可选字段读取：服务端给了就显示，没给就明确说明“未提供”，
- * 绝不把玩家可见投影包装成“主持秘密”。字段名已列入前端契约文档待 M1 确认。
+ * 主持专属资料；只来自获授权连接的快照，不从聊天正文或玩家投影猜测。
  */
-export type KeeperMaterialEntry = { title: string; text: string };
+export type KeeperMaterialEntry = {
+  id?: string;
+  kind?: "scene" | "npc";
+  current?: boolean;
+  title: string;
+  text: string;
+};
+export type KeeperAssetEntry = { id: string; label: string };
+export type KeeperInvestigator = {
+  investigatorId: string;
+  name: string;
+  occupation: string;
+  hp: number | null;
+  maxHp: number | null;
+  san: number | null;
+  maxSan: number | null;
+  attributes: Record<string, number>;
+  skills: Record<string, number>;
+  conditions: string[];
+  inventory: ItemOption[];
+};
 export type PublicDestination = { id: string; name: string };
 
 export type ClueOption = {
@@ -61,7 +84,11 @@ export type ItemOption = {
 };
 
 export type RequestIntentKind =
-  StructuredAction["kind"] | "free_roll" | "check_response" | "command";
+  | StructuredAction["kind"]
+  | "free_roll"
+  | "check_response"
+  | "command"
+  | "cancel";
 
 /** awaiting_player 的公开待办：尚未执行的行动 + 已告知条件（不含主持秘密）。 */
 export type AwaitingTodo = {
@@ -96,6 +123,12 @@ export type PendingRequest = {
   updatedAt: number;
   /** 超时未收到任何服务端事件：UI 显示“正在查询原请求状态”，而不是假装成功。 */
   awaitingAck: boolean;
+  /** Explicit server receipt (ack/status/snapshot), never inferred from sending. */
+  serverReceived: boolean;
+  /** Host-only full request projection; never inferred from its short label. */
+  keeperAction?: StructuredAction;
+  investigatorId?: string;
+  requestType?: string;
 };
 
 export type MemoryQueryState = {
@@ -146,6 +179,9 @@ export type KeeperControl = {
   detail: string;
   /** 是否可申请接管；服务端未声明时为 false。 */
   takeoverAvailable: boolean;
+  /** 已提交的控制权身份；诊断帧可缺省，不把诊断当作权限授权。 */
+  controllerKind?: "human" | "agent" | "none";
+  controllerId?: string | null;
   updatedAt: number;
 };
 
@@ -344,6 +380,47 @@ function readItems(value: unknown): ItemOption[] {
   });
 }
 
+function numberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, number] =>
+        typeof entry[1] === "number" && Number.isFinite(entry[1]),
+    ),
+  );
+}
+
+function readKeeperInvestigators(value: unknown): KeeperInvestigator[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const r = entry as Record<string, unknown>;
+    const id = str(r.investigator_id);
+    if (!id) return [];
+    const stat = (key: string) =>
+      typeof r[key] === "number" && Number.isFinite(r[key])
+        ? (r[key] as number)
+        : null;
+    return [
+      {
+        investigatorId: id,
+        name: str(r.name, id),
+        occupation: str(r.occupation),
+        hp: stat("hp"),
+        maxHp: stat("max_hp"),
+        san: stat("san"),
+        maxSan: stat("max_san"),
+        attributes: numberMap(r.attributes),
+        skills: numberMap(r.skills),
+        conditions: Array.isArray(r.conditions)
+          ? r.conditions.filter((x): x is string => typeof x === "string")
+          : [],
+        inventory: readItems(r.inventory),
+      },
+    ];
+  });
+}
+
 function readKeeperMaterial(value: unknown): KeeperMaterialEntry[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
@@ -351,7 +428,15 @@ function readKeeperMaterial(value: unknown): KeeperMaterialEntry[] {
     const record = entry as Record<string, unknown>;
     const txt = str(record.text);
     if (!txt) return [];
-    return [{ title: str(record.title, "主持资料"), text: txt }];
+    return [
+      {
+        id: str(record.id),
+        kind: record.kind === "npc" ? ("npc" as const) : ("scene" as const),
+        current: record.current === true,
+        title: str(record.title, "主持资料"),
+        text: txt,
+      },
+    ];
   });
 }
 
@@ -393,6 +478,7 @@ function applyRequestUpdate(
     outcome: asOutcome(payload.outcome) ?? request.outcome,
     detail: str(payload.detail) || request.detail,
     awaitingAck: false,
+    serverReceived: true,
     updatedAt: now,
   };
 }
@@ -404,10 +490,21 @@ type StructuredState = {
   identity: Identity;
   targets: PublicTarget[];
   destinations: PublicDestination[];
+  /** Read-only stable ID from committed scene snapshots/events, for catalog markers. */
+  currentSceneId: string;
   clues: ClueOption[];
   items: ItemOption[];
   /** 主持资料（服务端可选下发；缺省时控制台显示“未提供”）。 */
   keeperMaterial: KeeperMaterialEntry[];
+  keeperAssets: KeeperAssetEntry[];
+  receivedAssets: KeeperAssetEntry[];
+  keeperInvestigators: KeeperInvestigator[];
+  historyBeforeSequence: number | null;
+  inheritedHistory: NarrativeHistoryPage | null;
+  inheritedHistoryUnavailable: boolean;
+  inheritedHistoryIncomplete: boolean;
+  /** Every authoritative recovery invalidates outstanding reads, even in the same world. */
+  historyGeneration: number;
   requests: Record<string, PendingRequest>;
   requestOrder: string[];
   checks: Record<string, CheckRequestState>;
@@ -474,9 +571,18 @@ export const initialStructuredState: StructuredState = {
   identity: { ...EMPTY_IDENTITY },
   targets: [],
   destinations: [],
+  currentSceneId: "",
   clues: [],
   items: [],
   keeperMaterial: [],
+  keeperAssets: [],
+  receivedAssets: [],
+  keeperInvestigators: [],
+  historyBeforeSequence: null,
+  inheritedHistory: null,
+  inheritedHistoryUnavailable: false,
+  inheritedHistoryIncomplete: false,
+  historyGeneration: 0,
   requests: {},
   requestOrder: [],
   checks: {},
@@ -531,15 +637,31 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           identity: { ...state.identity, worldId: id, revision: revision ?? 0 },
           targets: [],
           destinations: [],
+          currentSceneId: "",
           clues: [],
           items: [],
           keeperMaterial: [],
+          keeperAssets: [],
+          receivedAssets: [],
+          keeperInvestigators: [],
+          historyBeforeSequence: null,
+          inheritedHistory: null,
+          inheritedHistoryUnavailable: false,
+          inheritedHistoryIncomplete: false,
+          historyGeneration: state.historyGeneration + 1,
           requests: {},
           requestOrder: [],
           checks: {},
           checkOrder: [],
           keeperDraft: null,
           keeperControl: null,
+          memoryQuery: {
+            ...initialStructuredState.memoryQuery,
+            entries: [],
+            filters: {},
+          },
+          interactions: {},
+          interactionOrder: [],
           protocolNotice: null,
         };
       }),
@@ -620,11 +742,13 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           // 「为什么停下了、能不能接管」，不能只说一句「已暂停」。
           const detail = str(record.detail);
           const existing = requests[id];
+          const action = structuredActionSchema.safeParse(record.action);
+          const keeperAction = action.success ? action.data : undefined;
           if (!existing) {
             requestOrder.push(id);
             requests[id] = {
               requestId: id,
-              kind: snapshotIntentKind(awaiting?.kind),
+              kind: snapshotIntentKind(keeperAction?.kind ?? awaiting?.kind),
               label: str(record.summary) || "守秘人待办",
               status,
               awaiting,
@@ -638,16 +762,25 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               createdAt: Date.now(),
               updatedAt: Date.now(),
               awaitingAck: false,
+              serverReceived: true,
+              keeperAction,
+              requestType: str(record.request_type),
+              investigatorId: str(record.investigator_id),
             };
             continue;
           }
           requests[id] = {
             ...existing,
+            keeperAction,
+            requestType: str(record.request_type) || existing.requestType,
+            investigatorId: str(record.investigator_id),
             status,
             awaiting:
               awaiting ??
               (status === "awaiting_player" ? existing.awaiting : null),
             detail: detail || existing.detail,
+            awaitingAck: false,
+            serverReceived: true,
             updatedAt: Date.now(),
           };
         }
@@ -668,14 +801,37 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           });
         }
         return {
+          keeperControl:
+            payload.keeper !== undefined
+              ? {
+                  state:
+                    keeper.mode === "human" && str(keeper.user_id)
+                      ? "takeover"
+                      : "active",
+                  controllerKind:
+                    keeper.mode === "agent"
+                      ? "agent"
+                      : str(keeper.user_id)
+                        ? "human"
+                        : "none",
+                  controllerId: str(keeper.user_id) || null,
+                  detail: "",
+                  takeoverAvailable: false,
+                  updatedAt: Date.now(),
+                }
+              : nextWorldId === state.identity.worldId
+                ? state.keeperControl
+                : null,
           identity: {
             worldId: nextWorldId,
             revision,
             investigatorId:
-              str(payload.investigator_id) || state.identity.investigatorId,
+              payload.investigator_id !== undefined
+                ? str(payload.investigator_id)
+                : state.identity.investigatorId,
             keeperUserId:
               payload.keeper !== undefined
-                ? str(keeper.user_id)
+                ? str(keeper.user_id) || null
                 : state.identity.keeperUserId,
             // M0 的 keeper_mode 是 payload 必填字段；keeper 本身可为 null
             // （KeeperControl 行缺失时），因此模式优先取 keeper_mode。
@@ -692,6 +848,10 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             payload.destinations !== undefined
               ? readDestinations(payload.destinations)
               : state.destinations,
+          currentSceneId:
+            payload.scene !== undefined
+              ? str((payload.scene as Record<string, unknown> | null)?.id)
+              : state.currentSceneId,
           clues:
             payload.clues !== undefined
               ? readClues(payload.clues)
@@ -703,14 +863,65 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           keeperMaterial:
             payload.keeper_material !== undefined
               ? readKeeperMaterial(payload.keeper_material)
-              : state.keeperMaterial,
+              : [],
+          keeperInvestigators: readKeeperInvestigators(
+            payload.keeper_investigators,
+          ),
+          historyGeneration: state.historyGeneration + 1,
+          historyBeforeSequence:
+            typeof (
+              payload.message_history as Record<string, unknown> | undefined
+            )?.next_before_sequence === "number" &&
+            Number.isSafeInteger(
+              (payload.message_history as Record<string, unknown>)
+                .next_before_sequence,
+            ) &&
+            Number(
+              (payload.message_history as Record<string, unknown>)
+                .next_before_sequence,
+            ) > 0
+              ? num(
+                  (payload.message_history as Record<string, unknown>)
+                    .next_before_sequence,
+                )
+              : null,
+          inheritedHistory:
+            narrativeHistorySchema.safeParse(payload.inherited_message_history)
+              .data ?? null,
+          inheritedHistoryUnavailable:
+            payload.inherited_history_unavailable === true,
+          inheritedHistoryIncomplete:
+            payload.inherited_history_incomplete === true,
+          // A fresh player/permission-revoked snapshot must erase private data.
+          keeperAssets: Array.isArray(payload.keeper_assets)
+            ? payload.keeper_assets.flatMap((entry) => {
+                if (!entry || typeof entry !== "object") return [];
+                const record = entry as Record<string, unknown>;
+                const id = str(record.id);
+                return id ? [{ id, label: str(record.label, id) }] : [];
+              })
+            : [],
+          receivedAssets: Array.isArray(payload.received_assets)
+            ? Array.from(
+                new Map(
+                  payload.received_assets.flatMap((entry) => {
+                    if (!entry || typeof entry !== "object") return [];
+                    const record = entry as Record<string, unknown>;
+                    const id = str(record.id);
+                    return id
+                      ? [[id, { id, label: str(record.label, id) }] as const]
+                      : [];
+                  }),
+                ).values(),
+              )
+            : [],
           checks,
           checkOrder,
           requests,
           requestOrder,
           keeperDraft: Array.isArray(payload.keeper_drafts)
             ? readKeeperDraft(payload.keeper_drafts.at(-1))
-            : state.keeperDraft,
+            : null,
         };
       }),
 
@@ -725,6 +936,12 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
           str(payload.command_id) ||
           envelope.cause_request_id ||
           "";
+        const receiptPayload =
+          state.requests[byRequest]?.payload &&
+          typeof state.requests[byRequest].payload === "object" &&
+          !Array.isArray(state.requests[byRequest].payload)
+            ? (state.requests[byRequest].payload as Record<string, unknown>)
+            : null;
         // 每个事件信封都带当前世界 revision：必须让它前进，否则冲突后重试
         // 仍然带着旧版本号，重试永远无法收敛。
         const base = {
@@ -748,6 +965,73 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
         };
 
         switch (envelope.type) {
+          case "handout_presented": {
+            const id = str(payload.asset_id);
+            if (
+              !id ||
+              str(payload.investigator_id) !== state.identity.investigatorId
+            )
+              return base;
+            const entry = { id, label: str(payload.caption, id) || id };
+            return {
+              ...base,
+              receivedAssets: [
+                ...state.receivedAssets.filter((asset) => asset.id !== id),
+                entry,
+              ],
+            };
+          }
+          case "intent_pending": {
+            const id = str(payload.request_id);
+            if (!id) return base;
+            const parsed = structuredActionSchema.safeParse(payload.action);
+            const current: PendingRequest | undefined = Object.hasOwn(
+              state.requests,
+              id,
+            )
+              ? state.requests[id]
+              : undefined;
+            return {
+              ...base,
+              requests: {
+                ...state.requests,
+                [id]: {
+                  ...(current ?? {
+                    requestId: id,
+                    kind: snapshotIntentKind(
+                      parsed.success ? parsed.data.kind : undefined,
+                    ),
+                    label: str(payload.summary) || "玩家请求",
+                    awaiting: null,
+                    outcome: null,
+                    detail: "",
+                    errorCode: null,
+                    errorMessage: null,
+                    payload: null,
+                    digest: "",
+                    sends: 0,
+                    createdAt: now,
+                    awaitingAck: false,
+                    serverReceived: true,
+                  }),
+                  status: "queued",
+                  awaiting: null,
+                  outcome: null,
+                  detail: "",
+                  errorCode: null,
+                  errorMessage: null,
+                  awaitingAck: false,
+                  serverReceived: true,
+                  updatedAt: now,
+                  keeperAction: parsed.success ? parsed.data : undefined,
+                  investigatorId: str(payload.investigator_id),
+                },
+              },
+              requestOrder: state.requestOrder.includes(id)
+                ? state.requestOrder
+                : [...state.requestOrder, id],
+            };
+          }
           case "session_snapshot": {
             get().applySnapshot(payload, envelope.world_id);
             return {
@@ -773,6 +1057,7 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
                   ...request,
                   status: asStatus(payload.status ?? "queued"),
                   awaitingAck: false,
+                  serverReceived: true,
                 },
               },
             };
@@ -862,13 +1147,54 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
                     },
                     updatedAt: now,
                   };
+            // A committed result also acknowledges this player's response,
+            // not any related investigation or another player's roll.
+            const response = state.requests[byRequest];
+            const ownResponse =
+              receiptPayload?.type === "check_response" &&
+              receiptPayload.check_request_id === checkRequestId;
             return {
               ...base,
+              ...(ownResponse
+                ? {
+                    requests: {
+                      ...state.requests,
+                      [byRequest]: applyRequestUpdate(
+                        response,
+                        {
+                          status: "completed",
+                          outcome:
+                            envelope.type === "check_cancelled"
+                              ? "not_executed"
+                              : payload.outcome,
+                          detail: payload.detail || payload.reason,
+                        },
+                        now,
+                      ),
+                    },
+                  }
+                : {}),
               checks: { ...state.checks, [checkRequestId]: resolved },
               checkOrder: state.checkOrder.includes(checkRequestId)
                 ? state.checkOrder
                 : [...state.checkOrder, checkRequestId],
             };
+          }
+          case "roll_resolved": {
+            const roll = state.requests[byRequest];
+            return receiptPayload?.type === "free_roll_request"
+              ? {
+                  ...base,
+                  requests: {
+                    ...state.requests,
+                    [byRequest]: applyRequestUpdate(
+                      roll,
+                      { status: "completed", detail: "普通掷骰已结算。" },
+                      now,
+                    ),
+                  },
+                }
+              : base;
           }
           case "keeper_draft": {
             const draft = readKeeperDraft(payload);
@@ -903,12 +1229,33 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             )
               ? (rawState as KeeperControl["state"])
               : "active";
+            const controllerKind = controller?.kind;
+            const hasController =
+              controllerKind === "human" ||
+              controllerKind === "agent" ||
+              controllerKind === "none";
+            const controllerId =
+              hasController && controllerKind !== "none"
+                ? str(controller?.id) || null
+                : null;
             return {
               ...base,
+              identity: {
+                ...base.identity,
+                keeperUserId: hasController
+                  ? controllerId
+                  : state.identity.keeperUserId,
+              },
               keeperControl: {
                 state: controlState,
                 detail: str(payload.detail) || str(payload.reason),
                 takeoverAvailable: bool(payload.takeover_available),
+                controllerKind: hasController
+                  ? controllerKind
+                  : state.keeperControl?.controllerKind,
+                controllerId: hasController
+                  ? controllerId
+                  : state.keeperControl?.controllerId,
                 updatedAt: now,
               },
             };
@@ -917,6 +1264,9 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             // 只有已提交场景事件更新位置；候选目的地同步替换。
             return {
               ...base,
+              currentSceneId: str(
+                (payload.scene as Record<string, unknown> | null)?.id,
+              ),
               destinations:
                 payload.destinations !== undefined
                   ? readDestinations(payload.destinations)
@@ -956,10 +1306,46 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               identity: { ...state.identity, revision: envelope.revision },
             };
           }
+          case "state_changed": {
+            const changes = readKeeperInvestigators([
+              { ...payload, name: "" },
+            ])[0];
+            return {
+              ...base,
+              keeperInvestigators: state.keeperInvestigators.map((sheet) =>
+                sheet.investigatorId !== str(payload.investigator_id) ||
+                !changes
+                  ? sheet
+                  : {
+                      ...sheet,
+                      hp: changes.hp ?? sheet.hp,
+                      maxHp: changes.maxHp ?? sheet.maxHp,
+                      san: changes.san ?? sheet.san,
+                      maxSan: changes.maxSan ?? sheet.maxSan,
+                      conditions: Array.isArray(payload.conditions)
+                        ? changes.conditions
+                        : sheet.conditions,
+                    },
+              ),
+              targets:
+                payload.targets !== undefined
+                  ? readTargets(payload.targets)
+                  : state.targets,
+            };
+          }
           case "inventory_changed":
             return {
               ...base,
-              items: readItems(payload.items),
+              // A public inventory update for another PC is not my backpack.
+              items:
+                str(payload.investigator_id) === state.identity.investigatorId
+                  ? readItems(payload.items)
+                  : state.items,
+              keeperInvestigators: state.keeperInvestigators.map((sheet) =>
+                sheet.investigatorId === str(payload.investigator_id)
+                  ? { ...sheet, inventory: readItems(payload.items) }
+                  : sheet,
+              ),
               identity: { ...state.identity, revision: envelope.revision },
             };
           default:
@@ -992,6 +1378,7 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               createdAt: now,
               updatedAt: now,
               awaitingAck: false,
+              serverReceived: false,
             },
           },
           requestOrder: state.requestOrder.includes(requestId)
@@ -1022,7 +1409,8 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
     markAwaitingAck: (requestId) =>
       set((state) => {
         const current = state.requests[requestId];
-        if (!current || current.awaitingAck) return state;
+        if (!current || current.awaitingAck || current.serverReceived)
+          return state;
         return {
           requests: {
             ...state.requests,
@@ -1198,7 +1586,13 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
         return { requests, requestOrder: keep, checks, checkOrder: keepChecks };
       }),
 
-    reset: () => set({ ...initialStructuredState }),
+    reset: () =>
+      set((state) => ({
+        ...initialStructuredState,
+        // A reset must invalidate reads even if the same account/world is
+        // re-entered before the old HTTP request finishes.
+        historyGeneration: state.historyGeneration + 1,
+      })),
   }),
 );
 
@@ -1304,6 +1698,8 @@ export function requestLabel(kind: RequestIntentKind): string {
       return "检定回应";
     case "command":
       return "主持操作";
+    case "cancel":
+      return "取消行动申请";
     default:
       return "行动";
   }

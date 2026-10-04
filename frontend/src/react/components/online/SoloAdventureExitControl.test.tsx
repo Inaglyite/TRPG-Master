@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { abandonSoloWorld, enterSoloLobby } from "../../../online";
@@ -39,6 +45,75 @@ beforeEach(() => {
 });
 
 describe("SoloAdventureExitControl", () => {
+  it("退出与归档确认都约束 Tab；取消恢复到安全入口，不发归档请求", async () => {
+    render(<SoloAdventureExitControl />);
+    const trigger = screen.getByRole("button", { name: "离开当前冒险" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const safe = screen.getByRole("button", { name: "继续调查" });
+    expect(safe).toHaveFocus();
+    const first = screen.getByRole("button", {
+      name: "返回我的冒险（保留进度）",
+    });
+    const last = safe;
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
+    const keep = screen.getByRole("button", { name: "继续保留" });
+    expect(keep).toHaveFocus();
+    const confirm = screen.getByRole("button", { name: "确认归档" });
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(keep).toHaveFocus();
+    fireEvent.keyDown(keep, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "继续调查" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(trigger).toHaveFocus();
+    expect(abandonSoloWorld).not.toHaveBeenCalled();
+    expect(enterSoloLobby).not.toHaveBeenCalled();
+  });
+
+  it("同为单人房主但世界切换时，旧归档确认必须关闭", () => {
+    render(<SoloAdventureExitControl />);
+    fireEvent.click(screen.getByRole("button", { name: "离开当前冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
+    act(() =>
+      useOnlineStore.setState({
+        activeWorldId: "world-another",
+        roomMetadata: { name: "另一份冒险", play_mode: "solo" },
+      }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(abandonSoloWorld).not.toHaveBeenCalled();
+  });
+
+  it("归档提交中焦点留在面板；失败后恢复安全选择", async () => {
+    let finish!: (result: boolean) => void;
+    vi.mocked(abandonSoloWorld).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<SoloAdventureExitControl />);
+    fireEvent.click(screen.getByRole("button", { name: "离开当前冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
+    const confirm = screen.getByRole("button", { name: "确认归档" });
+    confirm.focus();
+    fireEvent.click(confirm);
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    await act(async () => {
+      finish(false);
+    });
+    expect(screen.getByRole("button", { name: "继续保留" })).toHaveFocus();
+    expect(abandonSoloWorld).toHaveBeenCalledOnce();
+  });
   it("只在云端单人房主的开局/进行阶段显示", () => {
     const { container, rerender } = render(<SoloAdventureExitControl />);
     expect(
@@ -86,11 +161,13 @@ describe("SoloAdventureExitControl", () => {
   it("放弃需要第二次确认，才调用专用归档流程", async () => {
     render(<SoloAdventureExitControl />);
     fireEvent.click(screen.getByRole("button", { name: "离开当前冒险" }));
-    fireEvent.click(screen.getByRole("button", { name: "放弃并删除存档" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
 
     expect(abandonSoloWorld).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toHaveTextContent("确认放弃冒险？");
-    fireEvent.click(screen.getByRole("button", { name: "确认放弃并删除" }));
+    expect(
+      screen.getByRole("dialog", { name: "归档这场冒险？" }),
+    ).toHaveTextContent("整场冒险及其分支");
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
 
     await waitFor(() => expect(abandonSoloWorld).toHaveBeenCalledTimes(1));
     expect(enterSoloLobby).not.toHaveBeenCalled();
@@ -103,14 +180,34 @@ describe("SoloAdventureExitControl", () => {
     });
     render(<SoloAdventureExitControl />);
     fireEvent.click(screen.getByRole("button", { name: "离开当前冒险" }));
-    fireEvent.click(screen.getByRole("button", { name: "放弃并删除存档" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认放弃并删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "守秘人仍在处理本回合",
     );
     expect(
-      screen.getByRole("button", { name: "确认放弃并删除" }),
+      screen.getByRole("button", { name: "确认归档" }),
     ).toBeInTheDocument();
+  });
+
+  it("归档进行中禁用两种选择，连点不会重复调用", async () => {
+    let finish!: (success: boolean) => void;
+    vi.mocked(abandonSoloWorld).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<SoloAdventureExitControl />);
+    fireEvent.click(screen.getByRole("button", { name: "离开当前冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "放弃并归档冒险" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
+    fireEvent.click(screen.getByRole("button", { name: "正在归档…" }));
+    expect(abandonSoloWorld).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "继续保留" })).toBeDisabled();
+    finish(false);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "确认归档" })).toBeEnabled(),
+    );
   });
 });

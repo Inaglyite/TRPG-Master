@@ -1,4 +1,7 @@
 import { apiHttpOrigin } from "./api/client";
+import { sendRoomFrameNow } from "./room-send-now";
+import { resetSettings } from "./settings";
+import { onPlayerNotes } from "./utility";
 import {
   clearTransientHandouts,
   openSavePanel,
@@ -6,6 +9,7 @@ import {
   updateCluePanel,
 } from "./panels";
 import { parseServerMessage } from "./protocol/server-message";
+import { parseStructuredEvent } from "./protocol/structured";
 import { useAppStore } from "./state/app-store";
 import {
   bumpOnlineRequestEpoch,
@@ -14,7 +18,10 @@ import {
   useOnlineStore,
 } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
-import { rebindStructuredWorld } from "./structured-transport";
+import {
+  rebindStructuredWorld,
+  resetStructuredTransport,
+} from "./structured-transport";
 import { useStructuredStore } from "./state/structured-store";
 import { useStartStore } from "./state/start-store";
 import {
@@ -64,6 +71,7 @@ function handleSoloWorldSwitch(
   }
   try {
     localStorage.setItem(LAST_ROOM_KEY, worldId);
+    localStorage.setItem("trpg-online-world-origin", apiHttpOrigin());
   } catch {
     /* localStorage 不可用不影响重连 */
   }
@@ -101,6 +109,7 @@ let reconnectTimer: number | null = null;
 let manuallyClosed = false;
 let lastEventId: number | null = null;
 let roomSnapshotApplied = false;
+let structuredSnapshotApplied = false;
 let activeRoomTurnId: string | null = null;
 let pendingRoomRecoveryTurnId: string | null = null;
 /** 时间线切换（4412 重连）后的待恢复现场：系统提示与存档面板重开。 */
@@ -115,6 +124,7 @@ const ROLE_CHANGE_RECONNECT_NOTICE = "房间角色已更新，正在重新连接
 function clearPrivatePresentationState(): void {
   clearTransientHandouts();
   useAppStore.setState({
+    activeWorldId: null,
     character: null,
     clues: {},
     notesText: "",
@@ -170,7 +180,18 @@ export function connectRoom(worldId: string): void {
   roomSnapshotApplied = false;
   activeRoomTurnId = null;
   pendingRoomRecoveryTurnId = null;
-  setActiveTransport({ send: (payload) => sendRaw(injectActionId(payload)) });
+  setActiveTransport({
+    send: (payload) => sendRaw(injectActionId(payload)),
+    sendNow: (payload) =>
+      sendRoomFrameNow(
+        {
+          worldId: activeWorldId,
+          snapshotApplied: roomSnapshotApplied,
+          socket,
+        },
+        injectActionId(payload),
+      ),
+  });
   // 换房间/换世界先清空顶栏位置，等房间全量镜像带回权威场景。
   useSceneStore.getState().setWorld(worldId);
   open();
@@ -178,6 +199,8 @@ export function connectRoom(worldId: string): void {
 
 function open(): void {
   if (!activeWorldId) return;
+  roomSnapshotApplied = false;
+  structuredSnapshotApplied = false;
   setConnectionState("connecting");
   const next = new WebSocket(roomWsUrl(activeWorldId));
   socket = next;
@@ -185,7 +208,6 @@ function open(): void {
   next.onopen = () => {
     if (socket !== next) return;
     reconnectAttempt = 0;
-    setConnectionState("connected");
     if (lastEventId !== null) {
       // 断线恢复：按最后的序号增量补发缺失的房间事件。
       next.send(
@@ -223,8 +245,9 @@ function open(): void {
     }
     if (event.code === 4401) {
       // Session 已失效：清空账号与房间数据并停掉重连，认证页显示过期提示。
+      const pendingIntent = useOnlineStore.getState().pendingIntent;
       disconnectRoom();
-      resetOnlineState({ sessionExpired: true });
+      resetOnlineState({ sessionExpired: true, pendingIntent });
       return;
     }
     if (event.code === 4403 || event.code === 4404 || event.code === 4400) {
@@ -276,6 +299,28 @@ function open(): void {
   };
 }
 
+/** A live socket is not yet an actionable session: restore authority first. */
+function markRoomReady(): void {
+  const online = useOnlineStore.getState();
+  const structured =
+    online.roomMetadata?.execution_profile === "structured_v1" ||
+    useStructuredStore.getState().capabilities.executionProfile ===
+      "structured_v1";
+  if (
+    !roomSnapshotApplied ||
+    !socket ||
+    socket.readyState !== WebSocket.OPEN ||
+    (online.roomStatus === "playing" &&
+      structured &&
+      !structuredSnapshotApplied)
+  ) {
+    setConnectionState("connecting");
+    return;
+  }
+  setConnectionState("connected");
+  flushSendQueue();
+}
+
 function scheduleReconnect(): void {
   if (manuallyClosed || !activeWorldId || reconnectTimer !== null) return;
   const delay =
@@ -306,6 +351,12 @@ export function disconnectRoom(): void {
   sendQueue.length = 0;
   setActiveTransport(null);
   resetRoomGameSession();
+  // Logout, expiry and navigation must revoke both legacy and structured
+  // projections now, not when a later connection happens to send a snapshot.
+  resetStructuredTransport();
+  useStructuredStore.getState().reset();
+  useSceneStore.getState().reset();
+  resetSettings();
   current?.close();
   // 公共叙事也属于房间；退出、切房和换号时不能短暂显示上一房间内容。
   displayWorldHistory([]);
@@ -328,7 +379,11 @@ export function disconnectRoom(): void {
 }
 
 function sendRaw(data: string): void {
-  if (roomSnapshotApplied && socket && socket.readyState === WebSocket.OPEN) {
+  if (
+    useOnlineStore.getState().roomConnection === "connected" &&
+    socket &&
+    socket.readyState === WebSocket.OPEN
+  ) {
     socket.send(data);
   } else {
     if (sendQueue.length >= MAX_SEND_QUEUE) sendQueue.shift();
@@ -352,6 +407,14 @@ function sendProtocolFrame(payload: Record<string, unknown>): void {
 /** 发送房间消息（对象形式）；未连接时排队，重连成功后按序补发。 */
 export function roomSend(payload: Record<string, unknown>): void {
   sendRaw(JSON.stringify(payload));
+}
+
+/** User-initiated room controls must not be silently replayed after reconnect. */
+export function roomSendNow(payload: Record<string, unknown>): boolean {
+  return sendRoomFrameNow(
+    { worldId: activeWorldId, snapshotApplied: roomSnapshotApplied, socket },
+    injectActionId(JSON.stringify(payload)),
+  );
 }
 
 let actionCounter = 0;
@@ -525,6 +588,7 @@ function handleRoomMessage(raw: unknown): void {
       break;
     case "room_state":
       applyRoomStateFields(message);
+      markRoomReady();
       consumeDeferredTimelinePanels();
       break;
     case "solo_world_switched": {
@@ -619,10 +683,9 @@ function handleRoomMessage(raw: unknown): void {
         }
         updateCluePanel(JSON.stringify(clueGroups));
         if (rawNotes && typeof rawNotes === "object") {
-          useAppStore.getState().applyNotes({
+          onPlayerNotes({
             text: notesText,
             revision: notesRevision,
-            saved: true,
           });
         }
       } else {
@@ -632,7 +695,7 @@ function handleRoomMessage(raw: unknown): void {
       // 只有权威快照落地后才发送断线期间积压的动作，避免基于旧行动者或旧存档
       // 状态抢先提交。ACK/sync 使用直连路径，不受该队列影响。
       roomSnapshotApplied = true;
-      flushSendQueue();
+      markRoomReady();
       // history、私有状态和控制字段均已落地后，才允许 OnlineShell 撤去覆盖层。
       // 开场中（starting）也应立即看见游戏区与守秘人的流式叙事，不能等到
       // opening 回合完成才显示；输入仍由 GameControls 的 playing 门禁保持禁用。
@@ -774,6 +837,18 @@ function handleRoomMessage(raw: unknown): void {
           ].slice(-50),
         };
       });
+      break;
+    }
+    case "session_snapshot": {
+      const parsed = parseStructuredEvent(message);
+      if (!parsed || "mismatch" in parsed) {
+        handleServerPayload(raw);
+        break;
+      }
+      if (parsed.envelope.world_id !== activeWorldId) break;
+      handleServerPayload(raw);
+      structuredSnapshotApplied = true;
+      markRoomReady();
       break;
     }
     default:

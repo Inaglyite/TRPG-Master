@@ -67,6 +67,18 @@ beforeEach(() => {
 });
 
 describe("SoloCharacterSelectScreen", () => {
+  it("空的角色来源不占用云端选角列表空间，但可用角色仍可认领", () => {
+    useStartStore.setState({
+      characterGroups: [
+        { id: "empty", title: "没有角色的来源", characters: [] },
+        { id: "module", title: "模组角色", characters: [fullCharacter] },
+      ],
+    });
+    render(<SoloCharacterSelectScreen />);
+    expect(screen.queryByText("没有角色的来源")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /艾米莉.*记者/ }));
+    expect(claimByKey).toHaveBeenCalledWith(fullCharacter.id);
+  });
   it("预览另一角色但认领失败时，不能以旧认领确认开局", () => {
     useOnlineStore.setState({
       members: [

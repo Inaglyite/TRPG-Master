@@ -18,6 +18,7 @@ from src.storage.database import utcnow
 
 from .errors import StructuredError
 from .ids import new_stable_id
+from .materials import asset_entries
 from .registries import ensure_clue_registry, ensure_item_registry, find_item
 
 # 事件接收范围的简写
@@ -435,7 +436,12 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
         existing["granted_to"] = sorted(merged)
     asset_id = str(payload.get("present_asset_id") or "")
     if asset_id:
+        if asset_id not in asset_entries(state):
+            raise StructuredError("object_not_found", f"素材不存在或 ID 不唯一：{asset_id}")
         for recipient in granted:
+            state.setdefault("asset_grants", []).append(
+                {"asset_id": asset_id, "investigator_id": recipient, "by": ctx.cause_id}
+            )
             audience = {"kind": "investigators", "investigator_ids": [recipient]}
             events.append(
                 EventSpec(
@@ -464,15 +470,8 @@ def cmd_present_handout(state: dict, payload: dict, ctx: CommandContext) -> Comm
     recipients = payload.get("recipient_investigator_ids")
     if not isinstance(recipients, list) or not recipients:
         raise StructuredError("invalid_action", "recipient_investigator_ids 不能为空。")
-    assets = state.get("assets") or state.get("handout_assets") or {}
-    asset_map = state.get("asset_map") or {}
-    known_asset_ids = set(assets) if isinstance(assets, dict) else set()
-    if isinstance(asset_map, dict):
-        for group_entries in asset_map.values():
-            if isinstance(group_entries, dict):
-                known_asset_ids.update(group_entries)
-    if known_asset_ids and asset_id not in known_asset_ids:
-        raise StructuredError("object_not_found", f"素材不存在：{asset_id}")
+    if asset_id not in asset_entries(state):
+        raise StructuredError("object_not_found", f"素材不存在或 ID 不唯一：{asset_id}")
     grants = state.setdefault("asset_grants", [])
     events: list[EventSpec] = []
     granted: list[str] = []

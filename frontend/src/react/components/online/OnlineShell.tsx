@@ -56,10 +56,10 @@ export function OnlineShell() {
       /* URL 解析失败时按多人大厅处理 */
     }
     void (async () => {
-      await checkSession();
+      const verified = await checkSession();
       // 已有有效 Session（刷新/重启后）直接进入大厅，并尝试回到上次的房间。
       const state = useOnlineStore.getState();
-      if (state.authStatus === "authenticated") {
+      if (verified && state.authStatus === "authenticated") {
         if (state.pendingIntent === "solo") {
           await enterSoloLobby();
         } else {

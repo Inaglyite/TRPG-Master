@@ -21,7 +21,7 @@ from .errors import StructuredError
 class Principal:
     """服务端解析出的调用者。investigator_ids 是其控制的调查员。"""
 
-    kind: str  # "player" | "keeper" | "agent"
+    kind: str  # "player" | "keeper" | "agent" | "viewer" (read-only projection)
     user_id: str = ""
     run_id: str = ""
     investigator_ids: tuple[str, ...] = field(default_factory=tuple)
@@ -74,7 +74,13 @@ def resolve_keeper_principal(session: Session, world_id: str, user_id: str) -> P
         raise StructuredError(
             "keeper_required", "你没有该世界的守秘人授权（keeper 与 owner 分别授予）。"
         )
-    return Principal(kind="keeper", user_id=user_id)
+    # Hosting and controlling a character are independent dimensions. A cloud
+    # solo human keeper still owns the claimed PC; an unclaimed keeper has none.
+    return Principal(
+        kind="keeper",
+        user_id=user_id,
+        investigator_ids=controlled_investigators(session, world_id, user_id),
+    )
 
 
 def agent_principal(run_id: str) -> Principal:

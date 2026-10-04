@@ -11,6 +11,10 @@ function percentage(value?: number, maximum?: number) {
   return Math.max(0, Math.min(100, (Number(value) / Number(maximum)) * 100));
 }
 
+function statValue(value?: number) {
+  return Number.isFinite(value) ? String(value) : "--";
+}
+
 /** 低 HP/SAN 的中性文本提醒：只陈述数值偏低，不从数值猜昏迷/疯狂等状态。 */
 function lowWarning(ratio: number): string | null {
   return ratio > 0 && ratio <= 30 ? "偏低" : null;
@@ -44,7 +48,7 @@ export function CharacterStatusCard() {
   const collapsedSummary = (
     <>
       {character
-        ? `HP ${character.hp}/${character.max_hp} · SAN ${character.san}/${character.max_san}`
+        ? `HP ${statValue(character.hp)}/${statValue(character.max_hp)} · SAN ${statValue(character.san)}/${statValue(character.max_san)}`
         : "HP --/-- · SAN --/--"}
       {hpWarn && <em className="inv-warn">HP {hpWarn}</em>}
       {sanWarn && <em className="inv-warn">SAN {sanWarn}</em>}
@@ -79,7 +83,7 @@ export function CharacterStatusCard() {
       <div className="stat-row">
         <span>HP</span>
         <span id="hp-bar">
-          {character ? `${character.hp} / ${character.max_hp}` : "-- / --"}
+          {`${statValue(character?.hp)} / ${statValue(character?.max_hp)}`}
           {hpWarn && <em className="inv-warn">（{hpWarn}）</em>}
         </span>
       </div>
@@ -93,7 +97,7 @@ export function CharacterStatusCard() {
       <div className="stat-row">
         <span>SAN</span>
         <span id="san-bar">
-          {character ? `${character.san} / ${character.max_san}` : "-- / --"}
+          {`${statValue(character?.san)} / ${statValue(character?.max_san)}`}
           {sanWarn && <em className="inv-warn">（{sanWarn}）</em>}
         </span>
       </div>

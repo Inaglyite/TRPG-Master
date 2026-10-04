@@ -12,6 +12,8 @@ import {
   setCloudOrigin,
 } from "./client";
 import { abandonWorld, acceptInvite, deleteWorld } from "./worlds";
+import { fetchMe } from "./auth";
+import { invalidateCloudRequests } from "./request-context";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +38,7 @@ describe("云端 origin 配置", () => {
       "http://192.168.1.5:8765",
     );
     expect(normalizeOrigin("ftp://example.com")).toBeNull();
+    expect(normalizeOrigin("https://user:private@example.com")).toBeNull();
     expect(normalizeOrigin("not a url")).toBeNull();
     expect(normalizeOrigin("   ")).toBeNull();
   });
@@ -63,6 +66,195 @@ describe("云端 origin 配置", () => {
 });
 
 describe("apiFetch", () => {
+  it("session revocation on the same server invalidates old successful data", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = apiFetch(
+      "/api/worlds",
+      z.object({ secret: z.string() }),
+    ).catch((error) => error);
+    invalidateCloudRequests();
+    finish(jsonResponse({ secret: "old-account" }));
+    expect(await pending).toMatchObject({ code: "request_context_changed" });
+  });
+
+  it("same-origin edits do not invalidate a valid in-flight response", async () => {
+    setCloudOrigin("https://table.example.com");
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = apiFetch("/api/worlds", z.object({ ok: z.boolean() }));
+    setCloudOrigin("https://table.example.com/path");
+    finish(jsonResponse({ ok: true }));
+    await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it("also guards a response whose JSON body arrives after switching", async () => {
+    let finish!: (value: unknown) => void;
+    const response = jsonResponse({});
+    vi.spyOn(response, "json").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.mocked(fetch).mockResolvedValue(response);
+    const pending = apiFetch(
+      "/api/worlds",
+      z.object({ secret: z.string() }),
+    ).catch((error) => error);
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    setCloudOrigin("https://second.example.com");
+    finish({ secret: "old-server" });
+    expect(await pending).toMatchObject({ code: "request_context_changed" });
+  });
+
+  it("local requests survive an unrelated cloud switch", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = apiFetch("/local-assets", z.object({ ok: z.boolean() }), {
+      local: true,
+    });
+    setCloudOrigin("https://second.example.com");
+    finish(jsonResponse({ ok: true }));
+    await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it("timed-out session verification has a bounded, actionable failure", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
+    try {
+      const pending = expect(fetchMe()).rejects.toMatchObject({
+        code: "request_timeout",
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await pending;
+      expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a credential rejection is returned without a global expiry broadcast", async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    try {
+      vi.mocked(fetch).mockResolvedValue(
+        jsonResponse({ detail: "已失效" }, 401),
+      );
+      await expect(
+        apiFetch("/api/auth/logout", z.undefined(), { method: "POST" }),
+      ).rejects.toMatchObject({ status: 401 });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("failed removal preserves the previous address and reports failure", () => {
+    setCloudOrigin("https://table.example.com");
+    const spy = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw new Error("disabled storage");
+      });
+    try {
+      expect(setCloudOrigin(null)).toBe(false);
+      expect(getCloudOrigin()).toBe("https://table.example.com");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("a local backend 401 never expires the independent cloud session", async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    try {
+      setCloudOrigin("https://table.example.com");
+      vi.mocked(fetch).mockResolvedValue(
+        jsonResponse({ detail: "本地无权限" }, 401),
+      );
+      await expect(
+        apiFetch("/api/worlds/local/keeper-guide", z.looseObject({}), {
+          local: true,
+        }),
+      ).rejects.toMatchObject({ status: 401 });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("a late 401 from a previous server cannot log out the current server", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setCloudOrigin("https://first.example.com");
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    try {
+      const pending = apiFetch("/api/worlds", z.looseObject({})).catch(
+        (error) => error,
+      );
+      setCloudOrigin("https://second.example.com");
+      finish(jsonResponse({ detail: "旧服务器已过期" }, 401));
+      expect(await pending).toMatchObject({ code: "request_context_changed" });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("switching away and back cannot revive an old successful response", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setCloudOrigin("https://first.example.com");
+    const pending = apiFetch(
+      "/api/worlds",
+      z.object({ secret: z.string() }),
+    ).catch((error) => error);
+    setCloudOrigin("https://second.example.com");
+    setCloudOrigin("https://first.example.com");
+    finish(jsonResponse({ secret: "旧账号私密资料" }));
+    expect(await pending).toMatchObject({ code: "request_context_changed" });
+  });
+
+  it("failed persistence does not pretend the server address was saved", () => {
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("disabled storage");
+      });
+    try {
+      expect(setCloudOrigin("https://table.example.com")).toBe(false);
+      expect(getCloudOrigin()).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
   beforeEach(() => {
     localStorage.clear();
     vi.stubGlobal("fetch", vi.fn());
@@ -70,6 +262,20 @@ describe("apiFetch", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("local image requests use loopback even when a cloud origin is saved", async () => {
+    setCloudOrigin("https://trpg.example.com");
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ ok: true }));
+    await apiFetch(
+      "/api/worlds/world/handouts/photo",
+      z.object({ ok: z.boolean() }),
+      { local: true },
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8765/api/worlds/world/handouts/photo",
+      expect.objectContaining({ credentials: "include" }),
+    );
   });
 
   it("解析成功响应并携带 Cookie", async () => {

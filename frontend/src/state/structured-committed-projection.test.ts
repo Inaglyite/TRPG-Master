@@ -16,6 +16,7 @@ vi.mock("../renderer", () => ({
   onDice: vi.fn(),
   onNarrativeChunk: vi.fn(),
   onNarrativeSegment: vi.fn(),
+  resetGamePresentation: vi.fn(),
 }));
 vi.mock("../panels", () => ({
   showHandout: vi.fn(),

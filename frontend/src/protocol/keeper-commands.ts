@@ -54,6 +54,8 @@ export type CommandField = {
   minLength?: number;
   candidate?: CandidateSource;
   help?: string;
+  /** 展示元数据，不改变协议字段类型。 */
+  multiline?: boolean;
 };
 
 export type KeeperCommandSpec = {
@@ -378,6 +380,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     kind: "use_item",
     label: "代为使用物品",
     group: "角色与物品",
+    help: "准备表单不执行行动。只有勾选「扣减物品」并提交才会消耗；结算物品后，玩家请求还需在「准备裁定」中收尾。",
     fields: [
       INVESTIGATOR,
       {
@@ -617,6 +620,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         kind: "text",
         required: false,
         maxLength: 300,
+        multiline: true,
       },
       {
         name: "pending_action_destination",
@@ -630,7 +634,9 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         label: "已告知条件（一行一条，避免重复劝留）",
         kind: "text",
         required: false,
-        maxLength: 800,
+        maxLength: 1607,
+        multiline: true,
+        help: "最多 8 条，每条 200 字；一行一条，留空不记录条件。只记录已告知内容，不执行行动。",
       },
       {
         name: "outcome",
@@ -645,6 +651,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         kind: "text",
         required: false,
         maxLength: 500,
+        multiline: true,
       },
       {
         name: "remaining_steps",
@@ -652,6 +659,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         kind: "text",
         required: false,
         maxLength: 500,
+        multiline: true,
       },
     ],
   },
@@ -788,6 +796,7 @@ export function findKeeperCommand(kind: string): KeeperCommandSpec | null {
 export type KeeperCandidates = {
   investigators: { id: string; name: string }[];
   npcs: { id: string; name: string }[];
+  objects?: { id: string; name: string }[];
   scenes: { id: string; name: string }[];
   clues: { id: string; name: string }[];
   items: { id: string; name: string }[];
@@ -1034,13 +1043,10 @@ export function validateKeeperFields(
     const isAudiencePart = field.name.startsWith("audience_");
     const isTargetPart = field.name.startsWith("target_");
     const blank = (() => {
-      if (
-        field.name === "from_investigator_id" ||
-        field.name === "to_investigator_id"
-      ) {
-        return true;
-      }
       if (field.kind === "bool") return false;
+      // Composite target controls populate target_kind/target_id, not a fictitious
+      // scalar "target" field. Keep the required check, but validate its real value.
+      if (field.kind === "target") return targetFrom(values) === undefined;
       if (field.kind === "int")
         return String(values[field.name] ?? "").trim() === "";
       if (field.kind === "id_list")
@@ -1104,6 +1110,19 @@ export function validateKeeperFields(
     if (!target) errors.push("请选择目标（或填写未解析目标）。");
   }
   if (spec.kind === "resolve_intent") {
+    if (
+      String(values.resolution ?? "").trim() === "awaiting_player" ||
+      String(values.thread_action ?? "").trim()
+    ) {
+      const conditions = String(values.disclosed ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (conditions.length > 8)
+        errors.push("已告知条件最多 8 条。请合并或删减，不会自动截断。");
+      if (conditions.some((line) => line.length > 200))
+        errors.push("已告知条件每条不能超过 200 字。");
+    }
     // 等待玩家自由回应：必须写清「尚未执行什么」，否则待办对玩家没有意义。
     if (String(values.resolution ?? "").trim() === "awaiting_player") {
       const note = String(values.pending_action_note ?? "").trim();

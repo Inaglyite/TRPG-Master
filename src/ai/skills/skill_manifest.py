@@ -17,18 +17,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from src.ai.context.lorebook import estimate_text_tokens
+from src.ai.skills.module_budget import (
+    LOCAL_AUTHOR_SKILL_DEFAULT_CONTEXT_TOKENS,
+    LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS,
+    module_skill_budget,
+)
 
 SKILL_ID_RE = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)+$")
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
 # H3.1：local-author = 本机安装/作者目录（runtime modules/）的模组 Skill，
-# 信任低于随仓库内置的 bundled-module，预算与声明受更紧的分级约束。
+# 信任低于随仓库内置的 bundled-module；正文预算与信任等级分别校验。
 TRUST_LEVELS = ("core", "bundled-module", "local-author")
 RESIDENCY_LEVELS = ("core", "deterministic", "on_demand")
 _CATALOG_FILE = "skills/catalog.json"
 _MODULE_URI_PREFIX = "module://"
 _MAX_SKILLS_PER_CATALOG = 128
 _DEFAULT_MODULE_SKILL_MAX_CONTEXT_TOKENS = 12_000
-_LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS = 4_000
+_LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS = LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS
 
 
 class CatalogError(Exception):
@@ -260,8 +265,7 @@ def validate_catalog(
                     f"{entry.id}: 模组 Skill resource 必须使用 module://skills/ 路径"
                 )
         if entry.trust == "local-author":
-            # 本机作者内容信任低于随仓库内置模组：预算硬顶更低，防止未审阅的
-            # 长文本直接挤占常驻上下文。
+            # 信任等级与正文长度分离；长篇模组仍保留单篇预算硬顶。
             if entry.max_context_tokens > _LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS:
                 raise CatalogError(
                     f"{entry.id}: local-author Skill 预算超过 "
@@ -365,7 +369,7 @@ def catalog_for(context) -> SkillCatalog:
             stem = re.sub(r"[^a-z0-9_]+", "_", path.stem.lower()).strip("_") or "skill"
             record = getattr(context, "module_record", None)
             # H3.1 信任分级：项目 builtin mod/ = bundled-module；runtime
-            # user_root（本机安装/作者目录）= local-author，预算更紧。
+            # user_root（本机安装/作者目录）= local-author，不因篇幅提升信任。
             is_local_author = str(getattr(record, "source", "") or "") == "user"
             entry = SkillEntry(
                 id=f"module.{slug}.{stem}",
@@ -379,12 +383,9 @@ def catalog_for(context) -> SkillCatalog:
                 description=f"模组 {module_name} 自带规则：{path.stem}",
                 opening=False,
                 model_invocable=False,
-                # Third-party packages currently contain declaration-free
-                # ``.skill`` text.  Until module format v2 adds per-Skill
-                # manifests, use a fixed bounded budget instead of letting
-                # arbitrary author text become unbounded core prompt content.
+                # Imported text gets a measured, bounded budget below.
                 max_context_tokens=(
-                    _LOCAL_AUTHOR_SKILL_MAX_CONTEXT_TOKENS
+                    LOCAL_AUTHOR_SKILL_DEFAULT_CONTEXT_TOKENS
                     if is_local_author
                     else _DEFAULT_MODULE_SKILL_MAX_CONTEXT_TOKENS
                 ),
@@ -392,6 +393,12 @@ def catalog_for(context) -> SkillCatalog:
             content = read_skill_content(context.project_root, entry, module_dir=module_dir)
             if content is None:
                 raise CatalogError(f"模组 Skill 内容不可读: {path.name}")
+            if is_local_author:
+                try:
+                    budget = module_skill_budget(content)
+                except ValueError as exc:
+                    raise CatalogError(f"{entry.id}: {exc}") from exc
+                entry = entry.model_copy(update={"max_context_tokens": budget})
             if not skill_content_within_budget(content, entry):
                 raise CatalogError(f"{entry.id}: Skill 正文超出 max_context_tokens")
             entries.append(entry)

@@ -106,6 +106,7 @@ from src.app.game_application import (
     SaveNotFoundError,
 )
 from src.app.logger import redact as redact_log
+from src.app.player_notes_handlers import register_player_notes_handlers
 from src.app.runtime import RuntimeContext, default_world_id
 from src.app.settings_service import (
     SettingsScope,
@@ -153,9 +154,9 @@ from src.storage.database import (
     session_scope,
 )
 from src.storage.persistence import delete_save, load_game
-from src.storage.player_notes import PlayerNotesConflict, PlayerNotesStore
 from src.storage.world_branches import WorldBranchService
 from src.storage.world_store import StaleRevisionError
+from src.structured.local_creation import can_resume_structured, register_local_start
 from src.structured.server_integration import StructuredLocalWire
 from src.web.asset_payload import (
     SpeakerPayloadResolver,
@@ -175,19 +176,10 @@ from src.web.module_http import (
     create_module_http_router,
     serve_module_asset,
 )
+from src.web.operation_errors import operation_error_message
 from src.web.service_health import health_payload, readiness_payload
 
 app = FastAPI(title="TRPG Agent API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["null"],
-    allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    # X-TRPG-Local-Token 由桌面壳主进程注入（见 authentication_gate 的本地信任校验）。
-    allow_headers=["Content-Type", "X-Module-Filename", "X-TRPG-Local-Token"],
-    # 编辑器 dev（:4173）跨域打本地后端时需要带 cookie session；生产同源不受影响。
-    allow_credentials=True,
-)
 MODULE_REGISTRY = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT)
 WORLD_BRANCHES = WorldBranchService(PROJECT_ROOT, RUNTIME_ROOT)
 EDITOR_PROJECTS = EditorProjectStore(RUNTIME_ROOT)
@@ -398,6 +390,18 @@ async def authentication_gate(request: Request, call_next):
     finally:
         if actor_mutation_room is not None:
             actor_mutation_room.release_action()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["null"],
+    allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    # X-TRPG-Local-Token 由桌面壳主进程注入（见 authentication_gate 的本地信任校验）。
+    allow_headers=["Content-Type", "X-Module-Filename", "X-TRPG-Local-Token"],
+    # 最后注册使 CORS 位于认证外层，401/403 可读且预检可达；不替代认证/CSRF。
+    allow_credentials=True,
+)
 
 
 def _world_turn_lock(context: RuntimeContext) -> threading.Lock:
@@ -891,6 +895,24 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
     router = WsMessageRouter()
     structured_wire = StructuredLocalWire(engine, outbound, user_id).register(router)
+    register_local_start(
+        router,
+        engine,
+        structured_wire,
+        allow_local=lambda: (
+            not auth_required() and user_id is None and getattr(ws, "room", None) is None
+        ),
+        reserve=reserve_turn,
+        release=release_turn,
+        activate=lambda fresh: (
+            resolve_speaker.clear(),
+            turn_gate.rebind_world(_world_turn_lock(fresh)),
+            _set_active_context(fresh),
+        ),
+        context_payload=world_context_payload,
+        list_payload=world_list_payload,
+        save_panels=send_save_panels,
+    )
 
     @router.handler("ping")
     async def handle_ping(_data: dict) -> None:
@@ -913,10 +935,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     async def handle_world_list(_data: dict) -> None:
         await outbound.send(world_list_payload())
 
-    @router.handler("player_notes_get")
-    async def handle_player_notes_get(_data: dict) -> None:
-        notes = PlayerNotesStore(engine.context.world_dir, user_id=user_id).load()
-        await outbound.send({"type": "player_notes", **notes})
+    register_player_notes_handlers(router, engine, outbound, user_id=user_id)
 
     async def _settings_call(fn, data: dict) -> None:
         try:
@@ -976,33 +995,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 ),
             }
         )
-
-    @router.handler("player_notes_update")
-    async def handle_player_notes_update(data: dict) -> None:
-        try:
-            notes = PlayerNotesStore(engine.context.world_dir, user_id=user_id).save(
-                data.get("text", ""),
-                expected_revision=(
-                    int(data["revision"]) if data.get("revision") is not None else None
-                ),
-            )
-            await outbound.send({"type": "player_notes", "saved": True, **notes})
-        except PlayerNotesConflict as exc:
-            current = PlayerNotesStore(engine.context.world_dir, user_id=user_id).load()
-            await outbound.send(
-                {
-                    "type": "player_notes_conflict",
-                    "message": str(exc),
-                    **current,
-                }
-            )
-        except (OSError, TypeError, ValueError, RuntimeError) as exc:
-            await outbound.send(
-                {
-                    "type": "player_notes_error",
-                    "message": str(exc) or "玩家笔记保存失败",
-                }
-            )
 
     @router.handler("model_settings_update")
     async def handle_model_settings_update(data: dict) -> None:
@@ -1551,7 +1543,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                         "type": "error",
                         "code": "operation_failed",
                         "operation": str(data.get("type") or ""),
-                        "message": "操作失败，房间连接已保留，请稍后重试。",
+                        "message": operation_error_message(data.get("type"), exc),
                         "terminal": data.get("_room_reserved_action") is True,
                     }
                 )
@@ -1640,7 +1632,7 @@ async def game_ws(ws: WebSocket):
                 )
                 context = (
                     requested_context
-                    if messages is not None
+                    if messages is not None or can_resume_structured(requested_context)
                     else _local_world_fallback(requested_context.module_name)
                 )
             except (FileNotFoundError, ValueError):

@@ -78,7 +78,6 @@ def _bypass_byok_readiness_gate():
         yield
 
 
-
 def _fixture_database_url(tmp_path: Path) -> str:
     """门禁夹具库：连接循环会按 world 元数据探测结构化模式并放行帧，
     需要能打开且有表的库（世界行缺失时按 legacy 处理，不必造世界）。"""
@@ -802,6 +801,82 @@ def test_continue_with_slot_is_owner_control_but_plain_continue_is_actor_control
     assert owner_turn_required("save_load", {"slot_id": "slot_001"}) is True
 
 
+def test_player_notes_correlation_and_stale_world_write_are_explicit(tmp_path):
+    notes = PlayerNotesStore(tmp_path, user_id="owner")
+    with session_scope(notes.database_url) as session:
+        session.add(User(id="owner", username="notes-owner", password_hash="unused"))
+
+    class NoteSocket:
+        def __init__(self):
+            self.frames = iter(
+                [
+                    {
+                        "type": "player_notes_get",
+                        "world_id": "notes-world",
+                        "request_id": "read:one",
+                    },
+                    {
+                        "type": "player_notes_update",
+                        "world_id": "old-world",
+                        "request_id": "write:old",
+                        "revision": 0,
+                        "text": "不应写进当前世界",
+                    },
+                    {
+                        "type": "player_notes_get",
+                        "world_id": "notes-world",
+                        "request_id": "read:two",
+                    },
+                ]
+            )
+            self.messages = []
+
+        async def receive_text(self):
+            try:
+                return json.dumps(next(self.frames))
+            except StopIteration:
+                raise RuntimeError("test complete") from None
+
+        async def send_json(self, payload):
+            self.messages.append(dict(payload))
+
+    room = GameRoom(
+        "notes-world",
+        SimpleNamespace(context=SimpleNamespace(world_dir=tmp_path)),
+        RoomEventHub("notes-world"),
+        "owner",
+        current_actor_user_id="owner",
+    )
+    socket = NoteSocket()
+    controller = SimpleNamespace(
+        deps=SimpleNamespace(database_url=lambda: _fixture_database_url(tmp_path))
+    )
+    with (
+        patch("src.multiplayer.messages.websocket_user", return_value=object()),
+        patch("src.multiplayer.messages.authorize_world", return_value="owner"),
+        pytest.raises(RuntimeError, match="test complete"),
+    ):
+        asyncio.run(
+            run_room_message_loop(
+                controller,
+                socket,
+                room,
+                SimpleNamespace(id="owner"),
+                room.world_id,
+                "owner-tab",
+                "owner",
+            )
+        )
+    assert PlayerNotesStore(tmp_path, user_id="owner").load()["text"] == ""
+    assert [
+        (entry["type"], entry["world_id"], entry["request_id"]) for entry in socket.messages
+    ] == [
+        ("player_notes", "notes-world", "read:one"),
+        ("player_notes_error", "notes-world", "write:old"),
+        ("player_notes", "notes-world", "read:two"),
+    ]
+
+
 def test_player_notes_internal_error_is_logged_but_not_sent_to_client(tmp_path, capsys):
     secret_detail = f"{tmp_path}/private/player-notes.json: permission denied"
 
@@ -859,6 +934,7 @@ def test_player_notes_internal_error_is_logged_but_not_sent_to_client(tmp_path, 
         {
             "type": "player_notes_error",
             "message": "玩家笔记暂时不可用，请稍后重试",
+            "world_id": "world-notes-error",
         }
     ]
     assert secret_detail not in json.dumps(socket.messages, ensure_ascii=False)

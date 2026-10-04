@@ -1,10 +1,16 @@
 import { useEffect, useRef } from "react";
 
 import { desktopBridge } from "../../desktop";
-import { continueGame, startGame, switchModule } from "../../start";
+import {
+  continueGame,
+  discardLocalCreationRequest,
+  startGame,
+  switchModule,
+} from "../../start";
 import { useAppStore } from "../../state/app-store";
 import { useStartStore } from "../../state/start-store";
 import { CharacterDossier } from "./CharacterDossier";
+import { LocalPlayStylePanel } from "./LocalPlayStylePanel";
 import { ModelSettingsTrigger } from "./ModelSettingsPanel";
 import { ModuleImporter } from "./ModuleImporter";
 import { ModuleSelect } from "./ModuleSelect";
@@ -110,8 +116,10 @@ export function StartScreen() {
         !event.defaultPrevented &&
         !useAppStore.getState().characterLibraryOpen &&
         !state.gameStarting
-      )
+      ) {
+        discardLocalCreationRequest();
         useStartStore.setState({ view: "menu" });
+      }
     };
     document.addEventListener("keydown", listener);
     return () => document.removeEventListener("keydown", listener);
@@ -232,7 +240,10 @@ export function StartScreen() {
               id="btn-character-back"
               className="character-back-button"
               disabled={state.gameStarting}
-              onClick={() => useStartStore.setState({ view: "menu" })}
+              onClick={() => {
+                discardLocalCreationRequest();
+                useStartStore.setState({ view: "menu" });
+              }}
             >
               ← 返回主菜单
             </button>
@@ -256,44 +267,46 @@ export function StartScreen() {
             <section id="character-selector" className="character-roster">
               <div className="character-roster-title">可用调查员</div>
               <div id="character-choice-list">
-                {state.characterGroups.map((group) => (
-                  <section className="character-group" key={group.id}>
-                    <div className="character-group-title">
-                      {group.id === "module"
-                        ? `${shown.activeModuleTitle} 特色调查员`
-                        : group.title}
-                    </div>
-                    <div className="character-card-row">
-                      {group.characters.map((character) => (
-                        <button
-                          className={`character-card${selected?.id === character.id ? " selected" : ""}`}
-                          aria-pressed={selected?.id === character.id}
-                          key={character.id}
-                          onClick={() =>
-                            useStartStore.setState({
-                              selectedCharacterId: character.id,
-                              selectedCharacterRef: character.ref,
-                            })
-                          }
-                        >
-                          <span className="character-card-name">
-                            {character.name}
-                          </span>
-                          <span className="character-card-source">
-                            {character.source_label}
-                          </span>
-                          <span className="character-card-meta">
-                            {character.occupation || "调查员"}
-                          </span>
-                          <span className="character-card-vitals">
-                            HP {character.hp}/{character.max_hp} · SAN{" "}
-                            {character.san}/{character.max_san}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
+                {state.characterGroups
+                  .filter((group) => group.characters.length > 0)
+                  .map((group) => (
+                    <section className="character-group" key={group.id}>
+                      <div className="character-group-title">
+                        {group.id === "module"
+                          ? `${shown.activeModuleTitle} 特色调查员`
+                          : group.title}
+                      </div>
+                      <div className="character-card-row">
+                        {group.characters.map((character) => (
+                          <button
+                            className={`character-card${selected?.id === character.id ? " selected" : ""}`}
+                            aria-pressed={selected?.id === character.id}
+                            key={character.id}
+                            onClick={() =>
+                              useStartStore.setState({
+                                selectedCharacterId: character.id,
+                                selectedCharacterRef: character.ref,
+                              })
+                            }
+                          >
+                            <span className="character-card-name">
+                              {character.name}
+                            </span>
+                            <span className="character-card-source">
+                              {character.source_label}
+                            </span>
+                            <span className="character-card-meta">
+                              {character.occupation || "调查员"}
+                            </span>
+                            <span className="character-card-vitals">
+                              HP {character.hp}/{character.max_hp} · SAN{" "}
+                              {character.san}/{character.max_san}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
               </div>
             </section>
             <aside id="character-detail" ref={detailRef}>
@@ -314,6 +327,7 @@ export function StartScreen() {
                 ? `${selected.name} · ${selected.occupation || "调查员"} · ${selected.source_label}`
                 : "未选择调查员"}
             </span>
+            <LocalPlayStylePanel />
             <button
               id="btn-character-confirm"
               disabled={state.gameStarting || !state.selectedCharacterRef}

@@ -16,7 +16,7 @@ const credentialsResponseSchema = z.looseObject({
 
 /** 查询当前登录账号；未登录时抛出 401 ApiError。 */
 export function fetchMe(): Promise<AuthUser> {
-  return apiFetch("/api/auth/me", authUserSchema);
+  return apiFetch("/api/auth/me", authUserSchema, { timeoutMs: 15_000 });
 }
 
 export function login(username: string, password: string): Promise<AuthUser> {

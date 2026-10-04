@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 import { existsSync } from "node:fs";
 
 const localChromium = "/snap/bin/chromium";
+const configuredChromium = process.env.TRPG_E2E_CHROMIUM;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -12,9 +13,11 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     browserName: "chromium",
-    launchOptions: existsSync(localChromium)
-      ? { executablePath: localChromium }
-      : {},
+    launchOptions: configuredChromium
+      ? { executablePath: configuredChromium }
+      : existsSync(localChromium)
+        ? { executablePath: localChromium }
+        : {},
     headless: true,
     ignoreHTTPSErrors: true,
     viewport: { width: 1440, height: 900 },

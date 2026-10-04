@@ -17,6 +17,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  column-gap: 16px;
   padding: 0 20px;
   z-index: 10;
 }
@@ -45,9 +46,17 @@
   font-weight: 600;
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+.header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 标题旁的烛火贴图小件（替代原 emoji） */
 .header-candle {
+  flex: 0 0 auto;
   width: 20px;
   height: 26px;
   margin-right: 12px;
@@ -56,6 +65,7 @@
 }
 #toolbar {
   display: flex;
+  flex: 0 0 auto;
   gap: 14px;
   align-items: center;
 }
@@ -246,6 +256,7 @@
 /* ---- 连接状态指示器（标题旁小圆点） ---- */
 #conn-status {
   display: inline-block;
+  flex: 0 0 auto;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -267,7 +278,7 @@
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--bg3) 80%, transparent),
     0 0 8px var(--gold-glow);
-  animation: blink 1s infinite;
+  /* 同步可能持续一段时间：状态点保持可见，不用消失式闪烁催促玩家。 */
 }
 #conn-status.disconnected {
   background: var(--red-bright);

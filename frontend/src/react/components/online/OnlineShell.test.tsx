@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { checkSession, enterLobby, resumeLastRoom } from "../../../online";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,7 +10,7 @@ import { OnlineShell } from "./OnlineShell";
 
 vi.mock("../../../online", () => ({
   assignActor: vi.fn(),
-  checkSession: vi.fn().mockResolvedValue(undefined),
+  checkSession: vi.fn().mockResolvedValue(true),
   enterLobby: vi.fn(),
   enterSoloLobby: vi.fn(),
   initOnlineSession: vi.fn(() => () => {}),
@@ -73,11 +74,27 @@ function setupOnline(patch: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(checkSession).mockResolvedValue(true);
   window.history.replaceState({}, "", "/");
   setupOnline({ view: "auth", activeWorldId: null, roomStatus: null });
 });
 
 describe("OnlineShell 界面切换", () => {
+  it("a superseded verification cannot resume a room using another operation's login", async () => {
+    let finish!: (result: boolean) => void;
+    vi.mocked(checkSession).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<OnlineShell />);
+    await act(async () => {
+      finish(false);
+    });
+    expect(enterLobby).not.toHaveBeenCalled();
+    expect(resumeLastRoom).not.toHaveBeenCalled();
+  });
   it("等待阶段渲染房间等待页（覆盖层）", () => {
     setupOnline({ roomStatus: "waiting" });
     render(<OnlineShell />);

@@ -105,17 +105,10 @@
               "$ref": "common.json#/$defs/revision"
             },
             "execution_profile": {
-              "enum": [
-                "legacy",
-                "structured_v1"
-              ]
+              "enum": ["legacy", "structured_v1"]
             },
             "keeper_mode": {
-              "enum": [
-                "human",
-                "assisted",
-                "agent"
-              ]
+              "enum": ["human", "assisted", "agent"]
             },
             "server_capabilities": {
               "$ref": "#/$defs/server_capabilities"
@@ -124,21 +117,14 @@
               "oneOf": [
                 {
                   "type": "object",
-                  "required": [
-                    "user_id",
-                    "mode"
-                  ],
+                  "required": ["user_id", "mode"],
                   "additionalProperties": false,
                   "properties": {
                     "user_id": {
                       "$ref": "common.json#/$defs/id_string"
                     },
                     "mode": {
-                      "enum": [
-                        "human",
-                        "assisted",
-                        "agent"
-                      ]
+                      "enum": ["human", "assisted", "agent"]
                     }
                   }
                 },
@@ -151,10 +137,7 @@
               "oneOf": [
                 {
                   "type": "object",
-                  "required": [
-                    "id",
-                    "name"
-                  ],
+                  "required": ["id", "name"],
                   "additionalProperties": false,
                   "properties": {
                     "id": {
@@ -188,7 +171,7 @@
                   "type": "null"
                 }
               ],
-              "description": "本连接当前行动调查员；keeper/旁观为 null。"
+              "description": "本连接控制的调查员；主持可同时控制调查员，未认领与只读旁观为 null。"
             },
             "targets": {
               "type": "array",
@@ -221,6 +204,131 @@
               },
               "description": "仅主持收到待处理草稿；普通玩家为空。"
             },
+            "keeper_material": {
+              "description": "只向获授权主持投影作者场景和人物资料；玩家连接不包含此字段。",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "kind", "title", "text", "current"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "$ref": "common.json#/$defs/id_string" },
+                  "kind": { "enum": ["scene", "npc"] },
+                  "title": { "type": "string", "maxLength": 160 },
+                  "text": { "type": "string" },
+                  "current": { "type": "boolean" }
+                }
+              }
+            },
+            "character": {
+              "description": "当前连接自己控制的调查员卡；未认领时为 null，不含其他调查员的私有卡。",
+              "type": ["object", "null"]
+            },
+            "message_history": {
+              "description": "本连接有权阅读的已完成叙事与明确标识的行动申报，最近 50 条；不是可重执行事件，申报不代表已执行。",
+              "type": "object",
+              "required": ["messages", "next_before_sequence"],
+              "additionalProperties": false,
+              "properties": {
+                "next_before_sequence": {
+                  "type": ["integer", "null"],
+                  "minimum": 1
+                },
+                "messages": {
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "required": ["message_id", "sequence", "speaker", "text"],
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "entry_kind": { "const": "action_request" }
+                          },
+                          "required": ["entry_kind"]
+                        },
+                        "then": {
+                          "properties": {
+                            "speaker": {
+                              "properties": {
+                                "kind": { "const": "investigator" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "properties": {
+                      "message_id": { "$ref": "common.json#/$defs/id_string" },
+                      "sequence": { "type": "integer", "minimum": 0 },
+                      "entry_kind": { "enum": ["narrative", "action_request"] },
+                      "text": { "type": "string" },
+                      "speaker": {
+                        "type": "object",
+                        "required": ["kind", "name"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "enum": ["keeper", "npc", "investigator", "system"]
+                          },
+                          "id": { "type": "string" },
+                          "name": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "inherited_message_history": {
+              "$ref": "#/$defs/session_snapshot/properties/payload/properties/message_history"
+            },
+            "inherited_history_unavailable": { "type": "boolean" },
+            "inherited_history_incomplete": { "type": "boolean" },
+            "keeper_investigators": {
+              "description": "仅授权人类主持：当前队员完整技能、属性及状态的只读白名单投影，不含控制元数据或记忆。",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["investigator_id", "name"],
+                "additionalProperties": false,
+                "properties": {
+                  "investigator_id": { "$ref": "common.json#/$defs/id_string" },
+                  "name": { "type": "string" },
+                  "occupation": {},
+                  "hp": {},
+                  "max_hp": {},
+                  "san": {},
+                  "max_san": {},
+                  "attributes": {},
+                  "skills": {},
+                  "conditions": {},
+                  "inventory": {},
+                  "luck": {},
+                  "mp": {},
+                  "max_mp": {}
+                }
+              }
+            },
+            "keeper_assets": {
+              "description": "主持素材索引，不含文件路径或图片；图片必须按世界身份单独请求。",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "label"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "$ref": "common.json#/$defs/id_string" },
+                  "label": { "type": "string", "maxLength": 160 }
+                }
+              }
+            },
+            "received_assets": {
+              "description": "仅当前身份所控制调查员已经获准查看的图片目录；不是主持作者素材库，不含路径或图片数据。",
+              "$ref": "#/$defs/session_snapshot/properties/payload/properties/keeper_assets"
+            },
             "pending_checks": {
               "type": "array",
               "items": {
@@ -229,10 +337,7 @@
             },
             "cursor": {
               "type": "object",
-              "required": [
-                "event_id",
-                "revision"
-              ],
+              "required": ["event_id", "revision"],
               "additionalProperties": false,
               "properties": {
                 "event_id": {
@@ -283,19 +388,12 @@
           "type": "boolean"
         },
         "execution_profile": {
-          "enum": [
-            "legacy",
-            "structured_v1"
-          ]
+          "enum": ["legacy", "structured_v1"]
         },
         "keeper_modes": {
           "type": "array",
           "items": {
-            "enum": [
-              "human",
-              "assisted",
-              "agent"
-            ]
+            "enum": ["human", "assisted", "agent"]
           }
         },
         "commands": {
@@ -335,19 +433,11 @@
     },
     "public_target": {
       "type": "object",
-      "required": [
-        "kind",
-        "id",
-        "name"
-      ],
+      "required": ["kind", "id", "name"],
       "additionalProperties": false,
       "properties": {
         "kind": {
-          "enum": [
-            "npc",
-            "investigator",
-            "scene_object"
-          ]
+          "enum": ["npc", "investigator", "scene_object"]
         },
         "id": {
           "$ref": "common.json#/$defs/id_string"
@@ -361,10 +451,7 @@
     },
     "public_destination": {
       "type": "object",
-      "required": [
-        "id",
-        "name"
-      ],
+      "required": ["id", "name"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -379,24 +466,14 @@
     },
     "known_clue": {
       "type": "object",
-      "required": [
-        "id",
-        "category",
-        "text",
-        "presentation"
-      ],
+      "required": ["id", "category", "text", "presentation"],
       "additionalProperties": false,
       "properties": {
         "id": {
           "$ref": "common.json#/$defs/id_string"
         },
         "category": {
-          "enum": [
-            "investigation",
-            "event",
-            "task",
-            "npc"
-          ]
+          "enum": ["investigation", "event", "task", "npc"]
         },
         "text": {
           "type": "string",
@@ -406,23 +483,14 @@
         "presentation": {
           "type": "array",
           "items": {
-            "enum": [
-              "describe",
-              "image",
-              "original"
-            ]
+            "enum": ["describe", "image", "original"]
           }
         }
       }
     },
     "known_item": {
       "type": "object",
-      "required": [
-        "id",
-        "label",
-        "quantity",
-        "operations"
-      ],
+      "required": ["id", "label", "quantity", "operations"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -452,12 +520,14 @@
     },
     "request_status_entry": {
       "type": "object",
-      "required": [
-        "request_id",
-        "status"
-      ],
+      "required": ["request_id", "status"],
       "additionalProperties": false,
       "properties": {
+        "request_type": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "仅本人／主持可见的请求类别，供重连后判断取消入口；不是执行授权。"
+        },
         "request_id": {
           "$ref": "common.json#/$defs/id_string"
         },
@@ -467,6 +537,11 @@
         "summary": {
           "type": "string",
           "maxLength": 200
+        },
+        "investigator_id": { "$ref": "common.json#/$defs/id_string" },
+        "action": {
+          "description": "仅主持的完整待处理请求，非执行授权。",
+          "$ref": "action_request.json#/$defs/action"
         },
         "awaiting": {
           "description": "status=awaiting_player 时的公开待办明细（本人/主持可见）。",
@@ -507,11 +582,7 @@
           "maxLength": 60
         },
         "difficulty": {
-          "enum": [
-            "regular",
-            "hard",
-            "extreme"
-          ]
+          "enum": ["regular", "hard", "extreme"]
         },
         "bonus_penalty": {
           "type": "integer",
@@ -528,10 +599,7 @@
           "maxLength": 200
         },
         "visibility": {
-          "enum": [
-            "public",
-            "keeper"
-          ]
+          "enum": ["public", "keeper"]
         },
         "push_for": {
           "oneOf": [
@@ -567,10 +635,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "request_id",
-            "status"
-          ],
+          "required": ["request_id", "status"],
           "additionalProperties": false,
           "properties": {
             "request_id": {
@@ -599,10 +664,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "request_id",
-            "status"
-          ],
+          "required": ["request_id", "status"],
           "additionalProperties": false,
           "properties": {
             "request_id": {
@@ -714,10 +776,7 @@
               ]
             },
             "outcome": {
-              "enum": [
-                "success",
-                "failure"
-              ]
+              "enum": ["success", "failure"]
             },
             "detail": {
               "type": "string",
@@ -752,10 +811,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "check_request_id",
-            "reason"
-          ],
+          "required": ["check_request_id", "reason"],
           "additionalProperties": false,
           "properties": {
             "check_request_id": {
@@ -806,10 +862,7 @@
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": [
-                  "sides",
-                  "values"
-                ],
+                "required": ["sides", "values"],
                 "additionalProperties": false,
                 "properties": {
                   "sides": {
@@ -857,11 +910,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "message_id",
-            "speaker",
-            "audience"
-          ],
+          "required": ["message_id", "speaker", "audience"],
           "additionalProperties": false,
           "properties": {
             "message_id": {
@@ -892,11 +941,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "message_id",
-            "index",
-            "text"
-          ],
+          "required": ["message_id", "index", "text"],
           "additionalProperties": false,
           "properties": {
             "message_id": {
@@ -929,12 +974,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "message_id",
-            "speaker",
-            "audience",
-            "text"
-          ],
+          "required": ["message_id", "speaker", "audience", "text"],
           "additionalProperties": false,
           "properties": {
             "message_id": {
@@ -970,18 +1010,12 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "scene",
-            "destinations"
-          ],
+          "required": ["scene", "destinations"],
           "additionalProperties": false,
           "properties": {
             "scene": {
               "type": "object",
-              "required": [
-                "id",
-                "name"
-              ],
+              "required": ["id", "name"],
               "additionalProperties": false,
               "properties": {
                 "id": {
@@ -1026,10 +1060,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "clue_id",
-            "investigator_id"
-          ],
+          "required": ["clue_id", "investigator_id"],
           "additionalProperties": false,
           "properties": {
             "clue_id": {
@@ -1039,12 +1070,7 @@
               "$ref": "common.json#/$defs/id_string"
             },
             "category": {
-              "enum": [
-                "investigation",
-                "event",
-                "task",
-                "npc"
-              ]
+              "enum": ["investigation", "event", "task", "npc"]
             },
             "text": {
               "type": "string",
@@ -1072,10 +1098,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "investigator_id",
-            "items"
-          ],
+          "required": ["investigator_id", "items"],
           "additionalProperties": false,
           "properties": {
             "investigator_id": {
@@ -1085,11 +1108,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "id",
-                  "label",
-                  "quantity"
-                ],
+                "required": ["id", "label", "quantity"],
                 "additionalProperties": false,
                 "properties": {
                   "id": {
@@ -1152,9 +1171,7 @@
             },
             "clock": {
               "type": "object",
-              "required": [
-                "elapsed_minutes"
-              ],
+              "required": ["elapsed_minutes"],
               "additionalProperties": false,
               "properties": {
                 "elapsed_minutes": {
@@ -1188,11 +1205,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "code",
-            "message",
-            "retryable"
-          ],
+          "required": ["code", "message", "retryable"],
           "additionalProperties": false,
           "properties": {
             "request_id": {
@@ -1234,21 +1247,14 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "draft_id",
-            "kind",
-            "summary"
-          ],
+          "required": ["draft_id", "kind", "summary"],
           "additionalProperties": false,
           "properties": {
             "draft_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "kind": {
-              "enum": [
-                "commands",
-                "narrative"
-              ]
+              "enum": ["commands", "narrative"]
             },
             "request_id": {
               "$ref": "common.json#/$defs/id_string"
@@ -1262,10 +1268,7 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "kind",
-                  "payload"
-                ],
+                "required": ["kind", "payload"],
                 "additionalProperties": false,
                 "properties": {
                   "kind": {
@@ -1302,21 +1305,14 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "draft_id",
-            "decision"
-          ],
+          "required": ["draft_id", "decision"],
           "additionalProperties": false,
           "properties": {
             "draft_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "decision": {
-              "enum": [
-                "approved",
-                "rejected",
-                "edited"
-              ]
+              "enum": ["approved", "rejected", "edited"]
             },
             "note": {
               "type": "string",
@@ -1341,11 +1337,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "controller_epoch",
-            "controller",
-            "reason"
-          ],
+          "required": ["controller_epoch", "controller", "reason"],
           "additionalProperties": false,
           "properties": {
             "controller_epoch": {
@@ -1354,18 +1346,11 @@
             },
             "controller": {
               "type": "object",
-              "required": [
-                "kind",
-                "id"
-              ],
+              "required": ["kind", "id"],
               "additionalProperties": false,
               "properties": {
                 "kind": {
-                  "enum": [
-                    "human",
-                    "agent",
-                    "none"
-                  ]
+                  "enum": ["human", "agent", "none"]
                 },
                 "id": {
                   "$ref": "common.json#/$defs/id_string"
@@ -1395,11 +1380,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "request_id",
-            "investigator_id",
-            "summary"
-          ],
+          "required": ["request_id", "investigator_id", "summary"],
           "additionalProperties": false,
           "properties": {
             "request_id": {
@@ -1412,6 +1393,9 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 200
+            },
+            "action": {
+              "$ref": "action_request.json#/$defs/action"
             }
           }
         }
@@ -1487,10 +1471,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "asset_id",
-            "investigator_id"
-          ],
+          "required": ["asset_id", "investigator_id"],
           "additionalProperties": false,
           "properties": {
             "asset_id": {
@@ -1525,31 +1506,18 @@
           "$ref": "common.json#/$defs/id_string"
         },
         "status": {
-          "enum": [
-            "open",
-            "completed",
-            "cancelled",
-            "superseded"
-          ]
+          "enum": ["open", "completed", "cancelled", "superseded"]
         },
         "investigator_id": {
           "$ref": "common.json#/$defs/id_string"
         },
         "pending_action": {
           "type": "object",
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "additionalProperties": false,
           "properties": {
             "kind": {
-              "enum": [
-                "freeform",
-                "move",
-                "present_clue",
-                "use_item",
-                "other"
-              ]
+              "enum": ["freeform", "move", "present_clue", "use_item", "other"]
             },
             "note": {
               "type": "string",
@@ -1612,18 +1580,10 @@
           "$ref": "common.json#/$defs/id_string"
         },
         "character_kind": {
-          "enum": [
-            "investigator",
-            "npc"
-          ]
+          "enum": ["investigator", "npc"]
         },
         "knowledge_type": {
-          "enum": [
-            "experienced",
-            "told",
-            "rumor",
-            "belief"
-          ]
+          "enum": ["experienced", "told", "rumor", "belief"]
         },
         "content": {
           "type": "string",
@@ -1646,10 +1606,7 @@
           }
         },
         "status": {
-          "enum": [
-            "active",
-            "superseded"
-          ]
+          "enum": ["active", "superseded"]
         },
         "superseded_by": {
           "$ref": "common.json#/$defs/id_string"
@@ -1686,21 +1643,14 @@
               "$ref": "common.json#/$defs/id_string"
             },
             "status": {
-              "enum": [
-                "open",
-                "completed",
-                "cancelled",
-                "superseded"
-              ]
+              "enum": ["open", "completed", "cancelled", "superseded"]
             },
             "investigator_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "pending_action": {
               "type": "object",
-              "required": [
-                "kind"
-              ],
+              "required": ["kind"],
               "additionalProperties": false,
               "properties": {
                 "kind": {
@@ -1783,18 +1733,10 @@
               "$ref": "common.json#/$defs/id_string"
             },
             "character_kind": {
-              "enum": [
-                "investigator",
-                "npc"
-              ]
+              "enum": ["investigator", "npc"]
             },
             "knowledge_type": {
-              "enum": [
-                "experienced",
-                "told",
-                "rumor",
-                "belief"
-              ]
+              "enum": ["experienced", "told", "rumor", "belief"]
             },
             "content": {
               "type": "string",
@@ -1839,11 +1781,7 @@
         "payload": {
           "description": "主持侧只读记忆查询的结果（keeper 定向）。",
           "type": "object",
-          "required": [
-            "query_id",
-            "memories",
-            "truncated"
-          ],
+          "required": ["query_id", "memories", "truncated"],
           "additionalProperties": false,
           "properties": {
             "query_id": {

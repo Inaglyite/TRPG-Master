@@ -44,6 +44,7 @@ from src.app.config import (
     model_timeout_seconds,
 )
 from src.app.engine_primitives import EngineCallbacks, TurnCancelledError
+from src.app.engine_session_switch import switch_engine_context
 from src.app.logger import error as log_error
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
@@ -299,16 +300,7 @@ class GameEngine:
 
     def switch_context(self, context: RuntimeContext) -> None:
         """切换到另一个世界实例并重建该世界对应的 system prompt。"""
-        self.context = context
-        self._skill_catalog_cache = self._skill_pins_cache = None
-        self.turn_journal = TurnJournal(
-            context.world_dir,
-            world_id=context.world_id,
-            module_name=context.module_name,
-        )
-        self._active_turn_id = None
-        _context_shadow.forget_engine(self)
-        self.prepare_session()
+        switch_engine_context(self, context)
 
     def adopt_message_history(
         self,

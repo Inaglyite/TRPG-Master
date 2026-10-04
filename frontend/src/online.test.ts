@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError } from "./api/client";
+import { ApiError, apiHttpOrigin, setCloudOrigin } from "./api/client";
 import {
   fetchMe,
   login as apiLogin,
@@ -39,7 +39,7 @@ import {
   startGame,
   toggleReady,
 } from "./online";
-import { disconnectRoom, roomSend } from "./room-ws";
+import { disconnectRoom, roomSendNow } from "./room-ws";
 import {
   initialOnlineState,
   resetOnlineState,
@@ -91,7 +91,7 @@ vi.mock("./api/worlds", () => ({
 vi.mock("./room-ws", () => ({
   clearPendingSoloSwitch: vi.fn(),
   disconnectRoom: vi.fn(),
-  roomSend: vi.fn(),
+  roomSendNow: vi.fn(() => true),
   newActionId: vi.fn(() => "action-1"),
 }));
 
@@ -116,6 +116,196 @@ beforeEach(() => {
 });
 
 describe("checkSession", () => {
+  it("clearing local storage in another tab revokes the old server view before checking the default", async () => {
+    setCloudOrigin("https://first.example.com");
+    vi.mocked(fetchMe).mockResolvedValue(alice);
+    await checkSession();
+    useOnlineStore.setState({
+      view: "room",
+      activeWorldId: "old-world",
+      pendingIntent: "solo",
+      privateEvents: [{ kind: "private_clue", clue: { text: "旧服务器秘密" } }],
+    });
+    const next = deferred<typeof alice>();
+    vi.mocked(fetchMe).mockReturnValue(next.promise);
+    const unsubscribe = initOnlineSession();
+    try {
+      localStorage.clear();
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: null, storageArea: localStorage }),
+      );
+      expect(useOnlineStore.getState()).toMatchObject({
+        authStatus: "checking",
+        view: "auth",
+        activeWorldId: null,
+        privateEvents: [],
+        pendingIntent: "solo",
+      });
+      next.reject(new ApiError("未登录", 401, null));
+      await next.promise.catch(() => {});
+      await Promise.resolve();
+      expect(useOnlineStore.getState().authStatus).toBe("anonymous");
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("a session-storage clear event does not revoke an unrelated cloud session", async () => {
+    setCloudOrigin("https://first.example.com");
+    vi.mocked(fetchMe).mockResolvedValue(alice);
+    await checkSession();
+    useOnlineStore.setState({ view: "room", activeWorldId: "current-world" });
+    vi.mocked(fetchMe).mockClear();
+    const unsubscribe = initOnlineSession();
+    try {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: null, storageArea: sessionStorage }),
+      );
+      expect(fetchMe).not.toHaveBeenCalled();
+      expect(disconnectRoom).not.toHaveBeenCalled();
+      expect(useOnlineStore.getState()).toMatchObject({
+        authStatus: "authenticated",
+        view: "room",
+        activeWorldId: "current-world",
+        user: alice,
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("a storage event immediately revokes the previous server and unsubscribes cleanly", async () => {
+    setCloudOrigin("https://first.example.com");
+    vi.mocked(fetchMe).mockResolvedValue(alice);
+    await checkSession();
+    useOnlineStore.setState({
+      view: "room",
+      activeWorldId: "old-world",
+      pendingIntent: "solo",
+    });
+    const next = deferred<typeof alice>();
+    vi.mocked(fetchMe).mockReturnValue(next.promise);
+    const unsubscribe = initOnlineSession();
+    setCloudOrigin("https://second.example.com");
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "trpg-cloud-origin",
+        oldValue: "https://first.example.com",
+        newValue: "https://second.example.com",
+      }),
+    );
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "checking",
+      view: "auth",
+      activeWorldId: null,
+      privateEvents: [],
+    });
+    next.reject(new ApiError("未登录", 401, null));
+    await next.promise.catch(() => {});
+    await Promise.resolve();
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "anonymous",
+      pendingIntent: "solo",
+    });
+    unsubscribe();
+    vi.mocked(fetchMe).mockClear();
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "trpg-cloud-origin",
+        oldValue: "https://second.example.com",
+        newValue: "https://third.example.com",
+      }),
+    );
+    expect(fetchMe).not.toHaveBeenCalled();
+  });
+  it("changing server clears the previous room before verification, even if both servers return the same user ID", async () => {
+    setCloudOrigin("https://first.example.com");
+    vi.mocked(fetchMe).mockResolvedValue(alice);
+    await checkSession();
+    useOnlineStore.setState({
+      view: "room",
+      activeWorldId: "old-world",
+      pendingIntent: "solo",
+      privateEvents: [{ kind: "private_clue", clue: { text: "旧服务器秘密" } }],
+    });
+    const next = deferred<typeof alice>();
+    vi.mocked(fetchMe).mockReturnValue(next.promise);
+    setCloudOrigin("https://second.example.com");
+    const checking = checkSession();
+    expect(useOnlineStore.getState()).toMatchObject({
+      activeWorldId: null,
+      privateEvents: [],
+      authStatus: "checking",
+    });
+    next.resolve(alice);
+    await checking;
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      user: alice,
+      view: "auth",
+      activeWorldId: null,
+      pendingIntent: "solo",
+    });
+    expect(disconnectRoom).toHaveBeenCalled();
+  });
+  it("同账号有效复核不清掉当前房间", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      view: "room",
+      activeWorldId: "same-world",
+    });
+    vi.mocked(fetchMe).mockResolvedValue(alice);
+    await checkSession();
+    expect(disconnectRoom).not.toHaveBeenCalled();
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      activeWorldId: "same-world",
+      view: "room",
+    });
+  });
+
+  it("主动复核已认证会话返回 401 时清掉旧房间并保留 solo 意图", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      pendingIntent: "solo",
+      view: "room",
+      activeWorldId: "old-world",
+    });
+    vi.mocked(fetchMe).mockRejectedValue(new ApiError("已过期", 401, null));
+    await checkSession();
+    expect(disconnectRoom).toHaveBeenCalled();
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "anonymous",
+      user: null,
+      view: "auth",
+      activeWorldId: null,
+      pendingIntent: "solo",
+      sessionExpired: true,
+    });
+  });
+
+  it("会话重新核对识别为另一账号时不继承旧房间", async () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: alice,
+      pendingIntent: "solo",
+      view: "room",
+      activeWorldId: "old-world",
+    });
+    vi.mocked(fetchMe).mockResolvedValue(bob);
+    await checkSession();
+    expect(disconnectRoom).toHaveBeenCalled();
+    expect(useOnlineStore.getState()).toMatchObject({
+      authStatus: "authenticated",
+      user: bob,
+      view: "auth",
+      activeWorldId: null,
+      pendingIntent: "solo",
+    });
+  });
+
   it("已登录时进入 authenticated", async () => {
     vi.mocked(fetchMe).mockResolvedValue(alice);
     await checkSession();
@@ -254,8 +444,29 @@ describe("logout 与会话过期", () => {
 });
 
 describe("上次房间恢复", () => {
+  it("a bookmark from another server never queries the same world ID here", async () => {
+    localStorage.setItem("trpg-online-world-id", "same-world-id");
+    localStorage.setItem(
+      "trpg-online-world-origin",
+      "https://first.example.com",
+    );
+    setCloudOrigin("https://second.example.com");
+    await resumeLastRoom();
+    expect(getRoomInfo).not.toHaveBeenCalled();
+    expect(useOnlineStore.getState().activeWorldId).toBeNull();
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+  });
+
+  it("unscoped pre-upgrade bookmarks require explicit lobby entry", async () => {
+    localStorage.setItem("trpg-online-world-id", "unknown-server-world");
+    await resumeLastRoom();
+    expect(getRoomInfo).not.toHaveBeenCalled();
+    expect(useOnlineStore.getState().activeWorldId).toBeNull();
+    expect(localStorage.getItem("trpg-online-world-id")).toBeNull();
+  });
   it("无权访问旧房间时清除持久化记录，避免每次启动反复失败", async () => {
     localStorage.setItem("trpg-online-world-id", "world-stale");
+    localStorage.setItem("trpg-online-world-origin", apiHttpOrigin());
     vi.mocked(getRoomInfo).mockRejectedValue(
       new ApiError("forbidden", 403, "forbidden"),
     );
@@ -269,6 +480,7 @@ describe("上次房间恢复", () => {
 
   it("上次房间是云端单人世界时不从多人入口恢复", async () => {
     localStorage.setItem("trpg-online-world-id", "world-solo");
+    localStorage.setItem("trpg-online-world-origin", apiHttpOrigin());
     useOnlineStore.setState({
       view: "lobby",
       worldsStatus: "ready",
@@ -293,6 +505,7 @@ describe("上次房间恢复", () => {
 
   it("旧房间返回 world_not_found 时按资源错误回大厅，而不是误报接口未实现", async () => {
     localStorage.setItem("trpg-online-world-id", "world-deleted");
+    localStorage.setItem("trpg-online-world-origin", apiHttpOrigin());
     vi.mocked(getRoomInfo).mockRejectedValue(
       new ApiError("房间不存在", 404, "world_not_found"),
     );
@@ -844,17 +1057,45 @@ describe("云端单人", () => {
 
 describe("房间 WS 动作", () => {
   beforeEach(() => {
-    useOnlineStore.setState({ activeWorldId: "world-1" });
+    useOnlineStore.setState({
+      activeWorldId: "world-1",
+      roomConnection: "connected",
+    });
   });
+
+  it.each(["disconnected", "connecting"] as const)(
+    "%s 时不将准备、开局或指定行动排入重连队列",
+    async (roomConnection) => {
+      useOnlineStore.setState({ roomConnection });
+      await toggleReady(true);
+      await startGame();
+      await assignActor("u2");
+      expect(roomSendNow).not.toHaveBeenCalled();
+      expect(useOnlineStore.getState().roomError).toContain("尚未发送");
+    },
+  );
 
   it("toggleReady 通过房间 WS 发送 room_ready", async () => {
     await toggleReady(true);
-    expect(roomSend).toHaveBeenCalledWith({ type: "room_ready", ready: true });
+    expect(roomSendNow).toHaveBeenCalledWith({
+      type: "room_ready",
+      ready: true,
+    });
+  });
+
+  it("连接投影仍正常但即时发送失败时说明尚未发送", async () => {
+    vi.mocked(roomSendNow).mockReturnValueOnce(false);
+    await toggleReady(true);
+    expect(useOnlineStore.getState()).toMatchObject({
+      readyUserIds: [],
+      roomErrorCode: "room_not_connected",
+    });
+    expect(useOnlineStore.getState().roomError).toContain("尚未发送");
   });
 
   it("startGame 通过房间 WS 发送携带 action_id 的 start", async () => {
     await startGame();
-    expect(roomSend).toHaveBeenCalledWith({
+    expect(roomSendNow).toHaveBeenCalledWith({
       type: "start",
       action_id: "action-1",
     });
@@ -862,7 +1103,7 @@ describe("房间 WS 动作", () => {
 
   it("assignActor 通过房间 WS 发送 actor_assign", async () => {
     await assignActor("u2");
-    expect(roomSend).toHaveBeenCalledWith({
+    expect(roomSendNow).toHaveBeenCalledWith({
       type: "actor_assign",
       user_id: "u2",
     });
@@ -873,7 +1114,7 @@ describe("房间 WS 动作", () => {
     await toggleReady(true);
     await startGame();
     await assignActor("u2");
-    expect(roomSend).not.toHaveBeenCalled();
+    expect(roomSendNow).not.toHaveBeenCalled();
   });
 });
 

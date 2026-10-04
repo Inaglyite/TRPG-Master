@@ -13,9 +13,11 @@ import {
   injectActionId,
   newActionId,
   roomSend,
+  roomSendNow,
   roomWsUrl,
 } from "./room-ws";
 import { useAppStore } from "./state/app-store";
+import { useModelStore, draftFromView } from "./state/model-store";
 import { initialOnlineState, useOnlineStore } from "./state/online-store";
 import { useStartStore } from "./state/start-store";
 import { useStructuredStore } from "./state/structured-store";
@@ -113,6 +115,32 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+it("离开房间清掉未保存的 Key、模型视图和诊断，不把草稿交给下个账号", () => {
+  const draft = draftFromView(undefined);
+  draft.service.api_key = "test-only-unsaved-key";
+  draft.service.base_url = "https://test-only-private.invalid/v1";
+  useModelStore.setState({
+    open: true,
+    drafts: { narrative: draft, judgement: draftFromView(undefined) },
+    loading: true,
+    diagnosticsLoading: true,
+    contextSummary: { world_id: "previous-world" } as never,
+    testResult: { target_host: "test-only-private.invalid" } as never,
+  });
+  disconnectRoom();
+  expect(useModelStore.getState()).toMatchObject({
+    open: false,
+    view: null,
+    loading: false,
+    diagnosticsLoading: false,
+    contextSummary: null,
+    diagnostics: null,
+    testResult: null,
+  });
+  expect(useModelStore.getState().drafts.narrative.service.api_key).toBe("");
+  expect(useModelStore.getState().drafts.narrative.service.base_url).toBe("");
+});
+
 afterEach(() => {
   disconnectRoom();
   vi.unstubAllGlobals();
@@ -133,6 +161,17 @@ describe("connectRoom", () => {
       expect.objectContaining({ send: expect.any(Function) }),
     );
     FakeWebSocket.latest().open();
+    expect(useOnlineStore.getState().roomConnection).toBe("connecting");
+    FakeWebSocket.latest().message(
+      JSON.stringify({
+        type: "room_full_state",
+        world_id: "world-1",
+        latest_event_id: 0,
+        status: "waiting",
+        history: [],
+        private_state: null,
+      }),
+    );
     expect(useOnlineStore.getState().roomConnection).toBe("connected");
   });
 
@@ -194,6 +233,74 @@ describe("connectRoom", () => {
 });
 
 describe("终止性关闭码", () => {
+  it("离开房间丢弃结构化主持资料、待办与游标，不靠下一次快照清理", () => {
+    connectRoom("world-1");
+    useStructuredStore.setState({
+      identity: {
+        worldId: "world-1",
+        revision: 8,
+        investigatorId: "pc",
+        keeperUserId: "u1",
+        keeperMode: "human",
+      },
+      keeperMaterial: [{ title: "秘密", text: "主持私设" }],
+      keeperAssets: [{ id: "secret-photo", label: "秘密照片" }],
+      memoryQuery: {
+        status: "done",
+        queryId: "old",
+        entries: [],
+        truncated: false,
+        error: "",
+        filters: { secret: true },
+      },
+      historyBeforeSequence: 12,
+    });
+    const generation = useStructuredStore.getState().historyGeneration;
+    disconnectRoom();
+    expect(useStructuredStore.getState()).toMatchObject({
+      identity: {
+        worldId: "",
+        revision: 0,
+        investigatorId: "",
+        keeperUserId: null,
+        keeperMode: null,
+      },
+      keeperMaterial: [],
+      keeperAssets: [],
+      keeperInvestigators: [],
+      requests: {},
+      checks: {},
+      interactions: {},
+      memoryQuery: { status: "idle", filters: {} },
+      historyBeforeSequence: null,
+    });
+    expect(useStructuredStore.getState().historyGeneration).toBeGreaterThan(
+      generation,
+    );
+  });
+
+  it("WS 4401 保留云端单人入口意图，且清除主持私态", () => {
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      pendingIntent: "solo",
+      user: { id: "u1", username: "alice" },
+      view: "room",
+      activeWorldId: "world-1",
+    });
+    connectRoom("world-1");
+    FakeWebSocket.latest().open();
+    useStructuredStore.setState({
+      keeperMaterial: [{ title: "秘密", text: "只给主持" }],
+    });
+    FakeWebSocket.latest().close(4401);
+    expect(useOnlineStore.getState()).toMatchObject({
+      sessionExpired: true,
+      pendingIntent: "solo",
+      view: "auth",
+    });
+    expect(useStructuredStore.getState().keeperMaterial).toEqual([]);
+  });
+
   it("1011 内部故障保留房间恢复记录并自动重连", () => {
     vi.useFakeTimers();
     localStorage.setItem("trpg-online-world-id", "world-1");
@@ -391,7 +498,7 @@ describe("终止性关闭码", () => {
     vi.advanceTimersByTime(1100);
     expect(FakeWebSocket.instances).toHaveLength(2);
     FakeWebSocket.latest().open();
-    expect(useOnlineStore.getState().roomConnection).toBe("connected");
+    expect(useOnlineStore.getState().roomConnection).toBe("connecting");
     expect(useOnlineStore.getState().roomError).toBe(
       "房间角色已更新，正在重新连接……",
     );
@@ -409,6 +516,89 @@ describe("终止性关闭码", () => {
 });
 
 describe("发送队列", () => {
+  it("结构化重连必须等本连接的成员快照，旧身份和房间镜像不能放行动作", () => {
+    vi.useFakeTimers();
+    useOnlineStore.setState({
+      roomMetadata: { execution_profile: "structured_v1" },
+    });
+    const full = {
+      type: "room_full_state",
+      world_id: "world-1",
+      latest_event_id: 0,
+      status: "playing",
+      history: [],
+      private_state: null,
+    };
+    const snapshot = {
+      type: "session_snapshot",
+      protocol_version: 1,
+      event_id: 0,
+      world_id: "world-1",
+      revision: 9,
+      payload: {},
+    };
+    connectRoom("world-1");
+    // connectRoom clears the previous session metadata; REST entry normally supplies it.
+    useOnlineStore.setState({
+      roomMetadata: { execution_profile: "structured_v1" },
+    });
+    let ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(JSON.stringify(full));
+    expect(useAppStore.getState().connection).toBe("connecting");
+    roomSend({ type: "player_notes_update", text: "同步后发送" });
+    expect(ws.sent).toHaveLength(0);
+    ws.message(JSON.stringify({ ...snapshot, world_id: "foreign-world" }));
+    ws.message(JSON.stringify({ ...snapshot, protocol_version: 99 }));
+    expect(useAppStore.getState().connection).toBe("connecting");
+    expect(ws.sent).toHaveLength(0);
+    ws.message(JSON.stringify(snapshot));
+    expect(useAppStore.getState().connection).toBe("connected");
+    expect(ws.sent.map((frame) => JSON.parse(frame).text)).toEqual([
+      "同步后发送",
+    ]);
+    ws.close(1012);
+    vi.advanceTimersByTime(1000);
+    ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(JSON.stringify(full));
+    expect(useAppStore.getState().connection).toBe("connecting");
+    // The preceding socket's snapshot is never readiness evidence for this one.
+    ws.message(JSON.stringify(snapshot));
+    expect(useAppStore.getState().connection).toBe("connected");
+  });
+
+  it("结构化成员快照先到也必须等房间镜像，大厅不依赖游戏快照", () => {
+    connectRoom("world-1");
+    useOnlineStore.setState({
+      roomMetadata: { execution_profile: "structured_v1" },
+    });
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    ws.message(
+      JSON.stringify({
+        type: "session_snapshot",
+        protocol_version: 1,
+        event_id: 0,
+        world_id: "world-1",
+        revision: 1,
+        payload: {},
+      }),
+    );
+    expect(useAppStore.getState().connection).toBe("connecting");
+    ws.message(
+      JSON.stringify({
+        type: "room_full_state",
+        world_id: "world-1",
+        latest_event_id: 0,
+        status: "waiting",
+        history: [],
+        private_state: null,
+      }),
+    );
+    expect(useAppStore.getState().connection).toBe("connected");
+  });
+
   it("权威快照前的队列最多保留 64 条", () => {
     connectRoom("world-1");
     const ws = FakeWebSocket.latest();
@@ -1034,6 +1224,41 @@ describe("游戏事件桥接", () => {
     expect(reopened.sent).toContain(
       JSON.stringify({ type: "room_sync", after_event_id: 3 }),
     );
+  });
+
+  it("即时房间操作未同步或断线时不排队，恢复后仅主动操作才发送", () => {
+    vi.useFakeTimers();
+    useOnlineStore.setState({ activeWorldId: "world-1" });
+    connectRoom("world-1");
+    const ws = FakeWebSocket.latest();
+    ws.open();
+    expect(roomSendNow({ type: "room_ready", ready: true })).toBe(false);
+    const snapshot = JSON.stringify({
+      type: "room_full_state",
+      world_id: "world-1",
+      status: "lobby",
+      latest_event_id: 0,
+      history: [],
+      private_state: null,
+    });
+    ws.message(snapshot);
+    expect(
+      ws.sent.filter((frame) => JSON.parse(frame).type === "room_ready"),
+    ).toHaveLength(0);
+    expect(roomSendNow({ type: "room_ready", ready: true })).toBe(true);
+    ws.close();
+    expect(roomSendNow({ type: "room_ready", ready: false })).toBe(false);
+    vi.advanceTimersByTime(1100);
+    const reopened = FakeWebSocket.latest();
+    reopened.open();
+    reopened.message(snapshot);
+    expect(
+      reopened.sent.filter((frame) => JSON.parse(frame).type === "room_ready"),
+    ).toHaveLength(0);
+    expect(roomSendNow({ type: "room_ready", ready: false })).toBe(true);
+    expect(
+      reopened.sent.filter((frame) => JSON.parse(frame).type === "room_ready"),
+    ).toHaveLength(1);
   });
 
   it("roomSend 未连接时排队，重连后按序补发", () => {

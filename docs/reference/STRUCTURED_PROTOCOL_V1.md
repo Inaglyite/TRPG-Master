@@ -56,6 +56,20 @@ Agent 触发语义（M3 实现冻结）：`action_request` / `check_response` �
 模型路由不可用（BYOK 未配置/被阻断）时不消耗模型、触发请求置 paused 并给主持可见提示；
 人类在控时运行返回 blocked 不抢占。
 
+### 本地无账号新建入口（2026-10-05）
+
+本地选角页可选经典 AI 叙事、人类主持、AI 辅助主持、AI 主持。选择只作用于下一次新建，不改已有世界的模式。云端继续使用原有建房/单人创建接口，不接受此本地入口。
+
+本地 `/ws` 的应用级帧 `local_start`（不是结构化主持命令）携带 `request_id`、`source_world_id`、`character_ref`、`execution_profile`、`keeper_mode`。服务端校验本地无账号/非房间身份、模式枚举、当前源世界和真实调查员引用，然后创建独立世界并初始化本地 owner/keeper。结构化人类主持不进入旧 `start` 开场，不调用模型；新建后的主持权限、调查员物品注册与其他结构化入口共用同一实现。
+
+成功顺序为 `world_context` → `world_list` → `local_start_result` → 权威结构化快照；确认携带同一 `request_id`、`ok:true`、`world_id` 和 `execution_profile`。拒绝确认携带 `ok:false`、`code`、`message`。前端只接受当前请求与已同步世界匹配的成功确认，不预先显示创建成功。
+
+请求标识只允许 1–96 位字母、数字、下划线、连字符。同一标识绑定完整创建载荷摘要；持久化创建回执用于幂等重放，重试不清空已创建世界的进度，改载荷则拒绝。连接未就绪或忙碌时不排队自动重发；确认超时由用户明确重试原请求。即使世界身份已经先到、确认丢失，重试仍沿用原始源世界和请求标识。明确返回主菜单只丢弃客户端等待，不删除已经提交的世界。
+
+结构化新建即算可续玩的冒险；刷新读取当前已提交状态，不要求旧式 AI 自动存档。没有模型凭据时，默认菜单世界允许建立连接与读取模组/角色；实际 AI 调用仍失败关闭。无 Key 不等于免费 AI，亦不让 human 降级穿透到模型。
+
+实现：`src/structured/local_creation.py`、`src/structured/engine_gate.py`、`frontend/src/start.ts`、`LocalPlayStylePanel`。定向验证：`tests/test_local_structured_creation.py`、`frontend/src/local-start-request.test.ts`、`frontend/e2e/local-human-start.spec.ts`。新增入口不改变结构化战斗/结局尚未提供的能力边界；本轮不声明 assisted/agent 真实模型新建验收通过。
+
 ### 2.3 server_capabilities 协商
 
 `session_snapshot.payload.server_capabilities` 是能力唯一来源：`structured_protocol`、
@@ -299,6 +313,51 @@ M4 协议增补（生命周期：分支 / 读档 / 续团）：
    slot_000 使时间线列表兼容旧 UI。
 4. `world_switch` 到结构化世界：`world_switched.history=[]`，随后收到
    `session_snapshot`；不会有消息历史帧。
+
+### 2026-10-03：人类主持参考与授权叙事恢复（未发布工作区）
+
+快照新增可选字段，字段形态以 `events.json` 为准；未提供字段不能被前端猜成已有事实：
+
+- `character` 与 `investigator_id`：连接用户实际控制的调查员；主持也可兼调查员，未控制时为 null，绝不以队伍 active PC 代替。
+- `keeper_material` / `keeper_assets` / `keeper_investigators`：仅人类主持投影。队员资料为完整只读属性/技能与当前物品账本，不扩充 Agent 上下文；房主不是隐式主持授权。
+- `received_assets`：可选的接收者图片目录，条目仅含 `id` / `label`，由服务器当前身份所控制调查员的已提交 `asset_grants` 投影；空目录明确为 `[]`。与主持作者目录分离，不含文件路径、图片字节或未授权素材。Agent 上下文不增加此 UI 字段。快照恢复替换整个目录；字段缺省也清除旧目录，不能保留已撤回内容。实时 `handout_presented` 仅为其中的本人接收记录补充目录，标题暂用已投递 caption（缺省为素材 ID），下次快照采用作者标签。查看仍经现有授权 HTTP 接口，不授予新权限，不申报游戏行动。
+- `message_history`：除 Agent 内部快照外提供当前接收者可见的最近 50 条已完成叙事与自由行动申报，按 sequence 正序排列；条目含 `message_id`、`sequence`、`speaker`（kind/id/name）和 `text`。申报另带 `entry_kind: action_request`，只允许调查员归属，界面标为“行动申报 · 不代表已执行”。仅提交者及当前授权主持可读，不扩展至其他玩家／旁观者；从请求账本读完整原文，以最早存活受理事件定位、跨分页去重。缺少存活受理事件的请求不单独恢复。普通已完成叙事可省略 `entry_kind`。`next_before_sequence` 非空表示还能读取更早一页，不是执行授权。
+
+只读分页：`GET /api/worlds/{world_id}/narrative-history?before_sequence=<正整数>`。
+使用当前账号或受信本地连接，每次重新检查成员及接收范围；未经授权的世界返回 404。
+响应只包含可见叙事与下一页游标（private/no-store），不返回原始 outbox、
+玩家私有待办、角色记忆或命令；不推进世界版本、不掷骰、不重执行游戏。
+旁观者只读公开叙事；玩家读公开与本人获准的消息；主持读取主持权限允许的范围。
+新消息不移动旧页边界；前端必须在同世界读档/权限恢复快照后也丢弃旧请求的迟到结果。
+
+新结构化存档的内部 `structured_event_cursor` 保存 world_id/revision/sequence：
+状态与游标在同一存档事务内读取，读档删除 revision 或 sequence 晚于该点的事件，
+并删除该点之后创建的线程/记忆。游标与世界/快照不符时拒绝读档、不落状态。
+没有此字段的旧存档仍按原 revision 契约恢复，不能承诺精确区分同版本的前后台词。
+分支仍不复制 outbox；这些恢复字段不是通用事件回放。
+
+### 2026-10-04：分叉前只读档案（未发布工作区）
+
+新建结构化分支在冻结源状态及事件边界时保存独立 `branch_history_entries`，
+包含祖先已保存档案和父世界自身截至分叉点的已完成叙事／自由申报。新分支
+outbox 仍为空，读取档案不产生事件，不复制控制权，不重执行行动或骰子。
+档案的接收范围／原申报者仅保存在私有账本，不能放进公开 metadata。
+
+- `inherited_message_history`：当前连接可见的最近 50 条分叉前档案，字段与
+  `message_history` 相同，但 sequence 是独立档案序号，不是世界事件游标。
+- 分页仍用只读 history 接口，加 `scope=inherited`；默认 `scope=current`
+  与旧调用兼容。游标不可在两个 scope 间混用，非法 scope 返回 422。
+- 阅读时按新分支当前身份过滤。旁观者仅公开记录；旧角色的新控制者不继承
+  原账号的私下申报；当前授权主持可读主持资料。不递归读取可变父世界，
+  因而父事件删除／父世界继续行动不会改变已经保存的档案。
+- `inherited_history_unavailable=true`：旧分支没有冻结档案，不猜补父世界
+  当前内容。`inherited_history_incomplete=true`：新分支来自缺失档案的旧
+  祖先，只能提供已保存部分；此标识随后续分支继承。根世界不显示这些入口。
+- Agent 内部快照不注入档案字段；前端默认收起、与当前时间线分区，不把
+  祖先记录作为实时消息或新行动结果展示。权限恢复／世界切换作废旧读取。
+
+0019 迁移创建独立档案表，世界删除级联清理该世界档案，不依赖祖先世界外键。
+桌面 create_all 形状接管与旧库升级沿用 fail-closed 契约，打包表集同步更新。
 
 ## 10. 当前交互与角色长期记忆（2026-09-14 扩展）
 

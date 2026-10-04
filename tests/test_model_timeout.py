@@ -34,6 +34,7 @@ def test_engine_openai_client_uses_configured_timeout(monkeypatch, tmp_path) -> 
     # 客户端构造已迁到 engine_gate.build_engine_client（structured_v1+human
     # 世界返回 None，其余照常实例化）。
     monkeypatch.setattr(engine_gate_module, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(engine_module, "API_KEY", "configured-test-key")
     monkeypatch.setattr(engine_module, "TurnJournal", lambda *args, **kwargs: None)
     monkeypatch.setenv("TRPG_MODEL_TIMEOUT", "77")
     context = engine_module.RuntimeContext.local(runtime_root=tmp_path)

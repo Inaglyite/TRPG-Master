@@ -25,6 +25,9 @@ describe("AppHeader", () => {
     const { container } = render(<AppHeader />);
     expect(screen.getByRole("heading")).toHaveTextContent("TRPG Game");
     expect(container.querySelector("#conn-status")).toHaveClass("connecting");
+    expect(
+      screen.getByRole("img", { name: "连接／同步中…" }),
+    ).toBeInTheDocument();
 
     act(() => {
       useAppStore.getState().setConnection("connected");
@@ -33,6 +36,13 @@ describe("AppHeader", () => {
 
     expect(screen.getByRole("heading")).toHaveTextContent("猩红文档");
     expect(container.querySelector("#conn-status")).toHaveClass("connected");
+    expect(
+      screen.getByRole("img", { name: "已连接到守秘人" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".header-title")).toHaveAttribute(
+      "title",
+      "猩红文档",
+    );
   });
 
   it("通过应用内开局选择开始新游戏，不重载 Electron 页面", () => {

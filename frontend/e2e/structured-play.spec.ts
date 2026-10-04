@@ -82,6 +82,232 @@ function framesOf(type: string) {
   return (stub?.received ?? []).filter((entry) => entry.frame.type === type);
 }
 
+test("主持恢复与草稿卡：真实 DOM 三宽度、不误写重试含义、拒绝草稿有回执（协议替身）", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const hostUi = await startServer({ port: 8770, scenario: "keeper-ui" });
+  try {
+    await enterStructuredGame(page, "keeper", 8770);
+    await page.locator("#btn-panel").click();
+    const control = page.getByTestId("keeper-control-notice");
+    const draft = page.getByTestId("keeper-draft-card");
+    await expect(control).toContainText("此前已结算的行动不会回滚");
+    await expect(draft).toContainText("建议先向医生出示死亡证明。");
+    for (const width of [1280, 939, 640, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const button of [
+        control.getByRole("button", { name: /交还 AI 并重试/ }),
+        draft.getByTestId("draft-approve"),
+        draft.getByTestId("draft-reject"),
+      ]) {
+        await button.scrollIntoViewIfNeeded();
+        const geometry = await button.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          const css = getComputedStyle(node);
+          return {
+            width: rect.width,
+            height: rect.height,
+            padding: parseFloat(css.paddingLeft),
+            nowrap: css.whiteSpace,
+            inside:
+              rect.left >= 0 &&
+              rect.right <= innerWidth &&
+              rect.top >= 0 &&
+              rect.bottom <= innerHeight,
+            hit: node.contains(
+              document.elementFromPoint(
+                rect.x + rect.width / 2,
+                rect.y + rect.height / 2,
+              ),
+            ),
+          };
+        });
+        expect(geometry.height).toBeGreaterThanOrEqual(44);
+        expect(geometry.padding).toBeGreaterThanOrEqual(10);
+        expect(geometry.nowrap).toBe("nowrap");
+        expect(geometry.inside).toBe(true);
+        expect(geometry.hit).toBe(true);
+      }
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+      ).toBe(true);
+      await page.screenshot({ path: `/tmp/trpg-keeper-recovery-${width}.png` });
+    }
+    await draft.getByTestId("draft-reject").click();
+    await expect(draft).toHaveCount(0);
+    const commands = hostUi.received.filter(
+      ({ frame }) => frame.type === "command_request",
+    );
+    expect(commands).toHaveLength(1);
+    expect(commands[0].frame).toMatchObject({
+      kind: "resolve_draft",
+      payload: { draft_id: "draft-layout", decision: "rejected" },
+    });
+  } finally {
+    await hostUi.close();
+  }
+});
+
+test("服务端只给草稿和接管标志但未提供命令：只读且零提交（协议替身）", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const readonlyHost = await startServer({
+    port: 8769,
+    scenario: "keeper-ui-readonly",
+  });
+  try {
+    await enterStructuredGame(page, "keeper", 8769);
+    await page.locator("#btn-panel").click();
+    const draft = page.getByTestId("keeper-draft-card");
+    const control = page.getByTestId("keeper-control-notice");
+    await expect(draft).toContainText(
+      "服务端未开放草稿审批，不能提交批准或拒绝。",
+    );
+    await expect(control).toContainText("当前状态仅供查看");
+    await expect(control.getByRole("button")).toHaveCount(0);
+    for (const width of [1280, 939, 640, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await draft.scrollIntoViewIfNeeded();
+      await expect(draft.getByTestId("draft-approve")).toBeDisabled();
+      await expect(draft.getByTestId("draft-reject")).toBeDisabled();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+      ).toBe(true);
+      await page.screenshot({ path: `/tmp/trpg-keeper-readonly-${width}.png` });
+    }
+    expect(
+      readonlyHost.received.filter(
+        ({ frame }) => frame.type === "command_request",
+      ),
+    ).toHaveLength(0);
+    await expect(draft).toContainText("待批准");
+    await expect(draft).not.toContainText("已结算");
+    await page.getByTestId("btn-keeper-console").click();
+    const workspace = page.getByRole("dialog", { name: "主持工作台" });
+    await expect(workspace.getByTestId("keeper-submit")).toBeDisabled();
+    await expect(workspace.getByTestId("keeper-cmd-grant_clue")).toBeDisabled();
+    await expect(workspace).toContainText("服务端未开放该主持操作");
+    await checkDialogLayout(page, "keeper");
+    for (const width of [1280, 939, 640, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await workspace.getByTestId("keeper-submit").scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: `/tmp/trpg-console-readonly-${width}.png`,
+      });
+    }
+    expect(
+      readonlyHost.received.filter(
+        ({ frame }) => frame.type === "command_request",
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await readonlyHost.close();
+  }
+});
+
+async function checkDialogLayout(page: Page, kind: "action" | "keeper") {
+  const dialog = page.locator(
+    kind === "keeper" ? "#keeper-console" : "#structured-action-dialog",
+  );
+  const close = dialog.getByRole("button", {
+    name: kind === "keeper" ? "关闭主持台" : "取消并关闭",
+  });
+  const body = dialog.locator(".panel-action-body").first();
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 480 });
+    await page.waitForTimeout(1000); // Measure the settled panel, not its entry transform.
+    await body.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    const controls =
+      kind === "keeper"
+        ? [close]
+        : [
+            close,
+            ...(await dialog.locator(".panel-action-footer button").all()),
+          ];
+    for (const button of controls) {
+      const geometry = await button.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const css = getComputedStyle(node);
+        return {
+          height: rect.height,
+          padding: parseFloat(css.paddingLeft),
+          nowrap: css.whiteSpace,
+          inViewport:
+            rect.top >= 0 &&
+            rect.bottom <= innerHeight &&
+            rect.left >= 0 &&
+            rect.right <= innerWidth,
+          hit: node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          ),
+        };
+      });
+      expect(geometry.height).toBeGreaterThanOrEqual(44);
+      expect(geometry.padding).toBeGreaterThanOrEqual(10);
+      expect(geometry.nowrap).toBe("nowrap");
+      expect(geometry.inViewport).toBe(true);
+      expect(geometry.hit).toBe(true);
+    }
+    await close.focus();
+    await page.keyboard.press("Shift+Tab");
+    expect(
+      await dialog.evaluate((node) => {
+        const controls = [
+          ...node.querySelectorAll<HTMLElement>(
+            "button, input, select, textarea, summary, a[href], [tabindex]",
+          ),
+        ].filter((control) => {
+          if (
+            control.tabIndex < 0 ||
+            control.matches(":disabled") ||
+            control.closest('[hidden], [inert], [aria-hidden="true"]')
+          )
+            return false;
+          for (
+            let parent: HTMLElement | null = control;
+            parent && parent !== node;
+            parent = parent.parentElement
+          ) {
+            const style = getComputedStyle(parent);
+            if (style.display === "none" || style.visibility === "hidden")
+              return false;
+            if (
+              parent.tagName === "DETAILS" &&
+              !parent.hasAttribute("open") &&
+              !parent.querySelector(":scope > summary")?.contains(control)
+            )
+              return false;
+          }
+          return true;
+        });
+        return document.activeElement === controls.at(-1);
+      }),
+    ).toBe(true);
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    expect(
+      await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+    ).toBe(true);
+    await body.evaluate((node) => {
+      node.scrollTop = 0;
+    });
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: `/tmp/trpg-modal-${kind}-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
 test("结构请求取代文字通道：出示 / 检定 / 前往 / 掷骰发的都是 M0 信封", async ({
   page,
 }) => {
@@ -94,6 +320,8 @@ test("结构请求取代文字通道：出示 / 检定 / 前往 / 掷骰发的�
   await presentButton.click();
   const presentDialog = page.getByRole("dialog", { name: "出示线索" });
   await expect(presentDialog).toBeVisible();
+  await checkDialogLayout(page, "action");
+  expect(framesOf("action_request")).toHaveLength(0);
   await presentDialog
     .getByLabel("向谁出示 / 说明")
     .selectOption("npc:john_whitcroft");
@@ -235,15 +463,17 @@ test("主持台：命令信封与私发线索的接收者记录", async ({ page 
   test.setTimeout(120_000);
   await enterStructuredGame(page, "keeper");
   await page.getByTestId("btn-keeper-console").click();
-  const console_ = page.getByRole("dialog", { name: "主持台" });
+  const console_ = page.getByRole("dialog", { name: "主持工作台" });
   await expect(console_).toBeVisible();
+  await checkDialogLayout(page, "keeper");
+  expect(framesOf("command_request")).toHaveLength(0);
 
   await page.getByTestId("keeper-cmd-grant_clue").click();
   await page
     .locator('[data-field="clue_id"] select')
     .selectOption("clue_death_certificate");
   await page
-    .locator('[data-field="recipient_investigator_ids"] input')
+    .locator('[data-field="recipient_investigator_ids"] input[type="text"]')
     .fill("inv-alice");
   await page.locator('[data-field="basis"] input').fill("医生当面说明");
   await page.getByTestId("keeper-submit").click();
@@ -334,6 +564,107 @@ test("提交冲突：位置不变、可同 ID 重试、拒绝后草稿仍可编�
   }
 });
 
+test("经典编辑器：短窗口出示与使用可关闭，取消不发旧行动且不预扣物品", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const legacy = await startServer({ port: 8772, scenario: "legacy-game" });
+  page.setDefaultTimeout(20_000);
+  try {
+    await openLocalStartScreen(
+      page,
+      "http://127.0.0.1:8772/?mode=local&role=player-a",
+    );
+    await page.locator(".module-select-trigger").click();
+    await page.getByRole("option", { name: /猩红文档/ }).click();
+    await page.locator("#btn-start").click();
+    await page.locator("#btn-character-confirm").click();
+    await expect(page.locator("#user-input")).toBeEnabled();
+    await page.locator("#btn-panel").click();
+    const present = page
+      .getByRole("button", { name: "出示", exact: true })
+      .first();
+    const use = page.getByRole("button", { name: "使用", exact: true }).first();
+    await expect(present).toBeEnabled();
+    await expect(use).toBeEnabled();
+    const before = legacy.received.length;
+    for (const width of [1280, 939, 640, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 360 : 480 });
+      for (const [trigger, name] of [
+        [present, "出示线索"],
+        [use, "使用道具"],
+      ] as const) {
+        if (await page.locator("#char-panel.collapsed").count())
+          await page.locator("#btn-panel").click();
+        await trigger.click();
+        const dialog = page.getByRole("dialog", { name });
+        await expect(dialog).toBeVisible();
+        await page.waitForTimeout(1000);
+        const body = dialog.locator(".panel-action-content");
+        const close = dialog.getByRole("button", { name: "取消并关闭" });
+        const footer = dialog.locator(".panel-action-footer");
+        const beforeY = (await footer.boundingBox())?.y;
+        await body.evaluate((node) => {
+          node.scrollTop = node.scrollHeight;
+        });
+        expect((await footer.boundingBox())?.y).toBe(beforeY);
+        for (const button of [
+          close,
+          ...(await footer.getByRole("button").all()),
+        ]) {
+          const box = await button.evaluate((node) => {
+            const r = node.getBoundingClientRect();
+            return {
+              height: r.height,
+              visible:
+                r.top >= 0 &&
+                r.bottom <= innerHeight &&
+                r.left >= 0 &&
+                r.right <= innerWidth,
+              hit: node.contains(
+                document.elementFromPoint(
+                  r.x + r.width / 2,
+                  r.y + r.height / 2,
+                ),
+              ),
+            };
+          });
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          expect(box.visible).toBe(true);
+          expect(box.hit).toBe(true);
+        }
+        await dialog.getByRole("button", { name: "取消", exact: true }).focus();
+        await page.keyboard.press("Tab"); // invalid draft leaves submit disabled
+        await expect(close).toBeFocused();
+        await body.evaluate((node) => {
+          node.scrollTop = 0;
+        });
+        await page.screenshot({
+          path: `/tmp/trpg-legacy-editor-${name === "出示线索" ? "present" : "use"}-${width}.png`,
+        });
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expect(
+          width <= 999 ? page.locator("#btn-panel") : trigger,
+        ).toBeFocused();
+      }
+    }
+    expect(
+      legacy.received
+        .slice(before)
+        .filter(({ frame }) =>
+          ["action", "action_request"].includes(String(frame.type)),
+        ),
+    ).toHaveLength(0);
+    await expect(page.locator('.inv-item-row[data-item="手电筒"]')).toHaveCount(
+      1,
+    );
+    await expect(page.getByTestId("structured-tool-row")).toHaveCount(0);
+  } finally {
+    await legacy.close();
+  }
+});
+
 test("协议不支持的世界不显示结构化入口，也不退回文字发送", async ({ page }) => {
   test.setTimeout(120_000);
   // 只发旧协议帧的替身：模拟尚未支持 structured_v1 的服务端。
@@ -378,6 +709,19 @@ test("同 revision 的多条聊天事件都渲染；旧世界迟到事件不污�
     await expect(page.getByText("第二句：他把档案推到桌边。")).toBeVisible({
       timeout: 20_000,
     });
+    // Separate committed messages must not merge into one eternally streaming
+    // legacy bubble, even when they share a speaker and world revision.
+    const firstBubble = page
+      .locator(".msg.gm")
+      .filter({ hasText: "第一句：法伦抬起头。" });
+    const secondBubble = page
+      .locator(".msg.gm")
+      .filter({ hasText: "第二句：他把档案推到桌边。" });
+    await expect(firstBubble).toHaveCount(1);
+    await expect(secondBubble).toHaveCount(1);
+    await expect(firstBubble).not.toContainText("第二句：");
+    await expect(secondBubble).not.toContainText("第一句：");
+    await expect(page.locator(".msg.gm.streaming-cursor")).toHaveCount(0);
 
     // 移动 → 替身先切到另一个世界，再发一条属于旧世界的迟到场景事件。
     await page.getByTestId("btn-move").click();

@@ -104,6 +104,33 @@ def ensure_item_registry(state: dict) -> dict:
     return registry
 
 
+def register_investigator_inventory(state: dict, investigators: dict[str, dict]) -> None:
+    """Seed newly materialized PCs without rebuilding the authoritative registry.
+
+    Lobby snapshots may have already created a registry before any character
+    exists. Import each starting backpack once; never resync stale character
+    strings after consumption/transfer. Existing IDs (including NPCs) survive.
+    The marker includes empty backpacks, so empty does not mean uninitialized.
+    """
+    registry = ensure_item_registry(state)
+    initialized = set(registry.get("initialized_investigators") or [])
+    for investigator_id, sheet in investigators.items():
+        if investigator_id in initialized:
+            continue
+        # Pre-marker worlds still have an original stack key after full transfer.
+        # An existing stack, even zero quantity, proves prior initialization.
+        existing = any(
+            str(entry.get("stack_key") or "").startswith(f"investigator:{investigator_id}/")
+            or entry.get("holder") == {"kind": "investigator", "id": investigator_id}
+            for entry in registry["items"].values()
+        )
+        if not existing:
+            scratch = {"investigators": {investigator_id: sheet}}
+            registry["items"].update(ensure_item_registry(scratch)["items"])
+        initialized.add(investigator_id)
+    registry["initialized_investigators"] = sorted(initialized)
+
+
 def ensure_clue_registry(state: dict) -> dict:
     """线索稳定 ID：catalog_id 优先，否则按 legacy key 生成（幂等）。
 

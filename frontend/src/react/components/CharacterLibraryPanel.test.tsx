@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -9,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LibraryEntry } from "../../api/characterLibrary";
 import { useAppStore } from "../../state/app-store";
+import { useOnlineStore } from "../../state/online-store";
+import { setCloudOrigin } from "../../api/client";
 import { useStartStore } from "../../state/start-store";
 import { CharacterLibraryPanel } from "./CharacterLibraryPanel";
 
@@ -56,6 +59,12 @@ function makeEntry(overrides: Partial<LibraryEntry> = {}): LibraryEntry {
 describe("CharacterLibraryPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    useOnlineStore.setState({
+      user: null,
+      authOrigin: null,
+      authStatus: "anonymous",
+    });
     useAppStore.setState({ characterLibraryOpen: true, mode: "local" });
     useStartStore.setState({ pendingLibraryCharacterId: null });
     api.listCharacterLibrary.mockResolvedValue([makeEntry()]);
@@ -85,6 +94,7 @@ describe("CharacterLibraryPanel", () => {
     api.getLibraryCard.mockResolvedValue(original);
     api.updateLibraryEntry.mockResolvedValue({ entry: original, warnings: [] });
     render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByText("测试调查员"));
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
     fireEvent.change(screen.getByLabelText(/姓名/), {
       target: { value: "新名字" },
@@ -116,6 +126,7 @@ describe("CharacterLibraryPanel", () => {
   it("删除需要二次确认，且说明不影响已开局世界", async () => {
     render(<CharacterLibraryPanel />);
     await screen.findByText("测试调查员");
+    fireEvent.click(screen.getByText("测试调查员"));
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     expect(api.deleteLibraryEntry).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -265,5 +276,246 @@ describe("CharacterLibraryPanel", () => {
     fireEvent.change(input, { target: { files: [big] } });
     expect(await screen.findByText(/文件过大/)).toBeInTheDocument();
     expect(api.inspectLibraryCard).not.toHaveBeenCalled();
+  });
+
+  it("切换账号立即清空旧列表，迟到列表不得回填", async () => {
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "A", username: "甲" },
+    });
+    let resolveOld!: (entries: LibraryEntry[]) => void;
+    api.listCharacterLibrary.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOld = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    act(() => useOnlineStore.setState({ user: { id: "B", username: "乙" } }));
+    await screen.findByText("测试调查员");
+    await act(async () => resolveOld([makeEntry({ name: "甲的私密角色" })]));
+    expect(screen.queryByText("甲的私密角色")).not.toBeInTheDocument();
+  });
+
+  it("读取完整卡面期间换账号，不得继续发保存命令", async () => {
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "A", username: "甲" },
+    });
+    let resolveCard!: (card: Record<string, unknown>) => void;
+    api.getLibraryCard.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCard = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByText("测试调查员"));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    act(() => useOnlineStore.setState({ user: { id: "B", username: "乙" } }));
+    await act(async () => resolveCard(makeEntry()));
+    expect(api.updateLibraryEntry).not.toHaveBeenCalled();
+    expect(safeSend).not.toHaveBeenCalled();
+  });
+
+  it("同账号会话复核保留草稿；退出登录立即移除内容", async () => {
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "A", username: "甲" },
+    });
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByText("测试调查员"));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText(/姓名/), {
+      target: { value: "未保存的草稿" },
+    });
+    act(() => useOnlineStore.setState({ authStatus: "checking" }));
+    act(() => useOnlineStore.setState({ authStatus: "authenticated" }));
+    expect(screen.getByLabelText(/姓名/)).toHaveValue("未保存的草稿");
+    act(() => useOnlineStore.setState({ authStatus: "anonymous", user: null }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useAppStore.getState().characterLibraryOpen).toBe(false);
+  });
+
+  it("弹窗接管焦点与 Tab，输入法 Escape 不关闭，关闭后归还入口", async () => {
+    const trigger = document.createElement("button");
+    document.body.append(trigger);
+    trigger.focus();
+    const { unmount } = render(<CharacterLibraryPanel />);
+    const dialog = screen.getByRole("dialog");
+    const close = within(dialog).getByRole("button", { name: "关闭" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(close).not.toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, {
+      key: "Escape",
+      isComposing: true,
+    });
+    expect(useAppStore.getState().characterLibraryOpen).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(useAppStore.getState().characterLibraryOpen).toBe(false);
+    expect(trigger).toHaveFocus();
+    unmount();
+    trigger.remove();
+  });
+
+  it("关闭重开后，旧列表不得覆盖新的读取结果", async () => {
+    let finish!: (entries: LibraryEntry[]) => void;
+    api.listCharacterLibrary.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    act(() => useAppStore.getState().setCharacterLibraryOpen(true));
+    await screen.findByText("测试调查员");
+    await act(async () => finish([makeEntry({ name: "旧窗口迟到卡" })]));
+    expect(screen.queryByText("旧窗口迟到卡")).not.toBeInTheDocument();
+  });
+
+  it("换服务器立即隐藏旧账号资料，返回原地址不能复活旧保存", async () => {
+    setCloudOrigin("https://one.example.test");
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      authOrigin: "https://one.example.test",
+      user: { id: "A", username: "甲" },
+    });
+    let finish!: (card: Record<string, unknown>) => void;
+    api.getLibraryCard.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByText("测试调查员"));
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    act(() => {
+      setCloudOrigin("https://two.example.test");
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    act(() => {
+      setCloudOrigin("https://one.example.test");
+    });
+    await act(async () => finish(makeEntry()));
+    expect(api.updateLibraryEntry).not.toHaveBeenCalled();
+  });
+
+  it("文件读取期间换账号，不把文件继续送去新账号校验", async () => {
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      authStatus: "authenticated",
+      user: { id: "A", username: "甲" },
+    });
+    let finish!: (text: string) => void;
+    const file = new File(["{}"], "card.json", { type: "application/json" });
+    Object.defineProperty(file, "text", {
+      value: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    });
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "导入角色卡" }));
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [file] },
+    });
+    act(() => useOnlineStore.setState({ user: { id: "B", username: "乙" } }));
+    await act(async () => finish("{}"));
+    expect(api.inspectLibraryCard).not.toHaveBeenCalled();
+    expect(api.createLibraryEntry).not.toHaveBeenCalled();
+  });
+
+  it("返回列表后迟到的文件校验不能变成新导入预览", async () => {
+    let finish!: (result: unknown) => void;
+    api.inspectLibraryCard.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "导入角色卡" }));
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["{}"], "card.json")] },
+    });
+    await waitFor(() => expect(api.inspectLibraryCard).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入角色卡" }));
+    await act(async () =>
+      finish({
+        ok: true,
+        errors: [],
+        warnings: [],
+        preview: makeEntry({ name: "旧文件的预览" }),
+      }),
+    );
+    expect(screen.queryByText("旧文件的预览")).not.toBeInTheDocument();
+  });
+
+  it("按姓名或职业搜索，不丢失已选档案，空结果有说明", async () => {
+    api.listCharacterLibrary.mockResolvedValue([
+      makeEntry(),
+      makeEntry({ id: "doctor", name: "王医生", occupation: "医生" }),
+    ]);
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(await screen.findByText("测试调查员"));
+    fireEvent.change(screen.getByLabelText("查找档案"), {
+      target: { value: "医生" },
+    });
+    expect(screen.getByText("王医生")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "测试调查员" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("查找档案"), {
+      target: { value: "查无此人" },
+    });
+    expect(screen.getByText(/没有匹配的档案/)).toBeInTheDocument();
+    expect(api.listCharacterLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it("读取失败可以原地重试，不把故障显示成空库", async () => {
+    const { ApiError } = await import("../../api/client");
+    api.listCharacterLibrary.mockRejectedValueOnce(
+      new ApiError("服务器未及时响应", 0, "request_timeout"),
+    );
+    render(<CharacterLibraryPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "服务器未及时响应",
+    );
+    expect(screen.queryByText("角色库还是空的")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(await screen.findByText("测试调查员")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("保存期间所有操作禁用时，焦点留在弹窗而不是回到背景", async () => {
+    let finish!: (value: unknown) => void;
+    api.createLibraryEntry.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<CharacterLibraryPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "新建角色" }));
+    fireEvent.change(screen.getByLabelText(/姓名/), {
+      target: { value: "保存中的卡" },
+    });
+    fireEvent.change(screen.getByLabelText(/职业/), {
+      target: { value: "记者" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建角色" }));
+    const panel = screen.getByRole("dialog");
+    expect(panel).toHaveFocus();
+    fireEvent.keyDown(panel, { key: "Tab" });
+    expect(panel).toHaveFocus();
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(useAppStore.getState().characterLibraryOpen).toBe(true);
+    await act(async () => finish({ entry: makeEntry(), warnings: [] }));
+    expect(panel.contains(document.activeElement)).toBe(true);
   });
 });

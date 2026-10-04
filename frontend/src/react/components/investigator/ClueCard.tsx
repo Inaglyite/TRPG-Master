@@ -11,6 +11,7 @@ import {
   type ClueFilter,
 } from "../../../state/investigator-panel-store";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { ReceivedMaterialLibrary } from "./ReceivedMaterialLibrary";
 
 const KNOWN_CATEGORIES = ["investigation", "event", "task", "npc"] as const;
 const CATEGORY_LABELS: Record<string, string> = {
@@ -86,7 +87,7 @@ function ClueRow({
   isNew: boolean;
   expanded: boolean;
   onToggleDetail: (key: string) => void;
-  onImage: (src: string, alt: string) => void;
+  onImage: (src: string, alt: string, trigger: HTMLButtonElement) => void;
   onPresent: (key: string, summary: string, clueId: string | null) => void;
 }) {
   const summary = clueSummaryOf(item);
@@ -129,7 +130,7 @@ function ClueRow({
             type="button"
             className="clue-thumb-btn"
             title={alt}
-            onClick={() => onImage(src, alt)}
+            onClick={(event) => onImage(src, alt, event.currentTarget)}
           >
             <img className="clue-thumb" src={src} alt={alt} loading="lazy" />
           </button>
@@ -163,7 +164,7 @@ function ClueRow({
 export function ClueCard({
   onImage,
 }: {
-  onImage: (src: string, alt: string) => void;
+  onImage: (src: string, alt: string, trigger: HTMLButtonElement) => void;
 }) {
   const { clues, path, ready } = usePanelClues();
   const prefs = useWorldPrefs();
@@ -306,6 +307,7 @@ export function ClueCard({
           );
         })}
       </div>
+      {path === "structured" && <ReceivedMaterialLibrary />}
     </CollapsibleCard>
   );
 }

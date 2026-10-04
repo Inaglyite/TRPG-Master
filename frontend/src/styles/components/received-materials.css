@@ -1,0 +1,58 @@
+/* Recipient catalog inside the existing clue card, never a fourth HUD card. */
+#char-content .inv-received-materials {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--platform-line, rgba(186, 161, 106, 0.24));
+}
+
+#char-content .inv-received-material-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#char-content .inv-received-materials .inv-path-note {
+  color: var(--platform-muted, #b8ac96);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+#char-content .inv-received-material-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+#char-content .inv-received-material-list li > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--platform-text, #e4dccd);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+#char-content .inv-received-materials .inv-row-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+
+#char-content .inv-received-recovery,
+#char-content .inv-received-materials [role="alert"] {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#char-content .inv-received-materials [role="status"],
+#char-content .inv-received-materials [role="alert"] p {
+  flex: 1 1 100%;
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--platform-muted, #b8ac96);
+}

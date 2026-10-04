@@ -1,0 +1,73 @@
+/* Companion for NotebookSections. Imported only when the notebook is wired. */
+#utility-panel .notebook-sections {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+#utility-panel .notebook-sections .player-notes-section {
+  padding-top: 0;
+}
+#utility-panel .notebook-shortcuts-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font: inherit;
+  color: var(--platform-brass);
+}
+#utility-panel .notebook-shortcuts[hidden] {
+  display: none;
+}
+#utility-panel .notebook-sections .player-notes-heading {
+  display: block;
+}
+#utility-panel .notebook-sections #player-notes-status {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+@media (max-height: 520px) {
+  #utility-panel.archive-folder-panel:has(.notebook-sections) {
+    padding-top: 48px;
+    padding-bottom: 24px;
+  }
+  #utility-panel .panel-eyebrow {
+    display: none;
+  }
+  #utility-panel:has(.notebook-sections) .utility-header,
+  #utility-panel:has(.notebook-sections) .utility-actions {
+    padding: 6px 10px;
+  }
+  #utility-panel .utility-header h2 {
+    margin: 0;
+    font-size: 22px;
+  }
+  #utility-panel:has(.notebook-sections) .utility-body {
+    padding: 8px 10px;
+  }
+  #utility-panel .notebook-sections {
+    gap: 8px;
+  }
+  #utility-panel .notebook-sections h3 {
+    margin-top: 0;
+    margin-bottom: 6px;
+  }
+  #utility-panel .notebook-sections #player-notes-input {
+    min-height: 80px;
+    height: 80px;
+    max-height: none;
+    padding: 10px;
+  }
+}
+@media (max-height: 400px) {
+  #utility-panel .notebook-sections #player-notes-input {
+    min-height: 72px;
+    height: 72px;
+  }
+}

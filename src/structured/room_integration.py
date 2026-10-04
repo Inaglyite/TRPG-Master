@@ -159,6 +159,14 @@ async def handle_structured_room_start(
             roster,
             active_investigator_id=str(roster[0]["investigator_id"]),
         )
+        # Lobby snapshots can predate roster materialization. Preserve that
+        # registry's stable IDs, but import each new PC's equipment once before
+        # broadcasting playing/snapshots. Legacy opening remains untouched.
+        from .registries import register_investigator_inventory
+
+        room.engine.context.world_store.update(
+            lambda state: register_investigator_inventory(state, state.get("investigators") or {})
+        )
     except Exception as exc:  # noqa: BLE001 - 开局失败要回执而不是静默
         logger.warning("结构化房间开局物化调查员名册失败：%s", exc)
         await ws.send_json(

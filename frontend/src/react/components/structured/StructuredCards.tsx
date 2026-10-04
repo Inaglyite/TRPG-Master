@@ -8,7 +8,7 @@
  * - RollDock：普通掷骰入口的结果提示与待处理请求列表容器。
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../../state/app-store";
 import { useOnlineStore } from "../../../state/online-store";
 
@@ -21,6 +21,9 @@ import {
   resendStructuredRequest,
   resubmitWithFreshRevision,
   sendFreeRoll,
+  sendCancelAction,
+  structuredCancelReason,
+  structuredReplayReason,
 } from "../../../structured-transport";
 import { currentStructuredIdentity } from "../../../structured-transport";
 import {
@@ -35,9 +38,10 @@ import {
 } from "../../../state/structured-store";
 
 import { AssistedDraftCard, KeeperControlNotice } from "./AssistedAgentCards";
+import { CompactGameDialog } from "../CompactGameDialog";
 
 const STATUS_LABELS: Record<string, string> = {
-  queued: "已提交，等待服务端确认",
+  queued: "已发出，等待收件确认",
   processing: "守秘人处理中",
   awaiting_player: "等你回应",
   completed: "已处理完成",
@@ -68,7 +72,39 @@ export function ActionStatusCard({
   suppressAwaiting?: boolean;
 }) {
   const [retrying, setRetrying] = useState(false);
-  const status = STATUS_LABELS[request.status] ?? request.status;
+  const [sendError, setSendError] = useState("");
+  const connection = useAppStore((state) => state.connection);
+  const mode = useAppStore((state) => state.mode);
+  const worldId = useStructuredStore((state) => state.identity.worldId);
+  useStructuredStore((state) => state.identity.investigatorId);
+  useStructuredStore((state) => state.identity.revision);
+  useStructuredStore((state) => state.requests);
+  const userId = useOnlineStore((state) => state.user?.id);
+  useOnlineStore((state) => state.members);
+  useEffect(
+    () => setSendError(""),
+    [mode, worldId, userId, request.requestId, request.updatedAt],
+  );
+  const payload = request.payload as Record<string, unknown> | null;
+  const cancelCandidate =
+    (payload?.type || request.requestType) === "action_request" &&
+    request.status === "queued" &&
+    request.serverReceived;
+  const cancelReason = cancelCandidate
+    ? structuredCancelReason(request.requestId)
+    : null;
+  const replayReason = structuredReplayReason(request.requestId);
+  const freshReason = structuredReplayReason(request.requestId, true);
+  const status =
+    request.status === "queued"
+      ? request.errorCode === "not_sent"
+        ? "未能发出"
+        : request.errorCode
+          ? "需修正后重试"
+          : request.serverReceived
+            ? "已收件，待守秘人处理"
+            : STATUS_LABELS.queued
+      : (STATUS_LABELS[request.status] ?? request.status);
   const outcome = request.outcome
     ? (OUTCOME_LABELS[request.outcome] ?? request.outcome)
     : null;
@@ -86,6 +122,7 @@ export function ActionStatusCard({
     <article
       className="structured-card action-status-card"
       data-status={request.status}
+      data-request-id={request.requestId}
       aria-live="polite"
     >
       <header className="structured-card-head">
@@ -96,6 +133,13 @@ export function ActionStatusCard({
           {status}
         </span>
       </header>
+      {request.status === "queued" &&
+        request.serverReceived &&
+        !request.errorCode && (
+          <p className="structured-card-note" data-tone="info">
+            请求已进入守秘人待办。还未执行行动，不需要重复提交。
+          </p>
+        )}
       {awaiting && (
         <div className="structured-awaiting" data-testid="structured-awaiting">
           <p className="structured-card-note" data-tone="info">
@@ -118,8 +162,9 @@ export function ActionStatusCard({
       )}
       {request.awaitingAck && (
         <p className="structured-card-note" data-tone="warn">
-          还没有收到服务端确认，正在查询原请求状态；重试会沿用同一 request_id，
-          不会重复结算。
+          {connection === "connected"
+            ? "还没有收到服务端确认，正在查询原请求状态；重试会沿用同一请求 ID，不会重复结算。"
+            : "连接已断开，暂时无法确认原请求状态。重连后再核对，不要另发重复行动。"}
         </p>
       )}
       {request.errorMessage && (
@@ -131,17 +176,54 @@ export function ActionStatusCard({
       {request.detail && (
         <p className="structured-card-detail">{request.detail}</p>
       )}
+      {request.status === "paused" && (
+        <p className="structured-card-hint">
+          处理已暂停，已经结算的操作不会自动撤销。请联系主持查看原因并恢复处理；重发同一请求不会让主持自动继续。
+        </p>
+      )}
+      {sendError && (
+        <p className="structured-card-error" role="alert">
+          {sendError}
+        </p>
+      )}
+      {cancelCandidate && (
+        <div className="structured-card-actions">
+          <button
+            type="button"
+            className="btn-ghost structured-btn"
+            data-testid="structured-cancel-action"
+            disabled={cancelReason !== null}
+            title={
+              cancelReason ||
+              "申请取消自己尚未被主持接手的行动，以服务端回执为准"
+            }
+            onClick={() => {
+              const result = sendCancelAction(request.requestId);
+              if (!result.ok) setSendError(result.reason);
+            }}
+          >
+            申请取消
+          </button>
+          <p className="structured-card-hint">
+            取消是否成功以服务端回执为准；主持已接手的行动需由主持收尾。
+          </p>
+        </div>
+      )}
       {(request.awaitingAck || request.errorCode) && (
         <div className="structured-card-actions">
           <button
             type="button"
             className="btn-ghost structured-btn"
-            disabled={retrying}
-            title="按原请求 ID 重新发送，服务端按幂等键返回已保存的结果"
+            disabled={retrying || replayReason !== null}
+            title={
+              replayReason ||
+              "按原请求 ID 重新发送，服务端按幂等键返回已保存的结果"
+            }
             onClick={() => {
               setRetrying(true);
               try {
-                resendStructuredRequest(request.requestId);
+                const result = resendStructuredRequest(request.requestId);
+                if (!result.ok) setSendError(result.reason);
               } finally {
                 setRetrying(false);
               }
@@ -154,10 +236,13 @@ export function ActionStatusCard({
               type="button"
               className="btn-primary structured-btn"
               data-testid="structured-resubmit"
+              disabled={freshReason !== null}
               title="世界已经前进：用最新版本号与新请求 ID 重新提交同一意图"
               onClick={() => {
                 const result = resubmitWithFreshRevision(request.requestId);
-                if (result === null) resendStructuredRequest(request.requestId);
+                if (result === null)
+                  setSendError("尚未收到更新后的世界状态，请等待同步后再试。");
+                else if (!result.ok) setSendError(result.reason);
               }}
             >
               用最新版本重新提交
@@ -175,6 +260,9 @@ export function ActionStatusCard({
             </button>
           )}
         </div>
+      )}
+      {(request.awaitingAck || request.errorCode) && replayReason && (
+        <p className="structured-card-hint">{replayReason}</p>
       )}
     </article>
   );
@@ -470,61 +558,13 @@ export function RollDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div id="roll-panel-overlay" className="structured-overlay-inline">
-      <div
-        id="roll-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="roll-panel-title"
-      >
-        <header className="panel-action-header">
-          <h3 id="roll-panel-title">普通掷骰</h3>
-          <button
-            type="button"
-            className="btn-ghost panel-action-close"
-            aria-label="关闭掷骰面板"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </header>
-        <div className="panel-action-body">
-          <label className="panel-action-field">
-            <span>骰子表达式</span>
-            <input
-              type="text"
-              value={spec}
-              maxLength={20}
-              list="roll-presets"
-              onChange={(event) => {
-                setSpec(event.target.value);
-                setError(null);
-              }}
-            />
-            <datalist id="roll-presets">
-              {["1d100", "1d20", "1d10", "1d8", "1d6", "2d6", "3d6"].map(
-                (preset) => (
-                  <option key={preset} value={preset} />
-                ),
-              )}
-            </datalist>
-            <span className="panel-action-note">
-              普通掷骰只出结果：不自动发线索、不扣 SAN、不触发检定成功分支，
-              也不能用来绕过重复检定限制。
-            </span>
-          </label>
-          {!identity?.investigatorId && (
-            <p className="panel-action-error" role="alert">
-              尚未确定行动调查员，暂时无法掷骰。
-            </p>
-          )}
-          {error && (
-            <p className="panel-action-error" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-        <footer className="panel-action-footer">
+    <CompactGameDialog
+      id="roll-panel"
+      title="普通掷骰"
+      closeLabel="关闭掷骰面板"
+      onClose={onClose}
+      footer={
+        <>
           <button
             type="button"
             className="btn-ghost panel-action-cancel"
@@ -543,9 +583,44 @@ export function RollDialog({ onClose }: { onClose: () => void }) {
           >
             掷骰
           </button>
-        </footer>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <label className="panel-action-field">
+        <span>骰子表达式</span>
+        <input
+          type="text"
+          value={spec}
+          maxLength={20}
+          list="roll-presets"
+          onChange={(event) => {
+            setSpec(event.target.value);
+            setError(null);
+          }}
+        />
+        <datalist id="roll-presets">
+          {["1d100", "1d20", "1d10", "1d8", "1d6", "2d6", "3d6"].map(
+            (preset) => (
+              <option key={preset} value={preset} />
+            ),
+          )}
+        </datalist>
+        <span className="panel-action-note">
+          普通掷骰只出结果：不自动发线索、不扣 SAN、不触发检定成功分支，
+          也不能用来绕过重复检定限制。
+        </span>
+      </label>
+      {!identity?.investigatorId && (
+        <p className="panel-action-error" role="alert">
+          尚未确定行动调查员，暂时无法掷骰。
+        </p>
+      )}
+      {error && (
+        <p className="panel-action-error" role="alert">
+          {error}
+        </p>
+      )}
+    </CompactGameDialog>
   );
 }
 

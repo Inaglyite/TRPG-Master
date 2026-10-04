@@ -1,6 +1,6 @@
 @media (max-width: 760px) {
   #header {
-    height: 72px;
+    height: 84px;
     padding: 0 8px 0 12px;
   }
   #header h1 {
@@ -32,8 +32,8 @@
   }
 
   #main {
-    margin-top: 72px;
-    height: calc(100vh - 72px);
+    margin-top: 84px;
+    height: calc(100vh - 84px);
   }
   #messages {
     padding: 18px 14px;
@@ -88,7 +88,7 @@
   }
 
   #char-panel {
-    top: 72px;
+    top: 84px;
   }
 
   #handout-container {
@@ -359,27 +359,41 @@
   }
 }
 
-@media (max-width: 520px) {
-  /* 窄屏放不下一行“标题 + 位置 + 工具栏”：顶栏改成两行，
-     位置行（以及云端的“离开冒险”）独占第一行，工具栏整行铺开在第二行。
-     这样位置行不会挤压按钮，长地名也只会自己省略。 */
+@media (max-width: 760px) {
+  /* 保留标题与连接状态：紧凑的标题／位置／出口占第一行，工具占第二行。
+     长标题和长地名各自省略，不隐藏连接状态，也不增加固定顶栏高度。 */
   #header {
     flex-wrap: wrap;
     align-content: center;
     row-gap: 2px;
   }
   #header h1 {
+    display: flex;
+    flex: 0 1 auto;
+    max-width: 30%;
+    font-size: 13px;
+    line-height: 22px;
+    letter-spacing: 0.03em;
+  }
+  #header .header-candle {
     display: none;
+  }
+  #header #conn-status {
+    width: 7px;
+    height: 7px;
+    margin-left: 6px;
   }
   .header-leading {
     flex: 1 1 100%;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    min-height: 28px;
   }
-  /* 标题连同烛火一起隐藏，位置行改由自己占位：去掉标题缩进、缩小字号。 */
+  /* 位置行受剩余宽度约束；完整地点仍可从 title / accessible name 读取。 */
   .header-scene {
     flex: 1 1 auto;
+    min-width: 0;
     padding-left: 0;
     max-width: none;
     font-size: 11px;
@@ -389,6 +403,7 @@
     flex: 0 0 auto;
     margin-left: 0;
     font-size: 11px;
+    align-self: center;
   }
   /* 工具栏独占整行后，云端也不再需要“让到右侧”的单行约定，统一居中。 */
   #toolbar,
@@ -405,6 +420,9 @@
     min-width: 0;
     max-width: 68px;
   }
+}
+
+@media (max-width: 520px) {
   #utility-overlay {
     padding: 10px;
   }
@@ -484,7 +502,7 @@
 }
 
 /* ---- 中屏（1080px）：收窄留白，避免聊天区被挤压 ---- */
-@media (max-width: 1080px) {
+@media (min-width: 761px) and (max-width: 1080px) {
   #messages {
     padding: 24px 22px;
   }

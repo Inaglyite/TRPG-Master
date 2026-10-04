@@ -4,7 +4,7 @@ import { assignActor } from "../../../online";
 import { useOnlineStore } from "../../../state/online-store";
 
 const CONNECTION_LABELS: Record<string, string> = {
-  connecting: "连接中…",
+  connecting: "连接／同步中…",
   connected: "已连接",
   disconnected: "已断开，重连中…",
 };
@@ -43,6 +43,7 @@ export function OnlineRoomDock() {
   // 云端单人房间没有多人管理需求（邀请/移交/跳过行动者均被服务端拒绝），
   // 整个 dock 都不显示，单人界面不出现任何“房间”概念。
   const isSoloRoom = roomMetadata?.play_mode === "solo";
+  const structuredRoom = roomMetadata?.execution_profile === "structured_v1";
   const visible =
     view === "room" && roomStatus === "playing" && !roomOpen && !isSoloRoom;
 
@@ -56,7 +57,10 @@ export function OnlineRoomDock() {
   const me = members.find((member) => member.user_id === user?.id);
   const isOwner = me?.role === "owner";
   const actor = members.find((member) => member.user_id === currentActorUserId);
-  const myTurn = currentActorUserId != null && currentActorUserId === user?.id;
+  const myTurn =
+    !structuredRoom &&
+    currentActorUserId != null &&
+    currentActorUserId === user?.id;
   const players = members.filter((member) => member.role !== "viewer");
   const nextOnlineActor = players.find(
     (member) =>
@@ -67,11 +71,19 @@ export function OnlineRoomDock() {
     roomMetadata?.name ||
     modules.find((module) => module.id === roomModule)?.title ||
     "房间";
-  const turnText = myTurn
-    ? "轮到你行动"
-    : actor
-      ? `等待 ${actor.username} 行动…`
-      : "等待分配行动者…";
+  const turnText = structuredRoom
+    ? me?.can_keeper && (!me.investigator || me.role === "viewer")
+      ? "主持工作台处理行动"
+      : me?.role === "viewer"
+        ? "旁观中 · 只读"
+        : me?.investigator
+          ? "行动交由守秘人处理"
+          : "尚未认领调查员"
+    : myTurn
+      ? "轮到你行动"
+      : actor
+        ? `等待 ${actor.username} 行动…`
+        : "等待分配行动者…";
 
   function skipActor() {
     if (players.length < 2) return;
@@ -168,7 +180,8 @@ export function OnlineRoomDock() {
           <ul className="member-list online-room-dock-members">
             {members.map((member) => {
               const online = onlineUserIds.includes(member.user_id);
-              const isActor = currentActorUserId === member.user_id;
+              const isActor =
+                !structuredRoom && currentActorUserId === member.user_id;
               return (
                 <li key={member.user_id} className="member-row">
                   <span className="member-name">
@@ -181,6 +194,9 @@ export function OnlineRoomDock() {
                     <span className="online-badge">
                       {ROLE_LABELS[member.role] ?? member.role}
                     </span>
+                    {structuredRoom && member.can_keeper && (
+                      <span className="online-badge">主持</span>
+                    )}
                     {isActor && (
                       <span className="online-badge online-badge--ready">
                         行动中
@@ -202,7 +218,7 @@ export function OnlineRoomDock() {
           </ul>
 
           <div className="online-room-dock-actions">
-            {isOwner && players.length > 1 && (
+            {isOwner && !structuredRoom && players.length > 1 && (
               <button
                 type="button"
                 className="btn-ghost"

@@ -9,7 +9,7 @@
  */
 
 import { showHandout, updateCharPanel } from "./panels";
-import { onDice, onNarrativeChunk, onNarrativeSegment } from "./renderer";
+import { onDice } from "./renderer";
 import type { DiceRollData } from "./renderer";
 import type { Speaker } from "./state/message-store";
 import {
@@ -21,40 +21,14 @@ import { useOnlineStore } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
 import { useStructuredStore } from "./state/structured-store";
 import { useStartStore } from "./state/start-store";
+import { loadStructuredAsset } from "./api/structuredAssets";
+import { useMessageStore } from "./state/message-store";
+import { restoreNarrativeHistory } from "./structured-history";
+import { projectNarrativeMessage } from "./structured-narrative";
 import {
   SPEAKER_KINDS,
   type StructuredEventEnvelope,
 } from "./protocol/structured";
-
-/**
- * 已渲染正文的消息标记（按 world + message_id）。
- * 同一世界内不重复渲染；世界切换后旧键不再命中，新世界的同 ID 消息正常工作。
- */
-const renderedMessageBodies = new Set<string>();
-
-function messageKey(
-  envelope: StructuredEventEnvelope,
-  payload: Record<string, unknown>,
-): string {
-  const messageId = text(payload.message_id) || text(payload.id);
-  if (messageId) return `${envelope.world_id}:${messageId}`;
-  return `${envelope.world_id}:seq-${envelope.sequence ?? envelope.event_id}`;
-}
-
-function messageBodySeen(
-  envelope: StructuredEventEnvelope,
-  payload: Record<string, unknown>,
-): boolean {
-  return renderedMessageBodies.has(messageKey(envelope, payload));
-}
-
-function markMessageBody(
-  envelope: StructuredEventEnvelope,
-  payload: Record<string, unknown>,
-): void {
-  if (renderedMessageBodies.size > 512) renderedMessageBodies.clear();
-  renderedMessageBodies.add(messageKey(envelope, payload));
-}
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -76,7 +50,14 @@ function readSpeaker(value: unknown): Speaker | undefined {
   if (!(SPEAKER_KINDS as readonly string[]).includes(kind)) return undefined;
   const fallbackName =
     kind === "keeper" ? "守秘人" : kind === "system" ? "系统" : "";
-  const name = text(record.name) || fallbackName;
+  const name =
+    text(record.name) ||
+    useStructuredStore
+      .getState()
+      .targets.find((target) => target.id === record.id && target.kind === kind)
+      ?.name ||
+    fallbackName ||
+    (kind === "npc" ? "人物" : kind === "investigator" ? "调查员" : "");
   if (!name) return undefined;
   const avatar =
     record.avatar && typeof record.avatar === "object"
@@ -162,7 +143,7 @@ function enterStructuredSession(): void {
   if (inLobby) return;
 
   const start = useStartStore.getState();
-  if (!start.gameStarted) {
+  if (!start.gameStarted || start.gameStarting) {
     useStartStore.setState({ gameStarted: true, gameStarting: false });
   }
   if (!app.inputEnabled) {
@@ -171,6 +152,12 @@ function enterStructuredSession(): void {
 }
 
 function applyStateChanged(payload: Record<string, unknown>): void {
+  const targetId = text(payload.investigator_id);
+  if (
+    targetId &&
+    targetId !== useStructuredStore.getState().identity.investigatorId
+  )
+    return; // Public party updates must not overwrite this player's own card.
   const character = useAppStore.getState().character;
   if (!character) return;
   const next = { ...character };
@@ -204,36 +191,24 @@ export function applyStructuredEffects(
       // gm_turn_start/done：human 主持是异步待办，没有严格的行action顺序。
       enterStructuredSession();
       projectScene(envelope, payload);
+      if ("message_history" in payload) {
+        restoreNarrativeHistory(envelope.world_id, payload.message_history);
+      }
+      if ("character" in payload) {
+        if (payload.character && typeof payload.character === "object")
+          updateCharPanel(JSON.stringify(payload.character));
+        else useAppStore.setState({ character: null });
+      }
       break;
     }
     case "scene_changed": {
       projectScene(envelope, payload);
       break;
     }
-    case "message_started": {
-      onNarrativeSegment(readSpeaker(payload.speaker));
-      break;
-    }
-    case "message_chunk": {
-      const speaker = readSpeaker(payload.speaker);
-      if (speaker) onNarrativeSegment(speaker);
-      const body = text(payload.text);
-      if (body) {
-        markMessageBody(envelope, payload);
-        onNarrativeChunk(body, speaker?.type === "npc" ? speaker.id : null);
-      }
-      break;
-    }
+    case "message_started":
+    case "message_chunk":
     case "message_completed": {
-      const speaker = readSpeaker(payload.speaker);
-      if (speaker) onNarrativeSegment(speaker);
-      // 短发言可能只有定稿没有分片：这时必须补渲染正文，否则消息会凭空消失。
-      // 已经流式渲染过的消息不再重复追加（按 world + message_id 记忆）。
-      const body = text(payload.text);
-      if (body && !messageBodySeen(envelope, payload)) {
-        onNarrativeChunk(body, speaker?.type === "npc" ? speaker.id : null);
-      }
-      markMessageBody(envelope, payload);
+      projectNarrativeMessage(envelope, readSpeaker(payload.speaker));
       break;
     }
     case "roll_resolved": {
@@ -263,15 +238,42 @@ export function applyStructuredEffects(
       const assetId = text(payload.asset_id);
       const caption = text(payload.caption);
       if (!assetId) break;
-      showHandout({
-        // 素材 ID 走 file 字段（既有展示链按 file/label/asset_* 渲染）。
-        file: text(payload.file) || assetId,
-        label: caption || text(payload.label),
-        asset_data_uri: text(payload.asset_data_uri),
-        asset_url: text(payload.asset_url),
-        entity_type: text(payload.entity_type),
-        entity_id: text(payload.entity_id),
-      });
+      const worldId = envelope.world_id;
+      const generation = useStructuredStore.getState().historyGeneration;
+      const stillAuthorizedView = () => {
+        const state = useStructuredStore.getState();
+        return (
+          state.identity.worldId === worldId &&
+          state.historyGeneration === generation
+        );
+      };
+      void loadStructuredAsset(
+        worldId,
+        assetId,
+        useAppStore.getState().mode === "local",
+      )
+        .then((asset) => {
+          if (!stillAuthorizedView()) return;
+          showHandout({
+            file: assetId,
+            label: caption || asset.label,
+            asset_data_uri: asset.asset_data_uri,
+            asset_url: "",
+            entity_type: "asset",
+            entity_id: assetId,
+          });
+        })
+        .catch(() => {
+          if (!stillAuthorizedView()) return;
+          useMessageStore.getState().updateMessages((messages) => [
+            ...messages,
+            {
+              id: `handout-error-${worldId}-${envelope.event_id}`,
+              kind: "system",
+              text: "已收到图片展示通知，但图片读取失败。请检查连接，或请主持重新展示。",
+            },
+          ]);
+        });
       break;
     }
     case "state_changed": {

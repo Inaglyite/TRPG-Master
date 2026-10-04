@@ -18,6 +18,9 @@ import {
   saveSettings,
   testConnection,
   updateServiceDraft,
+  resetSettings,
+  requestTurnDiagnostics,
+  onTurnDiagnostics,
 } from "./settings";
 import {
   draftFromView,
@@ -71,6 +74,43 @@ const view: ModelSettingsView = {
 };
 
 describe("settings commands", () => {
+  it("上下文读取无回执时有界恢复刷新，并保留已有诊断", () => {
+    vi.useFakeTimers();
+    try {
+      const diagnostics = { performance: { turn_total_ms: 123 } };
+      useModelStore.setState({ diagnostics });
+      requestTurnDiagnostics();
+      expect(useModelStore.getState().diagnosticsLoading).toBe(true);
+      vi.advanceTimersByTime(8001);
+      expect(useModelStore.getState().diagnosticsLoading).toBe(false);
+      expect(useModelStore.getState().diagnostics).toEqual(diagnostics);
+      expect(useModelStore.getState().diagnosticsError).toContain("超时");
+      onTurnDiagnostics({ performance: { turn_total_ms: 321 } });
+      expect(useModelStore.getState().diagnosticsError).toBeNull();
+    } finally {
+      resetSettings();
+      vi.useRealTimers();
+    }
+  });
+  it("离开账号取消读配置定时器并丢弃 Key 草稿；下一次读取仍可正常超时", () => {
+    vi.useFakeTimers();
+    try {
+      fetchSettings();
+      updateServiceDraft("narrative", { api_key: "test-only-draft" });
+      resetSettings();
+      vi.advanceTimersByTime(8000);
+      expect(useModelStore.getState().loadError).toBeNull();
+      expect(useModelStore.getState().drafts.narrative.service.api_key).toBe(
+        "",
+      );
+      fetchSettings();
+      vi.advanceTimersByTime(8000);
+      expect(useModelStore.getState().loadError).toContain("读取配置超时");
+    } finally {
+      resetSettings();
+      vi.useRealTimers();
+    }
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     useModelStore.setState({

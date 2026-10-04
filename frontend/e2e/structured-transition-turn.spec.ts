@@ -231,7 +231,7 @@ async function fillKeeperField(
   value: string,
 ): Promise<void> {
   const locator = page.locator(
-    `[data-field="${field}"] select, [data-field="${field}"] input, [data-field="${field}"] textarea`,
+    `[data-field="${field}"] select, [data-field="${field}"] input:not([type="checkbox"]), [data-field="${field}"] textarea`,
   );
   const tag = await locator.evaluate((node) => node.tagName);
   if (tag === "SELECT") await locator.selectOption(value);
@@ -252,7 +252,7 @@ function waitingCard(page: Page) {
 
 async function openConsole(page: Page): Promise<void> {
   await page.getByTestId("btn-keeper-console").click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
 }
 
 async function runKeeperCommand(
@@ -268,6 +268,78 @@ async function runKeeperCommand(
   await expect(page.locator('[data-testid="keeper-submit"]')).toBeEnabled({
     timeout: 30_000,
   });
+}
+
+async function checkHostLayout(page: Page, kind: "control" | "conditions") {
+  for (const width of [1280, 939, 640]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator(".boot-loader")).toHaveCount(0);
+    const button =
+      kind === "control"
+        ? page.getByRole("button", { name: "接管主持", exact: true })
+        : page.getByTestId("keeper-submit");
+    await button.scrollIntoViewIfNeeded();
+    const geometry = await button.evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        height: bounds.height,
+        padding: parseFloat(style.paddingLeft),
+        nowrap: style.whiteSpace,
+        textFits: node.scrollWidth <= node.clientWidth + 1,
+        hit: node.contains(
+          document.elementFromPoint(
+            bounds.x + bounds.width / 2,
+            bounds.y + bounds.height / 2,
+          ),
+        ),
+      };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.padding).toBeGreaterThanOrEqual(10);
+    expect(geometry.nowrap).toBe("nowrap");
+    expect(geometry.textFits).toBe(true);
+    expect(geometry.hit).toBe(true);
+    if (kind === "control") {
+      const header = await page.locator("#header").evaluate((node) => {
+        const bounds = node.getBoundingClientRect();
+        const scene = node
+          .querySelector(".header-scene-label")!
+          .getBoundingClientRect();
+        const move = node
+          .querySelector(".header-scene-move")!
+          .getBoundingClientRect();
+        return {
+          sceneWidth: scene.width,
+          sceneInside: scene.top >= bounds.top && scene.bottom <= bounds.bottom,
+          moveInside:
+            move.top >= bounds.top &&
+            move.bottom <= bounds.bottom + 1 &&
+            move.left >= bounds.left &&
+            move.right <= bounds.right,
+        };
+      });
+      expect(header.sceneWidth).toBeGreaterThan(80);
+      expect(header.sceneInside).toBe(true);
+      expect(header.moveInside).toBe(true);
+    }
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    if (kind === "conditions") {
+      const field = page.locator("#keeper-field-disclosed");
+      await field.scrollIntoViewIfNeeded();
+      expect(
+        await field.evaluate((node) => node.getBoundingClientRect().height),
+      ).toBeGreaterThanOrEqual(100);
+    }
+    await page.screenshot({ path: `/tmp/trpg-host-${kind}-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 }
 
 test("过渡回合：意愿→叙事等待→追问→决定→执行（人类主持，零模型）", async ({
@@ -307,6 +379,20 @@ test("过渡回合：意愿→叙事等待→追问→决定→执行（人类�
   expect(destinations.length).toBeGreaterThan(0);
   const destination = destinations[0];
 
+  // 真实控制权命令与快照恢复，不让 UI 自行声称已接管。
+  await checkHostLayout(page, "control");
+  await page.getByRole("button", { name: "接管主持", exact: true }).click();
+  await expect(page.getByText("你正在主持", { exact: true })).toBeVisible();
+  await expect(page.getByText("服务端已确认主持操作。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "交还 AI 主持" })).toHaveCount(
+    0,
+  );
+  await page.reload();
+  await expect(page.getByText("你正在主持", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "接管主持", exact: true }),
+  ).toHaveCount(0);
+
   // 2) 玩家表达意愿：只是说话，不是出发。
   const wish = "说实话，我想先看看莱特教授的尸体。";
   await page.locator("#user-input").fill(wish);
@@ -339,15 +425,50 @@ test("过渡回合：意愿→叙事等待→追问→决定→执行（人类�
     speaker_kind: "keeper",
     text: "法伦放下雪茄：“停尸房得先跟值班医生打招呼，否则他们不会放人进去。”",
   });
-  await runKeeperCommand(page, "resolve_intent", {
+  await page.getByTestId("keeper-cmd-resolve_intent").click();
+  const waitingFields = {
     request_id: wishRequest.request_id,
     resolution: "awaiting_player",
     pending_action_kind: "move",
     pending_action_note: "尚未出发前往停尸房",
     pending_action_destination: destination.id,
-    disclosed: "停尸房需要值班医生放行",
+    disclosed: "停尸房需要值班医生放行\n\n须先确认医生的值班时间",
     note: "等玩家决定是否现在联系医生",
-  });
+  };
+  for (const [field, value] of Object.entries(waitingFields))
+    await fillKeeperField(page, field, value);
+  expect(
+    await page
+      .locator("#keeper-field-disclosed")
+      .evaluate((node) => node.tagName),
+  ).toBe("TEXTAREA");
+  const commandsBeforePreview = frames.sent.filter((frame) =>
+    frame.includes('"type":"command_request"'),
+  ).length;
+  await checkHostLayout(page, "conditions");
+  expect(
+    frames.sent.filter((frame) => frame.includes('"type":"command_request"'))
+      .length,
+  ).toBe(commandsBeforePreview);
+  await page.getByTestId("keeper-submit").click();
+  await expect(page.getByTestId("keeper-submit")).toBeEnabled();
+  const waitingCommand = frames.sent
+    .map((frame) => {
+      try {
+        return JSON.parse(frame);
+      } catch {
+        return null;
+      }
+    })
+    .find(
+      (frame) =>
+        frame?.kind === "resolve_intent" &&
+        frame.payload?.request_id === wishRequest.request_id,
+    );
+  expect(waitingCommand.payload.disclosed).toEqual([
+    "停尸房需要值班医生放行",
+    "须先确认医生的值班时间",
+  ]);
   await page.getByRole("button", { name: "关闭主持台" }).click();
 
   // 4) 玩家侧：看到「等你回应」与尚未执行的待办；位置没有变；输入框可用。
@@ -356,6 +477,7 @@ test("过渡回合：意愿→叙事等待→追问→决定→执行（人类�
   });
   await expect(page.getByText(/尚未执行：尚未出发前往停尸房/)).toBeVisible();
   await expect(page.getByText(/已告知：停尸房需要值班医生放行/)).toBeVisible();
+  await expect(waitingCard(page)).toContainText("须先确认医生的值班时间");
   expect(await page.locator(".header-scene-name").innerText()).toBe(
     sceneAtStart,
   );

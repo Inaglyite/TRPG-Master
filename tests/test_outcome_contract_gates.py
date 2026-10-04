@@ -59,6 +59,7 @@ def test_executed_status_follows_check_result():
 
 
 def test_status_contract_is_announced_to_narrator(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.engine.API_KEY", "configured-test-key")
     monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
     context = RuntimeContext(
         PROJECT_ROOT, tmp_path, "status-contract", "mansion_of_madness"
@@ -222,6 +223,7 @@ def test_consistency_gate_is_fail_open():
 def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path, monkeypatch):
     """A02：流式叙事把 5 分钟演成"几天"时，定稿阶段重写一次，
     消息历史与回合记录采用修正后的文本（前端权威段同理覆盖）。"""
+    monkeypatch.setattr("src.app.engine.API_KEY", "configured-test-key")
     monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
     context = RuntimeContext(
         PROJECT_ROOT, tmp_path, "consistency-turn", "mansion_of_madness"

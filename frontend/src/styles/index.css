@@ -10,6 +10,7 @@
 @import "./components/controls.css";
 @import "./components/char-panel.css";
 @import "./components/investigator-panel.css";
+@import "./components/received-materials.css";
 @import "./components/handout.css";
 @import "./components/start-screen.css";
 @import "./components/overlays.css";
@@ -19,4 +20,5 @@
 @import "./components/save-panel.css";
 @import "./components/online.css";
 @import "./components/structured.css";
+@import "./components/platform-ui.css";
 @import "./components/responsive.css";

@@ -684,6 +684,26 @@ class EventOutbox(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BranchHistoryEntry(Base):
+    """Frozen readable branch history; never an event queue or command ledger."""
+
+    __tablename__ = "branch_history_entries"
+    __table_args__ = (
+        UniqueConstraint("world_id", "ordinal", name="uq_branch_history_ordinal"),
+        UniqueConstraint("world_id", "source_key", name="uq_branch_history_source"),
+    )
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    world_id: Mapped[str] = mapped_column(ForeignKey("worlds.id", ondelete="CASCADE"), index=True)
+    ordinal: Mapped[int] = mapped_column(BigInteger)
+    source_key: Mapped[str] = mapped_column(String(512))
+    message: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE)
+    audience: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE)
+    # Immutable original author identity, not a SET NULL link that could turn
+    # deleted accounts' private declarations into anonymous local records.
+    submitted_by: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class KeeperControl(Base):
     """单一活动主持控制权。接管递增 epoch；迟到旧 epoch 调用无权执行。"""
 

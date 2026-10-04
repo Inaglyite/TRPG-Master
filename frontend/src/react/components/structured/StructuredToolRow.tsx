@@ -10,6 +10,8 @@ import { useState } from "react";
 import { interactionPath } from "../../../protocol/structured";
 import { narrationGuardReason } from "../../../investigator-structured-actions";
 import { useStructuredStore } from "../../../state/structured-store";
+import { useAppStore } from "../../../state/app-store";
+import { useOnlineStore } from "../../../state/online-store";
 import { RollDialog } from "./StructuredCards";
 
 export function StructuredToolRow() {
@@ -18,17 +20,32 @@ export function StructuredToolRow() {
   );
   const capabilities = useStructuredStore((state) => state.capabilities);
   const protocolNotice = useStructuredStore((state) => state.protocolNotice);
+  const investigatorId = useStructuredStore(
+    (state) => state.identity.investigatorId,
+  );
+  const mode = useAppStore((state) => state.mode);
+  const connection = useAppStore((state) => state.connection);
+  const me = useOnlineStore((state) =>
+    state.members.find((member) => member.user_id === state.user?.id),
+  );
   const [rollOpen, setRollOpen] = useState(false);
 
   if (path !== "structured") return null;
 
   const disabledReason = protocolNotice
     ? protocolNotice
-    : !capabilities.structuredProtocol
-      ? "服务端能力不完整，暂不能提交结构化请求。"
-      : !capabilities.freeRoll
-        ? "服务端未开放普通掷骰能力。"
-        : narrationGuardReason();
+    : mode === "online" && me?.role === "viewer"
+      ? "旁观模式只能查看公开叙事，不能掷骰。"
+      : !(
+            investigatorId ||
+            (mode === "online" && me?.investigator?.character_key)
+          )
+        ? "未控制调查员，无法掷骰。"
+        : !capabilities.structuredProtocol
+          ? "服务端能力不完整，暂不能提交结构化请求。"
+          : !capabilities.freeRoll
+            ? "服务端未开放普通掷骰能力。"
+            : narrationGuardReason();
 
   return (
     <div id="structured-tool-row" data-testid="structured-tool-row">
@@ -44,9 +61,13 @@ export function StructuredToolRow() {
       >
         🎲 掷骰
       </button>
-      {!capabilities.freeRoll && disabledReason && (
-        <span className="structured-tool-note">{disabledReason}</span>
-      )}
+      {disabledReason &&
+        (connection !== "connected" ||
+          !capabilities.freeRoll ||
+          !investigatorId ||
+          me?.role === "viewer") && (
+          <span className="structured-tool-note">{disabledReason}</span>
+        )}
       {rollOpen && <RollDialog onClose={() => setRollOpen(false)} />}
     </div>
   );

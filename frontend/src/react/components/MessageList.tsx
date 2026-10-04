@@ -31,6 +31,8 @@ import { AvatarDisc } from "./AvatarDisc";
 import gmAvatarUrl from "../../assets/ui/gm_avatar.webp";
 import gmDiceUrl from "../../assets/ui/gm_dice.webp";
 import gmThinkingUrl from "../../assets/ui/gm_thinking.webp";
+import { NarrativeHistoryControl } from "./structured/NarrativeHistoryControl";
+import { InheritedHistoryControl } from "./structured/InheritedHistoryControl";
 
 /** 守秘人标准形象（本地资产，非模组内容，不泄漏剧情）。 */
 const KEEPER_AVATAR = { asset_url: gmAvatarUrl, alt: "守秘人" } as const;
@@ -260,7 +262,9 @@ function Message({
   const branchVisible = mode !== "online" || timelineCaps.canCreateBranch;
   // 仅流式呈现中的守秘人叙述区域响应长按加速；单击不做任何播放操作。
   const longPress = useNarrationLongPress(
-    message.kind === "gm" && Boolean(message.streaming),
+    message.kind === "gm" &&
+      Boolean(message.streaming) &&
+      !message.id.startsWith("structured:"),
   );
   const playerName =
     message.speaker?.name ||
@@ -289,6 +293,7 @@ function Message({
       id={message.id}
       className={className}
       data-turn-id={message.turnId}
+      data-entry-kind={message.entryKind}
       onPointerDown={longPress.onPointerDown}
       onPointerUp={longPress.endBoost}
       onPointerLeave={longPress.endBoost}
@@ -308,6 +313,9 @@ function Message({
             family="investigator"
           />
         </div>
+      )}
+      {message.entryKind === "action_request" && (
+        <div className="action-declaration-label">行动申报 · 不代表已执行</div>
       )}
       {message.kind === "loading" ? (
         <LoadingMessage label={message.text} />
@@ -384,17 +392,27 @@ export function MessageList() {
     (state) => state.forceScrollRequest,
   );
   const actionReset = useMessageStore((state) => state.actionReset);
+  const historyPrependRequest = useMessageStore(
+    (state) => state.historyPrependRequest,
+  );
   const container = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastForce = useRef(forceScrollRequest);
+  const lastHistoryPrepend = useRef(historyPrependRequest);
 
   useLayoutEffect(() => {
     const element = container.current;
     if (!element) return;
     const forced = forceScrollRequest !== lastForce.current;
     lastForce.current = forceScrollRequest;
-    if (forced || pinned.current) element.scrollTop = element.scrollHeight;
-  }, [messages, scrollRequest, forceScrollRequest]);
+    const olderLoaded = historyPrependRequest !== lastHistoryPrepend.current;
+    lastHistoryPrepend.current = historyPrependRequest;
+    if (olderLoaded && !forced) {
+      element.scrollTop = 0;
+      pinned.current = false;
+    } else if (forced || pinned.current)
+      element.scrollTop = element.scrollHeight;
+  }, [messages, scrollRequest, forceScrollRequest, historyPrependRequest]);
 
   return (
     <div
@@ -406,6 +424,8 @@ export function MessageList() {
           element.scrollHeight - element.scrollTop - element.clientHeight < 8;
       }}
     >
+      <NarrativeHistoryControl />
+      <InheritedHistoryControl />
       {messages.map((message, index) => (
         <Message
           key={message.id}

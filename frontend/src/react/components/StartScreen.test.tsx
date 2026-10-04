@@ -9,11 +9,34 @@ vi.mock("../../start", () => ({
   switchModule: vi.fn(),
   continueGame: vi.fn(),
   startGame: vi.fn(),
+  discardLocalCreationRequest: vi.fn(),
 }));
 vi.mock("../../settings", () => ({ openSettings: vi.fn() }));
 
 describe("StartScreen", () => {
+  it("本地开局可显式选择人类主持，并告知无需 Key 与单人秘密边界", () => {
+    render(<StartScreen />);
+    fireEvent.click(screen.getByRole("button", { name: /开始新游戏/ }));
+    const trigger = screen.getByRole("button", {
+      name: "游玩方式：经典 AI 叙事",
+    });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "游玩方式" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "人类主持" }));
+    expect(within(dialog).getByText(/不调用模型/)).toBeVisible();
+    expect(within(dialog).getByText(/单人人类主持由你兼任/)).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "关闭游玩方式" }),
+    );
+    expect(screen.queryByRole("dialog", { name: "游玩方式" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "游玩方式：人类主持" }),
+    ).toHaveFocus();
+  });
+
   beforeEach(() => {
+    // GameShell only mounts this screen in local mode.
+    useAppStore.setState({ mode: "local" });
     useStartStore.setState({
       gameStarted: false,
       gameStarting: false,
@@ -48,6 +71,8 @@ describe("StartScreen", () => {
       selectedCharacterRef: { source: "module", id: "arthur" },
       hasSaves: false,
       hint: "",
+      executionProfile: "legacy",
+      keeperMode: "human",
     });
   });
 
@@ -68,6 +93,18 @@ describe("StartScreen", () => {
     expect(
       screen.getByRole("button", { name: "以此调查员开始" }),
     ).toBeEnabled();
+  });
+  it("does not spend roster space on empty character categories", () => {
+    useStartStore.setState((state) => ({
+      characterGroups: [
+        { id: "empty-library", title: "没有角色的分类", characters: [] },
+        ...state.characterGroups,
+      ],
+      view: "characters",
+    }));
+    render(<StartScreen />);
+    expect(screen.queryByText("没有角色的分类")).toBeNull();
+    expect(screen.getByRole("button", { name: /阿瑟.*侦探/ })).toBeVisible();
   });
 
   it("角色库入口出现在主菜单和选角页；库中新建角色后自动选中", () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   assignActor,
@@ -30,7 +30,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const CONNECTION_LABELS: Record<string, string> = {
-  connecting: "连接中…",
+  connecting: "连接／同步中…",
   connected: "已连接",
   disconnected: "已断开，重连中…",
 };
@@ -79,6 +79,29 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   const [inviteHours, setInviteHours] = useState("72");
   const [inviteUses, setInviteUses] = useState("5");
   const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const copyGeneration = useRef(0);
+
+  useEffect(() => {
+    copyGeneration.current += 1;
+    setCopied(false);
+    setCopying(false);
+    setCopyError(null);
+    return () => {
+      copyGeneration.current += 1;
+    };
+  }, [activeWorldId, user?.id, invite?.token]);
+
+  useEffect(() => {
+    setConfirmingLeave(false);
+    setConfirmingDelete(false);
+    setConfirmingKick(null);
+    setConfirmingKeeper(null);
+    setConfirmingTransfer(null);
+    setInviteError(null);
+  }, [activeWorldId, user?.id]);
 
   // 开局后旁观者仍可加入，但不能再升级为玩家或房主；避免保留一个
   // 服务端必然返回 room_already_started 的 player 选项。
@@ -125,7 +148,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
     startBlockers.push(`${member.username} 未选择调查员`);
   }
   if (roomConnection !== "connected") {
-    startBlockers.push("房间连接已断开");
+    startBlockers.push(
+      roomConnection === "connecting" ? "房间正在连接／同步" : "房间连接已断开",
+    );
   }
   const canStart = isOwner && startBlockers.length === 0;
   const myInvestigator = me?.investigator ?? null;
@@ -140,13 +165,49 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
     : [];
 
   async function copyInvite() {
-    if (!invite) return;
+    if (!invite || copying) return;
+    const generation = ++copyGeneration.current;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    setCopying(true);
+    setCopied(false);
+    setCopyError(null);
     try {
-      await navigator.clipboard.writeText(invite.token);
-      setCopied(true);
+      await Promise.race([
+        navigator.clipboard.writeText(invite.token),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("clipboard_timeout")),
+            3000,
+          );
+        }),
+      ]);
+      if (generation === copyGeneration.current) setCopied(true);
     } catch {
-      setCopied(false);
+      if (generation === copyGeneration.current)
+        setCopyError("未能确认复制成功，请重试，或选中上方邀请码手动复制。");
+    } finally {
+      clearTimeout(timeout);
+      if (generation === copyGeneration.current) setCopying(false);
     }
+  }
+
+  function generateInvite() {
+    const hours = Number(inviteHours);
+    const uses = Number(inviteUses);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 168) {
+      setInviteError("有效期须为 1 至 168 小时的整数，输入已保留。");
+      return;
+    }
+    if (!Number.isInteger(uses) || uses < 1 || uses > 16) {
+      setInviteError("使用次数须为 1 至 16 的整数，输入已保留。");
+      return;
+    }
+    setInviteError(null);
+    void newInvite({
+      role: inviteRole,
+      expires_in_hours: hours,
+      max_uses: uses,
+    });
   }
 
   return (
@@ -209,6 +270,22 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
         </div>
       </header>
 
+      {structuredRoom && roomMetadata?.keeper_mode === "human" && (
+        <section className="platform-session-note" aria-label="人类主持说明">
+          <strong>人类主持 · 无需模型或 API Key</strong>
+          <p>
+            房主负责房间管理，主持负责叙事与裁定，两个权限相互独立。所有参与者准备后，由房主开始游戏。
+          </p>
+          <p>
+            {me?.can_keeper
+              ? "你已获主持授权，可以不认领调查员；开局后使用主持工作台发布叙事、私发线索和发起检定。"
+              : me?.role === "viewer"
+                ? "你正在旁观，不需要选择调查员，也不会收到主持秘密或他人的私密线索。"
+                : "请选择你的调查员并准备；游戏中的出示、道具使用和移动申请由主持判断，提交申请不会直接改变状态。"}
+          </p>
+        </section>
+      )}
+
       {roomError && (
         <div className="online-notice online-notice--error" role="alert">
           <span>{roomError}</span>
@@ -252,7 +329,8 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                 roomStatus === "playing" && member.role === "viewer";
               const online = onlineUserIds.includes(member.user_id);
               const ready = readyUserIds.includes(member.user_id);
-              const isActor = currentActorUserId === member.user_id;
+              const isActor =
+                !structuredRoom && currentActorUserId === member.user_id;
               return (
                 <li key={member.user_id} className="member-row">
                   <span className="member-name">
@@ -338,7 +416,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                   )}
                   {isOwner && member.user_id !== user?.id && (
                     <span className="member-actions">
-                      {member.role !== "viewer" && (
+                      {!structuredRoom && member.role !== "viewer" && (
                         <button
                           type="button"
                           className="btn-ghost"
@@ -541,9 +619,10 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                 <button
                   type="button"
                   className="btn-primary"
+                  disabled={copying}
                   onClick={() => void copyInvite()}
                 >
-                  {copied ? "已复制" : "复制邀请码"}
+                  {copying ? "复制中…" : copied ? "已复制" : "复制邀请码"}
                 </button>
                 <button
                   type="button"
@@ -553,6 +632,11 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                   撤销
                 </button>
               </div>
+              {copyError && (
+                <p className="online-notice online-notice--error" role="alert">
+                  {copyError}
+                </p>
+              )}
               <p className="room-card-time">
                 {invite.expires_at &&
                   `有效期至 ${new Date(invite.expires_at).toLocaleString()}`}
@@ -563,49 +647,59 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
           ) : (
             <div className="invite-create">
               <div className="online-inline-form">
-                <select
-                  value={inviteRole}
-                  onChange={(event) =>
-                    setInviteRole(event.target.value as "player" | "viewer")
-                  }
-                  aria-label="邀请角色"
-                  disabled={inviteBusy}
-                >
-                  {roomStatus !== "playing" && (
-                    <option value="player">玩家</option>
-                  )}
-                  <option value="viewer">旁观者</option>
-                </select>
-                <input
-                  value={inviteHours}
-                  onChange={(event) => setInviteHours(event.target.value)}
-                  aria-label="有效期（小时）"
-                  inputMode="numeric"
-                  disabled={inviteBusy}
-                />
-                <input
-                  value={inviteUses}
-                  onChange={(event) => setInviteUses(event.target.value)}
-                  aria-label="使用次数"
-                  inputMode="numeric"
-                  disabled={inviteBusy}
-                />
+                <label className="room-invite-field">
+                  <span>邀请角色</span>
+                  <select
+                    value={inviteRole}
+                    onChange={(event) =>
+                      setInviteRole(event.target.value as "player" | "viewer")
+                    }
+                    aria-label="邀请角色"
+                    disabled={inviteBusy}
+                  >
+                    {roomStatus !== "playing" && (
+                      <option value="player">玩家</option>
+                    )}
+                    <option value="viewer">旁观者</option>
+                  </select>
+                </label>
+                <label className="room-invite-field">
+                  <span>有效期（小时）</span>
+                  <input
+                    value={inviteHours}
+                    onChange={(event) => setInviteHours(event.target.value)}
+                    aria-label="有效期（小时）"
+                    inputMode="numeric"
+                    disabled={inviteBusy}
+                  />
+                </label>
+                <label className="room-invite-field">
+                  <span>使用次数</span>
+                  <input
+                    value={inviteUses}
+                    onChange={(event) => setInviteUses(event.target.value)}
+                    aria-label="使用次数"
+                    inputMode="numeric"
+                    disabled={inviteBusy}
+                  />
+                </label>
                 <button
                   type="button"
                   className="btn-ghost"
                   disabled={inviteBusy}
-                  onClick={() =>
-                    void newInvite({
-                      role: inviteRole,
-                      expires_in_hours: Number(inviteHours) || 72,
-                      max_uses: Number(inviteUses) || 5,
-                    })
-                  }
+                  onClick={generateInvite}
                 >
                   {inviteBusy ? "生成中……" : "生成邀请码"}
                 </button>
               </div>
-              <p className="online-hint">角色 / 有效期（小时）/ 使用次数</p>
+              <p className="online-hint">
+                有效期 1–168 小时，使用次数 1–16 次；仅生成所选角色的邀请。
+              </p>
+              {inviteError && (
+                <p className="online-notice online-notice--error" role="alert">
+                  {inviteError}
+                </p>
+              )}
             </div>
           )}
           {invites.length > 0 && (
@@ -678,7 +772,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
             ) : (
               <button
                 type="button"
-                className="btn-ghost"
+                className="btn-ghost room-delete-entry"
                 onClick={() => setConfirmingDelete(true)}
               >
                 删除房间
@@ -746,6 +840,12 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
           <button
             type="button"
             className="btn-primary"
+            disabled={roomConnection !== "connected"}
+            title={
+              roomConnection !== "connected"
+                ? "连接／同步完成后才能准备；尚未发送准备操作"
+                : undefined
+            }
             onClick={() => void toggleReady(!myReady)}
           >
             {myReady ? "取消准备" : "准备"}

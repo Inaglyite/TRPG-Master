@@ -1,5 +1,6 @@
 import {
   fireEvent,
+  act,
   render,
   screen,
   waitFor,
@@ -103,6 +104,56 @@ beforeEach(() => {
 });
 
 describe("SoloTimelinePanel 渲染", () => {
+  it("深层分支缩进有界且仍保留真实层级说明", async () => {
+    vi.mocked(fetchSoloTimelines).mockResolvedValue({
+      ...timelinesPayload,
+      worlds: [{ ...timelinesPayload.worlds[1], depth: 50 }],
+    });
+    renderPanel();
+    await screen.findByText("另一条路");
+    expect(rowOf("w-branch").style.marginLeft).toBe("48px");
+    expect(
+      within(rowOf("w-branch")).getByText(/第 50 层分支/),
+    ).toBeInTheDocument();
+  });
+  it("Tab 围在面板内；关闭后恢复入口焦点", async () => {
+    const trigger = document.createElement("button");
+    document.body.append(trigger);
+    trigger.focus();
+    const view = render(
+      <SoloTimelinePanel world={world} title="雾中宅邸" onClose={vi.fn()} />,
+    );
+    await screen.findByText("初入宅邸");
+    const close = screen.getByRole("button", { name: "关闭时间线面板" });
+    const last = within(rowOf("w-branch")).getByRole("button", {
+      name: "删除",
+    });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+    view.unmount();
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
+
+  it("父组件更新关闭回调不抢走编辑输入的焦点", async () => {
+    const view = render(
+      <SoloTimelinePanel world={world} title="雾中宅邸" onClose={vi.fn()} />,
+    );
+    await screen.findByText("初入宅邸");
+    fireEvent.click(
+      within(rowOf("w-branch")).getByRole("button", { name: "重命名" }),
+    );
+    const input = screen.getByLabelText("时间线名称");
+    expect(input).toHaveFocus();
+    view.rerender(
+      <SoloTimelinePanel world={world} title="雾中宅邸" onClose={vi.fn()} />,
+    );
+    expect(input).toHaveFocus();
+  });
+
   it("加载后分“主时间线/分支时间线”两段，并标出当前 badge", async () => {
     renderPanel();
     expect(screen.getByRole("status")).toHaveTextContent("正在读取时间线");
@@ -186,6 +237,33 @@ describe("SoloTimelinePanel 继续游戏", () => {
 });
 
 describe("SoloTimelinePanel 重命名", () => {
+  it("中文输入法确认候选的 Enter / Escape 不提交或取消重命名", async () => {
+    renderPanel();
+    fireEvent.click(
+      within(await readyRow("w-branch")).getByRole("button", {
+        name: "重命名",
+      }),
+    );
+    const input = screen.getByLabelText("时间线名称");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(renameSoloTimeline).not.toHaveBeenCalled();
+    expect(input).toHaveFocus();
+    expect(screen.getByLabelText("时间线名称")).toBeInTheDocument();
+  });
+  it("输入中 Escape 只取消编辑，不关闭面板，不请求接口，焦点回到本行重命名", async () => {
+    const onClose = renderPanel();
+    const row = within(await readyRow("w-branch"));
+    fireEvent.click(row.getByRole("button", { name: "重命名" }));
+    fireEvent.change(screen.getByLabelText("时间线名称"), {
+      target: { value: "不保存的名字" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("时间线名称"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(renameSoloTimeline).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("时间线名称")).toBeNull();
+    expect(row.getByRole("button", { name: "重命名" })).toHaveFocus();
+  });
   it("行内输入新名并确认后调用 rename 并刷新列表", async () => {
     renderPanel();
     const row = within(await readyRow("w-branch"));
@@ -215,6 +293,69 @@ describe("SoloTimelinePanel 重命名", () => {
 });
 
 describe("SoloTimelinePanel 删除分支", () => {
+  it("删除行后的列表刷新不将焦点丢到面板外", async () => {
+    vi.mocked(fetchSoloTimelines)
+      .mockResolvedValueOnce(timelinesPayload)
+      .mockResolvedValueOnce({
+        ...timelinesPayload,
+        worlds: [timelinesPayload.worlds[0]],
+      });
+    renderPanel();
+    fireEvent.click(
+      within(await readyRow("w-branch")).getByRole("button", { name: "删除" }),
+    );
+    const confirm = screen.getByRole("button", { name: "确认" });
+    confirm.focus();
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(document.querySelector('[data-world="w-branch"]')).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "关闭时间线面板" }),
+      ).toHaveFocus(),
+    );
+  });
+  it("删除确认内 Escape 只退出确认，不关闭面板，不发删除请求", async () => {
+    const onClose = renderPanel();
+    const row = within(await readyRow("w-branch"));
+    fireEvent.click(row.getByRole("button", { name: "删除" }));
+    const confirm = screen.getByRole("button", { name: "确认" });
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(archiveSoloTimeline).not.toHaveBeenCalled();
+    expect(screen.queryByText("删除此分支？")).toBeNull();
+    expect(row.getByRole("button", { name: "删除" })).toHaveFocus();
+  });
+
+  it("正在提交时 Escape 不取消；失败后可以关闭", async () => {
+    let reject!: (reason: Error) => void;
+    vi.mocked(renameSoloTimeline).mockReturnValue(
+      new Promise((_, no) => {
+        reject = no;
+      }),
+    );
+    const onClose = renderPanel();
+    fireEvent.click(
+      within(await readyRow("w-branch")).getByRole("button", {
+        name: "重命名",
+      }),
+    );
+    const input = screen.getByLabelText("时间线名称");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(renameSoloTimeline).toHaveBeenCalledOnce();
+    await act(async () => {
+      reject(new Error("被拒绝"));
+    });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
   it("需要行内二次确认；确认后 archive 并刷新列表", async () => {
     renderPanel();
     const row = within(await readyRow("w-branch"));

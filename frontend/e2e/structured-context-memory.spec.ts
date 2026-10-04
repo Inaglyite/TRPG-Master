@@ -235,7 +235,7 @@ function framesOf(frames: Frames, type: string): string[] {
 
 async function fillKeeperField(page: Page, field: string, value: string) {
   const locator = page.locator(
-    `[data-field="${field}"] select, [data-field="${field}"] input, [data-field="${field}"] textarea`,
+    `[data-field="${field}"] select, [data-field="${field}"] input:not([type="checkbox"]), [data-field="${field}"] textarea`,
   );
   const tag = await locator.evaluate((node) => node.tagName);
   if (tag === "SELECT") await locator.selectOption(value);
@@ -244,12 +244,12 @@ async function fillKeeperField(page: Page, field: string, value: string) {
 
 async function openConsole(page: Page) {
   await page.getByTestId("btn-keeper-console").click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
 }
 
 async function closeConsole(page: Page) {
   await page.getByRole("button", { name: "关闭主持台" }).click();
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
 }
@@ -393,6 +393,24 @@ test("主持记忆查询：记录一条记忆 → 只读查询命中；内容不
   test.setTimeout(300_000);
   page.setDefaultTimeout(30_000);
   const frames = collectFrames(page);
+  let dropMemoryReply = false;
+  const queryFrames: string[] = [];
+  await page.routeWebSocket(/\/ws(?:\?|$)/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (String(message).includes('"type":"memory_query"'))
+        queryFrames.push(String(message));
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      if (
+        dropMemoryReply &&
+        String(message).includes('"type":"memory_query_result"')
+      )
+        return;
+      socket.send(message);
+    });
+  });
   await bootWorld(page, frames);
 
   // 1) 记忆查询能力由服务端声明，主持台才出现入口
@@ -416,7 +434,8 @@ test("主持记忆查询：记录一条记忆 → 只读查询命中；内容不
   await expect(page.getByTestId("keeper-memory-query")).toBeVisible();
 
   // 2) 主持记录一条记忆（record_memory）
-  const memoryContent = "调查员在停尸间确认了遗体上的旧伤。";
+  const memoryContent =
+    "调查员在停尸间确认了遗体上的旧伤，并亲耳听见医生说明了这些伤痕形成的时间。";
   await page.getByTestId("keeper-cmd-record_memory").click();
   await fillKeeperField(page, "character_id", investigatorId);
   await fillKeeperField(page, "knowledge_type", "experienced");
@@ -439,12 +458,95 @@ test("主持记忆查询：记录一条记忆 → 只读查询命中；内容不
     await characterSelect.selectOption(investigatorId);
   }
   await fillKeeperField(page, "memory_topics", "morgue");
+  const queryPanel = page.getByTestId("keeper-memory-query");
+  const textFilter = queryPanel.locator('[data-field="memory_text"] textarea');
+  const beforeQueries = queryFrames.length;
+  await fillKeeperField(page, "memory_topics", "a,b,c,d,e,f,g");
+  await page.getByTestId("keeper-memory-submit").click();
+  await expect(queryPanel.getByRole("alert")).toContainText("主题最多 6 个");
+  await expect(
+    queryPanel.locator('[data-field="memory_topics"] input'),
+  ).toHaveValue("a,b,c,d,e,f,g");
+  expect(queryFrames).toHaveLength(beforeQueries);
+  await fillKeeperField(page, "memory_topics", "morgue");
+  await textFilter.fill("字".repeat(201));
+  await page.getByTestId("keeper-memory-submit").click();
+  await expect(queryPanel.getByRole("alert")).toContainText("200 字");
+  await expect(textFilter).toHaveValue("字".repeat(201));
+  expect(queryFrames).toHaveLength(beforeQueries);
+  await textFilter.fill(memoryContent);
   await page.getByTestId("keeper-memory-submit").click();
   const results = page.getByTestId("keeper-memory-results");
   await expect(results).toBeVisible({ timeout: 60_000 });
   await expect(results.getByText(/命中 [1-9]\d* 条/)).toBeVisible();
-  await expect(results.getByText(new RegExp(memoryContent))).toBeVisible();
+  await expect(
+    results.locator("li").filter({ hasText: memoryContent }),
+  ).toBeVisible();
   await expect(page.getByTestId("keeper-memory-empty")).toHaveCount(0);
+  await expect(results.locator("li")).toContainText("亲历");
+  await expect(results).not.toContainText('"character_id"');
+  expect(queryFrames).toHaveLength(beforeQueries + 1);
+  const query = JSON.parse(queryFrames.at(-1)!);
+  expect(query.filters.text).toBe(memoryContent);
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByTestId("keeper-memory-submit").scrollIntoViewIfNeeded();
+    const box = await page
+      .getByTestId("keeper-memory-submit")
+      .evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          height: rect.height,
+          padding: parseFloat(style.paddingLeft),
+          nowrap: style.whiteSpace,
+          hit: node.contains(
+            document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            ),
+          ),
+        };
+      });
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.padding).toBeGreaterThanOrEqual(10);
+    expect(box.nowrap).toBe("nowrap");
+    expect(box.hit).toBe(true);
+    const textBox = await textFilter.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        width: node.getBoundingClientRect().width,
+        available: node.parentElement!.getBoundingClientRect().width,
+        height: node.getBoundingClientRect().height,
+        background: style.backgroundColor,
+        color: style.color,
+        padding: parseFloat(style.paddingLeft),
+      };
+    });
+    expect(Math.abs(textBox.width - textBox.available)).toBeLessThanOrEqual(2);
+    expect(textBox.height).toBeGreaterThanOrEqual(88);
+    expect(textBox.background).toBe("rgb(28, 25, 21)");
+    expect(textBox.color).toBe("rgb(228, 220, 205)");
+    expect(textBox.padding).toBeGreaterThanOrEqual(10);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true);
+    await page.screenshot({ path: `/tmp/trpg-memory-filter-${width}.png` });
+  }
+  dropMemoryReply = true;
+  await page.getByTestId("keeper-memory-submit").click();
+  await expect(page.getByTestId("keeper-memory-submit")).toBeDisabled();
+  await expect(page.getByTestId("keeper-memory-failed")).toContainText("超时", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("keeper-memory-submit")).toBeEnabled();
+  dropMemoryReply = false;
+  await page.getByTestId("keeper-memory-submit").click();
+  await expect(
+    results.locator("li").filter({ hasText: memoryContent }),
+  ).toBeVisible();
   await page.screenshot({
     path: resolve(
       repositoryRoot,

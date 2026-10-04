@@ -19,6 +19,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import { assertGameHeaderFits } from "./header-layout";
 
 const port = 8776;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -310,6 +311,10 @@ test("顶栏当前场景：开局、移动、长地名与窄屏", async ({ page 
   // 多宽度回归：位置行始终可见、不超出视口、不与工具栏重叠。
   for (const width of [1280, 760, 640, 560, 520, 430, 390]) {
     await page.setViewportSize({ width, height: 780 });
+    await assertGameHeaderFits(page);
+    if ([1280, 640, 390].includes(width)) {
+      await page.screenshot({ path: `/tmp/trpg-header-local-${width}.png` });
+    }
     await expect(line).toBeVisible();
     const lineBox = await line.boundingBox();
     const toolbarBox = await page.locator("#toolbar").boundingBox();
@@ -339,6 +344,24 @@ test("顶栏当前场景：开局、移动、长地名与窄屏", async ({ page 
   await page.screenshot({
     path: join(screenshotsDir, "scene-indicator-narrow.png"),
   });
+
+  // Label-only geometry stress: no world or game state is modified here.
+  const title = page.locator(".header-title");
+  const originalTitle = await title.innerText();
+  const longTitle = "阿卡姆调查档案：旧港口与失踪教授的漫长夜晚";
+  await title.evaluate((node, value) => {
+    node.textContent = value;
+    node.setAttribute("title", value);
+  }, longTitle);
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 480 });
+    await assertGameHeaderFits(page);
+    await expect(title).toHaveAttribute("title", longTitle);
+  }
+  await title.evaluate((node, value) => {
+    node.textContent = value;
+    node.setAttribute("title", value);
+  }, originalTitle);
 
   // 回到开局选择：位置行随游戏一起收起。
   await page.locator("#btn-new").click();

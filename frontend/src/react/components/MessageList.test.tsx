@@ -4,11 +4,94 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../../state/app-store";
 import { useMessageStore } from "../../state/message-store";
 import { MessageList } from "./MessageList";
+import {
+  prependNarrativeHistory,
+  restoreNarrativeHistory,
+} from "../../structured-history";
 
 describe("MessageList", () => {
   beforeEach(() => {
     useMessageStore.setState({ messages: [], actionReset: 0 });
     useAppStore.setState({ mode: "local", character: null });
+  });
+
+  it("restores a full action declaration with authoritative attribution, not an execution claim", () => {
+    const text = "我只是申报，并没有打开抽屉。".repeat(40);
+    restoreNarrativeHistory("history-world", {
+      messages: [
+        {
+          message_id: "action:one",
+          sequence: 1,
+          text,
+          entry_kind: "action_request",
+          speaker: { kind: "investigator", id: "inv-one", name: "申报者" },
+        },
+      ],
+      next_before_sequence: null,
+    });
+    render(<MessageList />);
+    expect(screen.getByText("申报者")).toBeInTheDocument();
+    expect(screen.getByText("行动申报 · 不代表已执行")).toBeInTheDocument();
+    expect(
+      screen.getByText("行动申报 · 不代表已执行").closest(".msg"),
+    ).toHaveAttribute("data-entry-kind", "action_request");
+    expect(useMessageStore.getState().messages[0].text).toBe(text);
+  });
+
+  it("rejects action-history metadata attributed to an NPC instead of an investigator", () => {
+    useMessageStore.setState({
+      messages: [{ id: "existing", kind: "gm", text: "原有内容" }],
+    });
+    restoreNarrativeHistory("history-world", {
+      messages: [
+        {
+          message_id: "action:bad",
+          sequence: 1,
+          text: "错误归属",
+          entry_kind: "action_request",
+          speaker: { kind: "npc", name: "医生" },
+        },
+      ],
+      next_before_sequence: null,
+    });
+    expect(useMessageStore.getState().messages[0].text).toBe("原有内容");
+  });
+
+  it("shows an explicitly loaded older page rather than auto-scrolling back to the newest message", () => {
+    useMessageStore.setState({
+      messages: [{ id: "latest", kind: "gm", text: "最新叙事" }],
+    });
+    const { container } = render(<MessageList />);
+    const list = container.querySelector("#messages") as HTMLDivElement;
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    list.scrollTop = 900;
+    act(() =>
+      prependNarrativeHistory("history-world", {
+        messages: [
+          {
+            message_id: "older",
+            sequence: 1,
+            text: "早先叙事",
+            speaker: { kind: "keeper", name: "守秘人" },
+          },
+        ],
+        next_before_sequence: null,
+      }),
+    );
+    expect(list.scrollTop).toBe(0);
+    expect(list.textContent).toMatch(/早先叙事[\s\S]*最新叙事/);
+    act(() =>
+      useMessageStore
+        .getState()
+        .updateMessages((messages) => [
+          ...messages,
+          { id: "newest", kind: "gm", text: "继续叙事" },
+        ]),
+    );
+    expect(list.scrollTop).toBe(0); // Reading older text is not interrupted by a new message.
   });
 
   it("renders markdown while suppressing model-provided images", () => {

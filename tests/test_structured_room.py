@@ -198,6 +198,7 @@ class StructuredRoomStartTests(unittest.IsolatedAsyncioTestCase):
                     "attributes": {"STR": 50},
                     "derived": {"HP": 10, "max_HP": 10, "SAN": 50, "max_SAN": 50},
                     "skills": {"侦查": 60},
+                    "inventory": ["测试绷带", "测试绷带", "测试手电筒"],
                 },
                 ensure_ascii=False,
             ),
@@ -255,6 +256,29 @@ class StructuredRoomStartTests(unittest.IsolatedAsyncioTestCase):
 
         state = DatabaseWorldStore(self.db_url, self.world_id, room.engine.context.world_dir).load()
         self.assertEqual({"inv-p"}, set(state.get("investigators") or {}))
+
+    async def test_lobby_snapshot_before_start_does_not_lose_starting_inventory(self):
+        from src.structured.principal import Principal
+        from src.structured.service import StructuredPlayService
+
+        service = StructuredPlayService(self.db_url)
+        # A normal lobby connection materializes the registry before the PC.
+        service.session_snapshot(world_id=self.world_id, principal=Principal("keeper", "u-k"))
+        room = self._room()
+        await handle_structured_room_start(
+            _FakeController(self.db_url), room, _FakeWs(), _FakeUser("u-k"), self.world_id
+        )
+        sent = {cid: env for cid, env in room.hub.direct}
+        items = sent["c-p"]["payload"]["items"]
+        self.assertEqual(
+            {"测试绷带": 2, "测试手电筒": 1}, {i["label"]: i["quantity"] for i in items}
+        )
+        before = {i["label"]: i["id"] for i in items}
+        after = service.session_snapshot(
+            world_id=self.world_id,
+            principal=Principal("player", "u-p", investigator_ids=("inv-p",)),
+        )["items"]
+        self.assertEqual(before, {i["label"]: i["id"] for i in after})
 
     async def test_start_without_claimed_investigators_rejected(self):
         other_world = (

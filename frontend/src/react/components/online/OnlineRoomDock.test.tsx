@@ -38,6 +38,74 @@ beforeEach(() => {
 });
 
 describe("OnlineRoomDock", () => {
+  it("structured rooms describe asynchronous actions without turn assignment or skip controls", async () => {
+    const { assignActor } = await import("../../../online");
+    setupOnline({
+      roomMetadata: { name: "周五调查夜", execution_profile: "structured_v1" },
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "owner",
+          can_keeper: true,
+          investigator: null,
+        },
+        {
+          user_id: "u2",
+          username: "bob",
+          role: "player",
+          investigator: { character_key: "bob" },
+        },
+      ],
+    });
+    render(<OnlineRoomDock />);
+    expect(screen.getByText("主持工作台处理行动")).toBeVisible();
+    expect(screen.queryByText(/等待 .* 行动/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /周五调查夜/ }));
+    expect(screen.queryByText("行动中")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "跳过行动者" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("主持")).toBeVisible();
+    expect(assignActor).not.toHaveBeenCalled();
+  });
+
+  it("structured viewers are explicitly read-only rather than waiting for a turn", () => {
+    setupOnline({
+      roomMetadata: { name: "周五调查夜", execution_profile: "structured_v1" },
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "viewer",
+          investigator: null,
+        },
+      ],
+    });
+    render(<OnlineRoomDock />);
+    expect(screen.getByText("旁观中 · 只读")).toBeVisible();
+  });
+  it("keeper authority is independent of the viewer role, without granting player turns", () => {
+    setupOnline({
+      roomMetadata: { name: "周五调查夜", execution_profile: "structured_v1" },
+      members: [
+        {
+          user_id: "u1",
+          username: "alice",
+          role: "viewer",
+          can_keeper: true,
+          investigator: null,
+        },
+      ],
+    });
+    render(<OnlineRoomDock />);
+    expect(screen.getByText("主持工作台处理行动")).toBeVisible();
+    expect(screen.queryByText("旁观中 · 只读")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /周五调查夜/ }));
+    expect(
+      screen.queryByRole("button", { name: "跳过行动者" }),
+    ).not.toBeInTheDocument();
+  });
   it("跳过行动者绕开离线成员，选择下一位在线玩家", async () => {
     const { assignActor } = await import("../../../online");
     setupOnline({

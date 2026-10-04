@@ -1,8 +1,39 @@
 import { describe, expect, it } from "vitest";
 
 import { parseServerMessage } from "./server-message";
+import { STRUCTURED_EVENT_TYPES } from "./structured";
 
 describe("parseServerMessage", () => {
+  it("validates local creation receipts before the start-flow consumes them", () => {
+    const success = {
+      type: "local_start_result",
+      request_id: "create-1",
+      ok: true,
+      world_id: "new-world",
+      execution_profile: "structured_v1",
+    };
+    expect(parseServerMessage(success)).toEqual(success);
+    expect(parseServerMessage({ ...success, ok: "true" })).toBeNull();
+    expect(parseServerMessage({ ...success, world_id: "" })).toBeNull();
+    expect(
+      parseServerMessage({ ...success, execution_profile: "pretend" }),
+    ).toBeNull();
+    expect(
+      parseServerMessage({
+        type: "local_start_result",
+        request_id: "create-1",
+        ok: false,
+        code: "not_authorized",
+        message: "拒绝",
+      }),
+    ).not.toBeNull();
+  });
+  it("admits every registered structured event before envelope validation", () => {
+    for (const type of STRUCTURED_EVENT_TYPES) {
+      const frame = { type, payload: { asset_id: "example" } };
+      expect(parseServerMessage(frame), type).toEqual(frame);
+    }
+  });
   it("retains payload fields for a known protocol message", () => {
     expect(
       parseServerMessage('{"type":"narrative_chunk","text":"雨声"}'),

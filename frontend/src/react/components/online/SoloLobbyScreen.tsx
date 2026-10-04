@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   createSoloWorld,
@@ -15,8 +15,9 @@ import { ModuleSelect } from "../ModuleSelect";
 import { usePhaseTransition } from "../transitions";
 import { roomStatusLabel } from "./room-status";
 import { SoloTimelinePanel } from "./SoloTimelinePanel";
-import { KeeperModeSelect } from "./KeeperModeSelect";
+import { PlayStylePicker } from "./PlayStylePicker";
 import type { KeeperMode } from "../../../protocol/structured";
+import { AdventureArchiveConfirmation } from "./AdventureArchiveConfirmation";
 
 function formatTime(value?: string): string {
   if (!value) return "";
@@ -25,7 +26,7 @@ function formatTime(value?: string): string {
 }
 
 /**
- * 云端单人“我的冒险”：列出 play_mode=solo 的私密世界，可新建/继续/删除。
+ * 云端单人“我的冒险”：列出 play_mode=solo 的私密世界，可新建/继续/归档。
  * 视觉与本地开始页同一体系（主题背景裸排版 + start-brand 品牌区 +
  * adventure-card 存档卡 + start-art-button 黄铜 CTA），写通路保持
  * HTTP worlds/createSoloWorld 不变。删除即归档，保留二次确认。
@@ -60,6 +61,8 @@ export function SoloLobbyScreen() {
   );
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const archiveInFlight = useRef(false);
+  const archiveTrigger = useRef<HTMLButtonElement | null>(null);
   // 删除报错内联挂在被删除的冒险卡上（worldId + 消息），不进创建卡。
   const [deleteError, setDeleteError] = useState<{
     worldId: string;
@@ -98,12 +101,18 @@ export function SoloLobbyScreen() {
   }
 
   async function confirmDelete(worldId: string) {
-    setConfirmingDelete(null);
+    if (archiveInFlight.current) return;
+    archiveInFlight.current = true;
     setDeleteError(null);
     setDeleteBusy(true);
-    const error = await deleteSoloWorld(worldId);
-    setDeleteBusy(false);
-    if (error) setDeleteError({ worldId, message: error });
+    try {
+      const error = await deleteSoloWorld(worldId);
+      if (error) setDeleteError({ worldId, message: error });
+      else setConfirmingDelete(null);
+    } finally {
+      archiveInFlight.current = false;
+      setDeleteBusy(false);
+    }
   }
 
   return (
@@ -113,7 +122,7 @@ export function SoloLobbyScreen() {
     >
       <header className="solo-lobby-header">
         <div className="start-brand">
-          <h1 className="online-title fx-glow">我的冒险</h1>
+          <h1 className="online-title">我的冒险</h1>
           <p className="online-subtitle">云端私密单人世界，只有你能进入</p>
         </div>
         <div className="solo-lobby-user online-account">
@@ -124,7 +133,7 @@ export function SoloLobbyScreen() {
           >
             角色库
           </button>
-          <span className="online-user" title={user?.id}>
+          <span className="online-user" title={user?.username}>
             {user?.username}
           </span>
           <button
@@ -204,85 +213,82 @@ export function SoloLobbyScreen() {
                 data-world={world.world_id}
               >
                 <div className="adventure-card-main">
-                  <div
+                  <button
+                    type="button"
                     className="adventure-card-info"
+                    aria-label={`${adventureTitle(world)}：管理时间线`}
+                    disabled={deleteBusy}
                     onClick={() => setTimelineWorld(world)}
                   >
-                    <div className="adventure-slot-line">
+                    <span className="adventure-slot-line">
                       <span className="adventure-slot-no">云端存档</span>
                       {world.metadata?.room_status && (
                         <span className="adventure-badge">
                           {roomStatusLabel(world.metadata.room_status)}
                         </span>
                       )}
-                    </div>
-                    <div className="adventure-card-title">
+                    </span>
+                    <span className="adventure-card-title">
                       {world.metadata?.name || moduleTitle(world.module)}
-                    </div>
-                    <div className="adventure-card-meta">
+                    </span>
+                    <span className="adventure-card-meta">
                       {moduleTitle(world.module)}
-                    </div>
-                    <div className="adventure-card-meta dim">
+                    </span>
+                    <span className="adventure-card-meta dim">
                       最后游玩 {formatTime(world.updated_at) || "未知"}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                   <div className="adventure-card-actions">
                     <button
                       type="button"
                       className="adventure-resume"
+                      disabled={deleteBusy}
                       onClick={() => void enterRoom(resumeWorldId(world))}
                     >
                       继续冒险
                     </button>
                     <div className="adventure-card-sub-actions">
-                      {confirmingDelete === world.world_id ? (
-                        <>
-                          <button
-                            type="button"
-                            className="adventure-delete"
-                            disabled={deleteBusy}
-                            onClick={() => void confirmDelete(world.world_id)}
-                          >
-                            确认删除
-                          </button>
-                          <button
-                            type="button"
-                            className="adventure-manage"
-                            disabled={deleteBusy}
-                            onClick={() => setConfirmingDelete(null)}
-                          >
-                            取消
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="adventure-manage"
-                            onClick={() => setTimelineWorld(world)}
-                          >
-                            管理时间线
-                          </button>
-                          <button
-                            type="button"
-                            className="adventure-delete"
-                            disabled={deleteBusy}
-                            onClick={() => {
-                              setDeleteError(null);
-                              setConfirmingDelete(world.world_id);
-                            }}
-                          >
-                            删除存档
-                          </button>
-                        </>
+                      <button
+                        type="button"
+                        className="adventure-manage"
+                        disabled={deleteBusy}
+                        onClick={() => setTimelineWorld(world)}
+                      >
+                        管理时间线
+                      </button>
+                      {world.role === "owner" && (
+                        <button
+                          type="button"
+                          className="adventure-delete"
+                          disabled={deleteBusy}
+                          onClick={(event) => {
+                            setDeleteError(null);
+                            archiveTrigger.current = event.currentTarget;
+                            setConfirmingDelete(world.world_id);
+                          }}
+                        >
+                          归档冒险
+                        </button>
                       )}
                     </div>
                   </div>
                 </div>
-                {deleteError?.worldId === world.world_id && (
-                  <p className="adventure-delete-error" role="alert">
-                    {deleteError.message}
-                  </p>
+                {confirmingDelete === world.world_id && (
+                  <AdventureArchiveConfirmation
+                    title={adventureTitle(world)}
+                    busy={deleteBusy}
+                    error={
+                      deleteError?.worldId === world.world_id
+                        ? deleteError.message
+                        : null
+                    }
+                    onConfirm={() => void confirmDelete(world.world_id)}
+                    onCancel={() => {
+                      setConfirmingDelete(null);
+                      setDeleteError(null);
+                      archiveTrigger.current?.focus();
+                    }}
+                  />
                 )}
               </div>
             ))}
@@ -329,6 +335,18 @@ export function SoloLobbyScreen() {
                   listLabel="选择模组"
                   onSelect={(id) => setModuleId(id)}
                 />
+              </div>
+              <PlayStylePicker
+                structured={structuredWorld}
+                keeperMode={keeperMode}
+                disabled={createBusy}
+                solo
+                onChange={(value) => {
+                  setStructuredWorld(value.structured);
+                  setKeeperMode(value.keeperMode);
+                }}
+              />
+              <div className="platform-create-actions">
                 <button
                   type="button"
                   className="btn-primary"
@@ -351,22 +369,6 @@ export function SoloLobbyScreen() {
                   收起
                 </button>
               </div>
-              <label className="online-inline-toggle">
-                <input
-                  type="checkbox"
-                  checked={structuredWorld}
-                  disabled={createBusy}
-                  onChange={(event) => setStructuredWorld(event.target.checked)}
-                />
-                <span>结构化操作模式：按钮提交行动，由主持判断并执行</span>
-              </label>
-              {structuredWorld && (
-                <KeeperModeSelect
-                  value={keeperMode}
-                  disabled={createBusy}
-                  onChange={setKeeperMode}
-                />
-              )}
               {createError && (
                 <p className="online-notice online-notice--error" role="alert">
                   {createError}

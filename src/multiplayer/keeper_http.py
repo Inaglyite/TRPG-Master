@@ -5,6 +5,9 @@ from fastapi.responses import JSONResponse
 
 from src.auth.service import audit, request_user
 from src.storage.database import KeeperControl, WorldMember, session_scope
+from src.web.structured_asset_http import register_structured_asset_routes
+from src.web.structured_guide_http import register_structured_guide_routes
+from src.web.structured_history_http import register_structured_history_routes
 
 from .service import MultiplayerError, _require_member, _require_owner, _require_world
 
@@ -47,6 +50,10 @@ def set_keeper_authorization(db_url, world_id, target_id, actor_id, enabled):
 
 
 def register_keeper_routes(router, deps):
+    register_structured_asset_routes(router, deps)
+    register_structured_guide_routes(router, deps)
+    register_structured_history_routes(router, deps)
+
     @router.patch("/api/worlds/{world_id}/members/{target_id}/keeper")
     async def change_keeper(world_id: str, target_id: str, data: dict, request: Request):
         db_url = deps.database_url()

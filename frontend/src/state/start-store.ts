@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { KeeperMode } from "../protocol/structured";
 
 export type CharacterRef = {
   source: string;
@@ -57,6 +58,8 @@ type StartState = {
   pendingLibraryCharacterId: string | null;
   hasSaves: boolean;
   hint: string;
+  executionProfile: "legacy" | "structured_v1";
+  keeperMode: KeeperMode;
 };
 
 export const useStartStore = create<StartState>(() => ({
@@ -74,4 +77,6 @@ export const useStartStore = create<StartState>(() => ({
   pendingLibraryCharacterId: null,
   hasSaves: false,
   hint: "正在读取存档…",
+  executionProfile: "legacy",
+  keeperMode: "human",
 }));

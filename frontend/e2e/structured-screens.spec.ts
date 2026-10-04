@@ -121,7 +121,7 @@ test("主持台截图：命令表单与待处理行动", async ({ page }) => {
   await page.waitForTimeout(400);
 
   await page.getByTestId("btn-keeper-console").click();
-  const console_ = page.getByRole("dialog", { name: "主持台" });
+  const console_ = page.getByRole("dialog", { name: "主持工作台" });
   await expect(console_).toBeVisible();
   await page.getByTestId("keeper-cmd-grant_clue").click();
   await expect(page.locator('[data-field="clue_id"] select')).toBeVisible();

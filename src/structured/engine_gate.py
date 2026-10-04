@@ -34,4 +34,10 @@ def build_engine_client(context: Any, *, api_key: str, base_url: str, timeout: f
         pass
     if profile == "structured_v1" and keeper_mode == "human":
         return None
+    if not api_key:
+        # The local menu starts with a legacy placeholder before the user can
+        # select human play or configure a model. Block actual calls, not entry.
+        from src.ai.model.route_service import _BlockedClient
+
+        return _BlockedClient("尚未配置模型凭据；请选择人类主持，或在模型设置中配置 API Key。")
     return OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)

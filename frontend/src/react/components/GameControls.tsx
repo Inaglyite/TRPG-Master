@@ -29,6 +29,7 @@ export function GameControls() {
   const userId = useOnlineStore((state) => state.user?.id);
   const members = useOnlineStore((state) => state.members);
   const [text, setText] = useState("");
+  const [inputError, setInputError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 多人进行中：只有当前行动者可以提交；其他人输入与选项均禁用并显示等待。
@@ -42,10 +43,22 @@ export function GameControls() {
     ) && roomStatus === "playing";
   const roomPlaying = mode === "online" && roomStatus === "playing";
   const myRole = members.find((member) => member.user_id === userId)?.role;
+  const ownInvestigatorId = useStructuredStore(
+    (state) => state.identity.investigatorId,
+  );
+  const controlledInvestigator =
+    ownInvestigatorId ||
+    members.find((member) => member.user_id === userId)?.investigator
+      ?.character_key;
+  const canSubmitStructured =
+    roomConnection === "connected" &&
+    (myRole === "owner" || myRole === "player") &&
+    !!controlledInvestigator;
   const myTurn =
     mode !== "online" ||
-    structuredAsync ||
-    (roomPlaying &&
+    (structuredAsync && canSubmitStructured) ||
+    (!structuredAsync &&
+      roomPlaying &&
       roomConnection === "connected" &&
       userId != null &&
       currentActorUserId === userId &&
@@ -71,9 +84,15 @@ export function GameControls() {
     (member) => member.user_id === currentActorUserId,
   )?.username;
   const placeholder =
-    roomPlaying && !myTurn
-      ? `等待 ${actorName ?? "行动者"} 行动……`
-      : appPlaceholder;
+    roomPlaying && structuredAsync && !canSubmitStructured
+      ? myRole === "viewer"
+        ? "旁观模式：只能查看公开叙事。"
+        : roomConnection !== "connected"
+          ? "连接恢复后可提交行动……"
+          : "你当前未控制调查员，请使用主持台。"
+      : roomPlaying && !myTurn
+        ? `等待 ${actorName ?? "行动者"} 行动……`
+        : appPlaceholder;
 
   useEffect(() => {
     if (enabled) inputRef.current?.focus();
@@ -86,9 +105,12 @@ export function GameControls() {
     // 旧世界：仍然是原来的文字回合。
     const result = sendPlayerText(action);
     if (!result.ok) {
-      setText(action);
+      setInputError(
+        result.reason || "行动未能发出，请检查连接后重试。草稿已保留。",
+      );
       return;
     }
+    setInputError("");
     setText("");
   };
 
@@ -148,6 +170,11 @@ export function GameControls() {
         <ContextSummaryButton />
       </div>
       <StructuredToolRow />
+      {inputError && (
+        <p id="player-input-error" role="alert">
+          {inputError}
+        </p>
+      )}
       <div id="input-bar">
         <input
           ref={inputRef}
@@ -156,7 +183,12 @@ export function GameControls() {
           value={text}
           placeholder={placeholder}
           disabled={!enabled}
-          onChange={(event) => setText(event.target.value)}
+          aria-describedby={inputError ? "player-input-error" : undefined}
+          aria-invalid={!!inputError}
+          onChange={(event) => {
+            setText(event.target.value);
+            setInputError("");
+          }}
           onKeyDown={(event) => {
             if (
               event.key === "Enter" &&

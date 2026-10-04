@@ -37,6 +37,7 @@ import {
 } from "./renderer";
 import {
   onGmTurnStart,
+  onLocalStartResult,
   onStartTurnRejected,
   resetStartButton,
   getGameStarted,
@@ -88,7 +89,7 @@ import {
   onNotesWorldChanged,
   onPlayerNotes,
   onPlayerNotesConflict,
-  onPlayerNotesError,
+  onNotesFailure,
 } from "./utility";
 import { parseServerMessage } from "./protocol/server-message";
 import {
@@ -284,7 +285,10 @@ const sendQueue: string[] = [];
 // ---- 发送传输适配 ----
 // 多人房间模式下，全部客户端消息（action/decision/save/start 等）经
 // setActiveTransport 指向房间 WS；null 恢复单机本地连接的默认行为。
-export type WsTransport = { send: (payload: string) => void };
+export type WsTransport = {
+  send: (payload: string) => void;
+  sendNow?: (payload: string) => boolean;
+};
 let activeTransport: WsTransport | null = null;
 
 export function setActiveTransport(transport: WsTransport | null) {
@@ -337,6 +341,18 @@ export function markRoomConnectionRestored(turnId: string): void {
   interruptedTurn = true;
   interruptedTurnId = turnId;
   onConnectionRestored(true);
+}
+
+/** Private writes must never wait in a reconnect queue with an implicit world. */
+export function sendImmediately(payload: string): boolean {
+  try {
+    if (activeTransport) return activeTransport.sendNow?.(payload) === true;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function safeSend(payload: string) {
@@ -712,6 +728,9 @@ export function handleServerPayload(raw: unknown) {
     acknowledgePendingAction();
   }
   switch (data.type) {
+    case "local_start_result":
+      onLocalStartResult(data);
+      break;
     case "pong":
       break;
     case "system_notice":
@@ -1040,7 +1059,7 @@ export function handleServerPayload(raw: unknown) {
       onPlayerNotesConflict(data);
       break;
     case "player_notes_error":
-      onPlayerNotesError(data.message);
+      onNotesFailure(data);
       break;
     case "turn_rejected":
       resetTurnActionButtons();
@@ -1100,6 +1119,8 @@ export function handleServerPayload(raw: unknown) {
       safeSend(JSON.stringify({ type: "save_list" }));
       break;
     case "save_renamed":
+      // Keep the draft on failure; only an authoritative success closes it.
+      if (data.ok) useAppStore.setState({ renameSlotId: null });
       addMsg(
         data.ok ? "system" : "error",
         data.ok

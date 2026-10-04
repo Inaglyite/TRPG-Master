@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -51,6 +51,29 @@ beforeEach(() => {
 });
 
 describe("keeper 授权", () => {
+  it("Tab 排除关闭 details、隐藏祖先与 disabled fieldset；其他浮层的 Escape 不关闭主持台", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    const dialog = screen.getByRole("dialog", { name: "主持工作台" });
+    const probe = document.createElement("div");
+    probe.innerHTML =
+      '<button>可见末尾</button><details><summary>收起</summary><input aria-label="不可见输入" /></details><div style="display:none"><button>隐藏末尾</button></div><fieldset disabled><button>禁用末尾</button></fieldset>';
+    dialog.append(probe);
+    const summary = probe.querySelector("summary")!;
+    summary.focus();
+    fireEvent.keyDown(summary, { key: "Tab" });
+    expect(screen.getByRole("button", { name: "关闭主持台" })).toHaveFocus();
+    const other = document.createElement("button");
+    document.body.append(other);
+    other.focus();
+    fireEvent.keyDown(other, { key: "Escape" });
+    expect(
+      screen.getByRole("dialog", { name: "主持工作台" }),
+    ).toBeInTheDocument();
+    other.remove();
+    probe.remove();
+  });
   it("房主不等于 keeper：没有 keeper 投影就不授权", () => {
     expect(keeperAuthorized(null, null, "user-owner")).toBe(false);
   });
@@ -69,6 +92,508 @@ describe("keeper 授权", () => {
 });
 
 describe("KeeperConsole", () => {
+  it("记忆查询完整发送超过20字的合法文本，接受中文逗号", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((state) => ({
+      capabilities: { ...state.capabilities, memoryQuery: true },
+    }));
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    const text = "调查员此前在停尸间确认的旧伤以及医生解释的证据来源";
+    expect(screen.getByLabelText("文本（最多200字）").tagName).toBe("TEXTAREA");
+    fireEvent.change(screen.getByLabelText("文本（最多200字）"), {
+      target: { value: text },
+    });
+    fireEvent.change(
+      screen.getByLabelText("主题（逗号分隔，最多6个，每个40字）"),
+      { target: { value: "医生，旧伤" } },
+    );
+    fireEvent.click(screen.getByTestId("keeper-memory-submit"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      type: "memory_query",
+      filters: { text, topics: ["医生", "旧伤"] },
+    });
+  });
+  it("超过六个记忆主题不截断或发送，保留原输入", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((state) => ({
+      capabilities: { ...state.capabilities, memoryQuery: true },
+    }));
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    const topics = screen.getByLabelText("主题（逗号分隔，最多6个，每个40字）");
+    fireEvent.change(topics, { target: { value: "一,二,三,四,五,六,七" } });
+    fireEvent.click(screen.getByTestId("keeper-memory-submit"));
+    expect(screen.getByRole("alert")).toHaveTextContent("主题最多 6 个");
+    expect(topics).toHaveValue("一,二,三,四,五,六,七");
+    expect(sent).toHaveLength(0);
+    act(() => useAppStore.setState({ connection: "connecting" }));
+    expect(screen.getByTestId("keeper-memory-submit")).toBeDisabled();
+  });
+  it("撤销云端 can_keeper 后隐藏旧主持资料，重新授权不重开旧表单", () => {
+    enableStructured({ user_id: "keeper-user", mode: "human" });
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      user: { id: "keeper-user" } as any,
+      members: [{ user_id: "keeper-user", can_keeper: true }] as any,
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    expect(
+      screen.getByRole("dialog", { name: "主持工作台" }),
+    ).toBeInTheDocument();
+    act(() =>
+      useOnlineStore.setState({
+        members: [{ user_id: "keeper-user", can_keeper: false }] as any,
+      }),
+    );
+    expect(screen.queryByRole("dialog", { name: "主持工作台" })).toBeNull();
+    expect(screen.queryByTestId("btn-keeper-console")).toBeNull();
+    act(() =>
+      useOnlineStore.setState({
+        members: [{ user_id: "keeper-user", can_keeper: true }] as any,
+      }),
+    );
+    expect(screen.getByTestId("btn-keeper-console")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "主持工作台" })).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+  it("命令能力撤回禁用已打开的表单，草稿保留且恢复后可编辑", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    act(() =>
+      useStructuredStore.setState((state) => ({
+        capabilities: { ...state.capabilities, commands: [] },
+      })),
+    );
+    expect(screen.getByTestId("keeper-submit")).toBeDisabled();
+    expect(screen.getByTestId("keeper-cmd-grant_clue")).toBeDisabled();
+    expect(screen.getByText(/服务端未开放该主持操作/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent).toHaveLength(0);
+    act(() =>
+      useStructuredStore.setState((state) => ({
+        capabilities: { ...state.capabilities, commands: ["publish_message"] },
+      })),
+    );
+    expect(screen.getByTestId("keeper-submit")).toBeEnabled();
+  });
+  it("断线与同步中不展示可提交表单，恢复连接后恢复", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    for (const connection of ["disconnected", "connecting"] as const) {
+      act(() => useAppStore.setState({ connection }));
+      expect(screen.queryByTestId("keeper-submit")).toBeNull();
+      expect(
+        screen.getByText(
+          connection === "connecting"
+            ? "正在连接并同步权威状态，请求未提交。"
+            : "连接已断开，请求未提交。",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("keeper-cmd-publish_message")).toBeDisabled();
+    }
+    act(() => useAppStore.setState({ connection: "connected" }));
+    expect(screen.getByTestId("keeper-submit")).toBeEnabled();
+    expect(sent).toHaveLength(0);
+  });
+  it("renders waiting conditions and ruling notes as genuine multi-line fields", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-resolve_intent"));
+    const conditions =
+      screen.getByLabelText("已告知条件（一行一条，避免重复劝留）");
+    expect(conditions.tagName).toBe("TEXTAREA");
+    expect(screen.getByLabelText("尚未执行什么").tagName).toBe("TEXTAREA");
+    expect(screen.getByLabelText("说明").tagName).toBe("TEXTAREA");
+    fireEvent.change(conditions, {
+      target: { value: "医生需要确认身份\n先询问开放时间" },
+    });
+    expect(conditions).toHaveValue("医生需要确认身份\n先询问开放时间");
+    expect(sent).toHaveLength(0);
+  });
+  it("optional enum fields visibly remain unspecified instead of displaying a fake success or thread operation", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-resolve_intent"));
+    expect(screen.getByLabelText("领域结果")).toHaveValue("");
+    expect(screen.getByLabelText("交互线程操作（可选）")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("领域结果"), {
+      target: { value: "success" },
+    });
+    expect(screen.getByLabelText("领域结果")).toHaveValue("success");
+    fireEvent.change(screen.getByLabelText("领域结果"), {
+      target: { value: "" },
+    });
+    expect(screen.getByLabelText("领域结果")).toHaveValue("");
+    expect(sent).toHaveLength(0);
+  });
+  it.each([
+    {
+      target: { kind: "unresolved", text: "门边生锈的锁" },
+      select: "unresolved:",
+    },
+    {
+      target: { kind: "scene_object", id: "door:lock" },
+      select: "scene_object:door:lock",
+    },
+  ])(
+    "retains $target.kind item targets through preparation and explicit submission",
+    ({ target, select }) => {
+      enableStructured({ user_id: null, mode: "human" });
+      useStructuredStore.setState((state) => ({
+        targets: [
+          ...state.targets,
+          { kind: "scene_object", id: "door:lock", name: "生锈的门锁" },
+        ],
+      }));
+      useStructuredStore.getState().applyEvent({
+        ...EVENT_FIXTURES.snapshot,
+        type: "intent_pending",
+        payload: {
+          request_id: "target-item",
+          investigator_id: "inv-alice",
+          summary: "使用物品",
+          action: {
+            kind: "use_item",
+            item_id: "item_bandage",
+            quantity: 1,
+            operation: "custom",
+            approach: "将绷带绕在锁边避免划伤",
+            target,
+          },
+        },
+      });
+      render(<KeeperConsole />);
+      fireEvent.click(screen.getByTestId("btn-keeper-console"));
+      fireEvent.click(screen.getByRole("button", { name: "准备使用" }));
+      expect(screen.getByLabelText("目标（可选）")).toHaveValue(select);
+      if (target.kind === "unresolved")
+        expect(screen.getByLabelText("描述对象")).toHaveValue(target.text);
+      expect(sent).toHaveLength(0);
+      fireEvent.click(screen.getByTestId("keeper-submit"));
+      expect(sent).toHaveLength(1);
+      expect((sent[0].payload as { target: unknown }).target).toEqual(target);
+    },
+  );
+  it("prepares the exact item request without consuming, settling or submitting it", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.getState().applyEvent({
+      ...EVENT_FIXTURES.snapshot,
+      type: "intent_pending",
+      payload: {
+        request_id: "item-player-1",
+        investigator_id: "inv-alice",
+        summary: "使用随身物品",
+        action: {
+          kind: "use_item",
+          item_id: "item_bandage",
+          quantity: 2,
+          operation: "包扎",
+          target: { kind: "npc", id: "john_whitcroft" },
+          approach: "先清洗伤口",
+        },
+      },
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByRole("button", { name: "准备使用" }));
+    expect(screen.getByLabelText("调查员")).toHaveValue("inv-alice");
+    expect(screen.getByLabelText("物品")).toHaveValue("item_bandage");
+    expect(screen.getByLabelText("数量")).toHaveValue(2);
+    expect(screen.getByLabelText("用法")).toHaveValue("包扎");
+    expect(screen.getByLabelText("补充做法")).toHaveValue("先清洗伤口");
+    expect(screen.getByLabelText("扣减物品")).not.toBeChecked();
+    expect(sent).toHaveLength(0);
+    expect(useStructuredStore.getState().requests["item-player-1"].status).toBe(
+      "queued",
+    );
+    // Original known target survives preparation; no free text intent parser.
+    expect(screen.getByLabelText("目标（可选）")).toHaveValue(
+      "npc:john_whitcroft",
+    );
+    act(() =>
+      useStructuredStore.setState((state) => ({
+        capabilities: {
+          ...state.capabilities,
+          commands: state.capabilities.commands.filter(
+            (kind) => kind !== "use_item",
+          ),
+        },
+      })),
+    );
+    expect(screen.getByRole("button", { name: "准备使用" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "准备使用" }));
+    expect(sent).toHaveLength(0);
+  });
+  it("offers all exact skills only for the selected investigator", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.getState().applySnapshot({
+      keeper_investigators: [
+        { investigator_id: "alice", name: "甲", skills: { rare_skill: 17 } },
+        { investigator_id: "bob", name: "乙", skills: { other_skill: 71 } },
+      ],
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-request_check"));
+    fireEvent.change(screen.getByLabelText("调查员"), {
+      target: { value: "alice" },
+    });
+    expect(
+      document.querySelector(
+        '#keeper-skill-options option[value="rare_skill"]',
+      ),
+    ).toHaveTextContent("17%");
+    expect(
+      document.querySelector(
+        '#keeper-skill-options option[value="other_skill"]',
+      ),
+    ).toBeNull();
+    fireEvent.change(screen.getByLabelText("调查员"), {
+      target: { value: "bob" },
+    });
+    expect(
+      document.querySelector(
+        '#keeper-skill-options option[value="other_skill"]',
+      ),
+    ).toHaveTextContent("71%");
+    expect(
+      document.querySelector(
+        '#keeper-skill-options option[value="rare_skill"]',
+      ),
+    ).toBeNull();
+    expect(sent).toHaveLength(0);
+  });
+  it("receives a full player request live; quick actions only prepare explicit forms", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    const text =
+      "我详细说明自己准备调查的方式。".repeat(12) +
+      "最后这句话不能被摘要截断。";
+    act(() =>
+      useStructuredStore.getState().applyEvent({
+        ...EVENT_FIXTURES.snapshot,
+        type: "intent_pending",
+        payload: {
+          request_id: "player-long",
+          investigator_id: "inv-alice",
+          summary: text.slice(0, 80),
+          action: { kind: "freeform", text },
+        },
+      }),
+    );
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "准备检定" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "准备检定" }));
+    expect(screen.getByLabelText("关联请求")).toHaveValue("player-long");
+    fireEvent.click(screen.getByRole("button", { name: "准备裁定" }));
+    expect(screen.getByLabelText("玩家请求")).toHaveValue("player-long");
+    expect(screen.getByLabelText("领域结果")).toHaveValue("not_executed");
+    fireEvent.click(screen.getByRole("button", { name: "准备回应" }));
+    expect(
+      document.querySelector('[data-field="audience_kind"] select'),
+    ).toHaveValue("investigators");
+    expect(screen.getByLabelText("接收调查员")).toHaveValue("inv-alice");
+    expect(sent).toHaveLength(0);
+    act(() =>
+      useStructuredStore.getState().applyEvent({
+        ...EVENT_FIXTURES.snapshot,
+        type: "action_status",
+        cause_request_id: "player-long",
+        payload: {
+          request_id: "player-long",
+          status: "completed",
+          outcome: "not_executed",
+        },
+      }),
+    );
+    expect(
+      screen.queryByTestId("keeper-pending-request"),
+    ).not.toBeInTheDocument();
+  });
+  it("offers the correct character list for each speech identity and clears stale IDs", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    expect(screen.queryByLabelText("身份 ID")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("发言身份"), {
+      target: { value: "npc" },
+    });
+    fireEvent.change(screen.getByLabelText("身份 ID"), {
+      target: { value: "john_whitcroft" },
+    });
+    fireEvent.change(screen.getByLabelText("发言身份"), {
+      target: { value: "investigator" },
+    });
+    expect(screen.getByLabelText("身份 ID")).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "爱丽丝（inv-alice）" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /john_whitcroft/ }),
+    ).not.toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+  });
+  it("keeps namespace colons in the selected investigator target", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState({
+      targets: [
+        { kind: "investigator", id: "default:调查员乙", name: "调查员乙" },
+      ],
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-present_information"));
+    fireEvent.change(screen.getByLabelText("线索"), {
+      target: { value: "clue_death_certificate" },
+    });
+    fireEvent.change(screen.getByLabelText("目标"), {
+      target: { value: "investigator:default:调查员乙" },
+    });
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect((sent[0].payload as { target: unknown }).target).toEqual({
+      kind: "investigator",
+      id: "default:调查员乙",
+    });
+  });
+  it("shows Chinese choices without changing protocol values and confirms only server outcomes", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    expect(screen.getByRole("option", { name: "守秘人旁白" })).toHaveValue(
+      "keeper",
+    );
+    expect(screen.getByRole("option", { name: "所有人" })).toHaveValue(
+      "public",
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "内容" }), {
+      target: { value: "雨渐渐停了。" },
+    });
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(screen.getByRole("status")).toHaveTextContent("等待服务端确认");
+    expect(screen.getByTestId("keeper-submit")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent).toHaveLength(1);
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      "服务端已确认提交",
+    );
+    const id = String(sent[0].command_id);
+    act(() =>
+      useStructuredStore.getState().applyEvent({
+        ...EVENT_FIXTURES.actionCompleted,
+        type: "action_ack",
+        payload: { request_id: id, status: "queued" },
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "服务端已收件，等待本次命令结算",
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      "服务端已确认提交",
+    );
+    expect(screen.getByTestId("keeper-submit")).toBeDisabled();
+    act(() =>
+      useStructuredStore.getState().applyEvent({
+        ...EVENT_FIXTURES.actionCompleted,
+        payload: { command_id: id, status: "completed", detail: "旁白已发布" },
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("服务端已确认提交");
+    expect(screen.getByRole("status")).toHaveTextContent("旁白已发布");
+    expect(screen.getByTestId("keeper-submit")).toBeEnabled();
+  });
+
+  it("keeps the narration draft and displays the actual server rejection", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.change(screen.getByRole("textbox", { name: "内容" }), {
+      target: { value: "未发布的草稿" },
+    });
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    act(() =>
+      useStructuredStore
+        .getState()
+        .applyRequestError(
+          String(sent[0].command_id),
+          "revision_conflict",
+          "世界版本已变化",
+          true,
+        ),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("未完成");
+    expect(screen.getByRole("status")).not.toHaveTextContent("已确认提交");
+    expect(screen.getByRole("textbox", { name: "内容" })).toHaveValue(
+      "未发布的草稿",
+    );
+  });
+
+  it("selects actual investigator recipients without typing their IDs", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState({
+      targets: [
+        { kind: "investigator", id: "inv-one", name: "调查员甲" },
+        { kind: "investigator", id: "inv-two", name: "调查员乙" },
+      ],
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-grant_clue"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "调查员甲" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "调查员乙" }));
+    expect(screen.getByRole("textbox", { name: "接收调查员" })).toHaveValue(
+      "inv-one,inv-two",
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "调查员甲" }));
+    expect(screen.getByRole("textbox", { name: "接收调查员" })).toHaveValue(
+      "inv-two",
+    );
+    expect(sent).toHaveLength(0);
+  });
+
+  it("opens ready for narration and preserves its draft while distributing a clue", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    const draft = "雨声落在窗沿。\n医生将一份病历放到你的面前。";
+    fireEvent.change(screen.getByRole("textbox", { name: "内容" }), {
+      target: { value: draft },
+    });
+    fireEvent.click(screen.getByTestId("keeper-cmd-grant_clue"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-publish_message"));
+    expect(screen.getByRole("textbox", { name: "内容" })).toHaveValue(draft);
+    expect(screen.getByRole("button", { name: "发布叙事" })).toBeEnabled();
+    expect(sent).toHaveLength(0);
+  });
+
+  it("clears private drafts and closes the workspace when changing worlds", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.change(screen.getByRole("textbox", { name: "内容" }), {
+      target: { value: "旧世界的主持秘密" },
+    });
+    act(() =>
+      useStructuredStore.setState({
+        identity: {
+          ...useStructuredStore.getState().identity,
+          worldId: "another-world",
+        },
+      }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    expect(screen.getByRole("textbox", { name: "内容" })).toHaveValue("");
+    expect(sent).toHaveLength(0);
+  });
+
   it("没有 keeper_console 能力时不渲染入口", () => {
     render(<KeeperConsole />);
     expect(screen.queryByTestId("btn-keeper-console")).not.toBeInTheDocument();
@@ -101,15 +626,15 @@ describe("KeeperConsole", () => {
     }
   });
 
-  it("非 keeper 打开时命令禁用并说明需要权限", () => {
+  it("非 keeper 不显示主持入口，即使服务器支持主持命令", () => {
     enableStructured({ user_id: "user-keeper", mode: "human" });
     useOnlineStore.setState({
       user: { id: "user-player", username: "player" },
     });
     render(<KeeperConsole />);
-    fireEvent.click(screen.getByTestId("btn-keeper-console"));
-    expect(screen.getByTestId("keeper-unauthorized")).toBeInTheDocument();
-    expect(screen.getByTestId("keeper-cmd-grant_clue")).toBeDisabled();
+    expect(screen.queryByTestId("btn-keeper-console")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(sent).toHaveLength(0);
   });
 
   it("NPC 发言提交的 payload 使用 M0 speaker 形态", () => {
@@ -132,14 +657,9 @@ describe("KeeperConsole", () => {
         target: { value: "john_whitcroft" },
       },
     );
-    fireEvent.change(
-      document.querySelector(
-        '[data-field="text"] select, [data-field="text"] input',
-      )!,
-      {
-        target: { value: "停尸房不对外开放。" },
-      },
-    );
+    fireEvent.change(document.querySelector('[data-field="text"] textarea')!, {
+      target: { value: "停尸房不对外开放。" },
+    });
     fireEvent.click(screen.getByTestId("keeper-submit"));
 
     expect(sent).toHaveLength(1);
@@ -196,7 +716,7 @@ describe("KeeperConsole", () => {
     );
     fireEvent.change(
       document.querySelector(
-        '[data-field="recipient_investigator_ids"] select, [data-field="recipient_investigator_ids"] input',
+        '[data-field="recipient_investigator_ids"] input[type="text"]',
       )!,
       { target: { value: "inv-alice" } },
     );
@@ -286,7 +806,7 @@ describe("KeeperConsole", () => {
     // 快照里的线索是 keeper 视角的完整登记表。
     expect(screen.getByText(/clue_death_certificate/)).toBeInTheDocument();
     expect(screen.getByTestId("keeper-material-missing")).toHaveTextContent(
-      "服务端未提供主持专属资料条目",
+      "本模组暂未提供额外的主持资料",
     );
   });
 

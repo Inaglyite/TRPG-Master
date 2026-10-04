@@ -248,7 +248,7 @@ export function sendPlayerText(text: string): { ok: boolean; reason?: string } {
   }
   if (!structured.ok) return { ok: false, reason: structured.reason };
   // 玩家气泡立即回显；进度与结果由结构化状态卡承载，不占用旧回合的输入禁用。
-  addMsg("player", text, true);
+  addMsg("player", text, true, "action_request");
   useAppStore.getState().setChoices([]);
   useAppStore.getState().setEnding(null);
   return { ok: true };

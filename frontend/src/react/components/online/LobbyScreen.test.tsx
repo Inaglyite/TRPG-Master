@@ -98,7 +98,7 @@ describe("LobbyScreen 房间列表", () => {
     fireEvent.change(screen.getByLabelText("选择模组"), {
       target: { value: "example.whispering-archive@1.0.0" },
     });
-    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
+    fireEvent.click(screen.getByRole("radio", { name: "人类主持" }));
     fireEvent.click(screen.getByRole("button", { name: "创建房间" }));
     expect(createRoom).toHaveBeenCalledWith(
       "example.whispering-archive@1.0.0",
@@ -113,10 +113,7 @@ describe("LobbyScreen 房间列表", () => {
     fireEvent.change(screen.getByLabelText("选择模组"), {
       target: { value: "example.whispering-archive@1.0.0" },
     });
-    fireEvent.click(screen.getByLabelText(/结构化操作模式/));
-    fireEvent.change(screen.getByLabelText(/主持方式/), {
-      target: { value: "agent" },
-    });
+    fireEvent.click(screen.getByRole("radio", { name: "AI 主持" }));
     fireEvent.click(screen.getByRole("button", { name: "创建房间" }));
     expect(createRoom).toHaveBeenCalledWith(
       "example.whispering-archive@1.0.0",

@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from src.storage.database import (
     EventOutbox,
     World,
+    WorldMember,
     WorldState,
     session_scope,
     utcnow,
@@ -138,6 +139,18 @@ class StructuredGateway:
             try:
                 return resolve_player_principal(session, world_id, effective)
             except StructuredError:
+                # Observing committed public state is separate from submitting
+                # actions. A viewer has no investigator IDs, even if an old
+                # claim still exists. _resolve_principal continues to reject
+                # viewer action/check/roll/command frames independently.
+                member = session.execute(
+                    select(WorldMember).where(
+                        WorldMember.world_id == world_id,
+                        WorldMember.user_id == effective,
+                    )
+                ).scalar_one_or_none()
+                if member is not None and member.role == "viewer":
+                    return Principal(kind="viewer", user_id=effective)
                 return None
 
     # ------------------------------------------------------------------

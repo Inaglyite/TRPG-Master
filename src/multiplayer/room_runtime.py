@@ -110,7 +110,7 @@ class RoomEventHub:
                 and self._visibility_allows(connection, event.visibility)
             ]
             latest_event_id = self._event_id
-        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        delivered = all(await self._wait_deliveries(deliveries)) if deliveries else True
         return {
             "gap": False,
             "latest_event_id": latest_event_id,
@@ -147,7 +147,7 @@ class RoomEventHub:
             ]
             connection.active = True
             latest_event_id = self._event_id
-        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        delivered = all(await self._wait_deliveries(deliveries)) if deliveries else True
         return {
             "gap": False,
             "latest_event_id": latest_event_id,
@@ -236,7 +236,7 @@ class RoomEventHub:
             if connection is None or not self._is_authorized(connection):
                 return False
             delivery = self._queue_send_unlocked(connection, dict(payload))
-        return await delivery
+        return await asyncio.shield(delivery)
 
     async def send_batch(
         self,
@@ -255,7 +255,7 @@ class RoomEventHub:
                 self._queue_send_unlocked(connection, dict(payload))
                 for payload in payload_factory(self._event_id, tuple(self._events))
             ]
-        return all(await asyncio.gather(*deliveries)) if deliveries else True
+        return all(await self._wait_deliveries(deliveries)) if deliveries else True
 
     async def send_snapshot_with_replay(
         self,
@@ -293,7 +293,7 @@ class RoomEventHub:
                 self._queue_send_unlocked(connection, dict(payload)) for payload in ordered
             ]
             replay_cursor = self._event_id
-        return all(await asyncio.gather(*deliveries)), replay_cursor
+        return all(await self._wait_deliveries(deliveries)), replay_cursor
 
     async def build_at_boundary(
         self,
@@ -339,8 +339,15 @@ class RoomEventHub:
             if on_enqueued is not None:
                 on_enqueued()
         if deliveries:
-            await asyncio.gather(*deliveries)
+            await self._wait_deliveries(deliveries)
         return event_id
+
+    @staticmethod
+    async def _wait_deliveries(deliveries: list[asyncio.Task[bool]]) -> list[bool]:
+        # Once queued, transport delivery belongs to the hub, not the calling
+        # socket handler. A departing caller must not cancel another member's
+        # send_tail. Each delivery still checks authorization and has a deadline.
+        return list(await asyncio.gather(*(asyncio.shield(task) for task in deliveries)))
 
     def _queue_send_unlocked(
         self,
@@ -360,7 +367,7 @@ class RoomEventHub:
     ) -> bool:
         if previous is not None:
             try:
-                await previous
+                await asyncio.shield(previous)
             except asyncio.CancelledError:
                 return False
         async with self._lock:
@@ -485,7 +492,7 @@ class RoomEventHub:
                 and self._can_receive(connection, event.visibility)
             ]
             latest_event_id = self._event_id
-        delivered = all(await asyncio.gather(*deliveries)) if deliveries else True
+        delivered = all(await self._wait_deliveries(deliveries)) if deliveries else True
         return {
             "gap": False,
             "latest_event_id": latest_event_id,

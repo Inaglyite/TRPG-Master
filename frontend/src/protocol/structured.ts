@@ -106,7 +106,11 @@ export const moveActionSchema = z.object({
 
 export const freeformActionSchema = z.object({
   kind: z.literal("freeform"),
-  text: z.string().min(1).max(2000),
+  // JSON Schema maxLength counts Unicode code points, not UTF-16 units.
+  text: z
+    .string()
+    .min(1)
+    .refine((text) => Array.from(text).length <= 2000, "行动文字最多 2000 字"),
 });
 
 export const structuredActionSchema = z.discriminatedUnion("kind", [
@@ -162,6 +166,38 @@ export const checkResponseSchema = z.object({
   decision: z.enum(CHECK_DECISIONS),
 });
 export type CheckResponse = z.infer<typeof checkResponseSchema>;
+
+/** cancel_request.json: cancellation is a separately acknowledged request. */
+export const cancelRequestSchema = z
+  .object({
+    type: z.literal("cancel_request"),
+    protocol_version: z.literal(STRUCTURED_PROTOCOL_VERSION),
+    request_id: z.string().min(1).max(160),
+    world_id: z.string().min(1).max(160),
+    target_request_id: z.string().min(1).max(160),
+    expected_revision: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export function buildCancelRequest(
+  targetRequestId: string,
+  identity: StructuredIdentity,
+  requestId = newRequestId(),
+) {
+  const problem = identityProblem(identity);
+  if (problem) return { ok: false as const, reason: problem };
+  const parsed = cancelRequestSchema.safeParse({
+    type: "cancel_request",
+    protocol_version: STRUCTURED_PROTOCOL_VERSION,
+    request_id: requestId,
+    world_id: identity.worldId,
+    target_request_id: targetRequestId,
+    expected_revision: identity.expectedRevision,
+  });
+  return parsed.success
+    ? { ok: true as const, request: parsed.data }
+    : { ok: false as const, reason: describeIssue(parsed.error) };
+}
 
 /**
  * M0 冻结的主持命令集合（command_request.json 的 oneOf）。
@@ -516,6 +552,37 @@ export type MemoryQueryFilters = {
   charBudget?: number;
 };
 
+/** Same input bounds as memory_query.json; never silently narrow a search. */
+export function memoryQueryFilterError(
+  filters: MemoryQueryFilters,
+): string | null {
+  if (filters.topics && filters.topics.length > 6)
+    return "主题最多 6 个，请减少后再查询；输入未被截断。";
+  if (filters.topics?.some((topic) => [...topic].length > 40))
+    return "每个主题最多 40 字，请缩短后再查询。";
+  if (filters.text && [...filters.text].length > 200)
+    return "查询文本最多 200 字，请缩短后再查询；输入已保留。";
+  for (const id of [filters.characterId, filters.sceneId]) {
+    if (id !== undefined && (!id || [...id].length > 160))
+      return "角色或场景标识不合法，请重新选择。";
+  }
+  if (
+    filters.limit !== undefined &&
+    (!Number.isInteger(filters.limit) ||
+      filters.limit < 1 ||
+      filters.limit > 20)
+  )
+    return "记忆查询条数须为 1 至 20 的整数。";
+  if (
+    filters.charBudget !== undefined &&
+    (!Number.isInteger(filters.charBudget) ||
+      filters.charBudget < 200 ||
+      filters.charBudget > 4000)
+  )
+    return "记忆字符预算须为 200 至 4000 的整数。";
+  return null;
+}
+
 /** M5：主持侧只读记忆查询帧（玩家侧不发送；服务端同样会拒绝）。 */
 export function buildMemoryQuery(
   queryId: string,
@@ -524,7 +591,7 @@ export function buildMemoryQuery(
   const payload: Record<string, unknown> = {};
   if (filters.characterId) payload.character_id = filters.characterId;
   if (filters.sceneId) payload.scene_id = filters.sceneId;
-  if (filters.topics?.length) payload.topics = filters.topics.slice(0, 6);
+  if (filters.topics?.length) payload.topics = [...filters.topics];
   if (filters.text) payload.text = filters.text;
   if (filters.limit !== undefined) payload.limit = filters.limit;
   if (filters.charBudget !== undefined)

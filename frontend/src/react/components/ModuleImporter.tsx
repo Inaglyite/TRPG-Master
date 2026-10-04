@@ -1,58 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 
-import { backendHttpOrigin } from "../../backend-url";
+import {
+  uploadModulePackage,
+  type ModulePackageSummary,
+} from "../../api/modulePackages";
+import { useAppStore } from "../../state/app-store";
+import { useStartStore } from "../../state/start-store";
 import { safeSend } from "../../ws";
 import { useDelayedClose } from "./transitions";
+import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
+import { useDialogKeyboard } from "./useDialogKeyboard";
 
 const maxBytes = 64 * 1024 * 1024;
-const backendOrigin = backendHttpOrigin();
-type Summary = {
-  module_key: string;
-  package_id: string;
-  version: string;
-  title: string;
-  author: string;
-  description: string;
-  system: string;
-  capabilities: string[];
-  file_count: number;
-  warnings: string[];
-};
-
-async function upload(endpoint: "inspect" | "import", file: File) {
-  const response = await fetch(`${backendOrigin}/api/modules/${endpoint}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/vnd.trpg-master.module+zip",
-      "X-Module-Filename": encodeURIComponent(file.name),
-    },
-    body: file,
-  });
-  let payload: any;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(`守秘人返回了无法解析的响应（HTTP ${response.status}）`);
-  }
-  if (!response.ok || !payload.ok) {
-    const error = new Error(
-      payload.error || `导入失败（HTTP ${response.status}）`,
-    );
-    (error as Error & { details?: string[] }).details = Array.isArray(
-      payload.details,
-    )
-      ? payload.details
-      : [];
-    throw error;
-  }
-  return payload;
+export function ModuleImporter() {
+  const mode = useAppStore((state) => state.mode);
+  return mode === "local" ? <LocalModuleImporter /> : null;
 }
 
-export function ModuleImporter() {
+function LocalModuleImporter() {
+  const trigger = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const panel = useRef<HTMLElement>(null);
   const sequence = useRef(0);
+  const alive = useRef(true);
+  const upload = useRef<AbortController | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary] = useState<ModulePackageSummary | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -60,6 +33,34 @@ export function ModuleImporter() {
   const [error, setError] = useState("");
   // 延迟关闭：退出动画期间保留面板内容，隐藏后再清空表单状态。
   const { rendered, closing } = useDelayedClose(open);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      sequence.current++;
+      upload.current?.abort();
+    };
+  }, []);
+  useEffect(
+    () =>
+      useAppStore.subscribe((state, previous) => {
+        if (
+          previous.connection === "connected" &&
+          state.connection !== "connected"
+        ) {
+          sequence.current++;
+          upload.current?.abort();
+          setBusy(false);
+          setError(
+            "连接已中断，尚未确认操作结果。请重新选择文件检查；已安装的模组不会被撤销。",
+          );
+          setSummary(null);
+          setStatus("连接已中断，请重连后重新检查。");
+          setStatusKind("error");
+        }
+      }),
+    [],
+  );
   useEffect(() => {
     if (rendered) return;
     setFile(null);
@@ -72,14 +73,17 @@ export function ModuleImporter() {
     sequence.current++;
     setOpen(false);
   };
-  useEffect(() => {
-    if (!open) return;
-    const listener = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("keydown", listener);
-    return () => document.removeEventListener("keydown", listener);
-  }, [open, busy]);
+  useDialogKeyboard(panel, open && rendered, busy, close, trigger);
+  const beginUpload = () => {
+    upload.current?.abort();
+    upload.current = new AbortController();
+    return upload.current.signal;
+  };
+  const isCurrent = (current: number) =>
+    alive.current &&
+    current === sequence.current &&
+    useAppStore.getState().mode === "local" &&
+    !useStartStore.getState().gameStarted;
   const inspect = async (selected: File) => {
     if (!selected.name.toLowerCase().endsWith(".trpgmod")) {
       setStatus("请选择扩展名为 .trpgmod 的模组包");
@@ -92,6 +96,7 @@ export function ModuleImporter() {
       return;
     }
     const current = ++sequence.current;
+    const signal = beginUpload();
     setFile(selected);
     setSummary(null);
     setError("");
@@ -100,13 +105,13 @@ export function ModuleImporter() {
     setStatus(`正在检查 ${selected.name}`);
     setStatusKind("working");
     try {
-      const payload = await upload("inspect", selected);
-      if (current !== sequence.current) return;
+      const payload = await uploadModulePackage("inspect", selected, signal);
+      if (!isCurrent(current)) return;
       setSummary(payload.module);
       setStatus(`已通过格式与安全检查：${payload.module.title}`);
       setStatusKind("success");
     } catch (reason) {
-      if (current !== sequence.current) return;
+      if (!isCurrent(current)) return;
       const caught = reason as Error & { details?: string[] };
       setError(
         [caught.message || "无法检查模组包", ...(caught.details || [])].join(
@@ -116,21 +121,31 @@ export function ModuleImporter() {
       setStatus(caught.message);
       setStatusKind("error");
     } finally {
-      if (current === sequence.current) setBusy(false);
+      if (isCurrent(current)) setBusy(false);
     }
   };
   const install = async () => {
-    if (!file || !summary) return;
+    if (
+      !file ||
+      !summary ||
+      busy ||
+      useAppStore.getState().connection !== "connected"
+    )
+      return;
+    const current = ++sequence.current;
+    const signal = beginUpload();
+    setError("");
     setBusy(true);
     setStatus(`正在安装 ${summary.title}`);
     setStatusKind("working");
     try {
-      const payload = await upload("import", file);
+      const payload = await uploadModulePackage("import", file, signal);
+      if (!isCurrent(current)) return;
       const imported = payload.module;
       setStatus(
         payload.already_installed
-          ? `「${imported.title}」已经安装，已为你切换`
-          : `已导入「${imported.title}」v${imported.version}`,
+          ? `「${imported.title}」已经安装，已请求切换`
+          : `已导入「${imported.title}」v${imported.version}，已请求切换`,
       );
       setStatusKind("success");
       setOpen(false);
@@ -138,6 +153,7 @@ export function ModuleImporter() {
       setFile(null);
       setSummary(null);
     } catch (reason) {
+      if (!isCurrent(current)) return;
       const caught = reason as Error & { details?: string[] };
       setError(
         [caught.message || "模组安装失败", ...(caught.details || [])].join(
@@ -147,13 +163,14 @@ export function ModuleImporter() {
       setStatus(caught.message);
       setStatusKind("error");
     } finally {
-      setBusy(false);
+      if (isCurrent(current)) setBusy(false);
     }
   };
   return (
     <>
       <button
         id="btn-import-module"
+        ref={trigger}
         type="button"
         disabled={busy}
         onClick={() => {
@@ -191,8 +208,11 @@ export function ModuleImporter() {
             if (event.target === event.currentTarget) close();
           }}
         >
-          <div
+          <ArchiveFolderPanel
+            ref={panel}
+            className="module-folder"
             id="module-import-panel"
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="module-import-title"
@@ -204,11 +224,20 @@ export function ModuleImporter() {
                 </div>
                 <h2 id="module-import-title">导入模组</h2>
               </div>
-              <button id="module-import-close" disabled={busy} onClick={close}>
+              <button
+                id="module-import-close"
+                type="button"
+                aria-label="关闭模组导入"
+                disabled={busy}
+                onClick={close}
+              >
                 ✕
               </button>
             </div>
-            <div className="module-import-body">
+            <div className="module-import-body" data-dialog-scroll>
+              <p className="module-import-source">
+                本地模组库 · .trpgmod · 最大 64 MiB
+              </p>
               <h3 id="module-import-name">
                 {summary?.title ||
                   (error ? "模组包无法导入" : "正在检查模组包…")}
@@ -242,6 +271,15 @@ export function ModuleImporter() {
                   {error}
                 </div>
               )}
+              {!summary && !busy && file && (
+                <button
+                  type="button"
+                  className="btn-ghost module-retry"
+                  onClick={() => void inspect(file)}
+                >
+                  重新检查
+                </button>
+              )}
             </div>
             <div className="module-import-actions">
               <button id="module-import-cancel" disabled={busy} onClick={close}>
@@ -255,7 +293,7 @@ export function ModuleImporter() {
                 {busy && summary ? "正在安装…" : "导入并切换"}
               </button>
             </div>
-          </div>
+          </ArchiveFolderPanel>
         </div>
       )}
     </>

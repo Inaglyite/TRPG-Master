@@ -104,7 +104,8 @@ function roleFor(request) {
   return url.searchParams.get("role") || "player-a";
 }
 
-function startServer({ port, scenario = "full" }) {
+function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
+  const keeperUi = ["keeper-ui", "keeper-ui-readonly"].includes(scenario);
   const server = http.createServer((req, res) => {
     if (req.url && req.url.startsWith("/api/health")) {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -211,7 +212,7 @@ function startServer({ port, scenario = "full" }) {
             ? { user_id: null, mode: "human" }
             : { mode: "human" },
         scene: { id: "miskatonic_university", name: "密斯卡托尼克大学" },
-        destinations: DESTINATIONS,
+        destinations,
         investigator_id: role === "player-b" ? "inv-bob" : "inv-alice",
         targets: PUBLIC_TARGETS,
         clues: CLUES,
@@ -246,9 +247,20 @@ function startServer({ port, scenario = "full" }) {
               max_hp: 12,
               san: 65,
               max_san: 65,
-              inventory: [],
+              inventory: scenario === "legacy-game" ? ["手电筒"] : [],
             }),
-            clues: JSON.stringify({}),
+            clues: JSON.stringify(
+              scenario === "legacy-game"
+                ? {
+                    investigation: [
+                      {
+                        id: "legacy-letter",
+                        text: "经典模式布局验收：一封需要向医生询问的信。",
+                      },
+                    ],
+                  }
+                : {},
+            ),
             scene: { name: "密斯卡托尼克大学" },
           }),
         );
@@ -297,7 +309,7 @@ function startServer({ port, scenario = "full" }) {
                 keeper_mode: "human",
                 server_capabilities: structuredCapabilities(),
                 scene: { id: "hobhouse_mansion", name: "霍布豪斯宅邸" },
-                destinations: DESTINATIONS,
+                destinations,
                 investigator_id: "inv-alice",
                 targets: PUBLIC_TARGETS,
                 clues: CLUES,
@@ -318,7 +330,7 @@ function startServer({ port, scenario = "full" }) {
               type: "scene_changed",
               payload: {
                 scene: { id: "miskatonic_medical", name: "旧世界的停尸房" },
-                destinations: DESTINATIONS,
+                destinations,
               },
             }),
           );
@@ -344,7 +356,7 @@ function startServer({ port, scenario = "full" }) {
               action.destination_scene_id === "miskatonic_medical"
                 ? { id: "miskatonic_medical", name: "密斯卡托尼克大学医学院" }
                 : { id: "miskatonic_university", name: "密斯卡托尼克大学" },
-            destinations: DESTINATIONS,
+            destinations,
           });
           send("action_status", {
             request_id: frame.request_id,
@@ -459,6 +471,12 @@ function startServer({ port, scenario = "full" }) {
           outcome: "success",
           detail: `命令 ${frame.kind} 已执行。`,
         });
+        if (scenario === "keeper-ui" && frame.kind === "resolve_draft") {
+          send("keeper_draft_resolved", {
+            draft_id: frame.payload.draft_id,
+            decision: frame.payload.decision,
+          });
+        }
         if (frame.kind === "grant_clue") {
           send("clue_granted", {
             investigator_id: (frame.payload.recipient_investigator_ids ||
@@ -484,23 +502,64 @@ function startServer({ port, scenario = "full" }) {
       }
 
       if (frame.type === "start") {
-        if (scenario !== "legacy-only") {
+        if (scenario !== "legacy-only" && scenario !== "legacy-game") {
           send("session_snapshot", {
             revision: 12,
             execution_profile: "structured_v1",
-            keeper_mode: "human",
-            server_capabilities: structuredCapabilities(),
-            keeper:
-              role === "keeper"
+            keeper_mode: keeperUi ? "assisted" : "human",
+            server_capabilities: keeperUi
+              ? {
+                  ...structuredCapabilities(),
+                  assisted_draft: true,
+                  agent_takeover: true,
+                  commands:
+                    scenario === "keeper-ui-readonly"
+                      ? []
+                      : [
+                          ...structuredCapabilities().commands,
+                          "resolve_draft",
+                          "control_keeper",
+                        ],
+                }
+              : structuredCapabilities(),
+            keeper: keeperUi
+              ? { user_id: "local", mode: "human" }
+              : role === "keeper"
                 ? { user_id: null, mode: "human" }
                 : { mode: "human" },
             scene: { id: "miskatonic_university", name: "密斯卡托尼克大学" },
-            destinations: DESTINATIONS,
+            destinations,
             investigator_id: role === "player-b" ? "inv-bob" : "inv-alice",
             targets: PUBLIC_TARGETS,
             clues: CLUES,
             items: ITEMS,
-            requests: [],
+            requests: keeperUi
+              ? [
+                  {
+                    request_id: "paused-layout-action",
+                    status: "paused",
+                    request_type: "action_request",
+                    summary:
+                      "调查员准备前往远在阿卡姆城另一端的医学院并继续调查遗体与值班医生的关系",
+                    detail: "模型调用超时",
+                  },
+                ]
+              : [],
+            keeper_drafts: keeperUi
+              ? [
+                  {
+                    draft_id: "draft-layout",
+                    summary: "建议先向医生出示死亡证明。",
+                    proposed_commands: [
+                      {
+                        kind: "advance_time",
+                        payload: { minutes: 10, reason: "准备交涉" },
+                      },
+                    ],
+                    narration: "医生低头看着你递来的文件，等待你的解释。",
+                  },
+                ]
+              : [],
             pending_checks: [],
             cursor: { event_id: eventId, revision: 12 },
           });

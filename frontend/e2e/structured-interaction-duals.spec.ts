@@ -280,7 +280,7 @@ async function bootStructuredWorld(
 
 async function fillKeeperField(page: Page, field: string, value: string) {
   const locator = page.locator(
-    `[data-field="${field}"] select, [data-field="${field}"] input, [data-field="${field}"] textarea`,
+    `[data-field="${field}"] select, [data-field="${field}"] input:not([type="checkbox"]), [data-field="${field}"] textarea`,
   );
   const tag = await locator.evaluate((node) => node.tagName);
   if (tag === "SELECT") await locator.selectOption(value);
@@ -390,7 +390,7 @@ function waitingCard(page: Page) {
 async function openMoveDialog(
   page: Page,
 ): Promise<Array<{ id: string; name: string }>> {
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
   await page.getByTestId("btn-move").click();
@@ -402,9 +402,7 @@ async function openMoveDialog(
       name: (
         node.querySelector(".structured-destination-name")?.textContent ?? ""
       ).trim(),
-      id: (
-        node.querySelector(".structured-destination-id")?.textContent ?? ""
-      ).trim(),
+      id: node.getAttribute("data-scene-id") ?? "",
     })),
   );
 }
@@ -435,9 +433,12 @@ async function playerMoveToNewScene(
   const destinations = await openMoveDialog(page);
   const target = destinations.find((item) => item.name !== sceneBefore);
   expect(target, "前往列表里应有不是当前场景的目的地").toBeTruthy();
+  expect(target!.id, "真实目的地必须有稳定场景 ID").not.toBe("");
   const before = countSentRequests(frames);
   await page
-    .locator(".structured-destination", { hasText: target!.id })
+    .locator(
+      `.structured-destination[data-scene-id=${JSON.stringify(target!.id)}]`,
+    )
     .click();
   await expect
     .poll(() => countSentRequests(frames), { timeout: 30_000 })
@@ -456,7 +457,7 @@ async function playerTextRequest(
   text: string,
 ): Promise<string> {
   const before = countSentRequests(frames);
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
   await page.locator("#user-input").fill(text);
@@ -477,7 +478,7 @@ async function playerMoveRequest(
     frame.includes('"type":"action_request"'),
   ).length;
   // 主持台刚关过：等它真的消失再点玩家入口，避免点击落在残留浮层上。
-  await expect(page.getByRole("dialog", { name: "主持台" })).toBeHidden({
+  await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeHidden({
     timeout: 10_000,
   });
   await page.getByTestId("btn-move").click();
@@ -569,7 +570,7 @@ test("对偶：换目的地 / 普通直接移动 / 取消", async ({ page }) => 
     (item) => item.name !== sceneBeforeCancel,
   );
   await expect(page.getByRole("dialog", { name: /前往/ })).toBeVisible();
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   await keeperPark(page, cancelId, cancelTarget!.id, "尚未出发");
   await expect(waitingCard(page)).toBeVisible();
   await keeperResolve(page, cancelId, "cancelled", true, openThreadId(frames));
@@ -579,7 +580,9 @@ test("对偶：换目的地 / 普通直接移动 / 取消", async ({ page }) => 
   expect(await page.locator(".header-scene-name").innerText()).toBe(
     sceneBeforeCancel,
   );
-  await expect(page.getByText("已取消")).toBeVisible();
+  await expect(
+    page.locator(`[data-request-id=${JSON.stringify(cancelId)}]`),
+  ).toContainText("已取消");
   // 判定过程零模型调用：开局那一步之外不再碰模型
   expect(modelRequests.length).toBe(boot.modelCallsAfterBoot);
 });
@@ -594,7 +597,7 @@ test("追问：正常回答并等待是合法完成，原交互保持存活，�
   // 目的地从「前往」对话框实时挑（快照列表在移动后会滞后）
   const dialogDestinations = await openMoveDialog(page);
   const target = dialogDestinations[0];
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   const sceneBefore = await page.locator(".header-scene-name").innerText();
   const movesBefore = eventPayload(frames.received, "scene_changed").length;
 
@@ -668,7 +671,7 @@ test("移动已抵达后：关联请求的「尚未执行」明细必须同时�
   await bootStructuredWorld(page, frames, "human");
   const dialogDestinations = await openMoveDialog(page);
   const target = dialogDestinations[0];
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
 
   const wishId = await playerTextRequest(
     page,
@@ -701,7 +704,7 @@ test("刷新不丢公开待办，且同一动作只落账一次", async ({ page 
   // 目的地要从「前往」对话框实时挑（快照列表在移动后会滞后）
   const dialogDestinations = await openMoveDialog(page);
   const target = dialogDestinations[0];
-  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
 
   // 挂一个待办 → 刷新 → 卡片应恢复（快照里的公开待办）
   const wishId = await playerTextRequest(

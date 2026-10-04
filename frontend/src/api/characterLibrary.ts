@@ -1,6 +1,34 @@
 import { z } from "zod";
 
-import { ApiError, apiFetch, apiHttpOrigin } from "./client";
+import { ApiError, apiFetch, type ApiRequestInit } from "./client";
+import { useAppStore } from "../state/app-store";
+import { useOnlineStore } from "../state/online-store";
+import { currentCloudRequestGeneration } from "./request-context";
+
+async function libraryFetch<S extends z.ZodTypeAny>(
+  path: string,
+  schema: S,
+  init: ApiRequestInit = {},
+) {
+  const mode = useAppStore.getState().mode;
+  const userId = useOnlineStore.getState().user?.id;
+  const result = await apiFetch(path, schema, {
+    ...init,
+    local: mode === "local",
+    timeoutMs: 20000,
+  });
+  if (
+    mode !== useAppStore.getState().mode ||
+    (mode === "online" && userId !== useOnlineStore.getState().user?.id)
+  ) {
+    throw new ApiError(
+      "模式或账号已变化，旧角色库请求已忽略",
+      0,
+      "request_context_changed",
+    );
+  }
+  return result;
+}
 
 /**
  * 角色库 API：本地与云端共用同一组端点（本地走回环信任、云端走 Session）。
@@ -59,7 +87,7 @@ const writeResultSchema = z.looseObject({
 
 /** 本地模式无 Session，但同一组端点由回环/启动凭证信任校验放行。 */
 export async function listCharacterLibrary(): Promise<LibraryEntry[]> {
-  const data = await apiFetch(
+  const data = await libraryFetch(
     "/api/character-library",
     z.looseObject({ entries: z.array(libraryEntrySchema) }),
   );
@@ -70,7 +98,7 @@ export async function listCharacterLibrary(): Promise<LibraryEntry[]> {
 export async function inspectLibraryCard(
   payload: unknown,
 ): Promise<InspectResult> {
-  return apiFetch("/api/character-library/inspect", inspectResultSchema, {
+  return libraryFetch("/api/character-library/inspect", inspectResultSchema, {
     method: "POST",
     body: payload,
   });
@@ -79,7 +107,7 @@ export async function inspectLibraryCard(
 export async function createLibraryEntry(
   payload: unknown,
 ): Promise<{ entry: LibraryEntry; warnings: string[] }> {
-  return apiFetch("/api/character-library", writeResultSchema, {
+  return libraryFetch("/api/character-library", writeResultSchema, {
     method: "POST",
     body: payload,
   });
@@ -89,7 +117,7 @@ export async function updateLibraryEntry(
   id: string,
   payload: unknown,
 ): Promise<{ entry: LibraryEntry; warnings: string[] }> {
-  return apiFetch(
+  return libraryFetch(
     `/api/character-library/${encodeURIComponent(id)}`,
     writeResultSchema,
     { method: "PUT", body: payload },
@@ -100,7 +128,7 @@ export async function updateLibraryEntry(
 export async function getLibraryCard(
   id: string,
 ): Promise<Record<string, unknown>> {
-  const data = await apiFetch(
+  const data = await libraryFetch(
     `/api/character-library/${encodeURIComponent(id)}`,
     z.object({ card: z.record(z.string(), z.unknown()) }),
   );
@@ -108,7 +136,7 @@ export async function getLibraryCard(
 }
 
 export async function duplicateLibraryEntry(id: string): Promise<LibraryEntry> {
-  const data = await apiFetch(
+  const data = await libraryFetch(
     `/api/character-library/${encodeURIComponent(id)}/duplicate`,
     writeResultSchema,
     { method: "POST" },
@@ -117,7 +145,7 @@ export async function duplicateLibraryEntry(id: string): Promise<LibraryEntry> {
 }
 
 export async function deleteLibraryEntry(id: string): Promise<void> {
-  await apiFetch(
+  await libraryFetch(
     `/api/character-library/${encodeURIComponent(id)}`,
     z.undefined(),
     { method: "DELETE" },
@@ -129,14 +157,27 @@ export async function exportLibraryEntry(
   id: string,
   name: string,
 ): Promise<void> {
-  const response = await fetch(
-    `${apiHttpOrigin()}/api/character-library/${encodeURIComponent(id)}/export`,
-    { credentials: "include" },
+  const mode = useAppStore.getState().mode;
+  const generation = currentCloudRequestGeneration();
+  const data = await libraryFetch(
+    `/api/character-library/${encodeURIComponent(id)}/export`,
+    z.record(z.string(), z.unknown()),
   );
-  if (!response.ok) {
-    throw new ApiError("导出失败，请重试", response.status, null);
+  // Download is itself an effect: recheck after the final await, not only
+  // while reading HTTP data. Local exports ignore unrelated cloud changes.
+  if (
+    mode !== useAppStore.getState().mode ||
+    (mode === "online" && generation !== currentCloudRequestGeneration())
+  ) {
+    throw new ApiError(
+      "会话已变化，旧角色卡未下载",
+      0,
+      "request_context_changed",
+    );
   }
-  const blob = await response.blob();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

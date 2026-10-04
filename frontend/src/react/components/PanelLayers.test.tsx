@@ -673,7 +673,7 @@ describe("SavePanel 存档位 → 时间线两级视图", () => {
 
   it("删除存档位需二次确认；当前存档位没有删除入口", () => {
     const archiveAdventure = vi.spyOn(panels, "archiveAdventure");
-    render(<SavePanel />);
+    const { unmount } = render(<SavePanel />);
 
     const current = document.querySelector(
       '[data-adventure="root"]',
@@ -690,13 +690,14 @@ describe("SavePanel 存档位 → 时间线两级视图", () => {
     expect(screen.getByText(/条时间线将一并归档/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
-    // 先播「抽走 + 收拢」离场动画，动画结束后才真正下发删除命令
-    expect(archiveAdventure).not.toHaveBeenCalled();
+    // 确认时立即发送；退出动画不应在卸载或切换会话后再发一次。
+    expect(archiveAdventure).toHaveBeenCalledExactlyOnceWith("root-2");
     expect(other.className).toContain("leaving");
+    unmount();
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    expect(archiveAdventure).toHaveBeenCalledWith("root-2");
+    expect(archiveAdventure).toHaveBeenCalledExactlyOnceWith("root-2");
   });
 
   it("联机模式不提供删除/重命名存档位入口", () => {

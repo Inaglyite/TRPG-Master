@@ -71,7 +71,16 @@ def _structured_activity(session, candidates: list[tuple[str, dict]]) -> set[str
     ]
     if not structured_ids:
         return set()
-    active: set[str] = set()
+    # A committed explicit local creation is already playable, even before
+    # the human keeper publishes their first command. Placeholder worlds lack
+    # this server-owned receipt and remain hidden/eligible for reuse.
+    active: set[str] = {
+        world_id
+        for world_id, metadata in candidates
+        if world_id in structured_ids
+        and isinstance(metadata.get("local_creation"), dict)
+        and metadata["local_creation"].get("ready") is True
+    }
     for model in (PlayerRequest, GameCommand, CheckRequest):
         active.update(
             row[0]
@@ -821,7 +830,5 @@ class WorldBranchService:
             adventure["slot_index"] = index
         # 展示顺序与编号解耦：最近游玩的存档位排在最上面。列表里因此可能
         # 出现 SAVE 03 位于 SAVE 01 之上——编号是身份，不是位置。
-        adventures.sort(
-            key=lambda item: str(item.get("updated_at") or ""), reverse=True
-        )
+        adventures.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return adventures

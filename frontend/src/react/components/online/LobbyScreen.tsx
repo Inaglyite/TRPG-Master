@@ -12,7 +12,7 @@ import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 import { roomStatusLabel } from "./room-status";
-import { KeeperModeSelect } from "./KeeperModeSelect";
+import { PlayStylePicker } from "./PlayStylePicker";
 import type { KeeperMode } from "../../../protocol/structured";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -82,7 +82,7 @@ export function LobbyScreen() {
           <p className="online-subtitle">创建房间，或用邀请码加入朋友的调查</p>
         </div>
         <div className="online-header-side online-account">
-          <span className="online-user" title={user?.id}>
+          <span className="online-user" title={user?.username}>
             {user?.username}
           </span>
           <button
@@ -258,6 +258,17 @@ export function LobbyScreen() {
               </option>
             ))}
           </select>
+        </div>
+        <PlayStylePicker
+          structured={structuredRoom}
+          keeperMode={keeperMode}
+          disabled={createBusy}
+          onChange={(value) => {
+            setStructuredRoom(value.structured);
+            setKeeperMode(value.keeperMode);
+          }}
+        />
+        <div className="platform-create-actions">
           <button
             type="button"
             className="btn-primary"
@@ -272,22 +283,6 @@ export function LobbyScreen() {
             {createBusy ? "创建中……" : "创建房间"}
           </button>
         </div>
-        <label className="online-inline-toggle">
-          <input
-            type="checkbox"
-            checked={structuredRoom}
-            disabled={createBusy}
-            onChange={(event) => setStructuredRoom(event.target.checked)}
-          />
-          <span>结构化操作模式：按钮提交行动，由主持判断并执行</span>
-        </label>
-        {structuredRoom && (
-          <KeeperModeSelect
-            value={keeperMode}
-            disabled={createBusy}
-            onChange={setKeeperMode}
-          />
-        )}
         {createError && (
           <p className="online-notice online-notice--error" role="alert">
             {createError}

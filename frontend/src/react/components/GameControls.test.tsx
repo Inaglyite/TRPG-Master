@@ -1,8 +1,18 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as options from "../../options";
 
 import { useAppStore } from "../../state/app-store";
 import { DecisionModal, GameControls } from "./GameControls";
+import { STRUCTURED_CAPABILITIES } from "../../protocol/structured-fixtures";
+import {
+  initialStructuredState,
+  useStructuredStore,
+} from "../../state/structured-store";
+import { useOnlineStore } from "../../state/online-store";
+
+beforeEach(() => useStructuredStore.setState({ ...initialStructuredState }));
+afterEach(() => vi.restoreAllMocks());
 
 describe("game interaction components", () => {
   beforeEach(() => {
@@ -13,6 +23,21 @@ describe("game interaction components", () => {
       dialog: null,
       ending: null,
     });
+  });
+
+  it("发送被拒时显示原因并原样保留玩家输入", () => {
+    vi.spyOn(options, "sendPlayerText").mockReturnValue({
+      ok: false,
+      reason: "行动文字最多 2000 字，请缩短后再发送。",
+    });
+    useAppStore.setState({ mode: "local", inputEnabled: true });
+    render(<GameControls />);
+    const input = screen.getByRole("textbox");
+    const draft = "  我先询问医生，再观察门口。  ";
+    fireEvent.change(input, { target: { value: draft } });
+    fireEvent.click(screen.getByRole("button", { name: "⏎" }));
+    expect(input).toHaveValue(draft);
+    expect(screen.getByRole("alert")).toHaveTextContent("最多 2000 字");
   });
 
   it("renders choices and input state from the store", () => {
@@ -107,6 +132,46 @@ describe("GameControls 多人行动门禁", () => {
       ending: null,
     });
   });
+
+  it.each([
+    { role: "player", id: "pc", connection: "connected", enabled: true },
+    { role: "owner", id: "", connection: "connected", enabled: false },
+    { role: "viewer", id: "stale-pc", connection: "connected", enabled: false },
+    { role: "player", id: "pc", connection: "disconnected", enabled: false },
+  ] as const)(
+    "structured $role/$connection: async actions respect control and connection",
+    ({ role, id, connection, enabled }) => {
+      useStructuredStore.setState({
+        capabilities: STRUCTURED_CAPABILITIES,
+        identity: { ...initialStructuredState.identity, investigatorId: id },
+      });
+      useOnlineStore.setState({
+        roomConnection: connection,
+        members: [
+          { user_id: "u1", username: "alice", role, investigator: null },
+        ],
+      });
+      render(<GameControls />);
+      const input = screen.getByRole("textbox");
+      if (enabled) {
+        expect(input).toBeEnabled();
+        expect(screen.getByRole("button", { name: "⏎" })).toBeEnabled();
+      } else {
+        expect(input).toBeDisabled();
+        expect(screen.getByRole("button", { name: "⏎" })).toBeDisabled();
+      }
+      if (role === "viewer")
+        expect(input).toHaveAttribute(
+          "placeholder",
+          "旁观模式：只能查看公开叙事。",
+        );
+      if (!id)
+        expect(input).toHaveAttribute(
+          "placeholder",
+          "你当前未控制调查员，请使用主持台。",
+        );
+    },
+  );
 
   it("非当前行动者：输入与选项禁用并显示等待", () => {
     render(<GameControls />);

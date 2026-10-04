@@ -16,12 +16,14 @@ import {
   actionDigest,
   buildActionRequest,
   buildCheckResponse,
+  buildCancelRequest,
   buildCommandRequest,
   buildFreeRollRequest,
   freeRollReason,
   interactionPath,
   newCommandId,
   buildMemoryQuery,
+  memoryQueryFilterError,
   newRequestId,
   parseStructuredEvent,
   structuredUnavailableReason,
@@ -48,6 +50,7 @@ export const RETRY_AFTER_TIMEOUT_MS = 8000;
 
 const sequencer = new StructuredEventSequencer();
 const timers = new Map<string, number>();
+export const MEMORY_QUERY_TIMEOUT_MS = 15_000;
 
 function nowMs(): number {
   return Date.now();
@@ -86,9 +89,10 @@ function armAckTimer(requestId: string): void {
     timers.delete(requestId);
     const store = useStructuredStore.getState();
     const request = store.requests[requestId];
-    if (!request || request.awaitingAck) return;
+    if (!request || request.awaitingAck || request.serverReceived) return;
     store.markAwaitingAck(requestId);
     if (request.sends <= 1) {
+      if (structuredReplayReason(requestId)) return;
       // 同 request_id 重发：服务端按幂等键返回原结果，不会重复结算。
       emit(request.payload);
       store.markSent(requestId);
@@ -151,6 +155,24 @@ function gateReason(requiresInvestigator = true): string | null {
     state.protocolNotice,
   );
   if (unavailable) return unavailable;
+  const online = useOnlineStore.getState();
+  if (
+    !requiresInvestigator &&
+    useAppStore.getState().mode === "online" &&
+    !online.members.some(
+      (member) =>
+        member.user_id === online.user?.id && member.can_keeper === true,
+    )
+  )
+    return "当前账号没有主持授权，主持操作未提交。";
+  if (
+    requiresInvestigator &&
+    useAppStore.getState().mode === "online" &&
+    online.members.find((member) => member.user_id === online.user?.id)
+      ?.role === "viewer"
+  ) {
+    return "旁观模式只能查看公开叙事，不能提交玩家行动。";
+  }
   const identity = currentStructuredIdentity();
   if (!identity) return "还没有进入世界，无法提交结构化请求。";
   if (requiresInvestigator && !identity.investigatorId)
@@ -158,12 +180,20 @@ function gateReason(requiresInvestigator = true): string | null {
   if (identity.expectedRevision <= 0) {
     return "尚未收到服务端世界版本号，请稍候或刷新后重试。";
   }
+  if (useAppStore.getState().connection === "connecting") {
+    return "正在连接并同步权威状态，请求未提交。";
+  }
   if (useAppStore.getState().connection !== "connected") {
     return "连接已断开，请求未提交。";
   }
   // 不检查 inputEnabled：那是旧回合通道的行动顺序概念。结构化请求进入主持
   // 待办，任何时刻都可以提交，由服务端用 revision 与事务裁决成败。
   return null;
+}
+
+/** The UI and send path use the same identity/connection gate for player requests. */
+export function structuredPlayerRequestReason(): string | null {
+  return gateReason();
 }
 
 function trackAndSend(
@@ -207,7 +237,9 @@ export function sendFreeformIntent(text: string): StructuredSendResult | null {
   if (interactionPath(state.capabilities) !== "structured") return null;
   const body = text.trim();
   if (!body) return reject("请输入你想做的事。");
-  const action = { kind: "freeform" as const, text: body.slice(0, 2000) };
+  if (Array.from(body).length > 2000)
+    return reject("行动文字最多 2000 字，请缩短后再发送。草稿已保留。");
+  const action = { kind: "freeform" as const, text: body };
   // 协议不可用时这里会返回明确的拒绝原因，调用方必须原样展示，不能改走文字。
   return sendStructuredAction(action, `行动：${body.slice(0, 24)}`);
 }
@@ -264,6 +296,8 @@ export function sendMemoryQuery(
     return reject("当前世界不使用结构化协议，无法查询记忆。");
   }
   if (!state.capabilities.memoryQuery) return reject("服务端未开放记忆查询。");
+  const invalidFilters = memoryQueryFilterError(filters);
+  if (invalidFilters) return reject(invalidFilters);
   if (
     state.identity.keeperMode === "" ||
     state.identity.keeperMode === undefined
@@ -280,6 +314,7 @@ export function sendMemoryQuery(
     world_id:
       state.identity.worldId || useAppStore.getState().activeWorldId || "",
   };
+  if (state.memoryQuery.queryId) clearTimer(state.memoryQuery.queryId);
   useStructuredStore
     .getState()
     .beginMemoryQuery(
@@ -292,6 +327,18 @@ export function sendMemoryQuery(
       .applyMemoryQueryError("查询未能发出，请检查连接后重试。");
     return reject("查询未能发出，请检查连接后重试。");
   }
+  const timer = globalThis.setTimeout(() => {
+    timers.delete(queryId);
+    const current = useStructuredStore.getState();
+    if (
+      current.memoryQuery.queryId === queryId &&
+      current.memoryQuery.status === "querying"
+    )
+      current.applyMemoryQueryError(
+        "记忆查询等待超时，尚未收到结果。可以检查连接后重新查询；查询不会改变世界状态。",
+      );
+  }, MEMORY_QUERY_TIMEOUT_MS);
+  timers.set(queryId, timer as unknown as number);
   return { ok: true, requestId: queryId, payload };
 }
 
@@ -321,12 +368,20 @@ export function sendCheckResponse(
 }
 
 /** 主持命令（KeeperConsole）。命令 ID 由调用方决定，便于 harness 重试。 */
+export function keeperCommandBlockReason(kind: string): string | null {
+  const blocked = gateReason(false);
+  if (blocked) return blocked;
+  if (!useStructuredStore.getState().capabilities.commands.includes(kind))
+    return `服务端未开放该主持操作（${kind}），请求未提交。`;
+  return null;
+}
+
 export function sendKeeperCommand(
   kind: string,
   payload: Record<string, unknown>,
   commandId?: string,
 ): StructuredSendResult {
-  const blocked = gateReason(false);
+  const blocked = keeperCommandBlockReason(kind);
   if (blocked) return reject(blocked);
   const identity = currentStructuredIdentity();
   if (!identity) return reject("还没有进入世界。");
@@ -353,6 +408,8 @@ export function resubmitWithFreshRevision(
   const store = useStructuredStore.getState();
   const request = store.requests[requestId];
   if (!request) return reject("没有找到原请求。");
+  const replayProblem = structuredReplayReason(requestId, true);
+  if (replayProblem) return reject(replayProblem);
   const identity = currentStructuredIdentity();
   if (!identity) return reject("还没有进入世界。");
   const payload = request.payload as { expected_revision?: number } | undefined;
@@ -367,8 +424,8 @@ export function resubmitWithFreshRevision(
     // 版本没变：同 ID 重试即可，交给调用方走 resend。
     return null;
   }
-  const blocked = gateReason(false);
-  if (blocked) return reject(blocked);
+  // structuredReplayReason already checked the original frame's player/keeper
+  // gate. Rechecking as a keeper here would incorrectly reject ordinary players.
   const rebuilt = { ...(request.payload as Record<string, unknown>) };
   rebuilt.expected_revision = identity.expectedRevision;
   if (typeof rebuilt.request_id === "string") {
@@ -399,11 +456,100 @@ export function resendStructuredRequest(
   const store = useStructuredStore.getState();
   const request = store.requests[requestId];
   if (!request) return reject("没有找到原请求。");
+  const replayProblem = structuredReplayReason(requestId);
+  if (replayProblem) return reject(replayProblem);
   if (!emit(request.payload)) return reject("请求未能发出，请检查连接后重试。");
   store.noteRetry(requestId);
   store.markSent(requestId);
   armAckTimer(requestId);
   return { ok: true, requestId, payload: request.payload };
+}
+
+export function structuredReplayReason(
+  requestId: string,
+  freshRevision = false,
+): string | null {
+  const request = useStructuredStore.getState().requests[requestId];
+  if (!request) return "没有找到原请求。";
+  const payload = request.payload as Record<string, unknown> | null;
+  if (!payload || !payload.type || !payload.world_id)
+    return "重连快照不含原始请求载荷，无法安全重发；请向守秘人确认当前处理状态。";
+  const reason = gateReason(payload.type !== "command_request");
+  if (reason) return reason;
+  if (payload.type === "command_request") {
+    const unsupported = keeperCommandBlockReason(String(payload.kind || ""));
+    if (unsupported) return unsupported;
+  }
+  const identity = currentStructuredIdentity();
+  if (payload.world_id !== identity?.worldId)
+    return "原请求属于另一世界，不能在当前世界重发。";
+  if (
+    payload.investigator_id &&
+    payload.investigator_id !== identity?.investigatorId
+  )
+    return "原请求属于另一调查员，不能用当前身份重发。";
+  if (request.status === "paused")
+    return "处理已暂停，请联系主持恢复；重发不会自动继续。";
+  if (
+    ["completed", "cancelled", "declined"].includes(request.status) &&
+    !(
+      freshRevision &&
+      request.status === "declined" &&
+      request.errorCode === "revision_conflict"
+    )
+  )
+    return "该请求已经结束，请查看已结算结果，不要重复执行。";
+  if (["superseded", "discarded"].includes(request.errorCode || ""))
+    return "原请求已作废，不能再次重发。";
+  return null;
+}
+
+export function structuredCancelReason(requestId: string): string | null {
+  const blocked = gateReason();
+  if (blocked) return blocked;
+  const store = useStructuredStore.getState();
+  const request = store.requests[requestId];
+  if (!request) return "没有找到原行动。";
+  const payload = request.payload as Record<string, unknown> | null;
+  if ((payload?.type || request.requestType) !== "action_request")
+    return "只能取消玩家行动，不能撤销已经结算的操作。";
+  if (!request.serverReceived || request.status !== "queued")
+    return "只能申请取消已收件且尚未被主持接手的行动。";
+  const identity = currentStructuredIdentity();
+  if (
+    (payload?.investigator_id || request.investigatorId) !==
+    identity?.investigatorId
+  )
+    return "只能取消自己调查员的行动。";
+  if (payload?.world_id && payload.world_id !== identity?.worldId)
+    return "行动属于另一世界。";
+  if (
+    Object.values(store.requests).some(
+      (entry) =>
+        entry.kind === "cancel" &&
+        (entry.payload as Record<string, unknown> | null)?.target_request_id ===
+          requestId &&
+        !entry.errorCode &&
+        ["queued", "processing"].includes(entry.status),
+    )
+  )
+    return "取消申请已发出，等待服务端确认。";
+  return null;
+}
+
+export function sendCancelAction(requestId: string): StructuredSendResult {
+  const reason = structuredCancelReason(requestId);
+  if (reason) return reject(reason);
+  const identity = currentStructuredIdentity();
+  if (!identity) return reject("还没有进入世界。");
+  const built = buildCancelRequest(requestId, identity);
+  if (!built.ok) return reject(built.reason);
+  return trackAndSend(
+    built.request.request_id,
+    "cancel",
+    "取消行动申请",
+    built.request,
+  );
 }
 
 /** 丢弃一个未发出去的请求草稿（例如目标已失效）。 */
@@ -471,7 +617,26 @@ export function handleStructuredPayload(raw: unknown): StructuredInbound {
       envelope.cause_request_id ||
       "";
     if (requestId) clearTimer(requestId);
+    if (
+      envelope.type === "request_error" &&
+      requestId &&
+      requestId === useStructuredStore.getState().memoryQuery.queryId
+    )
+      useStructuredStore
+        .getState()
+        .applyMemoryQueryError(
+          String(
+            envelope.payload.message ||
+              envelope.payload.detail ||
+              "记忆查询被服务端拒绝，请检查条件或权限。",
+          ),
+        );
   }
+  if (
+    envelope.type === "memory_query_result" &&
+    typeof envelope.payload.query_id === "string"
+  )
+    clearTimer(envelope.payload.query_id);
   useStructuredStore.getState().applyEvent(envelope);
   // 通过游标校验后，再把事件投影到既有 UI（消息、骰子动画、场景、角色数值）。
   applyStructuredEffects(envelope);
@@ -480,6 +645,11 @@ export function handleStructuredPayload(raw: unknown): StructuredInbound {
 
 /** 世界切换时重绑游标，旧世界迟到事件随后被判为 foreign_world。 */
 export function rebindStructuredWorld(worldId: string): void {
+  const store = useStructuredStore.getState();
+  if (store.memoryQuery.status === "querying")
+    store.applyMemoryQueryError(
+      "世界连接已重新同步，旧记忆查询结果尚未确认，请重新查询。",
+    );
   sequencer.rebindWorld(worldId || null);
   for (const requestId of timers.keys()) clearTimer(requestId);
   useStructuredStore.getState().bindWorld(worldId);

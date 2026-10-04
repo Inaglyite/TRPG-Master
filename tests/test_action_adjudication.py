@@ -162,6 +162,7 @@ def test_prose_cannot_move_player_even_with_positive_arrival_wording(narrative):
 
 
 def test_full_turn_executes_model_selected_difficulty_and_persists_outcome(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.engine.API_KEY", "configured-test-key")
     monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
     context = RuntimeContext(PROJECT_ROOT, tmp_path, "adjudication-test", "mansion_of_madness").ensure_initialized()
     context.world_store.restore(world())
@@ -254,6 +255,7 @@ def test_no_take_disclaimer_blocks_acquisition_discovery():
 
 
 def test_time_settlement_is_announced_to_narrator(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.app.engine.API_KEY", "configured-test-key")
     """A03：带时间结算的裁决结果必须向叙事模型声明已结算分钟数与跨度约束。"""
     monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
     context = RuntimeContext(PROJECT_ROOT, tmp_path, "adjudication-time", "mansion_of_madness").ensure_initialized()
