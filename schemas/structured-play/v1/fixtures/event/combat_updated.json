@@ -1,0 +1,33 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "combat_updated",
+  "cause_request_id": null,
+  "payload": {
+    "active": true,
+    "encounter_id": "enc-1",
+    "round": 1,
+    "phase": "awaiting_roll",
+    "turn_order": [
+      "inv-alice",
+      "guard"
+    ],
+    "current_actor": "inv-alice",
+    "outcome": null,
+    "participants": [
+      {
+        "id": "inv-alice",
+        "name": "爱丽丝",
+        "kind": "pc",
+        "hp": 11,
+        "max_hp": 12,
+        "conditions": []
+      }
+    ],
+    "awaiting_roll": true,
+    "awaiting_decision": false
+  }
+}

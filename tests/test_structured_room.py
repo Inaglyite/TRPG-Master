@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.app.runtime import RuntimeContext
 from src.modules.module_registry import ModuleRegistry
@@ -279,6 +280,49 @@ class StructuredRoomStartTests(unittest.IsolatedAsyncioTestCase):
             principal=Principal("player", "u-p", investigator_ids=("inv-p",)),
         )["items"]
         self.assertEqual(before, {i["label"]: i["id"] for i in after})
+
+    async def test_solo_initial_checkpoint_contains_selected_pc_and_stable_items(self):
+        from src.storage.persistence import load_game_artifacts, save_game
+
+        room = self._room()
+        room.play_mode = "solo"
+        save_game([], context=room.engine.context)  # realistic pre-selection checkpoint
+        _, old, _ = load_game_artifacts("slot_000", context=room.engine.context)
+        self.assertFalse(old.get("investigators"))
+        controller = _FakeController(self.db_url)
+        ws = _FakeWs()
+        await handle_structured_room_start(controller, room, ws, _FakeUser("u-k"), self.world_id)
+        self.assertEqual("playing", room.status)
+        _, saved, metadata = load_game_artifacts("slot_000", context=room.engine.context)
+        live = room.engine.context.world_store.load()
+        self.assertEqual("inv-p", saved["active_investigator_id"])
+        self.assertEqual(live["pc"], saved["pc"])
+        self.assertEqual(live["investigators"], saved["investigators"])
+        self.assertEqual(live["item_registry"], saved["item_registry"])
+        self.assertEqual(live["revision"], metadata["structured_event_cursor"]["revision"])
+        # A repeated start/ordinary reconnection must not overwrite newer play.
+        with patch("src.storage.persistence.save_game") as save:
+            await handle_structured_room_start(
+                controller, room, ws, _FakeUser("u-k"), self.world_id
+            )
+            save.assert_not_called()
+
+    async def test_solo_checkpoint_failure_does_not_announce_started_or_send_snapshots(self):
+        room = self._room()
+        room.play_mode = "solo"
+        controller = _FakeController(self.db_url)
+        ws = _FakeWs()
+        with patch(
+            "src.storage.persistence.save_game", side_effect=RuntimeError("internal storage")
+        ):
+            await handle_structured_room_start(
+                controller, room, ws, _FakeUser("u-k"), self.world_id
+            )
+        self.assertEqual("lobby", room.status)
+        self.assertEqual([], controller.status_calls)
+        self.assertEqual([], room.hub.direct)
+        self.assertEqual("start_checkpoint_failed", ws.sent[-1]["code"])
+        self.assertNotIn("internal storage", ws.sent[-1]["message"])
 
     async def test_start_without_claimed_investigators_rejected(self):
         other_world = (

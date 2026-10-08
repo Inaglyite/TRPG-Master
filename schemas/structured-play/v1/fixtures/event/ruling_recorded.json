@@ -1,0 +1,25 @@
+{
+  "protocol_version": 1,
+  "event_id": 60,
+  "world_id": "world-fixture-1",
+  "sequence": 30,
+  "revision": 13,
+  "type": "ruling_recorded",
+  "cause_request_id": "cmd-ruling",
+  "payload": {
+    "flags": [{ "id": "sealed", "type": "boolean", "value": true }],
+    "recent": [
+      {
+        "flag_id": "sealed",
+        "before": false,
+        "after": true,
+        "basis": "人类主持确认仪式已经完成。",
+        "user_id": "keeper-1",
+        "revision": 13
+      }
+    ],
+    "eligible_endings": [
+      { "id": "seal", "title": "封印完成", "ending_type": "good" }
+    ]
+  }
+}

@@ -51,19 +51,70 @@ _DISPOSITION_LABELS = {
     "unknown": "尚不明确",
 }
 _PREFLIGHT_NEGATIONS = (
-    "不开枪", "不要开枪", "别开枪", "不射击", "别射击", "放下枪", "收起枪",
-    "不攻击", "不要攻击", "停止攻击", "只是问", "假如", "假设", "如果",
-    "会怎样", "会怎么样",
+    "不开枪",
+    "不要开枪",
+    "别开枪",
+    "不射击",
+    "别射击",
+    "放下枪",
+    "收起枪",
+    "不攻击",
+    "不要攻击",
+    "停止攻击",
+    "只是问",
+    "假如",
+    "假设",
+    "如果",
+    "会怎样",
+    "会怎么样",
 )
 _PREFLIGHT_NON_ACTION_MARKERS = (
-    "能够", "可以", "可能", "是否", "是不是", "会不会", "能不能",
-    "为什么", "为何", "怎么会", "据说", "据称", "传闻", "例如",
+    "能够",
+    "可以",
+    "可能",
+    "是否",
+    "是不是",
+    "会不会",
+    "能不能",
+    "为什么",
+    "为何",
+    "怎么会",
+    "据说",
+    "据称",
+    "传闻",
+    "例如",
 )
 _PREFLIGHT_REPORTING_MARKERS = (
-    "告诉", "询问", "问", "听说", "听到", "看到", "看见", "目睹",
-    "认为", "觉得", "怀疑", "解释", "提到", "谈到", "讨论", "描述",
-    "调查", "得知", "发现", "证明", "推测", "想象", "回忆", "想知道",
-    "阻止", "避免", "防止", "命令", "要求", "不让",
+    "告诉",
+    "询问",
+    "问",
+    "听说",
+    "听到",
+    "看到",
+    "看见",
+    "目睹",
+    "认为",
+    "觉得",
+    "怀疑",
+    "解释",
+    "提到",
+    "谈到",
+    "讨论",
+    "描述",
+    "调查",
+    "得知",
+    "发现",
+    "证明",
+    "推测",
+    "想象",
+    "回忆",
+    "想知道",
+    "阻止",
+    "避免",
+    "防止",
+    "命令",
+    "要求",
+    "不让",
 )
 _PLAYER_ACTION_PREFIX_RE = re.compile(
     r"(?:^|[，,:：])\s*(?:我|我们|调查员)"
@@ -84,7 +135,9 @@ _MELEE_ATTACK_PATTERNS = (
     re.compile(r"(?:杀死|杀掉|砍死|刺死|捅死|勒死|掐死|殴打|袭击)"),
 )
 _WEAPON_THREAT_PATTERNS = (
-    re.compile(r"(?:用|拿|举|持|拔).{0,8}(?:枪|手枪|左轮|刀|剑).{0,20}(?:指着|指向|对准|瞄准|威胁|架在|抵住)"),
+    re.compile(
+        r"(?:用|拿|举|持|拔).{0,8}(?:枪|手枪|左轮|刀|剑).{0,20}(?:指着|指向|对准|瞄准|威胁|架在|抵住)"
+    ),
     re.compile(r"(?:枪口|刀尖|刀刃).{0,20}(?:指着|指向|对准|抵住)"),
     re.compile(r"(?:持枪|持刀|拔枪|拔刀).{0,16}(?:威胁|逼问|胁迫)"),
 )
@@ -105,12 +158,8 @@ def _entity_for(world: dict, entity_id: str) -> tuple[dict, str, str]:
     stable_id = stable_investigator_id(world, entity_id)
     investigator = investigator_entity(world, stable_id)
     investigators = world.get("investigators")
-    if (
-        stable_id == "pc"
-        or (
-            isinstance(investigators, dict)
-            and isinstance(investigators.get(stable_id), dict)
-        )
+    if stable_id == "pc" or (
+        isinstance(investigators, dict) and isinstance(investigators.get(stable_id), dict)
     ):
         if isinstance(investigator, dict):
             active_id = str(world.get("active_investigator_id") or "")
@@ -211,7 +260,9 @@ def _participant(world: dict, spec: dict) -> dict:
         "damage_spec": str(entity.get("damage_spec") or spec.get("damage_spec") or "1d3"),
         "hp": hp,
         "max_hp": max_hp,
-        "conditions": list(entity.get("conditions", [])) if isinstance(entity.get("conditions", []), list) else [],
+        "conditions": list(entity.get("conditions", []))
+        if isinstance(entity.get("conditions", []), list)
+        else [],
         "disposition": str(entity.get("disposition") or "unknown"),
         "hostile_to_pc": bool(
             spec.get("hostile_to_pc")
@@ -239,7 +290,11 @@ def start_combat(
         spec["id"] = stable_investigator_id(world, raw_id) if raw_id else ""
     player_ids = _player_investigator_ids(world)
     present_ids = {str(item.get("id") or "") for item in specs}
-    specs[0:0] = [{"id": investigator_id} for investigator_id in player_ids if investigator_id not in present_ids]
+    specs[0:0] = [
+        {"id": investigator_id}
+        for investigator_id in player_ids
+        if investigator_id not in present_ids
+    ]
 
     resolved: list[dict] = []
     seen: set[str] = set()
@@ -277,10 +332,19 @@ def start_combat(
         params = {
             key: value
             for key, value in initial_action.items()
-            if key in {
-                "actor_id", "target_id", "action_type", "description", "skill",
-                "weapon", "damage_spec", "damage_mode", "defender_choice",
-                "bonus_dice", "penalty_dice",
+            if key
+            in {
+                "actor_id",
+                "target_id",
+                "action_type",
+                "description",
+                "skill",
+                "weapon",
+                "damage_spec",
+                "damage_mode",
+                "defender_choice",
+                "bonus_dice",
+                "penalty_dice",
             }
         }
         params["actor_id"] = stable_investigator_id(
@@ -344,11 +408,8 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
         prompt_suffix = "[系统确认：玩家已在叙事开始前确认执行这次攻击，不要再次询问。]"
 
     return {
-        "decision": {
-            key: copy.deepcopy(value)
-            for key, value in pending.items()
-            if key != "action"
-        } | {"presentation": "chat"},
+        "decision": {key: copy.deepcopy(value) for key, value in pending.items() if key != "action"}
+        | {"presentation": "chat"},
         "authorization": {
             "kind": kind,
             "target_id": target.get("id"),
@@ -417,9 +478,8 @@ def assign_combat_actor(
     target = _find_participant(combat, investigator_id)
     if target.get("kind") != "pc":
         raise CombatError("只能把战斗行动权交给调查员")
-    if (
-        isinstance(world.get("investigators"), dict)
-        and not investigator_controller_user_id(world, investigator_id)
+    if isinstance(world.get("investigators"), dict) and not investigator_controller_user_id(
+        world, investigator_id
     ):
         raise CombatError("目标调查员当前没有控制者")
     if not _can_act(target):
@@ -432,10 +492,7 @@ def assign_combat_actor(
     current_index = order.index(current_id)
     target_index = order.index(investigator_id)
     distance = (target_index - current_index) % len(order)
-    skipped_ids = [
-        order[(current_index + offset) % len(order)]
-        for offset in range(distance)
-    ]
+    skipped_ids = [order[(current_index + offset) % len(order)] for offset in range(distance)]
     if distance and target_index <= current_index:
         combat["round"] = int(combat.get("round", 1)) + 1
         combat["defense_counts"] = {}
@@ -478,11 +535,7 @@ def combat_action(
 ) -> dict:
     combat = _require_combat(world)
     actor_id = stable_investigator_id(world, actor_id)
-    target_id = (
-        stable_investigator_id(world, target_id)
-        if target_id is not None
-        else None
-    )
+    target_id = stable_investigator_id(world, target_id) if target_id is not None else None
     if combat.get("pending_decision"):
         raise CombatError("仍有玩家决定尚未处理")
     if actor_id != combat.get("current_actor"):
@@ -513,7 +566,12 @@ def combat_action(
     if action_type in {"move", "other"}:
         summary = description or ("移动" if action_type == "move" else "执行其他动作")
         _append_log(combat, f"{actor['name']}：{summary}")
-        result = {"ok": True, "event": "action_resolved", "outcome": "completed", "description": summary}
+        result = {
+            "ok": True,
+            "event": "action_resolved",
+            "outcome": "completed",
+            "description": summary,
+        }
         _advance_turn(combat)
         return _with_state(result, combat)
 
@@ -533,13 +591,10 @@ def combat_action(
 
     if target["kind"] == "pc" and actor["kind"] == "npc":
         _mark_hostile_to_pc(world, actor, action.get("description", ""))
-        if (
-            isinstance(world.get("investigators"), dict)
-            and not investigator_controller_user_id(world, target["id"])
+        if isinstance(world.get("investigators"), dict) and not investigator_controller_user_id(
+            world, target["id"]
         ):
-            action["defender_choice"] = (
-                "dodge" if action_type == "melee" else "take_cover"
-            )
+            action["defender_choice"] = "dodge" if action_type == "melee" else "take_cover"
             resolved = _resolve_action(
                 world,
                 combat,
@@ -583,18 +638,21 @@ def combat_decide(
         roleplay_context = copy.deepcopy(pending.get("roleplay_context", {}))
         if option_id == "cancel_violence":
             combat["phase"] = "awaiting_action"
-            result = _with_state({
-                "ok": True,
-                "event": "action_cancelled",
-                "outcome": "cancelled",
-                "action_consumed": False,
-                "description": "玩家取消了对非敌对人物的不可逆攻击",
-                "violence_confirmation": {
-                    "confirmed": False,
-                    "target_was_non_hostile": True,
-                    "roleplay_context": roleplay_context,
+            result = _with_state(
+                {
+                    "ok": True,
+                    "event": "action_cancelled",
+                    "outcome": "cancelled",
+                    "action_consumed": False,
+                    "description": "玩家取消了对非敌对人物的不可逆攻击",
+                    "violence_confirmation": {
+                        "confirmed": False,
+                        "target_was_non_hostile": True,
+                        "roleplay_context": roleplay_context,
+                    },
                 },
-            }, combat)
+                combat,
+            )
         else:
             target = _find_participant(combat, action["target_id"])
             _mark_hostile_to_pc(world, target, action.get("description", ""))
@@ -619,18 +677,21 @@ def combat_decide(
                 _append_log(combat, "玩家在实施武力威胁前收起了武器")
             else:
                 combat["phase"] = "awaiting_action"
-            result = _with_state({
-                "ok": True,
-                "event": "action_cancelled",
-                "outcome": "cancelled",
-                "action_consumed": False,
-                "description": "玩家取消了对非敌对人物的武力威胁",
-                "threat_confirmation": {
-                    "confirmed": False,
-                    "target_was_non_hostile": True,
-                    "roleplay_context": roleplay_context,
+            result = _with_state(
+                {
+                    "ok": True,
+                    "event": "action_cancelled",
+                    "outcome": "cancelled",
+                    "action_consumed": False,
+                    "description": "玩家取消了对非敌对人物的武力威胁",
+                    "threat_confirmation": {
+                        "confirmed": False,
+                        "target_was_non_hostile": True,
+                        "roleplay_context": roleplay_context,
+                    },
                 },
-            }, combat)
+                combat,
+            )
         else:
             actor = _find_participant(combat, action["actor_id"])
             target = _find_participant(combat, action["target_id"])
@@ -663,7 +724,9 @@ def _request_violence_confirmation(
         "ok": True,
         "event": "decision_required",
         "requires_decision": True,
-        "decision": {key: copy.deepcopy(value) for key, value in pending.items() if key != "action"},
+        "decision": {
+            key: copy.deepcopy(value) for key, value in pending.items() if key != "action"
+        },
         "combat": _public_state(combat),
     }
 
@@ -689,8 +752,16 @@ def _build_violence_decision(world: dict, action: dict, target: dict) -> dict:
         "title": f"你真的要攻击{target['name']}吗？",
         "description": f"{context}。{roleplay_note}{consequences}",
         "options": [
-            {"id": "cancel_violence", "label": cancel_label, "description": "保留行动与当前资源，重新选择做法。"},
-            {"id": "confirm_violence", "label": "仍然攻击", "description": "接受人物、法律与案件后果并进行结算。"},
+            {
+                "id": "cancel_violence",
+                "label": cancel_label,
+                "description": "保留行动与当前资源，重新选择做法。",
+            },
+            {
+                "id": "confirm_violence",
+                "label": "仍然攻击",
+                "description": "接受人物、法律与案件后果并进行结算。",
+            },
         ],
         "default_option": "cancel_violence",
         "roleplay_context": profile,
@@ -714,7 +785,9 @@ def _request_threat_confirmation(
         "ok": True,
         "event": "decision_required",
         "requires_decision": True,
-        "decision": {key: copy.deepcopy(value) for key, value in pending.items() if key != "action"},
+        "decision": {
+            key: copy.deepcopy(value) for key, value in pending.items() if key != "action"
+        },
         "combat": _public_state(combat),
     }
 
@@ -740,8 +813,16 @@ def _build_threat_decision(world: dict, action: dict, target: dict) -> dict:
         "title": f"你真的要用武力威胁{target['name']}吗？",
         "description": f"{context}。{roleplay_note}{consequences}",
         "options": [
-            {"id": "cancel_threat", "label": cancel_label, "description": "收起武器，不消耗行动或弹药。"},
-            {"id": "confirm_threat", "label": "继续威胁", "description": "接受关系、法律与案件后果。"},
+            {
+                "id": "cancel_threat",
+                "label": cancel_label,
+                "description": "收起武器，不消耗行动或弹药。",
+            },
+            {
+                "id": "confirm_threat",
+                "label": "继续威胁",
+                "description": "接受关系、法律与案件后果。",
+            },
         ],
         "default_option": "cancel_threat",
         "roleplay_context": profile,
@@ -780,14 +861,13 @@ def _is_explicit_player_action(segment: str, match: re.Match[str]) -> bool:
     if any(marker in segment for marker in _PREFLIGHT_NON_ACTION_MARKERS):
         return False
 
-    prefix = segment[:match.start()].strip(" \t\"'“”‘’")
+    prefix = segment[: match.start()].strip(" \t\"'“”‘’")
     if any(marker in prefix for marker in _PREFLIGHT_REPORTING_MARKERS):
         return False
     if "被" in prefix or "让" in prefix:
         return False
     return bool(
-        _PLAYER_ACTION_PREFIX_RE.search(prefix)
-        or _IMPLICIT_ACTION_PREFIX_RE.fullmatch(prefix)
+        _PLAYER_ACTION_PREFIX_RE.search(prefix) or _IMPLICIT_ACTION_PREFIX_RE.fullmatch(prefix)
     )
 
 
@@ -822,7 +902,8 @@ def _preflight_target(world: dict, content: str) -> dict | None:
     if not any(pronoun in content for pronoun in pronouns):
         return None
     present = [
-        npc for npc in world.get("npcs", [])
+        npc
+        for npc in world.get("npcs", [])
         if isinstance(npc, dict) and npc.get("id") in present_ids
     ]
     return present[0] if len(present) == 1 else None
@@ -831,11 +912,7 @@ def _preflight_target(world: dict, content: str) -> dict | None:
 def _npc_aliases(npc: dict) -> set[str]:
     name = str(npc.get("name") or "").strip()
     aliases = {name, str(npc.get("id") or "").strip()}
-    aliases.update(
-        part.strip()
-        for part in re.split(r"[·•・\s]+", name)
-        if len(part.strip()) >= 2
-    )
+    aliases.update(part.strip() for part in re.split(r"[·•・\s]+", name) if len(part.strip()) >= 2)
     return {alias for alias in aliases if len(alias) >= 2}
 
 
@@ -908,13 +985,25 @@ def _request_player_defense(combat: dict, action: dict, actor: dict, target: dic
     if action["action_type"] == "melee":
         options = [
             {"id": "dodge", "label": "闪避", "description": "只求避开这次攻击。"},
-            {"id": "fight_back", "label": "反击", "description": "与对方正面对抗，胜出时可造成伤害。"},
-            {"id": "no_defense", "label": "不防御", "description": "不进行对抗，让攻击方正常检定。"},
+            {
+                "id": "fight_back",
+                "label": "反击",
+                "description": "与对方正面对抗，胜出时可造成伤害。",
+            },
+            {
+                "id": "no_defense",
+                "label": "不防御",
+                "description": "不进行对抗，让攻击方正常检定。",
+            },
         ]
         default_option = "dodge"
     else:
         options = [
-            {"id": "take_cover", "label": "寻找掩体", "description": "进行闪避检定，成功后令射击获得惩罚骰。"},
+            {
+                "id": "take_cover",
+                "label": "寻找掩体",
+                "description": "进行闪避检定，成功后令射击获得惩罚骰。",
+            },
             {"id": "no_defense", "label": "不找掩体", "description": "让攻击方正常进行射击检定。"},
         ]
         default_option = "take_cover"
@@ -924,7 +1013,8 @@ def _request_player_defense(combat: dict, action: dict, actor: dict, target: dic
         "id": decision_id,
         "kind": "combat_defense",
         "title": f"{actor['name']} 正在攻击你",
-        "description": action.get("description") or f"{actor['name']} 对 {target['name']} 发动攻击。",
+        "description": action.get("description")
+        or f"{actor['name']} 对 {target['name']} 发动攻击。",
         "options": options,
         "default_option": default_option,
         "target_investigator_id": target["id"],
@@ -937,7 +1027,9 @@ def _request_player_defense(combat: dict, action: dict, actor: dict, target: dic
         "ok": True,
         "event": "decision_required",
         "requires_decision": True,
-        "decision": {key: copy.deepcopy(value) for key, value in pending.items() if key != "action"},
+        "decision": {
+            key: copy.deepcopy(value) for key, value in pending.items() if key != "action"
+        },
         "combat": _public_state(combat),
     }
 
@@ -956,7 +1048,9 @@ def _resolve_action(world: dict, combat: dict, action: dict, rng: random.Random)
     return _with_state(result, combat)
 
 
-def _resolve_melee(world: dict, combat: dict, action: dict, actor: dict, target: dict, rng: random.Random) -> dict:
+def _resolve_melee(
+    world: dict, combat: dict, action: dict, actor: dict, target: dict, rng: random.Random
+) -> dict:
     attack_skill = action.get("skill") or "fighting_brawl"
     defense_choice = action.get("defender_choice") or "dodge"
     extra_bonus = min(2, int(combat.get("defense_counts", {}).get(target["id"], 0)))
@@ -979,14 +1073,20 @@ def _resolve_melee(world: dict, combat: dict, action: dict, actor: dict, target:
         defense_roll = _skill_roll(target, defense_skill, 0, 0, rng)
         if attack_roll["rank"] > defense_roll["rank"] and attack_roll["rank"] >= 1:
             outcome = "attacker_hit"
-        elif defense_choice == "fight_back" and defense_roll["rank"] > attack_roll["rank"] and defense_roll["rank"] >= 1:
+        elif (
+            defense_choice == "fight_back"
+            and defense_roll["rank"] > attack_roll["rank"]
+            and defense_roll["rank"] >= 1
+        ):
             outcome = "defender_hit"
         else:
             outcome = "defended"
 
     if outcome == "attacker_hit":
         spec = action.get("damage_spec") or actor.get("damage_spec", "1d3")
-        damage = _deal_damage(world, actor, target, spec, action.get("damage_mode", "normal"), attack_roll, rng)
+        damage = _deal_damage(
+            world, actor, target, spec, action.get("damage_mode", "normal"), attack_roll, rng
+        )
     elif outcome == "defender_hit":
         spec = target.get("damage_spec", "1d3")
         damage = _deal_damage(world, target, actor, spec, "normal", defense_roll, rng)
@@ -1009,7 +1109,9 @@ def _resolve_melee(world: dict, combat: dict, action: dict, actor: dict, target:
     }
 
 
-def _resolve_firearm(world: dict, combat: dict, action: dict, actor: dict, target: dict, rng: random.Random) -> dict:
+def _resolve_firearm(
+    world: dict, combat: dict, action: dict, actor: dict, target: dict, rng: random.Random
+) -> dict:
     if actor.get("kind") == "pc":
         try:
             check_investigator_firearm_ammo(
@@ -1074,7 +1176,9 @@ def _resolve_firearm(world: dict, combat: dict, action: dict, actor: dict, targe
     }
 
 
-def _skill_roll(participant: dict, skill_id: str, bonus: int, penalty: int, rng: random.Random) -> dict:
+def _skill_roll(
+    participant: dict, skill_id: str, bonus: int, penalty: int, rng: random.Random
+) -> dict:
     value = _number(participant.get("skills", {}).get(skill_id), _DEFAULT_SKILLS.get(skill_id, 20))
     net = max(-2, min(2, int(bonus or 0) - int(penalty or 0)))
     units = rng.randint(0, 9)
@@ -1206,11 +1310,7 @@ def _player_investigator_ids(world: dict) -> list[str]:
         ids = [
             str(investigator_id)
             for investigator_id, entity in investigators.items()
-            if (
-                investigator_id
-                and isinstance(entity, dict)
-                and entity.get("controller_user_id")
-            )
+            if (investigator_id and isinstance(entity, dict) and entity.get("controller_user_id"))
         ]
         if ids:
             active_id = str(world.get("active_investigator_id") or "")
@@ -1244,14 +1344,26 @@ def _advance_turn(combat: dict) -> None:
 
 
 def _check_combat_end(combat: dict) -> None:
-    pc_alive = any(p.get("kind") == "pc" and _can_act(p) for p in combat.get("participants", []))
-    npc_alive = any(p.get("kind") == "npc" and _can_act(p) for p in combat.get("participants", []))
-    if pc_alive and npc_alive:
-        return
+    participants = combat.get("participants", [])
+    investigators = [p for p in participants if p.get("kind") == "pc"]
+    npcs = [p for p in participants if p.get("kind") == "npc"]
+    pc_alive = any(_can_act(p) for p in investigators)
+    npc_alive = any(_can_act(p) for p in npcs)
+    # A pure investigator confrontation has no NPC side to defeat. Keep it
+    # active while multiple investigators can still act, rather than declaring
+    # victory solely because npc_alive is false.
+    if not npcs and len(investigators) >= 2:
+        if sum(_can_act(p) for p in investigators) >= 2:
+            return
+        outcome = "confrontation_resolved"
+    else:
+        if pc_alive and npc_alive:
+            return
+        outcome = "victory" if pc_alive else "defeat"
     combat["active"] = False
     combat["phase"] = "ended"
     combat["pending_decision"] = None
-    combat["outcome"] = "victory" if pc_alive else "defeat"
+    combat["outcome"] = outcome
     _append_log(combat, f"战斗结束：{combat['outcome']}")
 
 
@@ -1289,15 +1401,17 @@ def _record_violence_event(world: dict, action: dict, target: dict) -> None:
     if not isinstance(log, list):
         log = []
         world["violence_log"] = log
-    log.append({
-        "actor": action.get("actor_id"),
-        "target": target.get("id"),
-        "target_name": target.get("name"),
-        "action_type": action.get("action_type"),
-        "description": action.get("description", ""),
-        "scene_id": scene.get("id", "") if isinstance(scene, dict) else "",
-        "confirmed": True,
-    })
+    log.append(
+        {
+            "actor": action.get("actor_id"),
+            "target": target.get("id"),
+            "target_name": target.get("name"),
+            "action_type": action.get("action_type"),
+            "description": action.get("description", ""),
+            "scene_id": scene.get("id", "") if isinstance(scene, dict) else "",
+            "confirmed": True,
+        }
+    )
     del log[:-30]
 
     clocks = world.get("case_clocks")
@@ -1311,14 +1425,16 @@ def _record_threat_event(world: dict, action: dict, target: dict) -> None:
     if not isinstance(log, list):
         log = []
         world["threat_log"] = log
-    log.append({
-        "actor": action.get("actor_id"),
-        "target": target.get("id"),
-        "target_name": target.get("name"),
-        "description": action.get("description", ""),
-        "scene_id": scene.get("id", "") if isinstance(scene, dict) else "",
-        "confirmed": True,
-    })
+    log.append(
+        {
+            "actor": action.get("actor_id"),
+            "target": target.get("id"),
+            "target_name": target.get("name"),
+            "description": action.get("description", ""),
+            "scene_id": scene.get("id", "") if isinstance(scene, dict) else "",
+            "confirmed": True,
+        }
+    )
     del log[:-30]
 
     clocks = world.get("case_clocks")

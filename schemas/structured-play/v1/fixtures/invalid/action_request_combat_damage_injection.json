@@ -1,0 +1,6 @@
+{
+  "type": "action_request", "protocol_version": 1,
+  "request_id": "bad-combat", "world_id": "world-fixture-1",
+  "expected_revision": 12, "investigator_id": "inv-alice",
+  "action": {"kind": "combat", "encounter_id": "encounter-1", "action_type": "melee", "target_id": "guard", "damage_spec": "100d100"}
+}

@@ -1,0 +1,14 @@
+{
+  "type": "ending_catalog_updated", "protocol_version": 1,
+  "event_id": 40, "world_id": "world-fixture-1", "sequence": 40,
+  "revision": 12, "cause_request_id": "req-1",
+  "payload": {
+    "flags": [], "recent": [], "eligible_endings": [],
+    "ending_catalog": [{
+      "id": "truth_and_seal", "title": "真相与封印", "ending_type": "good",
+      "description": "调查员恢复了文档并封印怪物。", "trigger": "案件收尾",
+      "eligible": false, "can_prepare": false, "blocked_reason": "结局前置条件尚未满足。",
+      "conditions": [{"flag_id": "monster_defeated", "expected_text": "true", "current_text": "false", "recorded": true, "satisfied": false}]
+    }]
+  }
+}

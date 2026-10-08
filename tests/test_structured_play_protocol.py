@@ -39,6 +39,15 @@ FRONTEND_KNOWN_ERROR_CODES = {
 }
 
 COMMAND_KINDS = {
+    "keeper_roll",
+    "record_condition",
+    "record_ruling",
+    "combat_start",
+    "combat_action",
+    "combat_decide",
+    "combat_roll",
+    "combat_end",
+    "end_game",
     "control_keeper",
     "publish_message",
     "request_check",
@@ -59,6 +68,17 @@ COMMAND_KINDS = {
 }
 
 EVENT_TYPES = {
+    "clue_updated",
+    "keeper_progress_updated",
+    "keeper_roll_resolved",
+    "ending_catalog_updated",
+    "ruling_recorded",
+    "combat_updated",
+    "combat_decision_required",
+    "combat_roll_required",
+    "combat_roll_resolved",
+    "game_ended",
+    "case_settled",
     "session_snapshot",
     "action_ack",
     "action_status",
@@ -169,7 +189,14 @@ class StructuredPlayProtocolTests(unittest.TestCase):
         fixture_files = {path.stem for path in (FIXTURE_DIR / "event").glob("*.json")}
         # state_changed 有三个代表形态（调查员状态 / 世界时钟 / 在场目标）
         self.assertEqual(
-            EVENT_TYPES | {"state_changed_clock", "state_changed_targets"}, fixture_files
+            EVENT_TYPES
+            | {
+                "state_changed_clock",
+                "state_changed_targets",
+                "combat_decision_required_pvp",
+                "combat_roll_required_pvp",
+            },
+            fixture_files,
         )
         events_schema = self.schemas["events.json"]
         declared = {

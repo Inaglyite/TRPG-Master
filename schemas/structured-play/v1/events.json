@@ -4,6 +4,9 @@
   "title": "结构化协议 v1：服务端事件",
   "description": "公共事件信封 + 每类型载荷。事件在命令事务提交成功后才发布；可见性在服务端过滤后投递。event_id 为全局数据库标识，sequence 为世界内单调游标（断线按游标补发），revision 为已提交世界版本（纯消息不必推进 revision，但仍有独立事件顺序）。",
   "oneOf": [
+    {"$ref": "#/$defs/clue_updated"},
+    {"$ref": "#/$defs/keeper_progress_updated"},
+    {"$ref": "#/$defs/keeper_roll_resolved"},
     {
       "$ref": "#/$defs/session_snapshot"
     },
@@ -72,9 +75,191 @@
     },
     {
       "$ref": "#/$defs/memory_query_result"
+    },
+    {
+      "$ref": "#/$defs/combat_updated"
+    },
+    {
+      "$ref": "#/$defs/combat_decision_required"
+    },
+    {
+      "$ref": "#/$defs/combat_roll_required"
+    },
+    {
+      "$ref": "#/$defs/combat_roll_resolved"
+    },
+    {
+      "$ref": "#/$defs/game_ended"
+    },
+    {
+      "$ref": "#/$defs/case_settled"
+    },
+    {
+      "$ref": "#/$defs/ruling_recorded"
+    },
+    {
+      "$ref": "#/$defs/ending_catalog_updated"
     }
   ],
   "$defs": {
+    "clue_updated": {
+      "description": "仅向已知该线索的调查员更新出示方式/持有原件候选；不授予新知识、不派生新获知记忆。",
+      "type": "object", "properties": {
+        "type": {"const": "clue_updated"},
+        "payload": {"$ref": "#/$defs/clue_granted/properties/payload"}
+      },
+      "allOf": [{"$ref": "#/$defs/envelope_base"}], "unevaluatedProperties": false
+    },
+    "keeper_progress_updated": {
+      "type": "object", "properties": {
+        "type": {"const": "keeper_progress_updated"},
+        "payload": {"$ref": "keeper_progress.json"}
+      },
+      "allOf": [{"$ref": "#/$defs/envelope_base"}], "unevaluatedProperties": false
+    },
+    "keeper_roll_receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["command_id", "visibility", "expression", "dice", "total", "modifier"],
+      "properties": {
+        "command_id": {"$ref": "common.json#/$defs/id_string"},
+        "visibility": {"enum": ["public", "keeper"]},
+        "expression": {"$ref": "#/$defs/roll_resolved/properties/payload/properties/expression"},
+        "dice": {"$ref": "#/$defs/roll_resolved/properties/payload/properties/dice"},
+        "total": {"type": "integer"}, "modifier": {"type": "integer"}
+      }
+    },
+    "keeper_roll_resolved": {
+      "type": "object",
+      "properties": {
+        "type": {"const": "keeper_roll_resolved"},
+        "payload": {"$ref": "#/$defs/keeper_roll_receipt"}
+      },
+      "allOf": [{"$ref": "#/$defs/envelope_base"}],
+      "unevaluatedProperties": false
+    },
+    "game_clock": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["elapsed_minutes"],
+          "additionalProperties": false,
+          "properties": {
+            "elapsed_minutes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "ruling_value": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        { "type": "string", "maxLength": 200 },
+        { "type": "null" }
+      ]
+    },
+    "ending_catalog": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "title", "ending_type", "description", "trigger", "eligible", "can_prepare", "blocked_reason", "conditions"],
+        "properties": {
+          "id": {"$ref": "common.json#/$defs/id_string"},
+          "title": {"type": "string"},
+          "ending_type": {"enum": ["good", "neutral", "bad", "secret"]},
+          "description": {"type": "string"}, "trigger": {"type": "string"},
+          "eligible": {"type": "boolean"}, "can_prepare": {"type": "boolean"},
+          "blocked_reason": {"type": "string"},
+          "conditions": {
+            "type": "array", "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["flag_id", "expected_text", "current_text", "recorded", "satisfied"],
+              "properties": {
+                "flag_id": {"$ref": "common.json#/$defs/id_string"},
+                "expected_text": {"type": "string"}, "current_text": {"type": "string"},
+                "recorded": {"type": "boolean"}, "satisfied": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "ruling_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flags", "recent", "eligible_endings"],
+      "properties": {
+        "ending_catalog": {"$ref": "#/$defs/ending_catalog"},
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "type", "value"],
+            "properties": {
+              "id": { "$ref": "common.json#/$defs/id_string" },
+              "type": { "enum": ["boolean", "integer", "string"] },
+              "value": { "$ref": "#/$defs/ruling_value" }
+            }
+          }
+        },
+        "recent": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "flag_id",
+              "before",
+              "after",
+              "basis",
+              "user_id",
+              "revision"
+            ],
+            "properties": {
+              "flag_id": { "$ref": "common.json#/$defs/id_string" },
+              "before": { "$ref": "#/$defs/ruling_value" },
+              "after": { "$ref": "#/$defs/ruling_value" },
+              "basis": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "user_id": { "type": "string", "maxLength": 160 },
+              "revision": { "$ref": "common.json#/$defs/revision" }
+            }
+          }
+        },
+        "eligible_endings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "ending_type"],
+            "properties": {
+              "id": { "$ref": "common.json#/$defs/id_string" },
+              "title": { "type": "string" },
+              "ending_type": { "enum": ["good", "neutral", "bad", "secret"] }
+            }
+          }
+        }
+      }
+    },
+    "ending_catalog_updated": {
+      "type": "object",
+      "properties": {
+        "type": {"const": "ending_catalog_updated"},
+        "payload": {"allOf": [{"$ref": "#/$defs/ruling_state"}], "required": ["ending_catalog"]}
+      },
+      "allOf": [{"$ref": "#/$defs/envelope_base"}],
+      "unevaluatedProperties": false
+    },
+    "ruling_recorded": {
+      "type": "object",
+      "properties": {
+        "type": { "const": "ruling_recorded" },
+        "payload": { "$ref": "#/$defs/ruling_state" }
+      },
+      "allOf": [{ "$ref": "#/$defs/envelope_base" }],
+      "unevaluatedProperties": false
+    },
     "session_snapshot": {
       "type": "object",
       "required": [],
@@ -133,6 +318,7 @@
                 }
               ]
             },
+            "clock": {"$ref": "#/$defs/game_clock"},
             "scene": {
               "oneOf": [
                 {
@@ -212,14 +398,27 @@
                 "required": ["id", "kind", "title", "text", "current"],
                 "additionalProperties": false,
                 "properties": {
-                  "id": { "$ref": "common.json#/$defs/id_string" },
-                  "kind": { "enum": ["scene", "npc"] },
-                  "title": { "type": "string", "maxLength": 160 },
-                  "text": { "type": "string" },
-                  "current": { "type": "boolean" }
+                  "id": {
+                    "$ref": "common.json#/$defs/id_string"
+                  },
+                  "kind": {
+                    "enum": ["scene", "npc"]
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 160
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "current": {
+                    "type": "boolean"
+                  }
                 }
               }
             },
+            "keeper_rulings": { "$ref": "#/$defs/ruling_state" },
+            "keeper_progress": {"$ref": "keeper_progress.json"},
             "character": {
               "description": "当前连接自己控制的调查员卡；未认领时为 null，不含其他调查员的私有卡。",
               "type": ["object", "null"]
@@ -245,7 +444,9 @@
                       {
                         "if": {
                           "properties": {
-                            "entry_kind": { "const": "action_request" }
+                            "entry_kind": {
+                              "const": "action_request"
+                            }
                           },
                           "required": ["entry_kind"]
                         },
@@ -253,7 +454,9 @@
                           "properties": {
                             "speaker": {
                               "properties": {
-                                "kind": { "const": "investigator" }
+                                "kind": {
+                                  "const": "investigator"
+                                }
                               }
                             }
                           }
@@ -261,10 +464,19 @@
                       }
                     ],
                     "properties": {
-                      "message_id": { "$ref": "common.json#/$defs/id_string" },
-                      "sequence": { "type": "integer", "minimum": 0 },
-                      "entry_kind": { "enum": ["narrative", "action_request"] },
-                      "text": { "type": "string" },
+                      "message_id": {
+                        "$ref": "common.json#/$defs/id_string"
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "entry_kind": {
+                        "enum": ["narrative", "action_request"]
+                      },
+                      "text": {
+                        "type": "string"
+                      },
                       "speaker": {
                         "type": "object",
                         "required": ["kind", "name"],
@@ -273,8 +485,12 @@
                           "kind": {
                             "enum": ["keeper", "npc", "investigator", "system"]
                           },
-                          "id": { "type": "string" },
-                          "name": { "type": "string" }
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -285,8 +501,12 @@
             "inherited_message_history": {
               "$ref": "#/$defs/session_snapshot/properties/payload/properties/message_history"
             },
-            "inherited_history_unavailable": { "type": "boolean" },
-            "inherited_history_incomplete": { "type": "boolean" },
+            "inherited_history_unavailable": {
+              "type": "boolean"
+            },
+            "inherited_history_incomplete": {
+              "type": "boolean"
+            },
             "keeper_investigators": {
               "description": "仅授权人类主持：当前队员完整技能、属性及状态的只读白名单投影，不含控制元数据或记忆。",
               "type": "array",
@@ -295,8 +515,12 @@
                 "required": ["investigator_id", "name"],
                 "additionalProperties": false,
                 "properties": {
-                  "investigator_id": { "$ref": "common.json#/$defs/id_string" },
-                  "name": { "type": "string" },
+                  "investigator_id": {
+                    "$ref": "common.json#/$defs/id_string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
                   "occupation": {},
                   "hp": {},
                   "max_hp": {},
@@ -320,8 +544,13 @@
                 "required": ["id", "label"],
                 "additionalProperties": false,
                 "properties": {
-                  "id": { "$ref": "common.json#/$defs/id_string" },
-                  "label": { "type": "string", "maxLength": 160 }
+                  "id": {
+                    "$ref": "common.json#/$defs/id_string"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 160
+                  }
                 }
               }
             },
@@ -334,6 +563,10 @@
               "items": {
                 "$ref": "#/$defs/pending_check"
               }
+            },
+            "keeper_rolls": {
+              "type": "array", "maxItems": 20,
+              "items": {"$ref": "#/$defs/keeper_roll_receipt"}
             },
             "cursor": {
               "type": "object",
@@ -358,6 +591,50 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/interaction_state"
+              }
+            },
+            "combat": {
+              "$ref": "#/$defs/combat_public"
+            },
+            "combat_results": {
+              "type": "array",
+              "maxItems": 20,
+              "items": { "$ref": "#/$defs/combat_result" }
+            },
+            "combat_decision": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/combat_decision"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "combat_roll": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/combat_roll"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "game_over": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ending_public"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "case_settlements": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/case_receipt"
               }
             }
           }
@@ -428,6 +705,15 @@
         },
         "memory_query": {
           "type": "boolean"
+        },
+        "combat_action_request": {
+          "type": "boolean"
+        },
+        "combat_weapon_item_id": {
+          "type": "boolean"
+        },
+        "structured_solo_restore": {
+          "type": "boolean"
         }
       }
     },
@@ -469,6 +755,7 @@
       "required": ["id", "category", "text", "presentation"],
       "additionalProperties": false,
       "properties": {
+        "allowed_physical_item_ids": {"type": "array", "items": {"$ref": "common.json#/$defs/id_string"}},
         "id": {
           "$ref": "common.json#/$defs/id_string"
         },
@@ -538,7 +825,9 @@
           "type": "string",
           "maxLength": 200
         },
-        "investigator_id": { "$ref": "common.json#/$defs/id_string" },
+        "investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
         "action": {
           "description": "仅主持的完整待处理请求，非执行授权。",
           "$ref": "action_request.json#/$defs/action"
@@ -1063,6 +1352,8 @@
           "required": ["clue_id", "investigator_id"],
           "additionalProperties": false,
           "properties": {
+            "presentation": {"type": "array", "items": {"enum": ["describe", "image", "original"]}},
+            "allowed_physical_item_ids": {"type": "array", "items": {"$ref": "common.json#/$defs/id_string"}},
             "clue_id": {
               "$ref": "common.json#/$defs/id_string"
             },
@@ -1170,15 +1461,7 @@
               }
             },
             "clock": {
-              "type": "object",
-              "required": ["elapsed_minutes"],
-              "additionalProperties": false,
-              "properties": {
-                "elapsed_minutes": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
+              "$ref": "#/$defs/game_clock"
             },
             "targets": {
               "type": "array",
@@ -1797,6 +2080,470 @@
               "type": "boolean"
             }
           }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_public": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "encounter_id": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "round": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turn_order": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "common.json#/$defs/id_string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_actor": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "common.json#/$defs/id_string"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "kind": {
+                "enum": ["pc", "npc"]
+              },
+              "hp": {
+                "type": "number"
+              },
+              "max_hp": {
+                "type": "number"
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 4000
+                }
+              }
+            },
+            "required": ["id", "name", "kind", "hp", "max_hp", "conditions"],
+            "additionalProperties": false
+          }
+        },
+        "awaiting_decision": {
+          "type": "boolean"
+        },
+        "awaiting_roll": {
+          "type": "boolean"
+        }
+      },
+      "required": ["active"],
+      "additionalProperties": false
+    },
+    "combat_decision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "kind": {
+          "enum": ["irreversible_violence", "coercive_threat", "combat_defense", "pvp_consent"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "common.json#/$defs/id_string"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            },
+            "required": ["id", "label"],
+            "additionalProperties": false
+          }
+        },
+        "default_option": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "responding_investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "description",
+        "options",
+        "default_option",
+        "responding_investigator_id"
+      ],
+      "additionalProperties": false
+    },
+    "combat_roll": {
+      "type": "object",
+      "properties": {
+        "weapon_item_id": {"$ref": "common.json#/$defs/id_string"},
+        "weapon_label": {"type": "string"},
+        "roll_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "actor_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "target_id": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_type": {
+          "enum": ["melee", "firearm", "threat", "move", "other"]
+        },
+        "source": {
+          "enum": ["action", "decision", "pvp_defense", "pvp_attack"]
+        }
+      },
+      "required": [
+        "roll_id",
+        "investigator_id",
+        "actor_id",
+        "target_id",
+        "action_type",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "ending_public": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "oneOf": [
+            {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "enum": ["good", "secret", "neutral", "bad"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "required": ["id", "type", "title", "summary"],
+      "additionalProperties": false
+    },
+    "case_receipt": {
+      "type": "object",
+      "properties": {
+        "investigator_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "character_id": {
+          "$ref": "common.json#/$defs/id_string"
+        },
+        "case": {
+          "type": "object",
+          "required": [
+            "case_id",
+            "world_id",
+            "ending_type",
+            "reputation_delta"
+          ],
+          "properties": {
+            "case_id": { "type": "string", "minLength": 1, "maxLength": 384 },
+            "world_id": { "$ref": "common.json#/$defs/id_string" },
+            "ending_type": { "enum": ["good", "secret", "neutral", "bad"] },
+            "reputation_delta": { "type": "integer" }
+          }
+        },
+        "career": {
+          "type": "object",
+          "required": ["case_history", "reputation", "completed_modules"]
+        },
+        "character_snapshot": {
+          "type": "object",
+          "description": "仅本人/主持可读的结案角色快照；不含控制权、世界权限或NPC原始记录。"
+        }
+      },
+      "required": ["investigator_id", "character_id", "case", "career"],
+      "additionalProperties": false
+    },
+    "combat_updated": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "combat_updated"
+        },
+        "payload": {
+          "$ref": "#/$defs/combat_public"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_decision_required": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "combat_decision_required"
+        },
+        "payload": {
+          "$ref": "#/$defs/combat_decision"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_roll_required": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "combat_roll_required"
+        },
+        "payload": {
+          "$ref": "#/$defs/combat_roll"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_roll_resolved": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "combat_roll_resolved"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "roll_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "response": {
+              "enum": ["roll", "cancel"]
+            },
+            "result": {
+              "$ref": "#/$defs/combat_result"
+            }
+          },
+          "required": ["roll_id", "investigator_id", "response"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roll_id",
+        "investigator_id",
+        "encounter_id",
+        "round",
+        "actor_id",
+        "target_id",
+        "action_type",
+        "response",
+        "outcome",
+        "rolls",
+        "damage"
+      ],
+      "properties": {
+        "roll_id": { "$ref": "common.json#/$defs/id_string" },
+        "investigator_id": { "$ref": "common.json#/$defs/id_string" },
+        "encounter_id": { "$ref": "common.json#/$defs/id_string" },
+        "round": { "type": "integer", "minimum": 1 },
+        "actor_id": { "$ref": "common.json#/$defs/id_string" },
+        "target_id": {
+          "oneOf": [
+            { "$ref": "common.json#/$defs/id_string" },
+            { "type": "null" }
+          ]
+        },
+        "action_type": {
+          "enum": ["melee", "firearm", "threat", "move", "other"]
+        },
+        "response": { "enum": ["roll", "cancel"] },
+        "outcome": { "type": "string", "maxLength": 80 },
+        "rolls": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["actor_id", "role", "roll", "level"],
+            "properties": {
+              "actor_id": { "$ref": "common.json#/$defs/id_string" },
+              "role": { "enum": ["attack", "defense"] },
+              "roll": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "level": { "type": "string", "maxLength": 40 }
+            }
+          }
+        },
+        "damage": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["target_id", "amount", "hp_before", "hp_after"],
+              "properties": {
+                "target_id": { "$ref": "common.json#/$defs/id_string" },
+                "amount": { "type": "integer", "minimum": 0 },
+                "hp_before": { "type": "integer" },
+                "hp_after": { "type": "integer" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "game_ended": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "game_ended"
+        },
+        "payload": {
+          "$ref": "#/$defs/ending_public"
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "case_settled": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "case_settled"
+        },
+        "payload": {
+          "$ref": "#/$defs/case_receipt"
         }
       },
       "allOf": [

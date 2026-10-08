@@ -64,10 +64,13 @@ def decision_has_controller(context: Any, decision: dict) -> bool:
     if not investigator_id:
         return True
     try:
-        return investigator_controller_user_id(
-            context.world_store.load(),
-            investigator_id,
-        ) is not None
+        return (
+            investigator_controller_user_id(
+                context.world_store.load(),
+                investigator_id,
+            )
+            is not None
+        )
     except Exception:
         return False
 
@@ -116,7 +119,10 @@ def normalize_legacy_combat_investigator_ids(state: dict) -> bool:
         if isinstance(action, dict):
             action["actor_id"] = replace(action.get("actor_id"))
             action["target_id"] = replace(action.get("target_id"))
-            responding_id = (
+            # Stable explicit recipients are authoritative. The actor/target
+            # fallback only repairs old decisions which had no recipient; it
+            # must not redirect a player-to-player consent to the attacker.
+            responding_id = replace(pending.get("responding_investigator_id")) or (
                 action.get("target_id")
                 if pending.get("kind") == "combat_defense"
                 else action.get("actor_id")
@@ -234,9 +240,7 @@ def reconcile_investigator_roster(
                     context=context,
                 )
                 if selected is None:
-                    raise InvestigatorRosterError(
-                        "当前调查员不在存档中，且无法从角色资料恢复"
-                    )
+                    raise InvestigatorRosterError("当前调查员不在存档中，且无法从角色资料恢复")
                 entity = scratch["pc"]
                 inventory = entity.setdefault("inventory", [])
                 for item in state.get("module_starting_inventory", []):

@@ -11,277 +11,182 @@
     "agent": "被委派的 Agent 运行时：拥有 keeper 命令子集，调用必须携带当前 controller_epoch。"
   },
   "permissions": {
-    "command.control_keeper": {
-      "roles": [
-        "keeper"
-      ],
+    "command.keeper_roll": {
+      "roles": ["keeper"],
+      "conditions": ["can_keeper", "human_controller", "fresh_authority_for_replay", "original_operator_for_replay", "no_investigator_required", "no_game_effects", "no_assisted_draft"]
+    },
+    "command.record_condition": {
+      "roles": ["keeper"],
+      "conditions": ["can_keeper", "human_controller", "investigator_exists", "expected_present_matches", "basis_required", "death_irreversible", "positive_hp_before_waking", "fresh_authority_for_replay"]
+    },
+    "command.record_ruling": {
+      "roles": ["keeper"],
       "conditions": [
         "can_keeper",
-        "explicit_takeover_or_release"
+        "human_controller",
+        "declared_flag_type",
+        "expected_before_matches",
+        "basis_required",
+        "fresh_authority_for_replay"
       ]
+    },
+    "command.control_keeper": {
+      "roles": ["keeper"],
+      "conditions": ["can_keeper", "explicit_takeover_or_release"]
     },
     "action_request.submit": {
-      "roles": [
-        "player"
-      ],
-      "conditions": [
-        "controls_investigator"
-      ]
+      "roles": ["player"],
+      "conditions": ["controls_investigator"]
     },
     "free_roll_request.submit": {
-      "roles": [
-        "player"
-      ],
-      "conditions": [
-        "controls_investigator"
-      ]
+      "roles": ["player"],
+      "conditions": ["controls_investigator"]
     },
     "check_response.submit": {
-      "roles": [
-        "player"
-      ],
-      "conditions": [
-        "controls_investigator",
-        "check_designated_investigator"
-      ]
+      "roles": ["player"],
+      "conditions": ["controls_investigator", "check_designated_investigator"]
     },
     "command.publish_message.player": {
-      "roles": [
-        "player"
-      ],
-      "conditions": [
-        "speaker_is_own_investigator"
-      ]
+      "roles": ["player"],
+      "conditions": ["speaker_is_own_investigator"]
     },
     "command.publish_message.keeper": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.request_check": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.resolve_check": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch",
-        "check_still_pending"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "check_still_pending"]
     },
     "command.present_information": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.grant_clue": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch",
-        "recipients_authorized"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "recipients_authorized"]
     },
     "command.use_item": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch",
-        "ownership_verified"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "ownership_verified"]
     },
     "command.transfer_item": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch",
-        "ownership_verified"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch", "ownership_verified"]
     },
     "command.adjust_stat": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.advance_time": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.move_party": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
+      "roles": ["keeper", "agent"],
       "conditions": [
         "agent_requires_current_epoch",
         "destination_known_to_party"
       ]
     },
     "command.resolve_intent": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.present_handout": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
+      "roles": ["keeper", "agent"],
       "conditions": [
         "agent_requires_current_epoch",
         "asset_authorized_for_recipients"
       ]
     },
     "command.set_npc_presence": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.record_fact": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "keeper.read_module_secrets": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "keeper.read_private_knowledge": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "keeper.take_control": {
-      "roles": [
-        "keeper"
-      ],
-      "conditions": [
-        "increments_controller_epoch"
-      ]
+      "roles": ["keeper"],
+      "conditions": ["increments_controller_epoch"]
     },
     "keeper.approve_draft": {
-      "roles": [
-        "keeper"
-      ],
-      "conditions": [
-        "rechecks_current_revision"
-      ]
+      "roles": ["keeper"],
+      "conditions": ["rechecks_current_revision"]
     },
     "owner.manage_room": {
-      "roles": [
-        "owner"
-      ],
+      "roles": ["owner"],
       "conditions": []
     },
     "owner.manage_billing_keys": {
-      "roles": [
-        "owner"
-      ],
+      "roles": ["owner"],
       "conditions": []
     },
     "session.snapshot.read": {
-      "roles": [
-        "owner",
-        "keeper",
-        "player",
-        "viewer",
-        "agent"
-      ],
-      "conditions": [
-        "payload_filtered_by_recipient"
-      ]
+      "roles": ["owner", "keeper", "player", "viewer", "agent"],
+      "conditions": ["payload_filtered_by_recipient"]
     },
     "events.replay": {
-      "roles": [
-        "owner",
-        "keeper",
-        "player",
-        "viewer",
-        "agent"
-      ],
-      "conditions": [
-        "payload_filtered_by_recipient",
-        "cursor_scoped_to_world"
-      ]
+      "roles": ["owner", "keeper", "player", "viewer", "agent"],
+      "conditions": ["payload_filtered_by_recipient", "cursor_scoped_to_world"]
     },
     "command.resolve_draft": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "command.record_memory": {
-      "roles": [
-        "keeper",
-        "agent"
-      ],
-      "conditions": [
-        "agent_requires_current_epoch"
-      ]
+      "roles": ["keeper", "agent"],
+      "conditions": ["agent_requires_current_epoch"]
     },
     "memory_query.submit": {
-      "roles": [
-        "keeper"
-      ],
+      "roles": ["keeper"],
+      "conditions": ["read_only", "player_requests_denied"]
+    },
+    "command.combat_start": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["keeper_authority", "current_controller_epoch"]
+    },
+    "command.combat_action": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["keeper_authority", "current_controller_epoch"]
+    },
+    "command.combat_decide": {
+      "roles": ["player"],
       "conditions": [
-        "read_only",
-        "player_requests_denied"
+        "controls_responding_investigator",
+        "current_pending_nonce",
+        "same_principal_for_replay"
       ]
+    },
+    "command.combat_roll": {
+      "roles": ["player"],
+      "conditions": [
+        "controls_responding_investigator",
+        "current_pending_nonce",
+        "same_principal_for_replay"
+      ]
+    },
+    "command.combat_end": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["keeper_authority", "current_controller_epoch"]
+    },
+    "command.end_game": {
+      "roles": ["keeper", "agent"],
+      "conditions": ["keeper_authority", "current_controller_epoch"]
     }
   },
   "notes": [

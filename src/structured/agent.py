@@ -23,10 +23,11 @@ from dataclasses import dataclass, field
 from openai import APITimeoutError
 from sqlalchemy import select
 
-from src.storage.database import PlayerRequest, session_scope
+from src.storage.database import GameCommand, PlayerRequest, session_scope
 
 from .agent_prompts import build_system_prompt
 from .errors import StructuredError
+from .execution import allowed_during_combat_wait
 from .principal import Principal, bind_agent_control, current_control
 from .service import StructuredPlayService
 from .validation import validate_command
@@ -209,10 +210,41 @@ class KeeperAgentRunner:
                 limit=self.budget.context_memory_limit,
                 char_budget=self.budget.context_memory_chars,
             )
+            # A resumed run has a new run_log. Read bounded committed receipts,
+            # not guesses from HP differences or a player's wording about dice.
+            combat_rows = session.scalars(
+                select(GameCommand)
+                .where(
+                    GameCommand.world_id == world_id,
+                    GameCommand.status == "committed",
+                    GameCommand.kind.in_(
+                        [
+                            "combat_start",
+                            "combat_action",
+                            "combat_decide",
+                            "combat_roll",
+                            "combat_end",
+                        ]
+                    ),
+                )
+                .order_by(GameCommand.created_at.desc(), GameCommand.id.desc())
+                .limit(8)
+            ).all()
+            combat_results = [
+                {
+                    "command_id": row.command_id,
+                    "kind": row.kind,
+                    "revision": row.revision,
+                    "cause_id": row.cause_id or None,
+                    "result": row.result,
+                }
+                for row in reversed(combat_rows)
+            ]
         context = {
             "snapshot": snapshot,
             "scene_notes": self.service.scene_notes_for_agent(world_id),
             "investigator_sheets": self.service.investigator_sheets_for_agent(world_id),
+            "recent_combat_results": combat_results,
             "open_threads": open_threads,
             "trigger_context": {
                 "request_id": trigger_request_id or None,
@@ -419,14 +451,20 @@ class KeeperAgentRunner:
     ) -> tuple[str | None, int]:
         """返回 (停止信号, 本步被拒命令数)；“takeover” 表示控制权已移交，立即停止。"""
         rejected = 0
+        combat_wait = False
         for index, command in enumerate(commands):
             if result.commands_committed >= self.budget.max_commands:
+                if combat_wait:
+                    return "combat_wait", rejected
                 spent.append("命令预算已用完")
                 return "budget", rejected
             kind = str(command.get("kind") or "")
             payload = command.get("payload")
             if not kind or not isinstance(payload, dict):
                 spent.append(f"命令 {index} 缺少 kind/payload，已跳过")
+                continue
+            if combat_wait and not allowed_during_combat_wait(kind, payload):
+                spent.append(f"{kind} 未执行：战斗已等待玩家决定或掷骰。")
                 continue
             # 兜底 id 必须与**尝试次数**绑定：原先用 commands_committed（已提交数）
             # 拼接，某一步全部被拒时下一步就会重用同一 id，撞上幂等键被判
@@ -465,6 +503,10 @@ class KeeperAgentRunner:
                 spent.append(f"{kind} 内部错误：{type(exc).__name__}")
                 continue
             result.commands_committed += 1
+            combat_wait = combat_wait or any(
+                event.get("type") in {"combat_decision_required", "combat_roll_required"}
+                for event in outcome.get("events", [])
+            )
             if (
                 kind == "resolve_intent"
                 and str(payload.get("resolution") or "") == "awaiting_player"
@@ -473,7 +515,7 @@ class KeeperAgentRunner:
                 result.awaiting_parked = True
                 spent.append(f"{kind} committed: awaiting_player")
                 await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
-                if rejected:
+                if rejected and not combat_wait:
                     # 同步有命令被拒（例如 request_check 没过 schema）：挂起已生效，
                     # 但模型还没看到驳回理由；就此结束会让玩家永远等一张不存在
                     # 的检定卡（2026-09-16 按钮级实测）。本轮不停在 await——让模型
@@ -483,12 +525,12 @@ class KeeperAgentRunner:
                         "请先修正被拒命令重新提交，再 resolve_intent 收尾。"
                     )
                     return None, rejected
-                return "await", rejected
+                return "combat_wait" if combat_wait else "await", rejected
             spent.append(
                 f"{kind} committed: {json.dumps(outcome['result'], ensure_ascii=False)[:200]}"
             )
             await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
-        return None, rejected
+        return "combat_wait" if combat_wait else None, rejected
 
     def _repair_audience(self, world_id: str, payload: dict) -> dict:
         """把「{"kind":"investigators"} 省略 ids」补全为当前全体调查员。
@@ -614,6 +656,12 @@ class KeeperAgentRunner:
             }
         if kind == "freeform":
             return {"kind": "freeform", "note": str(action.get("text") or "")[:300]}
+        if kind == "combat":
+            return {
+                "kind": "other",
+                "target": str(action.get("target_id") or "")[:160],
+                "note": fallback_note[:300] or f"尚未执行战斗动作：{action.get('action_type')}",
+            }
         return {"kind": "other", "note": fallback_note[:300] or "等待玩家回应"}
 
     def _resolve_trigger(
@@ -764,12 +812,37 @@ class KeeperAgentRunner:
             )
             return result
         commands = []
-        self._normalize_commands(decision.get("commands"))
-        for command in decision.get("commands") or []:
-            kind = str(command.get("kind") or "")
-            payload = command.get("payload")
-            if kind and isinstance(payload, dict):
+        try:
+            proposed = decision.get("commands") or []
+            self._normalize_commands(proposed)
+            if len(proposed) > 12:
+                raise StructuredError("invalid_action", "草稿最多包含12条命令。")
+            for command in proposed:
+                if not isinstance(command, dict):
+                    raise StructuredError("invalid_action", "草稿命令必须为对象。")
+                kind = str(command.get("kind") or "")
+                payload = command.get("payload")
+                if kind in {
+                    "resolve_draft",
+                    "control_keeper",
+                    "combat_decide",
+                    "combat_roll",
+                    "record_ruling",
+                    "record_condition",
+                } or not isinstance(payload, dict):
+                    raise StructuredError("invalid_action", "草稿包含缺失载荷或不可委托命令。")
+                payload = self._repair_audience(world_id, payload)
+                validate_command(kind, payload)
                 commands.append({"kind": kind, "payload": payload})
+        except (StructuredError, TypeError, ValueError):
+            # Never publish an invalid event which the frontend will silently
+            # drop, or echo the model's potentially private malformed payload.
+            result.status = "paused"
+            result.stop_reason = "draft_unavailable:invalid_draft"
+            await self._pause_assisted(
+                world_id, trigger_request_id, result.stop_reason, deliver, broadcast
+            )
+            return result
         narration = str(decision.get("narration") or "")[: self.budget.max_narration_chars]
         summary = str(decision.get("assessment") or "")[:200] or "守秘人助手建议"
         draft = self.service.create_keeper_draft(
@@ -964,6 +1037,24 @@ class KeeperAgentRunner:
                 if stop == "takeover":
                     result.status = "takeover_stopped"
                     result.stop_reason = "controller_epoch_stale"
+                    return result
+                if stop == "combat_wait":
+                    # Approval is not execution: never run another model step or
+                    # remaining world-changing commands while a player owns the dice.
+                    result.stop_reason = "wait_combat_player"
+                    if trigger_request_id and not result.awaiting_parked:
+                        await_outcome = self._await_trigger(
+                            world_id,
+                            principal,
+                            trigger_request_id,
+                            awaiting=None,
+                            fallback_note="战斗动作尚未执行，等待指定调查员决定或掷骰。",
+                        )
+                        result.awaiting_parked = await_outcome is not None
+                        if await_outcome is not None:
+                            await self._publish_events(
+                                world_id, await_outcome, deliver=deliver, broadcast=broadcast
+                            )
                     return result
                 if stop == "await":
                     # resolve_intent(awaiting_player) 已在命令层挂起并发布事件；

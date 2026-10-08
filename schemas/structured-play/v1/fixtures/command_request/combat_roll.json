@@ -1,0 +1,12 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-combat_roll-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "kind": "combat_roll",
+  "payload": {
+    "roll_id": "combat-roll-1",
+    "response": "roll"
+  }
+}

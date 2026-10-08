@@ -98,9 +98,7 @@ def seed_solo_tree(url: str, owner_id: str, *, pointer: str = "world-root") -> N
             )
         )
         session.add(
-            WorldMember(
-                id=new_id("member"), world_id="world-root", user_id=owner_id, role="owner"
-            )
+            WorldMember(id=new_id("member"), world_id="world-root", user_id=owner_id, role="owner")
         )
         session.add(
             WorldInvestigator(
@@ -172,9 +170,7 @@ def client(tmp_path: Path):
     url = sqlite_url(tmp_path)
     server, env_patch, db_patch = cloud_client(url)
     Base.metadata.create_all(get_engine(url))
-    with env_patch, db_patch, TestClient(
-        server.app, base_url="https://testserver"
-    ) as test_client:
+    with env_patch, db_patch, TestClient(server.app, base_url="https://testserver") as test_client:
         yield server, url, test_client
 
 
@@ -217,9 +213,7 @@ def test_timelines_reject_multiplayer_world(client):
             )
         )
         session.add(
-            WorldMember(
-                id=new_id("member"), world_id="world-multi", user_id=owner_id, role="owner"
-            )
+            WorldMember(id=new_id("member"), world_id="world-multi", user_id=owner_id, role="owner")
         )
     response = http.get("/api/worlds/world-multi/timelines", headers=ORIGIN)
     assert response.status_code == 403
@@ -276,6 +270,78 @@ def test_switch_is_idempotent_for_current_timeline(client):
     )
     assert response.status_code == 200
     assert response.json()["active_world_id"] == "world-root"
+
+
+def test_structured_switch_keeps_each_world_claim_and_state_in_both_directions(client):
+    """DEFECT-01: structured branches copy claims; switching must never move them."""
+    _server, url, http = client
+    _register(http, "tl_structured_owner")
+    owner_id = _user_id(url, "tl_structured_owner")
+    seed_solo_tree(url, owner_id)
+    with session_scope(url) as session:
+        for world_id, hp in (("world-root", 10), ("world-branch", 7)):
+            world = session.get(World, world_id)
+            world.metadata_json = {**world.metadata_json, "execution_profile": "structured_v1"}
+            state = session.get(WorldState, world_id)
+            state.state = {"pc": {"id": "howard", "hp": hp}, "active_investigator_id": "howard"}
+        session.add(
+            WorldInvestigator(
+                id="inv-branch",
+                world_id="world-branch",
+                character_key="howard",
+                character_ref={"source": "module", "id": "howard"},
+                controller_user_id=owner_id,
+                status="claimed",
+            )
+        )
+    for target in ("world-branch", "world-root", "world-branch", "world-root"):
+        response = http.post(
+            "/api/worlds/world-root/timelines/switch",
+            json={"target_world_id": target},
+            headers=ORIGIN,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["active_world_id"] == target
+        with session_scope(url) as session:
+            assert session.get(World, "world-root").metadata_json[POINTER_KEY] == target
+            assert session.query(WorldInvestigator).count() == 2
+            for world_id, claim_id, hp in (
+                ("world-root", "inv-root", 10),
+                ("world-branch", "inv-branch", 7),
+            ):
+                claim = session.get(WorldInvestigator, claim_id)
+                assert (
+                    claim.world_id,
+                    claim.character_key,
+                    claim.controller_user_id,
+                    claim.status,
+                ) == (
+                    world_id,
+                    "howard",
+                    owner_id,
+                    "claimed",
+                )
+                assert session.get(WorldState, world_id).state["pc"]["hp"] == hp
+
+
+@pytest.mark.parametrize("structured_world", ["world-root", "world-branch"])
+def test_timeline_switch_rejects_mixed_profiles_without_moving_claims(client, structured_world):
+    _server, url, http = client
+    _register(http, "tl_mixed_owner")
+    seed_solo_tree(url, _user_id(url, "tl_mixed_owner"))
+    with session_scope(url) as session:
+        world = session.get(World, structured_world)
+        world.metadata_json = {**world.metadata_json, "execution_profile": "structured_v1"}
+    response = http.post(
+        "/api/worlds/world-root/timelines/switch",
+        json={"target_world_id": "world-branch"},
+        headers=ORIGIN,
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "profile_mismatch"
+    with session_scope(url) as session:
+        assert session.get(World, "world-root").metadata_json[POINTER_KEY] == "world-root"
+        assert session.get(WorldInvestigator, "inv-root").world_id == "world-root"
 
 
 def test_switch_rejects_target_outside_tree(client):
@@ -424,9 +490,14 @@ def test_switch_tears_down_loaded_current_room(client):
         play_mode="solo",
         connected_users={},
     )
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
+
+    release_observations = []
+
+    def finish_retired(wid, aid, status):
+        release_observations.append((status, room.terminal_event_pending))
+        finish_room_action(url, wid, aid, status)
+
+    room.action_status_callback = finish_retired
 
     async def install_room():
         await server.ROOM_MANAGER.get_or_create("world-root", lambda: room)
@@ -443,5 +514,6 @@ def test_switch_tears_down_loaded_current_room(client):
         return await server.ROOM_MANAGER.get("world-root")
 
     assert asyncio.run(room_gone()) is None
+    assert release_observations == [("completed", True)]
     with session_scope(url) as session:
         assert session.get(World, "world-root").metadata_json[POINTER_KEY] == "world-branch"

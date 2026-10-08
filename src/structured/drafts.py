@@ -10,6 +10,7 @@ from src.storage.database import PlayerRequest, utcnow
 
 from .domains import KEEPER, CommandContext, CommandResult, EventSpec
 from .errors import StructuredError
+from .execution import allowed_during_combat_wait, combat_waiting, execute_domain
 from .validation import validate_command
 
 
@@ -51,10 +52,18 @@ def resolve_draft(state: dict, payload: dict, ctx: CommandContext) -> CommandRes
             if not isinstance(command, dict):
                 raise StructuredError("invalid_action", "草稿命令格式错误。")
             kind, body = str(command.get("kind") or ""), command.get("payload")
-            if kind in {"resolve_draft", "control_keeper"} or kind not in _KIND_HANDLERS:
+            if (
+                kind in {"resolve_draft", "control_keeper", "keeper_roll"}
+                or kind not in _KIND_HANDLERS
+            ):
                 raise StructuredError("invalid_action", f"草稿不能执行命令：{kind}")
             validate_command(kind, body)
-            outcome = _KIND_HANDLERS[kind](state, body, inner_ctx)
+            if combat_waiting(state) and not allowed_during_combat_wait(kind, body):
+                raise StructuredError(
+                    "invalid_action",
+                    f"草稿不能在等待玩家战斗响应后执行 {kind}；请拆分或重新生成，整份草稿未执行。",
+                )
+            outcome = execute_domain(kind, _KIND_HANDLERS[kind], state, body, inner_ctx)
             events.extend(outcome.events)
             bump = bump or outcome.bump_revision
             results.append({"kind": kind, "result": outcome.result})
@@ -84,6 +93,7 @@ def resolve_draft(state: dict, payload: dict, ctx: CommandContext) -> CommandRes
         action = (request.payload or {}).get("action") or {} if request else {}
         if (
             request is not None
+            and not combat_waiting(state)
             and request.status in {"queued", "processing", "awaiting_player"}
             and action.get("kind") == "move"
             and action.get("destination_scene_id") == (state.get("current_scene") or {}).get("id")

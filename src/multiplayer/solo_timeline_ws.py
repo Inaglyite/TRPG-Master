@@ -6,10 +6,12 @@ world_id 绑定，本地模式 ``world_timeline_ws`` 的热切换 handler 无法
 拒绝逻辑（``UNSUPPORTED_ROOM_TYPES``）一行不动，安全边界是结构性的。
 
 切换语义：不重绑运行中的房间，而是“提交指针 + 断开重连”。服务端在一个事务里
-把树根 metadata 的 ``solo_current_world_id`` 指针和调查员 claim 一起移到目标
+把树根 metadata 的 ``solo_current_world_id`` 指针切到目标
 世界，广播 ``solo_world_switched`` 后拆除旧房间；客户端收到广播后重连目标世界，
 由正常的房间引导恢复历史、存档与私有状态。claim 行随行迁移（而不是按世界复制）
-是因为世界快照里的调查员实体以 claim.id 为键，同树快照全部沿用最初的 id。
+是 legacy 路径的契约：快照实体以 claim.id 为键，同树沿用最初的 id。
+structured_v1 分支则复制世界各自的认领，以 character_key 标识人物；切换
+不得搬走任何一侧的认领或改变任一世界的人物状态。
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ SOLO_TIMELINE_MESSAGE_TYPES = frozenset(
         "solo_world_switch",
         "solo_world_rename",
         "solo_world_archive",
+        "solo_save_load",
     }
 )
 
@@ -133,9 +136,7 @@ def _gate(room: GameRoom, role: str, db_url: str) -> MultiplayerError | None:
     if role != "owner":
         return MultiplayerError("owner_required", "只有房主可以管理时间线", 403)
     with session_scope(db_url) as session:
-        member_count = (
-            session.query(WorldMember).filter_by(world_id=room.world_id).count()
-        )
+        member_count = session.query(WorldMember).filter_by(world_id=room.world_id).count()
     if member_count > 1:
         return MultiplayerError(
             "solo_membership_violated",
@@ -145,9 +146,7 @@ def _gate(room: GameRoom, role: str, db_url: str) -> MultiplayerError | None:
     return None
 
 
-def _tree_entries(
-    controller: Any, room: GameRoom
-) -> list[dict]:
+def _tree_entries(controller: Any, room: GameRoom) -> list[dict]:
     """当前房间所属分支树的时间线条目（含 resumable 判定）。"""
     return _service(controller).list_worlds(
         room.engine.context.module_name,
@@ -155,9 +154,7 @@ def _tree_entries(
     )
 
 
-async def _send_timeline_lists(
-    controller: Any, ws: Any, room: GameRoom, user_id: str
-) -> None:
+async def _send_timeline_lists(controller: Any, ws: Any, room: GameRoom, user_id: str) -> None:
     """按本地会话的线协议形状回发 world_list + adventure_list。
 
     与本地 ``send_save_panels`` 的纪律一致：两个列表成对刷新，前端存档面板
@@ -175,8 +172,7 @@ async def _send_timeline_lists(
     tree_ids = {entry["world_id"] for entry in worlds}
     with session_scope(controller.deps.database_url()) as session:
         allowed = {
-            row.world_id
-            for row in session.query(WorldMember).filter_by(user_id=user_id).all()
+            row.world_id for row in session.query(WorldMember).filter_by(user_id=user_id).all()
         }
     adventures = _service(controller).list_adventures(
         active_world_id=room.world_id,
@@ -188,9 +184,7 @@ async def _send_timeline_lists(
         for adventure in adventures
         if any(t["world_id"] in tree_ids for t in adventure["timelines"])
     ]
-    module_titles = {
-        mod["id"]: mod.get("title") for mod in controller.deps.list_modules()
-    }
+    module_titles = {mod["id"]: mod.get("title") for mod in controller.deps.list_modules()}
     for adventure in adventures:
         adventure["module_title"] = module_titles.get(
             adventure["module_name"], adventure["module_name"]
@@ -210,24 +204,22 @@ async def _reserve(
     room: GameRoom,
     user_id: str,
     action_type: str,
+    *,
+    action_id: str | None = None,
 ) -> str | None:
     """房间级行动锁（内存 + 持久租约），模板同 solo-abandon。
 
     回合生成中、待确认请求悬挂时拒绝；成功返回 action_id，失败时已向
     客户端发送拒绝原因并释放内存锁，返回 None。
     """
-    if (
-        room.action_active
-        or room.pending_reply_kind is not None
-        or room.terminal_event_pending
-    ):
+    if room.action_active or room.pending_reply_kind is not None or room.terminal_event_pending:
         await _reject(
             ws,
             "room_turn_in_progress",
             "当前回合或确认请求尚未结束，请稍后再管理时间线",
         )
         return None
-    action_id = f"{action_type}:{secrets.token_urlsafe(18)}"
+    action_id = action_id or f"{action_type}:{secrets.token_urlsafe(18)}"
     try:
         await room.reserve_control(user_id, action_id)
     except ActionReservationError as exc:
@@ -265,9 +257,7 @@ async def _reserve(
 def _move_claims(session: Any, from_world_id: str, to_world_id: str) -> None:
     """把已占用调查员 claim 随行迁到目标世界（快照实体以 claim.id 为键）。"""
     claims = (
-        session.query(WorldInvestigator)
-        .filter_by(world_id=from_world_id, status="claimed")
-        .all()
+        session.query(WorldInvestigator).filter_by(world_id=from_world_id, status="claimed").all()
     )
     for claim in claims:
         claim.world_id = to_world_id
@@ -275,9 +265,7 @@ def _move_claims(session: Any, from_world_id: str, to_world_id: str) -> None:
 
 
 def _set_pointer(session: Any, root_id: str, current_world_id: str) -> None:
-    root = (
-        session.query(World).filter_by(id=root_id).with_for_update().one_or_none()
-    )
+    root = session.query(World).filter_by(id=root_id).with_for_update().one_or_none()
     if root is None or root.status != "active":
         raise MultiplayerError("world_not_found", "存档不存在或已删除", 404)
     metadata = dict(root.metadata_json or {})
@@ -305,10 +293,7 @@ def _commit_branch_control_plane(
     """
     with session_scope(db_url) as session:
         branch_world = (
-            session.query(World)
-            .filter_by(id=branch_world_id)
-            .with_for_update()
-            .one_or_none()
+            session.query(World).filter_by(id=branch_world_id).with_for_update().one_or_none()
         )
         if branch_world is None or branch_world.status != "active":
             raise MultiplayerError("world_not_found", "分支世界创建失败", 500)
@@ -338,26 +323,31 @@ def _commit_branch_control_plane(
 
 
 def commit_solo_switch(db_url: str, *, current_world_id: str, target_world_id: str) -> None:
-    """切换时间线的控制面事务：校验同树后移动指针与 claim。
+    """校验同树、同执行配置后切指针；只有 legacy 随行迁移 claim。
 
     WS（游戏内切换）与 HTTP（大厅切换）共用：当前世界由调用方按上下文
     给出（房间绑定世界 / 树根指针解析结果）。
     """
     with session_scope(db_url) as session:
-        target = (
-            session.query(World)
-            .filter_by(id=target_world_id)
-            .with_for_update()
-            .one_or_none()
+        current = (
+            session.query(World).filter_by(id=current_world_id).with_for_update().one_or_none()
         )
+        if current is None or current.status != "active":
+            raise MultiplayerError("world_not_found", "当前时间线不存在或已删除", 404)
+        target = session.query(World).filter_by(id=target_world_id).with_for_update().one_or_none()
         if target is None or target.status != "active":
             raise MultiplayerError("world_not_found", "目标时间线不存在或已删除", 404)
         root_id = tree_root_id(session, current_world_id)
         if tree_root_id(session, target_world_id) != root_id:
-            raise MultiplayerError(
-                "world_not_in_tree", "目标时间线不属于当前存档", 403
-            )
-        _move_claims(session, current_world_id, target_world_id)
+            raise MultiplayerError("world_not_in_tree", "目标时间线不属于当前存档", 403)
+        current_structured = (current.metadata_json or {}).get(
+            "execution_profile"
+        ) == "structured_v1"
+        target_structured = (target.metadata_json or {}).get("execution_profile") == "structured_v1"
+        if current_structured != target_structured:
+            raise MultiplayerError("profile_mismatch", "不能在不同执行模式的时间线之间切换", 409)
+        if not current_structured:
+            _move_claims(session, current_world_id, target_world_id)
         _set_pointer(session, root_id, target_world_id)
 
 
@@ -365,6 +355,7 @@ async def teardown_room_for_switch(
     room_manager: Any, room: GameRoom, target_world_id: str, *, label: str, reason: str
 ) -> None:
     """切换提交后的广播与旧房间拆除（模板同 _teardown_archived_room）。"""
+    room.terminal_event_pending = True
     try:
         await room.hub.broadcast(
             {
@@ -377,9 +368,7 @@ async def teardown_room_for_switch(
     except Exception:
         logger.exception("切换后广播 solo_world_switched 失败 world_id=%s", room.world_id)
     try:
-        await room.hub.disconnect_all(
-            code=SOLO_SWITCH_CLOSE_CODE, reason="时间线已切换"
-        )
+        await room.hub.disconnect_all(code=SOLO_SWITCH_CLOSE_CODE, reason="时间线已切换")
     except Exception:
         logger.exception("切换后断开房间连接失败 world_id=%s", room.world_id)
     try:
@@ -412,6 +401,11 @@ async def handle_solo_timeline_message(
     if message_type == "solo_world_list":
         await _send_timeline_lists(controller, ws, room, user.id)
         return "handled"
+
+    if message_type == "solo_save_load":
+        from src.structured.room_restore import handle_solo_restore
+
+        return await handle_solo_restore(controller, ws, room, user, data)
 
     if message_type == "solo_world_rename":
         target_world_id = str(data.get("world_id") or "").strip()
@@ -521,6 +515,7 @@ async def _handle_branch_create(
             structured=is_structured,
         )
         committed = True
+        room.terminal_event_pending = True
     except Exception as exc:
         if branch_world_id:
             # 控制面补全失败：分支世界不得成为无人认领的孤儿房间。
@@ -570,16 +565,12 @@ async def _handle_switch(
         await _reject(ws, "already_active", "当前已经在该时间线")
         return "handled"
     entries = _tree_entries(controller, room)
-    entry = next(
-        (item for item in entries if item["world_id"] == target_world_id), None
-    )
+    entry = next((item for item in entries if item["world_id"] == target_world_id), None)
     if entry is None:
         await _reject(ws, "world_not_in_tree", "目标时间线不属于当前存档")
         return "handled"
     if not entry["resumable"]:
-        await _reject(
-            ws, "timeline_not_resumable", "目标时间线没有可继续的自动存档"
-        )
+        await _reject(ws, "timeline_not_resumable", "目标时间线没有可继续的自动存档")
         return "handled"
     action_id = await _reserve(controller, ws, room, user.id, "solo_world_switch")
     if action_id is None:
@@ -591,9 +582,7 @@ async def _handle_switch(
         target_room = await manager.get(target_world_id)
         if target_room is not None and target_room.connected_users:
             room.release_action(terminal_status="failed")
-            await _reject(
-                ws, "timeline_in_use", "目标时间线正在其他连接中打开，请先关闭"
-            )
+            await _reject(ws, "timeline_in_use", "目标时间线正在其他连接中打开，请先关闭")
             return "handled"
         try:
             commit_solo_switch(
@@ -602,6 +591,7 @@ async def _handle_switch(
                 target_world_id=target_world_id,
             )
             committed = True
+            room.terminal_event_pending = True
         except MultiplayerError as exc:
             await _reject(ws, exc.code, exc.message)
             return "handled"
@@ -647,9 +637,7 @@ async def _handle_archive(
         target_room = await manager.get(target_world_id)
         if target_room is not None and target_room.connected_users:
             room.release_action(terminal_status="failed")
-            await _reject(
-                ws, "timeline_in_use", "目标时间线正在其他连接中打开，请先关闭"
-            )
+            await _reject(ws, "timeline_in_use", "目标时间线正在其他连接中打开，请先关闭")
             return "handled"
         try:
             archived = await asyncio.to_thread(

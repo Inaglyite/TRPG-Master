@@ -60,19 +60,13 @@ def _solo_tree_preflight(db_url: str, world_id: str, user_id: str) -> dict:
         if world is None or world.status != "active":
             raise MultiplayerError("world_not_found", "存档不存在或已删除", 404)
         member = (
-            session.query(WorldMember)
-            .filter_by(world_id=world_id, user_id=user_id)
-            .one_or_none()
+            session.query(WorldMember).filter_by(world_id=world_id, user_id=user_id).one_or_none()
         )
         if member is None or member.role != "owner":
             raise MultiplayerError("owner_required", "只有房主可以管理时间线", 403)
         if world_play_mode(world.metadata_json) != "solo":
-            raise MultiplayerError(
-                "solo_world_required", "只有私密单人世界支持时间线管理", 403
-            )
-        member_count = (
-            session.query(WorldMember).filter_by(world_id=world_id).count()
-        )
+            raise MultiplayerError("solo_world_required", "只有私密单人世界支持时间线管理", 403)
+        member_count = session.query(WorldMember).filter_by(world_id=world_id).count()
         if member_count > 1:
             raise MultiplayerError(
                 "solo_membership_violated",
@@ -98,13 +92,9 @@ def _tree_entries(
 
 
 def _find_entry(entries: list[dict], target_world_id: str) -> dict:
-    entry = next(
-        (item for item in entries if item["world_id"] == target_world_id), None
-    )
+    entry = next((item for item in entries if item["world_id"] == target_world_id), None)
     if entry is None:
-        raise MultiplayerError(
-            "world_not_in_tree", "目标时间线不属于当前存档", 403
-        )
+        raise MultiplayerError("world_not_in_tree", "目标时间线不属于当前存档", 403)
     return entry
 
 
@@ -165,9 +155,7 @@ def register_solo_timeline_http_routes(
             }
         try:
             entry = _find_entry(
-                _tree_entries(
-                    project_root, runtime_root, tree["module_name"], current_id
-                ),
+                _tree_entries(project_root, runtime_root, tree["module_name"], current_id),
                 target_world_id,
             )
             if not entry["resumable"]:
@@ -246,6 +234,8 @@ def register_solo_timeline_http_routes(
                         target_world_id=target_world_id,
                     )
                     committed = True
+                    if room is not None:
+                        room.terminal_event_pending = True
                 except MultiplayerError as exc:
                     return _error(exc)
                 except Exception:
@@ -260,17 +250,11 @@ def register_solo_timeline_http_routes(
                 finally:
                     if not committed and reservation_attempted:
                         try:
-                            finish_room_action(
-                                database_url(), current_id, action_id, "failed"
-                            )
+                            finish_room_action(database_url(), current_id, action_id, "failed")
                         except Exception:
-                            logger.exception(
-                                "切换失败后清理持久租约失败 world_id=%s", current_id
-                            )
+                            logger.exception("切换失败后清理持久租约失败 world_id=%s", current_id)
                     if local_reservation and room is not None:
-                        room.release_action(
-                            terminal_status="completed" if committed else "failed"
-                        )
+                        room.release_action(terminal_status="completed" if committed else "failed")
                 if room is not None:
                     # 旧世界房间可能正开在别的标签页：广播后拆除，它会重连到
                     # 新的当前时间线（与游戏内切换同一条客户端路径）。
@@ -303,9 +287,7 @@ def register_solo_timeline_http_routes(
         try:
             tree = _solo_tree_preflight(database_url(), world_id, user.id)
             _find_entry(
-                _tree_entries(
-                    project_root, runtime_root, tree["module_name"], tree["current_id"]
-                ),
+                _tree_entries(project_root, runtime_root, tree["module_name"], tree["current_id"]),
                 target_world_id,
             )
             renamed = await asyncio.to_thread(
@@ -339,9 +321,7 @@ def register_solo_timeline_http_routes(
             tree = _solo_tree_preflight(database_url(), world_id, user.id)
             current_id = tree["current_id"]
             _find_entry(
-                _tree_entries(
-                    project_root, runtime_root, tree["module_name"], current_id
-                ),
+                _tree_entries(project_root, runtime_root, tree["module_name"], current_id),
                 target_world_id,
             )
         except MultiplayerError as exc:
@@ -380,9 +360,7 @@ def register_solo_timeline_http_routes(
                     try:
                         await manager.remove(target_world_id, target_room)
                     except Exception:
-                        logger.exception(
-                            "归档后移除空房间失败 world_id=%s", target_world_id
-                        )
+                        logger.exception("归档后移除空房间失败 world_id=%s", target_world_id)
                     if target_room.driver_transport is not None:
                         try:
                             await target_room.driver_transport.close_input()
@@ -408,9 +386,7 @@ def register_solo_timeline_http_routes(
                             "completed" if committed else "failed",
                         )
                     except Exception:
-                        logger.exception(
-                            "归档后清理持久租约失败 world_id=%s", target_world_id
-                        )
+                        logger.exception("归档后清理持久租约失败 world_id=%s", target_world_id)
         audit(
             database_url(),
             "world_archived",
@@ -423,8 +399,5 @@ def register_solo_timeline_http_routes(
 def _world_has_active_turn(db_url: str, world_id: str) -> bool:
     with session_scope(db_url) as session:
         return (
-            session.query(Turn.id)
-            .filter_by(world_id=world_id, status="active")
-            .first()
-            is not None
+            session.query(Turn.id).filter_by(world_id=world_id, status="active").first() is not None
         )

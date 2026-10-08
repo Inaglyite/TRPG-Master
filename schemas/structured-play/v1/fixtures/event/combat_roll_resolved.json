@@ -1,0 +1,39 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "combat_roll_resolved",
+  "cause_request_id": null,
+  "payload": {
+    "roll_id": "combat-roll-1",
+    "investigator_id": "inv-alice",
+    "response": "roll",
+    "result": {
+      "roll_id": "combat-roll-1",
+      "investigator_id": "inv-alice",
+      "encounter_id": "encounter-1",
+      "round": 1,
+      "actor_id": "inv-alice",
+      "target_id": "guard",
+      "action_type": "firearm",
+      "response": "roll",
+      "outcome": "attacker_hit",
+      "rolls": [
+        {
+          "actor_id": "inv-alice",
+          "role": "attack",
+          "roll": 17,
+          "level": "困难成功"
+        }
+      ],
+      "damage": {
+        "target_id": "guard",
+        "amount": 3,
+        "hp_before": 8,
+        "hp_after": 5
+      }
+    }
+  }
+}

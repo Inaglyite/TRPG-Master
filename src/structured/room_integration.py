@@ -88,6 +88,12 @@ async def handle_room_structured_frame(
         deliver=deliver,
         broadcast=broadcast,
         agent_broadcast=broadcast_all,
+        admission_guard=lambda: (
+            not (
+                getattr(room, "control_action_active", False)
+                or getattr(room, "terminal_event_pending", False)
+            )
+        ),
     )
 
 
@@ -177,6 +183,24 @@ async def handle_structured_room_start(
             }
         )
         return
+    if room.play_mode == "solo":
+        # Creation/lobby checkpoints can predate character selection. Save the
+        # real materialized PC and stable item IDs before exposing a playable
+        # solo world, not a template PC that restore would have to invent/heal.
+        from src.storage.persistence import save_game
+
+        try:
+            save_game([], context=room.engine.context)
+        except Exception:
+            logger.exception("结构化单人开局存档失败 world_id=%s", world_id)
+            await ws.send_json(
+                {
+                    "type": "room_action_rejected",
+                    "code": "start_checkpoint_failed",
+                    "message": "开局存档未能保存，游戏尚未开始。请稍后重试开局。",
+                }
+            )
+            return
     controller.set_room_status(room, "playing")
     await controller.broadcast_room_state(room)
     # 全员按各自 principal 重同步（keeper 与玩家看到不同的快照投影）。

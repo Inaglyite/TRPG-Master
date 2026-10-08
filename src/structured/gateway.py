@@ -19,6 +19,8 @@ from sqlalchemy import func, select
 
 from src.storage.database import (
     EventOutbox,
+    GameCommand,
+    PlayerRequest,
     World,
     WorldMember,
     WorldState,
@@ -173,7 +175,13 @@ class StructuredGateway:
                 "not_authorized", "帧的 world_id 与当前连接世界不一致。", retryable=False
             )
         with session_scope(self.database_url) as session:
-            principal = self._resolve_principal(session, world_id, user_id, frame_type)
+            principal_type = (
+                "combat_player_response"
+                if frame_type == "command_request"
+                and frame.get("kind") in {"combat_roll", "combat_decide"}
+                else frame_type
+            )
+            principal = self._resolve_principal(session, world_id, user_id, principal_type)
         if frame_type == "action_request":
             outcome = self.service.submit_action_request(
                 world_id=world_id, principal=principal, request=frame
@@ -257,10 +265,15 @@ class StructuredGateway:
         deliver: Deliver,
         broadcast: Broadcast | None = None,
         agent_broadcast: Broadcast | None = None,
+        admission_guard: Callable[[], bool] | None = None,
     ) -> None:
         """处理一帧：错误只回发起方；已提交事件按各连接 principal 过滤投递。"""
         async with self._world_lock(world_id):
             try:
+                if admission_guard is not None and not admission_guard():
+                    raise StructuredError(
+                        "stale_target", "世界正在读档或切换，请重新同步后提交。", retryable=True
+                    )
                 events, deduplicated = await asyncio.to_thread(
                     self._execute, world_id, user_id, frame
                 )
@@ -300,7 +313,48 @@ class StructuredGateway:
             and frame.get("kind") == "control_keeper"
             and (frame.get("payload") or {}).get("action") == "retry"
         )
-        if (frame_type in _AGENT_TRIGGER_FRAMES or retry_keeper) and not deduplicated:
+        combat_response = frame_type == "command_request" and frame.get("kind") in {
+            "combat_roll",
+            "combat_decide",
+        }
+        # A defense choice can create a roll wait. Resume only after no player
+        # decision/roll remains, not merely because the response frame was accepted.
+        if combat_response and not deduplicated:
+            snapshot = await asyncio.to_thread(
+                self.service.session_snapshot,
+                world_id=world_id,
+                principal=Principal(kind="agent", run_id="combat-resume-preview"),
+            )
+            combat_response = not (snapshot.get("combat_roll") or snapshot.get("combat_decision"))
+        combat_trigger = ""
+        if combat_response and not deduplicated:
+            with session_scope(self.database_url) as session:
+                command = session.scalar(
+                    select(GameCommand).where(
+                        GameCommand.world_id == world_id,
+                        GameCommand.command_id == str(frame.get("command_id") or ""),
+                        GameCommand.status == "committed",
+                    )
+                )
+                source = (command.result or {}).get("source_request_id") if command else None
+                request = (
+                    session.scalar(
+                        select(PlayerRequest).where(
+                            PlayerRequest.world_id == world_id,
+                            PlayerRequest.request_id == source,
+                            PlayerRequest.request_type == "action_request",
+                            PlayerRequest.status.in_(
+                                ["queued", "processing", "awaiting_player", "paused"]
+                            ),
+                        )
+                    )
+                    if source
+                    else None
+                )
+                combat_trigger = request.request_id if request else ""
+        if (
+            frame_type in _AGENT_TRIGGER_FRAMES or retry_keeper or combat_response
+        ) and not deduplicated:
             from .agent_runtime import maybe_schedule_keeper_agent
 
             maybe_schedule_keeper_agent(
@@ -309,7 +363,7 @@ class StructuredGateway:
                 trigger_request_id=str(
                     (frame.get("payload") or {}).get("request_id")
                     if retry_keeper
-                    else frame.get("request_id") or ""
+                    else combat_trigger or frame.get("request_id") or ""
                 ),
                 deliver=deliver if broadcast is None else None,
                 broadcast=agent_broadcast if agent_broadcast is not None else broadcast,

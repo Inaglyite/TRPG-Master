@@ -1,0 +1,15 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-combat_action-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "kind": "combat_action",
+  "payload": {
+    "actor_id": "inv-alice",
+    "target_id": "guard",
+    "action_type": "firearm",
+    "weapon_item_id": "item-alice-gun",
+    "damage_spec": "1d3"
+  }
+}

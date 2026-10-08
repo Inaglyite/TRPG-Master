@@ -1,0 +1,16 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-combat_start-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 12,
+  "kind": "combat_start",
+  "payload": {
+    "participants": [
+      {
+        "id": "guard"
+      }
+    ],
+    "reason": "守卫举枪"
+  }
+}

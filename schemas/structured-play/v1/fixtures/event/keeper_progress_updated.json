@@ -1,0 +1,1 @@
+{"protocol_version":1,"event_id":201,"world_id":"world-fixture-1","sequence":51,"revision":12,"type":"keeper_progress_updated","cause_request_id":null,"payload":{"clues":[],"clocks":[{"id":"clue_clarity","title":"线索清晰度","value":1,"max":5,"level":"已有发现","next_level":"逐渐清晰","advance_when":["首次记录作者线索"]}]}}

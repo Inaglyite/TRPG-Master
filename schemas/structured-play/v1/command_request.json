@@ -4,6 +4,7 @@
   "title": "command_request：主持领域命令信封",
   "description": "人类主持台与 Agent 适配器共用的命令入口。客户端不发送 principal/controller_epoch：身份由服务端会话或委派解析，epoch 在受理时由服务端绑定当前控制权。payload 按 kind 严格校验，禁止万能 execute_tool(name,args) 与任意 state_set。",
   "oneOf": [
+    {"$ref": "#/$defs/keeper_roll"},
     {
       "$ref": "#/$defs/control_keeper"
     },
@@ -54,9 +55,97 @@
     },
     {
       "$ref": "#/$defs/record_memory"
+    },
+    {
+      "$ref": "#/$defs/combat_start"
+    },
+    {
+      "$ref": "#/$defs/combat_action"
+    },
+    {
+      "$ref": "#/$defs/combat_decide"
+    },
+    {
+      "$ref": "#/$defs/combat_roll"
+    },
+    {
+      "$ref": "#/$defs/combat_end"
+    },
+    {
+      "$ref": "#/$defs/end_game"
+    },
+    {
+      "$ref": "#/$defs/record_ruling"
+    },
+    {
+      "$ref": "#/$defs/record_condition"
     }
   ],
   "$defs": {
+    "keeper_roll": {
+      "type": "object",
+      "properties": {
+        "kind": {"const": "keeper_roll"},
+        "cause_id": {"type": "null"},
+        "payload": {
+          "type": "object", "required": ["spec"], "additionalProperties": false,
+          "properties": {
+            "spec": {"$ref": "common.json#/$defs/dice_spec"},
+            "visibility": {"enum": ["keeper", "public"], "default": "keeper"}
+          }
+        }
+      },
+      "allOf": [{"$ref": "#/$defs/envelope_base"}],
+      "unevaluatedProperties": false
+    },
+    "ruling_value": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        { "type": "string", "maxLength": 200 }
+      ]
+    },
+    "record_ruling": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "record_ruling" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["flag_id", "value", "expected_before", "basis"],
+          "properties": {
+            "flag_id": { "$ref": "common.json#/$defs/id_string" },
+            "value": { "$ref": "#/$defs/ruling_value" },
+            "expected_before": {
+              "oneOf": [{ "$ref": "#/$defs/ruling_value" }, { "type": "null" }]
+            },
+            "basis": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      },
+      "allOf": [{ "$ref": "#/$defs/envelope_base" }],
+      "unevaluatedProperties": false
+    },
+    "record_condition": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "record_condition" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["investigator_id", "condition", "operation", "expected_present", "basis"],
+          "properties": {
+            "investigator_id": { "$ref": "common.json#/$defs/id_string" },
+            "condition": { "enum": ["major_wound", "prone", "unconscious", "dying", "dead"] },
+            "operation": { "enum": ["add", "remove"] },
+            "expected_present": { "type": "boolean" },
+            "basis": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      },
+      "allOf": [{ "$ref": "#/$defs/envelope_base" }],
+      "unevaluatedProperties": false
+    },
     "control_keeper": {
       "type": "object",
       "properties": {
@@ -65,17 +154,11 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "action"
-          ],
+          "required": ["action"],
           "additionalProperties": false,
           "properties": {
             "action": {
-              "enum": [
-                "take",
-                "release",
-                "retry"
-              ]
+              "enum": ["take", "release", "retry"]
             },
             "request_id": {
               "$ref": "common.json#/$defs/id_string"
@@ -91,9 +174,7 @@
                 }
               },
               "then": {
-                "required": [
-                  "request_id"
-                ]
+                "required": ["request_id"]
               }
             }
           ]
@@ -115,11 +196,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "speaker",
-            "audience",
-            "text"
-          ],
+          "required": ["speaker", "audience", "text"],
           "additionalProperties": false,
           "properties": {
             "speaker": {
@@ -173,11 +250,7 @@
               "maxLength": 60
             },
             "difficulty": {
-              "enum": [
-                "regular",
-                "hard",
-                "extreme"
-              ]
+              "enum": ["regular", "hard", "extreme"]
             },
             "bonus_penalty": {
               "type": "integer",
@@ -198,10 +271,7 @@
               "$ref": "common.json#/$defs/target"
             },
             "visibility": {
-              "enum": [
-                "public",
-                "keeper"
-              ],
+              "enum": ["public", "keeper"],
               "description": "keeper=秘密检定：细节与结果仅主持可见投影。"
             },
             "related_request_id": {
@@ -242,9 +312,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "check_request_id"
-          ],
+          "required": ["check_request_id"],
           "additionalProperties": false,
           "properties": {
             "check_request_id": {
@@ -273,22 +341,14 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "clue_id",
-            "presentation",
-            "target"
-          ],
+          "required": ["clue_id", "presentation", "target"],
           "additionalProperties": false,
           "properties": {
             "clue_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "presentation": {
-              "enum": [
-                "describe",
-                "image",
-                "original"
-              ]
+              "enum": ["describe", "image", "original"]
             },
             "target": {
               "$ref": "common.json#/$defs/target"
@@ -316,13 +376,19 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "clue_id",
-            "recipient_investigator_ids",
-            "basis"
-          ],
+          "required": ["clue_id", "recipient_investigator_ids", "basis"],
           "additionalProperties": false,
+          "dependentRequired": {
+            "discovery_rule_index": ["discovery_investigator_id"],
+            "discovery_investigator_id": ["discovery_rule_index"],
+            "check_request_id": ["discovery_rule_index"],
+            "acquire_item": ["discovery_rule_index"]
+          },
           "properties": {
+            "discovery_rule_index": {"type": "integer", "minimum": 0, "maximum": 999},
+            "discovery_investigator_id": {"$ref": "common.json#/$defs/id_string"},
+            "check_request_id": {"$ref": "common.json#/$defs/id_string"},
+            "acquire_item": {"type": "boolean", "description": "明确取得作者声明的实物。省略/false只发信息，不结算实物及取得标记。"},
             "clue_id": {
               "$ref": "common.json#/$defs/id_string"
             },
@@ -366,14 +432,19 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "investigator_id",
-            "item_id",
-            "quantity",
-            "operation"
-          ],
+          "required": ["investigator_id", "item_id", "quantity", "operation"],
           "additionalProperties": false,
+          "dependentRequired": {
+            "effect_clue_id": ["effect_rule_index", "basis"],
+            "effect_rule_index": ["effect_clue_id", "basis"],
+            "basis": ["effect_clue_id", "effect_rule_index"],
+            "check_request_id": ["effect_clue_id"]
+          },
           "properties": {
+            "effect_clue_id": {"$ref": "common.json#/$defs/id_string"},
+            "effect_rule_index": {"type": "integer", "minimum": 0, "maximum": 999},
+            "basis": {"type": "string", "minLength": 1, "maxLength": 500},
+            "check_request_id": {"$ref": "common.json#/$defs/id_string"},
             "investigator_id": {
               "$ref": "common.json#/$defs/id_string"
             },
@@ -424,12 +495,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "item_id",
-            "quantity",
-            "from",
-            "to"
-          ],
+          "required": ["item_id", "quantity", "from", "to"],
           "additionalProperties": false,
           "properties": {
             "item_id": {
@@ -442,18 +508,11 @@
             },
             "from": {
               "type": "object",
-              "required": [
-                "kind",
-                "id"
-              ],
+              "required": ["kind", "id"],
               "additionalProperties": false,
               "properties": {
                 "kind": {
-                  "enum": [
-                    "investigator",
-                    "npc",
-                    "scene"
-                  ]
+                  "enum": ["investigator", "npc", "scene"]
                 },
                 "id": {
                   "$ref": "common.json#/$defs/id_string"
@@ -462,18 +521,11 @@
             },
             "to": {
               "type": "object",
-              "required": [
-                "kind",
-                "id"
-              ],
+              "required": ["kind", "id"],
               "additionalProperties": false,
               "properties": {
                 "kind": {
-                  "enum": [
-                    "investigator",
-                    "npc",
-                    "scene"
-                  ]
+                  "enum": ["investigator", "npc", "scene"]
                 },
                 "id": {
                   "$ref": "common.json#/$defs/id_string"
@@ -503,24 +555,14 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "investigator_id",
-            "field",
-            "delta",
-            "reason"
-          ],
+          "required": ["investigator_id", "field", "delta", "reason"],
           "additionalProperties": false,
           "properties": {
             "investigator_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "field": {
-              "enum": [
-                "hp",
-                "san",
-                "max_hp",
-                "max_san"
-              ]
+              "enum": ["hp", "san", "max_hp", "max_san"]
             },
             "delta": {
               "type": "integer",
@@ -551,16 +593,19 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "minutes",
-            "reason"
-          ],
+          "required": ["minutes", "reason"],
           "additionalProperties": false,
           "properties": {
             "minutes": {
               "type": "integer",
               "minimum": 0,
               "maximum": 10080
+            },
+            "activity": {
+              "type": "string",
+              "enum": ["wait", "travel", "check", "interact", "combat", "other"],
+              "default": "wait",
+              "description": "时间活动类型；省略按等待计时。reason 仅为说明，不解析为类型。仅计时，不代替移动、检定或战斗命令。"
             },
             "reason": {
               "type": "string",
@@ -588,9 +633,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "destination_scene_id"
-          ],
+          "required": ["destination_scene_id"],
           "additionalProperties": false,
           "properties": {
             "destination_scene_id": {
@@ -631,10 +674,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "request_id",
-            "resolution"
-          ],
+          "required": ["request_id", "resolution"],
           "additionalProperties": false,
           "properties": {
             "request_id": {
@@ -663,9 +703,7 @@
             "pending_action": {
               "description": "awaiting_player：尚未执行的行动（只作记录，不构成执行授权）。",
               "type": "object",
-              "required": [
-                "kind"
-              ],
+              "required": ["kind"],
               "additionalProperties": false,
               "properties": {
                 "kind": {
@@ -703,18 +741,11 @@
             "thread": {
               "description": "交互线程操作（第 2 层上下文）：记录已讨论目标、关联追问、收尾或替换旧线程。线程是记录，不是执行授权。",
               "type": "object",
-              "required": [
-                "action"
-              ],
+              "required": ["action"],
               "additionalProperties": false,
               "properties": {
                 "action": {
-                  "enum": [
-                    "open",
-                    "continue",
-                    "close",
-                    "replace"
-                  ]
+                  "enum": ["open", "continue", "close", "replace"]
                 },
                 "thread_id": {
                   "$ref": "common.json#/$defs/id_string"
@@ -722,9 +753,7 @@
                 "pending_action": {
                   "description": "尚未执行的行动（只作记录，不构成执行授权）。",
                   "type": "object",
-                  "required": [
-                    "kind"
-                  ],
+                  "required": ["kind"],
                   "additionalProperties": false,
                   "properties": {
                     "kind": {
@@ -787,10 +816,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "asset_id",
-            "recipient_investigator_ids"
-          ],
+          "required": ["asset_id", "recipient_investigator_ids"],
           "additionalProperties": false,
           "properties": {
             "asset_id": {
@@ -826,11 +852,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "npc_id",
-            "scene_id",
-            "presence"
-          ],
+          "required": ["npc_id", "scene_id", "presence"],
           "additionalProperties": false,
           "properties": {
             "npc_id": {
@@ -840,10 +862,7 @@
               "$ref": "common.json#/$defs/id_string"
             },
             "presence": {
-              "enum": [
-                "enter",
-                "leave"
-              ]
+              "enum": ["enter", "leave"]
             }
           }
         }
@@ -864,10 +883,7 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "text",
-            "audience"
-          ],
+          "required": ["text", "audience"],
           "additionalProperties": false,
           "properties": {
             "text": {
@@ -879,11 +895,7 @@
               "$ref": "common.json#/$defs/audience"
             },
             "source": {
-              "enum": [
-                "keeper",
-                "module",
-                "ruling"
-              ]
+              "enum": ["keeper", "module", "ruling"]
             }
           }
         }
@@ -944,21 +956,14 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "draft_id",
-            "decision"
-          ],
+          "required": ["draft_id", "decision"],
           "additionalProperties": false,
           "properties": {
             "draft_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "decision": {
-              "enum": [
-                "approved",
-                "rejected",
-                "edited"
-              ]
+              "enum": ["approved", "rejected", "edited"]
             },
             "note": {
               "type": "string",
@@ -983,29 +988,17 @@
         },
         "payload": {
           "type": "object",
-          "required": [
-            "character_id",
-            "knowledge_type",
-            "content"
-          ],
+          "required": ["character_id", "knowledge_type", "content"],
           "additionalProperties": false,
           "properties": {
             "character_id": {
               "$ref": "common.json#/$defs/id_string"
             },
             "character_kind": {
-              "enum": [
-                "investigator",
-                "npc"
-              ]
+              "enum": ["investigator", "npc"]
             },
             "knowledge_type": {
-              "enum": [
-                "experienced",
-                "told",
-                "rumor",
-                "belief"
-              ],
+              "enum": ["experienced", "told", "rumor", "belief"],
               "description": "亲历/被告知/传闻/推测；传闻与推测不得以事实口吻叙述。"
             },
             "content": {
@@ -1036,6 +1029,232 @@
               "description": "更正/取代的旧记忆 ID；旧条目保留在来源链里。"
             }
           }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_start": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "combat_start"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "participants": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "common.json#/$defs/id_string"
+                  },
+                  "ready_firearm": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+              }
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 4000
+            }
+          },
+          "required": ["participants"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_action": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "combat_action"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "actor_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "target_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "action_type": {
+              "enum": ["melee", "firearm", "threat", "move", "other"]
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "skill": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "weapon": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "weapon_item_id": {"$ref": "common.json#/$defs/id_string"},
+            "damage_spec": {
+              "type": "string",
+              "pattern": "^(?:[1-9]|10)?d(?:[2-9]|[1-9][0-9]|100)(?:[+-](?:[0-9]|[1-9][0-9]|100))?$"
+            },
+            "damage_mode": {
+              "enum": ["normal", "impaling", "blunt"]
+            },
+            "defender_choice": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "bonus_dice": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "penalty_dice": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            }
+          },
+          "required": ["actor_id", "action_type"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_decide": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "combat_decide"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "decision_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "option_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          },
+          "required": ["decision_id", "option_id"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_roll": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "combat_roll"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "roll_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "response": {
+              "enum": ["roll", "cancel"]
+            }
+          },
+          "required": ["roll_id", "response"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "combat_end": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "combat_end"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            }
+          },
+          "required": ["reason"],
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "end_game": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "end_game"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "ending_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "ending_type": {
+              "enum": ["good", "secret", "neutral", "bad"]
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 4000
+            }
+          },
+          "required": [],
+          "additionalProperties": false
         }
       },
       "allOf": [

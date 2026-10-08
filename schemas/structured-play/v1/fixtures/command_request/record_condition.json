@@ -1,0 +1,15 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-condition-1",
+  "world_id": "world-demo",
+  "expected_revision": 4,
+  "kind": "record_condition",
+  "payload": {
+    "investigator_id": "inv-alice",
+    "condition": "unconscious",
+    "operation": "remove",
+    "expected_present": true,
+    "basis": "急救已结算，调查员恢复意识。"
+  }
+}

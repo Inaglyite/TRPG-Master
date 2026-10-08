@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.auth.service import auth_required, request_user
 from src.gameplay.character_library import (
@@ -28,6 +30,21 @@ from src.gameplay.character_library import (
     list_entries,
     update_entry,
 )
+from src.structured.case_characters import (
+    export_case_character,
+    preview_case_character,
+    save_case_character,
+)
+
+
+class CaseCharacterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    world_id: str = Field(min_length=1, max_length=160)
+    investigator_id: str = Field(min_length=1, max_length=160)
+    case_id: str = Field(min_length=1, max_length=384)
+    expected_revision: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    receipt_digest: str | None = Field(default=None, pattern="^[a-f0-9]{64}$")
 
 
 @dataclass(frozen=True)
@@ -80,6 +97,53 @@ def create_character_library_router(
     deps: CharacterLibraryHttpDependencies,
 ) -> APIRouter:
     router = APIRouter()
+
+    async def case_operation(request: Request, operation, *, export=False):
+        try:
+            _check_body_size(request)
+            owner_id = _owner_id(request, deps.database_url())
+            body = CaseCharacterRequest.model_validate(await request.json())
+            result = await asyncio.to_thread(
+                operation, deps.database_url(), owner_id, **body.model_dump()
+            )
+            if export:
+                filename = _export_filename(str(result["card"]["name"]))
+                return JSONResponse(
+                    result,
+                    headers={
+                        "Content-Disposition": f"attachment; filename=\"character.json\"; filename*=UTF-8''{quote(filename)}"
+                    },
+                )
+            if operation is save_case_character and not result.get("deduplicated"):
+                return JSONResponse({"ok": True, **result}, status_code=201)
+            return {"ok": True, **result}
+        except CharacterLibraryError as exc:
+            return _error_response(exc)
+        except ValidationError as exc:
+            return _error_response(
+                CharacterLibraryError(
+                    "invalid_case_source",
+                    "结案角色请求字段不合法。",
+                    400,
+                    exc.errors(include_input=False, include_url=False),
+                )
+            )
+        except (json.JSONDecodeError, ValueError):
+            return _error_response(
+                CharacterLibraryError("invalid_json", "请求体不是合法的 JSON。", 400)
+            )
+
+    @router.post("/api/character-library/from-case/preview")
+    async def preview_case_card(request: Request):
+        return await case_operation(request, preview_case_character)
+
+    @router.post("/api/character-library/from-case")
+    async def save_case_card(request: Request):
+        return await case_operation(request, save_case_character)
+
+    @router.post("/api/character-library/from-case/export")
+    async def export_case_card(request: Request):
+        return await case_operation(request, export_case_character, export=True)
 
     @router.get("/api/character-library")
     async def list_library(request: Request):
@@ -175,7 +239,7 @@ def create_character_library_router(
                 envelope,
                 headers={
                     "Content-Disposition": (
-                        f"attachment; filename=\"character.json\"; "
+                        f'attachment; filename="character.json"; '
                         f"filename*=UTF-8''{quote(filename)}"
                     )
                 },

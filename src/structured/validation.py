@@ -71,6 +71,22 @@ def validate_frame(frame_type: str, payload: dict) -> None:
         )
 
 
+def validate_action(action: dict) -> None:
+    """Programmatic action requests use the exact same discriminated schema."""
+    validate_frame(
+        "action_request",
+        {
+            "type": "action_request",
+            "protocol_version": 1,
+            "request_id": "action-validation",
+            "world_id": "action-validation",
+            "expected_revision": 0,
+            "investigator_id": "action-validation",
+            "action": action,
+        },
+    )
+
+
 def validate_command(kind: str, payload: dict) -> None:
     """校验一条**程序化构造**的主持命令（Agent 生成 / 内部调用）与冻结 schema 一致。
 

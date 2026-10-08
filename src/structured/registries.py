@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.gameplay.investigators import stable_investigator_id
+
 from .ids import new_stable_id
 
 ITEM_REGISTRY_VERSION = 1
@@ -76,15 +78,18 @@ def ensure_item_registry(state: dict) -> dict:
         by_stack[stack_key] = entry
 
     investigators = state.get("investigators")
+    pc = state.get("pc")
+    active_id = stable_investigator_id(state, "pc")
     if isinstance(investigators, dict):
         for investigator_id, sheet in investigators.items():
+            if investigator_id == active_id and isinstance(pc, dict):
+                continue  # the active pc is authoritative, not a second backpack
             inventory = sheet.get("inventory", []) if isinstance(sheet, dict) else []
             if isinstance(inventory, list):
                 for raw in inventory:
                     add(raw, {"kind": "investigator", "id": str(investigator_id)})
-    pc = state.get("pc")
     if isinstance(pc, dict):
-        pc_id = str(pc.get("id") or pc.get("stable_id") or "pc")
+        pc_id = active_id if active_id != "pc" else str(pc.get("id") or pc.get("stable_id") or "pc")
         inventory = pc.get("inventory", [])
         if isinstance(inventory, list):
             for raw in inventory:

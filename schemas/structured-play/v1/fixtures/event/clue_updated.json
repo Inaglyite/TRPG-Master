@@ -1,0 +1,1 @@
+{"protocol_version":1,"world_id":"world-fixture-1","event_id":202,"sequence":52,"revision":12,"type":"clue_updated","cause_request_id":null,"payload":{"clue_id":"known-diary","investigator_id":"inv-alice","category":"investigation","text":"已经知道的日记。","presentation":["describe"],"allowed_physical_item_ids":[]}}

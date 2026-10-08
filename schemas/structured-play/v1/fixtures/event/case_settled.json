@@ -1,0 +1,26 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "case_settled",
+  "cause_request_id": null,
+  "payload": {
+    "investigator_id": "inv-alice",
+    "character_id": "char-alice",
+    "case": {
+      "case_id": "world-fixture-1:truth_and_seal",
+      "world_id": "world-fixture-1",
+      "ending_type": "good",
+      "reputation_delta": 3
+    },
+    "career": {
+      "case_history": [],
+      "reputation": 3,
+      "completed_modules": [
+        "猩红文档"
+      ]
+    }
+  }
+}

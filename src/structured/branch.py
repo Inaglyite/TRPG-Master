@@ -32,6 +32,7 @@ from src.storage.database import (
     EventOutbox,
     GameCommand,
     InteractionThread,
+    KeeperControl,
     PlayerRequest,
     World,
     WorldInvestigator,
@@ -47,6 +48,13 @@ from src.storage.player_notes import PlayerNotesStore
 from .errors import StructuredError
 from .gateway import world_modes
 from .ids import new_row_id
+from .restore_receipts import (
+    OwnerRestoreRequest,
+    authorize_owner_restore,
+    existing_restore_receipt,
+    record_restore_receipt,
+    validate_owned_snapshot,
+)
 
 # 分支携带的控制面 metadata 键（缺了这些，分支会静默退化为 legacy 世界）。
 _CONTROL_PLANE_KEYS = ("execution_profile", "keeper_mode", "play_mode", "max_players", "name")
@@ -119,6 +127,9 @@ def create_structured_branch(
                 retryable=True,
             )
         branch_state = copy.deepcopy(row.state or {})
+        from .combat_flow import invalidate_combat_wait
+
+        invalidate_combat_wait(branch_state)
         branch_revision = int(row.revision)
         from .history_archive import source_archive_entries
         from .history_archive_capture import capture_local_history
@@ -388,6 +399,8 @@ def create_structured_branch(
 def restore_structured_save(
     context: RuntimeContext,
     slot_id: str | None = None,
+    *,
+    owner_restore: OwnerRestoreRequest | None = None,
 ) -> dict:
     """结构化世界读档：CAS 回滚状态 + 同事务 reconcile 结构化表。
 
@@ -398,6 +411,16 @@ def restore_structured_save(
     from src.storage.database_store import StaleRevisionError
     from src.storage.world_migrations import migrate_world_state
 
+    if owner_restore is not None:
+        if slot_id != owner_restore.slot_id:
+            raise StructuredError("invalid_action", "读档请求与存档点不一致。")
+        # A replay remains an audit receipt even if the checkpoint was later
+        # deleted. Fresh authority is required before this private lookup too.
+        with session_scope(context.database_url) as session:
+            authorize_owner_restore(session, context, owner_restore)
+            replay = existing_restore_receipt(session, context, owner_restore)
+            if replay is not None:
+                return replay
     _messages, snapshot, metadata = load_game_artifacts(slot_id, context=context)
     if snapshot is None:
         raise SaveNotFoundError(slot_id or AUTO_SAVE_SLOT)
@@ -416,15 +439,26 @@ def restore_structured_save(
         ):
             raise StructuredError("invalid_action", "存档事件游标与世界不一致，已拒绝读档。")
         saved_sequence = cursor["sequence"]
-    expected_revision = context.world_store.revision
+    expected_revision = (
+        owner_restore.expected_revision if owner_restore else context.world_store.revision
+    )
 
     with session_scope(context.database_url) as session:
+        if owner_restore is not None:
+            ids = authorize_owner_restore(session, context, owner_restore)
+            replay = existing_restore_receipt(session, context, owner_restore)
+            if replay is not None:
+                return replay
+            validate_owned_snapshot(snapshot, ids)
         row = session.get(WorldState, context.world_id, with_for_update=True)
         if row is None:
             raise StructuredError("unknown_world", "世界状态缺失。")
         if expected_revision is not None and int(row.revision) != int(expected_revision):
             raise StaleRevisionError(expected_revision, int(row.revision))
         snapshot["revision"] = restored_revision
+        from .combat_flow import invalidate_combat_wait
+
+        invalidate_combat_wait(snapshot)
         row.state = snapshot
         row.revision = restored_revision
         row.updated_at = utcnow()
@@ -517,6 +551,22 @@ def restore_structured_save(
                 memory.superseded_by = ""
                 memory.updated_revision = restored_revision
                 memory.updated_at = now
+        # A model call from the discarded timeline must not retain authority
+        # merely because the restored revision equals its original revision.
+        control = session.get(KeeperControl, context.world_id, with_for_update=True)
+        if control is not None:
+            control.epoch = int(control.epoch) + 1
+            control.updated_at = now
+            if control.controller_kind == "agent":
+                control.controller_kind, control.controller_id = "none", ""
+        if owner_restore is not None:
+            record_restore_receipt(
+                session,
+                context,
+                owner_restore,
+                {"slot_id": slot_id, "revision": restored_revision},
+                int(control.epoch) if control is not None else 0,
+            )
     # 让 store 缓存失效（恢复是带外写入），下次读取以行为准。
     invalidate = getattr(context.world_store, "invalidate_cache", None)
     if callable(invalidate):

@@ -37,15 +37,30 @@ from .checks import (
 )
 from .checks import (
     decline_pending_check,
+    parse_dice_spec,
     resolve_pending_check,
     roll_free,
 )
+from .combat_endings import finish_encounter, finish_game, start_encounter
+from .combat_flow import prepare_combat_action, respond_combat_decision, respond_combat_roll
+from .conditions import record_condition
 from .control import cmd_control_keeper
-from .domains import COMMAND_HANDLERS, CommandContext, CommandResult, EventSpec
+from .domains import COMMAND_HANDLERS, CommandContext, EventSpec
 from .errors import StructuredError
+from .execution import POST_GAME_COMMANDS, execute_domain
 from .ids import canonical_digest, new_row_id
-from .principal import Principal, check_command_authority, current_control, resolve_keeper_principal
+from .keeper_dice import keeper_roll, visible_keeper_rolls
+from .principal import (
+    Principal,
+    check_command_authority,
+    current_control,
+    resolve_keeper_principal,
+    resolve_player_principal,
+)
+from .rate_limits import ORDINARY_DICE_RATE_LIMITER
 from .registries import ensure_clue_registry, ensure_item_registry
+from .rulings import record_ruling, ruling_projection
+from .validation import validate_command
 
 logger = logging.getLogger("trpg.structured_service")
 
@@ -54,13 +69,31 @@ _KIND_HANDLERS = {
     "request_check": _cmd_request_check,
     "resolve_check": _cmd_resolve_check,
     "control_keeper": cmd_control_keeper,
+    "combat_start": start_encounter,
+    "combat_action": prepare_combat_action,
+    "combat_decide": respond_combat_decision,
+    "combat_roll": respond_combat_roll,
+    "combat_end": finish_encounter,
+    "end_game": finish_game,
+    "record_ruling": record_ruling,
+    "record_condition": record_condition,
+    "keeper_roll": keeper_roll,
 }
 
-_ACTION_KINDS = {"present_clue", "use_item", "move", "freeform"}
+_HUMAN_REPLAY_GUARDED = {"record_ruling", "record_condition", "resolve_draft", "keeper_roll"}
+
+_ACTION_KINDS = {"present_clue", "use_item", "move", "freeform", "combat"}
 
 # 权限矩阵（schemas/structured-play/v1/permission-matrix.json）中玩家可直接调用
 # 的命令：只能以自己控制的调查员身份发言，其余命令一律需要 keeper/agent 控制权。
-_PLAYER_COMMANDS = {"publish_message"}
+_COMBAT_PLAYER_COMMANDS = {"combat_decide", "combat_roll"}
+_COMBAT_COMMANDS = _COMBAT_PLAYER_COMMANDS | {
+    "combat_start",
+    "combat_action",
+    "combat_end",
+    "end_game",
+}
+_PLAYER_COMMANDS = {"publish_message", *_COMBAT_PLAYER_COMMANDS}
 
 
 class StructuredPlayService:
@@ -181,6 +214,10 @@ class StructuredPlayService:
         handler = _KIND_HANDLERS.get(kind)
         if handler is None:
             raise StructuredError("invalid_action", f"未知命令：{kind}")
+        if kind in _COMBAT_COMMANDS or kind in {"record_ruling", "record_condition", "keeper_roll"}:
+            validate_command(kind, payload)
+        if kind == "keeper_roll" and cause_id:
+            raise StructuredError("invalid_action", "主持普通骰不能关联或完成玩家行动。")
         digest = canonical_digest({"kind": kind, "payload": payload, "cause_id": cause_id})
         with session_scope(self.database_url) as session:
             _world, row, state = self._locked_world(session, world_id)
@@ -189,6 +226,36 @@ class StructuredPlayService:
             # 另一套 ID，导致请求与命令引用不同对象）。
             ensure_item_registry(state)
             ensure_clue_registry(state)
+            # Battle responses must re-read control before replay lookup as well:
+            # a revoked controller must not receive an old private receipt.
+            combat_epoch = None
+            if kind in _HUMAN_REPLAY_GUARDED:
+                if principal.kind != "keeper":
+                    raise StructuredError("keeper_required", "该操作需要人类主持授权。")
+                combat_epoch = check_command_authority(session, world_id, principal)
+            if kind in _COMBAT_COMMANDS:
+                if kind in _COMBAT_PLAYER_COMMANDS:
+                    if principal.kind != "player":
+                        raise StructuredError("not_authorized", "战斗响应只能由玩家提交。")
+                    principal = resolve_player_principal(session, world_id, principal.user_id)
+                    from .bootstrap import LOCAL_OPERATOR_USER_ID, local_player_investigator_ids
+
+                    if (
+                        principal.user_id == LOCAL_OPERATOR_USER_ID
+                        and not principal.investigator_ids
+                    ):
+                        principal = Principal(
+                            kind="player",
+                            user_id=principal.user_id,
+                            investigator_ids=local_player_investigator_ids(
+                                session, world_id, state
+                            ),
+                        )
+                    if not principal.investigator_ids:
+                        raise StructuredError("not_authorized", "你没有调查员控制权。")
+                    combat_epoch = 0
+                else:
+                    combat_epoch = check_command_authority(session, world_id, principal)
             existing = session.execute(
                 select(GameCommand).where(
                     GameCommand.world_id == world_id,
@@ -196,7 +263,34 @@ class StructuredPlayService:
                 )
             ).scalar_one_or_none()
             if existing is not None:
+                if (
+                    kind in _COMBAT_COMMANDS or kind in _HUMAN_REPLAY_GUARDED
+                ) and existing.principal != principal.as_dict():
+                    same_dice_keeper = (
+                        kind == "keeper_roll"
+                        and (existing.principal or {}).get("kind") == "keeper"
+                        and (existing.principal or {}).get("user_id") == principal.user_id
+                    )
+                    if not same_dice_keeper:
+                        raise StructuredError("not_authorized", "不能重放其他操作者的受限命令。")
                 if existing.payload_digest == digest:
+                    if (
+                        kind == "keeper_roll"
+                        and session.scalar(
+                            select(EventOutbox.id)
+                            .where(
+                                EventOutbox.world_id == world_id,
+                                EventOutbox.event_type == "keeper_roll_resolved",
+                                EventOutbox.payload["command_id"].as_string() == command_id,
+                            )
+                            .limit(1)
+                        )
+                        is None
+                    ):
+                        raise StructuredError(
+                            "stale_target",
+                            "该普通骰已被读档回滚或来自分支前，请用新命令ID主动掷骰。",
+                        )
                     return {
                         "status": existing.status,
                         "command_id": command_id,
@@ -210,7 +304,11 @@ class StructuredPlayService:
                     "同一 command_id 提交了不同内容，已拒绝。",
                 )
             self._check_revision(expected_revision, int(row.revision))
-            if kind == "control_keeper":
+            if state.get("game_over") and kind not in POST_GAME_COMMANDS:
+                raise StructuredError("invalid_action", "游戏已结束，不能继续改变游戏状态。")
+            if combat_epoch is not None:
+                epoch = combat_epoch
+            elif kind == "control_keeper":
                 if principal.kind != "keeper":
                     raise StructuredError("keeper_required", "该操作需要人类主持授权。")
                 resolve_keeper_principal(session, world_id, principal.user_id)
@@ -220,6 +318,9 @@ class StructuredPlayService:
             else:
                 epoch = check_command_authority(session, world_id, principal)
             self._authorize_payload(principal, kind, payload)
+            if kind == "keeper_roll":
+                parse_dice_spec(payload["spec"])
+                ORDINARY_DICE_RATE_LIMITER.check(self.database_url, principal.user_id)
             ctx = CommandContext(
                 world_id=world_id,
                 principal=principal,
@@ -227,12 +328,11 @@ class StructuredPlayService:
                 session=session,
                 rng=self._rng,
                 revision=int(row.revision),
+                command_id=command_id,
             )
-            outcome = handler(state, payload, ctx)
+            outcome = execute_domain(kind, handler, state, payload, ctx)
             if kind == "control_keeper":
                 epoch = int(current_control(session, world_id).epoch)
-            if not isinstance(outcome, CommandResult):
-                raise StructuredError("internal_error", f"命令 {kind} 返回了非法结果。")
             # 命令卡的收尾事件：以 command_id 为键，让发起方的“主持操作”卡
             # 离开等待态（协议 §3.3：committed 附带领域结果）。domain_outcome
             # 只接受 success/failure/not_executed，非法值降级为 success。
@@ -350,6 +450,17 @@ class StructuredPlayService:
         digest = canonical_digest(request)
         with session_scope(self.database_url) as session:
             _world, row, state = self._locked_world(session, world_id)
+            if kind == "combat":
+                from .bootstrap import LOCAL_OPERATOR_USER_ID, local_player_investigator_ids
+
+                if principal.kind != "player":
+                    raise StructuredError("not_authorized", "战斗申报只能由玩家提交。")
+                fresh = resolve_player_principal(session, world_id, principal.user_id)
+                ids = fresh.investigator_ids
+                if fresh.user_id == LOCAL_OPERATOR_USER_ID and not ids:
+                    ids = local_player_investigator_ids(session, world_id, state)
+                if investigator_id not in ids:
+                    raise StructuredError("not_investigator_controller", "调查员控制权已变化。")
             existing = self._find_request(session, world_id, request_id)
             if existing is not None:
                 if existing.payload_digest != digest:
@@ -357,6 +468,9 @@ class StructuredPlayService:
                         "duplicate_request_conflict", "同一请求 ID 提交了不同内容，已拒绝。"
                     )
                 if existing.status == "failed":
+                    from .combat_endings import _open_game
+
+                    _open_game(state)
                     # §3.1：failed 可恢复失败；客户端用同一 request_id 同载荷
                     # 重发 ⇒ 回到 queued 重新进入待办（重新做事实检查）。
                     self._check_revision(request.get("expected_revision"), int(row.revision))
@@ -396,6 +510,9 @@ class StructuredPlayService:
                     "events": [],
                     "deduplicated": True,
                 }
+            from .combat_endings import _open_game
+
+            _open_game(state)
             self._check_revision(request.get("expected_revision"), int(row.revision))
             # 事实检查用到的稳定 ID 注册表必须随状态持久化（不推进 revision），
             # 否则后续命令重新迁移会得到另一套随机 ID。
@@ -469,6 +586,9 @@ class StructuredPlayService:
         )
         with session_scope(self.database_url) as session:
             _world, row, _state = self._locked_world(session, world_id)
+            from .combat_endings import _open_game
+
+            _open_game(_state)
             session.add(
                 PlayerRequest(
                     id=new_row_id("req"),
@@ -641,6 +761,8 @@ class StructuredPlayService:
                     "events": [],
                     "deduplicated": True,
                 }
+            parse_dice_spec(spec)
+            ORDINARY_DICE_RATE_LIMITER.check(self.database_url, principal.user_id)
             ctx = CommandContext(
                 world_id=world_id, principal=principal, cause_id=request_id, rng=self._rng
             )
@@ -715,6 +837,9 @@ class StructuredPlayService:
                 raise StructuredError(
                     "duplicate_request_conflict", "同一请求 ID 提交了不同内容，已拒绝。"
                 )
+            from .combat_endings import _open_game
+
+            _open_game(state)
             check = session.execute(
                 select(CheckRequest).where(
                     CheckRequest.world_id == world_id,
@@ -837,6 +962,7 @@ class StructuredPlayService:
                 .all()
             )
             cursor = self._next_sequence(session, world_id) - 1
+            keeper_rolls = visible_keeper_rolls(session, world_id, is_keeper=is_keeper)
             from .message_history import visible_message_history
 
             message_history = (
@@ -896,7 +1022,15 @@ class StructuredPlayService:
                             "investigator_id": req.investigator_id,
                             "action": copy.deepcopy((req.payload or {})["action"]),
                         }
-                        if principal.kind == "keeper" and (req.payload or {}).get("action")
+                        if (req.payload or {}).get("action")
+                        and (
+                            principal.kind == "keeper"
+                            or (
+                                req.investigator_id in own
+                                and ((req.payload or {}).get("action") or {}).get("kind")
+                                == "combat"
+                            )
+                        )
                         else {}
                     ),
                     # 暂停/失败原因对本人与主持可见（可操作提示：缺 BYOK、被截断等），
@@ -962,12 +1096,41 @@ class StructuredPlayService:
             "keeper_drafts": draft_entries,
             "interactions": open_threads,
             "pending_checks": pending_checks,
+            "keeper_rolls": keeper_rolls,
             "cursor": {
                 "event_id": int(last_event_id or 0),
                 "revision": revision,
                 "sequence": max(cursor, 0),
             },
         }
+        from .game_clock import clock_projection
+
+        payload["clock"] = clock_projection(state)
+        from .combat_endings import combat_projection, decision_projection
+        from .combat_flow import roll_projection
+        from .combat_receipts import visible_results
+
+        decision = decision_projection(state)
+        roll = roll_projection(state)
+        payload["combat"] = combat_projection(state)
+        payload["combat_results"] = visible_results(state, own, is_keeper)
+        payload["combat_decision"] = (
+            decision
+            if decision and (is_keeper or decision["responding_investigator_id"] in own)
+            else None
+        )
+        payload["combat_roll"] = (
+            roll if roll and (is_keeper or roll["investigator_id"] in own) else None
+        )
+        payload["game_over"] = copy.deepcopy(state.get("game_over")) or None
+        if is_keeper:
+            payload["keeper_rulings"] = ruling_projection(state)
+        payload["case_settlements"] = [
+            copy.deepcopy(receipt)
+            for case in (state.get("case_settlements") or {}).values()
+            for investigator_id, receipt in case.items()
+            if is_keeper or investigator_id in own
+        ]
         # Room lobby recovery precedes roster materialization. Include the
         # member's own card on structured start/reconnect; no model is needed.
         if principal.kind != "agent":
@@ -987,8 +1150,10 @@ class StructuredPlayService:
         # contexts: its grounding/retrieval paths already have their own budgets.
         if principal.kind == "keeper":
             from .domains import _inventory_projection
+            from .keeper_progress import keeper_progress
             from .materials import keeper_assets, keeper_investigators, keeper_material
 
+            payload["keeper_progress"] = keeper_progress(state)
             payload["keeper_material"] = keeper_material(state)
             payload["keeper_assets"] = keeper_assets(state)
             payload["keeper_investigators"] = keeper_investigators(state)
@@ -1229,6 +1394,11 @@ class StructuredPlayService:
 
     def _fact_check_action(self, state: dict, action: dict, investigator_id: str) -> None:
         kind = action["kind"]
+        if kind == "combat":
+            from .combat_requests import fact_check_combat_request
+
+            fact_check_combat_request(state, action, investigator_id)
+            return
         if kind == "freeform":
             return
         if kind == "move":
@@ -1272,6 +1442,9 @@ class StructuredPlayService:
                     or int(item.get("quantity") or 0) <= 0
                 ):
                     raise StructuredError("object_not_held", "你手上没有这件实物。")
+                authored = (state.get("clue_catalog") or {}).get(clue_id) or {}
+                if authored.get("granted_item") and item.get("source_clue_id") != clue_id:
+                    raise StructuredError("object_not_held", "这件实物不是此线索已登记取得的原件。")
             if presentation == "image":
                 self._require_granted_clue_asset(state, clue_id, investigator_id)
             target = action.get("target") or {}
@@ -1362,9 +1535,12 @@ class StructuredPlayService:
             return f"前往 {action.get('destination_scene_id')}"
         if kind == "freeform":
             return str(action.get("text") or "")[:80]
+        if kind == "combat":
+            return f"申报战斗动作 {action.get('action_type')} → {action.get('target_id') or '无指定目标'}"
         return str(kind or "")
 
     def _visible_clues(self, state: dict, own: set[str], is_keeper: bool) -> list[dict]:
+        from .clue_custody import original_item_ids
         from .registries import ensure_clue_registry
 
         registry = ensure_clue_registry(state)
@@ -1381,12 +1557,17 @@ class StructuredPlayService:
                 self._clue_asset_granted(state, entry["clue_id"], own_id) for own_id in own
             ):
                 presentation.append("image")
+            holders = set(state.get("investigators") or {}) if is_keeper else own
+            physical = original_item_ids(state, entry["clue_id"], holders)
+            if physical:
+                presentation.append("original")
             clues.append(
                 {
                     "id": entry["clue_id"],
                     "category": category,
                     "text": str(entry.get("text") or "")[:500] or "（内容待守秘人补充）",
                     "presentation": presentation,
+                    "allowed_physical_item_ids": physical,
                 }
             )
         return sorted(clues, key=lambda clue: clue["id"])
@@ -1457,9 +1638,18 @@ class StructuredPlayService:
             "present_handout",
             "set_npc_presence",
             "record_fact",
+            "record_ruling",
+            "record_condition",
+            "keeper_roll",
             "record_memory",
             "resolve_draft",
             "control_keeper",
+            "combat_start",
+            "combat_action",
+            "combat_decide",
+            "combat_roll",
+            "combat_end",
+            "end_game",
         ]
         return {
             "protocol_version": 1,
@@ -1476,6 +1666,9 @@ class StructuredPlayService:
             "present_clue": structured,
             "use_item": structured,
             "memory_query": structured,
+            "combat_action_request": structured,
+            "combat_weapon_item_id": structured,
+            "structured_solo_restore": structured and meta.get("play_mode") == "solo",
         }
 
     @staticmethod

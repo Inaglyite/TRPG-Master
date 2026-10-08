@@ -12,11 +12,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.gameplay.investigators import (
+    investigator_entity,
+    project_active_investigator,
+    stable_investigator_id,
+)
 from src.gameplay.percentile import choose_percentile
 from src.gameplay.world_time import advance_time as _advance_time
 from src.storage.database import utcnow
 
 from .errors import StructuredError
+from .game_clock import clock_projection
 from .ids import new_stable_id
 from .materials import asset_entries
 from .registries import ensure_clue_registry, ensure_item_registry, find_item
@@ -24,6 +30,7 @@ from .registries import ensure_clue_registry, ensure_item_registry, find_item
 # 事件接收范围的简写
 PUBLIC = {"kind": "public"}
 KEEPER = {"kind": "keeper"}
+TIME_ACTIVITIES = ("wait", "travel", "check", "interact", "combat", "other")
 
 
 @dataclass
@@ -50,6 +57,7 @@ class CommandContext:
     # 处理器被调用时的世界 revision（写回前）；需要把行与「提交后版本」关联的
     # 处理器（线程/记忆：created_revision 是读档截止依据）按自身 bump 语义推算。
     revision: int = 0
+    command_id: str = ""  # Authoritative receipt ID, not a caller-supplied dice result.
 
     def roll_d100(self, bonus_penalty: int = 0) -> tuple[int, list[int]]:
         units = self.rng(10)
@@ -204,20 +212,25 @@ def cmd_advance_time(state: dict, payload: dict, ctx: CommandContext) -> Command
     if isinstance(minutes, bool) or not isinstance(minutes, int) or not 0 <= minutes <= 10080:
         raise StructuredError("invalid_action", "minutes 必须是 0–10080 的整数。")
     reason = str(payload.get("reason") or "")[:200]
-    event = _advance_time(state, minutes, activity=reason)
+    activity = payload.get("activity", "wait")
+    if not isinstance(activity, str) or activity not in TIME_ACTIVITIES:
+        raise StructuredError("invalid_action", "activity 必须是明确的时间活动类型。")
+    event = _advance_time(state, minutes, activity=activity)
     return CommandResult(
-        result={**event, "reason": reason},
+        result={**event, "reason": reason, "activity": activity},
         events=[
             EventSpec(
                 "state_changed",
-                {"clock": {"elapsed_minutes": event["after"]}},
+                {"clock": clock_projection(state)},
             )
         ],
     )
 
 
 def cmd_adjust_stat(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
-    investigator_id = _require_text(payload, "investigator_id", limit=160)
+    investigator_id = stable_investigator_id(
+        state, _require_text(payload, "investigator_id", limit=160)
+    )
     field_name = str(payload.get("field") or "")
     if field_name not in {"hp", "san", "max_hp", "max_san"}:
         raise StructuredError("invalid_action", "field 只支持 hp/san/max_hp/max_san。")
@@ -225,7 +238,9 @@ def cmd_adjust_stat(state: dict, payload: dict, ctx: CommandContext) -> CommandR
     if isinstance(delta, bool) or not isinstance(delta, int) or not -99 <= delta <= 99:
         raise StructuredError("invalid_action", "delta 必须是 -99–99 的整数。")
     reason = _require_text(payload, "reason", limit=200)
-    sheet = _investigator_sheet(state, investigator_id)
+    sheet = investigator_entity(state, investigator_id)
+    if sheet is None:
+        raise StructuredError("object_not_found", f"调查员不存在：{investigator_id}")
     before = int(sheet.get(field_name, 0) or 0)
     after = before + delta
     if field_name in {"max_hp", "max_san"}:
@@ -234,6 +249,8 @@ def cmd_adjust_stat(state: dict, payload: dict, ctx: CommandContext) -> CommandR
         upper = int(sheet.get(f"max_{field_name}", 0) or 0)
         after = max(0, min(after, upper if upper > 0 else after))
     sheet[field_name] = after
+    project_active_investigator(state)
+    projection = _stat_projection(sheet, investigator_id)
     return CommandResult(
         result={
             "status": "success",
@@ -242,7 +259,14 @@ def cmd_adjust_stat(state: dict, payload: dict, ctx: CommandContext) -> CommandR
             "after": after,
             "reason": reason,
         },
-        events=[EventSpec("state_changed", _stat_projection(sheet, investigator_id))],
+        events=[
+            EventSpec(
+                "state_changed",
+                projection,
+                {"kind": "investigators", "investigator_ids": [investigator_id]},
+            ),
+            EventSpec("state_changed", dict(projection), KEEPER),
+        ],
     )
 
 
@@ -263,6 +287,17 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     known = _known_destinations(state)
     if known and destination not in known:
         raise StructuredError("unknown_target", "该目的地对队伍未知；只能用已知出口或到过的场景。")
+    history = state.get("encounter_history")
+    if history is None:
+        history = {}
+        state["encounter_history"] = history
+    if not isinstance(history, dict):
+        raise StructuredError("invalid_action", "场景历史格式无效，不能记录此次移动。")
+    # Scene keys prove a committed visit; empty entries do not fabricate any
+    # legacy NPC encounter, availability or percentile outcome.
+    if current_id in scenes:
+        history.setdefault(current_id, {})
+    history.setdefault(destination, {})
     catalog_entry = {
         key: value for key, value in scene.items() if key not in {"document", "npcs_present"}
     }
@@ -272,6 +307,7 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     travel = payload.get("travel_minutes", 0)
     travel = travel if isinstance(travel, int) and not isinstance(travel, bool) else 0
     travel = max(0, min(travel, 1440))
+    arrival_updates = {"targets": _public_targets(state)}
     events = [
         EventSpec(
             "scene_changed",
@@ -283,7 +319,8 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
                 ],
                 "travel_minutes": travel,
             },
-        )
+        ),
+        EventSpec("state_changed", arrival_updates),
     ]
     result: dict[str, Any] = {
         "status": "success",
@@ -292,9 +329,7 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     }
     if travel:
         time_event = _advance_time(state, travel, activity="travel")
-        events.append(
-            EventSpec("state_changed", {"clock": {"elapsed_minutes": time_event["after"]}})
-        )
+        arrival_updates["clock"] = clock_projection(state)
         result["time"] = time_event
     # 已抵达目的地：把目标一致的开放移动线程收尾为 completed（记录收尾，
     # 方向永远是「命令改变世界，线程只记录」，不是线程触发移动）。
@@ -364,6 +399,8 @@ def cmd_record_fact(state: dict, payload: dict, ctx: CommandContext) -> CommandR
 
 
 def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
+    from .discoveries import advance_clue_clock, apply_discovery, verify_discovery
+
     clue_id = _require_text(payload, "clue_id", limit=160)
     recipients = payload.get("recipient_investigator_ids")
     if not isinstance(recipients, list) or not recipients:
@@ -372,8 +409,37 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     registry = ensure_clue_registry(state)
     catalog = state.get("clue_catalog", {})
     entry = registry["clues"].get(clue_id)
+    first_recording = entry is None
+    acquired_item_id = None
+    if "discovery_rule_index" in payload:
+        actor = _require_text(payload, "discovery_investigator_id", limit=160)
+        if actor not in recipients:
+            raise StructuredError("invalid_action", "发现者须包含在线索接收调查员中。")
+        definition, _rule = verify_discovery(
+            state,
+            clue_id,
+            payload["discovery_rule_index"],
+            actor,
+            str(payload.get("check_request_id") or ""),
+            ctx,
+        )
+        acquired_item_id = apply_discovery(
+            state,
+            clue_id,
+            definition,
+            actor,
+            basis,
+            ctx,
+            acquire=payload.get("acquire_item") is True,
+        )
+    elif any(
+        key in payload for key in ("discovery_investigator_id", "check_request_id", "acquire_item")
+    ):
+        raise StructuredError("invalid_action", "实物取得和发现者必须关联明确的模组发现规则。")
     if entry is None and isinstance(catalog, dict) and clue_id in catalog:
         catalog_entry = catalog[clue_id]
+        if not isinstance(catalog_entry, dict):
+            raise StructuredError("invalid_action", "模组线索格式无效。")
         entry = {
             "clue_id": clue_id,
             "legacy_key": f"{catalog_entry.get('category', 'investigation')}:{catalog_entry.get('text', '')}",
@@ -385,6 +451,8 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
         registry.setdefault("by_legacy_key", {}).setdefault(entry["legacy_key"], clue_id)
     if entry is None:
         raise StructuredError("object_not_found", f"线索不存在：{clue_id}")
+    if first_recording and clue_id in catalog:
+        advance_clue_clock(state)
 
     events: list[EventSpec] = []
     granted: list[str] = []
@@ -454,12 +522,25 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
                     audience,
                 )
             )
+    if acquired_item_id:
+        projection = {"investigator_id": actor, "items": _inventory_projection(state, actor)}
+        events.extend(
+            [
+                EventSpec(
+                    "inventory_changed",
+                    projection,
+                    {"kind": "investigators", "investigator_ids": [actor]},
+                ),
+                EventSpec("inventory_changed", dict(projection), {"kind": "keeper"}),
+            ]
+        )
     return CommandResult(
         result={
             "status": "success",
             "clue_id": clue_id,
             "recipients": sorted(granted),
             "basis": basis,
+            **({"acquired_item_id": acquired_item_id} if acquired_item_id else {}),
         },
         events=events,
     )
@@ -512,7 +593,10 @@ def _inventory_projection(state: dict, investigator_id: str) -> list[dict]:
 
 
 def cmd_use_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
+    from .discoveries import apply_discovery, require_actor, verify_discovery, verify_item_effect
+
     investigator_id = _require_text(payload, "investigator_id", limit=160)
+    require_actor(state, investigator_id)
     item_id = _require_text(payload, "item_id", limit=160)
     quantity = payload.get("quantity")
     if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 999:
@@ -527,12 +611,35 @@ def cmd_use_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResu
     held = int(entry.get("quantity") or 0)
     if held < quantity:
         raise StructuredError("object_not_held", f"数量不足：持有 {held}，需要 {quantity}。")
+    discovery_id = payload.get("effect_clue_id")
+    if discovery_id:
+        basis = _require_text(payload, "basis", limit=500)
+        definition, rule = verify_discovery(
+            state,
+            str(discovery_id),
+            payload.get("effect_rule_index"),
+            investigator_id,
+            str(payload.get("check_request_id") or ""),
+            ctx,
+            use=True,
+        )
+        verify_item_effect(state, entry, definition, rule, ctx)
+        apply_discovery(
+            state,
+            str(discovery_id),
+            definition,
+            investigator_id,
+            basis,
+            ctx,
+            acquire=False,
+            use=True,
+        )
     consume = payload.get("consume") is True
     consumed = 0
     if consume:
         entry["quantity"] = held - quantity
         consumed = quantity
-    return CommandResult(
+    outcome = CommandResult(
         result={
             "status": "success",
             "item_id": entry["item_id"],
@@ -551,6 +658,21 @@ def cmd_use_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResu
             )
         ],
     )
+    if discovery_id:
+        # Record the performed authored use as knowledge too; this is not a
+        # second physical acquisition and cannot advance the clock twice.
+        granted = cmd_grant_clue(
+            state,
+            {
+                "clue_id": discovery_id,
+                "recipient_investigator_ids": [investigator_id],
+                "basis": basis,
+            },
+            ctx,
+        )
+        outcome.events.extend(granted.events)
+        outcome.result["effect_clue_id"] = discovery_id
+    return outcome
 
 
 def cmd_transfer_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
@@ -721,11 +843,11 @@ def cmd_resolve_intent(state: dict, payload: dict, ctx: CommandContext) -> Comma
                 and linked.origin_request_id == request_id
                 and linked.investigator_id == row.investigator_id
             ):
-                interactions.close_thread(linked, status=auto_close_status, note=None, revision=revision + 1)
-                thread_row = linked
-                thread_events.append(
-                    EventSpec(*interactions.thread_event_with_audience(linked))
+                interactions.close_thread(
+                    linked, status=auto_close_status, note=None, revision=revision + 1
                 )
+                thread_row = linked
+                thread_events.append(EventSpec(*interactions.thread_event_with_audience(linked)))
     writes_thread = (
         resolution == "awaiting_player" or isinstance(thread_spec, dict) or thread_row is not None
     )
@@ -844,8 +966,14 @@ def _awaiting_record(payload: dict) -> dict:
         value = str(raw_action.get(key) or "")[:limit]
         if value:
             pending[key] = value
-    if not pending.get("note") and not pending.get("destination_scene_id") and not pending.get("target"):
-        raise StructuredError("invalid_action", "等待玩家时必须说明尚未执行什么（pending_action）。")
+    if (
+        not pending.get("note")
+        and not pending.get("destination_scene_id")
+        and not pending.get("target")
+    ):
+        raise StructuredError(
+            "invalid_action", "等待玩家时必须说明尚未执行什么（pending_action）。"
+        )
     record: dict = {"pending_action": pending}
     raw_disclosed = payload.get("disclosed") or []
     if not isinstance(raw_disclosed, list):

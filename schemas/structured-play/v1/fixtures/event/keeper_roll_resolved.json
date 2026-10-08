@@ -1,0 +1,6 @@
+{
+  "protocol_version": 1, "event_id": 51, "world_id": "world-fixture-1", "sequence": 51,
+  "revision": 12, "type": "keeper_roll_resolved", "cause_request_id": "host-roll-fixture",
+  "payload": {"command_id": "host-roll-fixture", "visibility": "keeper", "expression": "2d6+3",
+    "dice": [{"sides": 6, "values": [2, 5]}], "total": 10, "modifier": 3}
+}

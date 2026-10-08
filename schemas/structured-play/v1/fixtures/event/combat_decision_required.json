@@ -1,0 +1,24 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "combat_decision_required",
+  "cause_request_id": null,
+  "payload": {
+    "id": "decision-1",
+    "kind": "combat_defense",
+    "title": "守卫正在攻击你",
+    "description": "请选择应对",
+    "options": [
+      {
+        "id": "dodge",
+        "label": "闪避",
+        "description": "尝试避开攻击"
+      }
+    ],
+    "default_option": "dodge",
+    "responding_investigator_id": "inv-alice"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "combat_roll_required",
+  "cause_request_id": null,
+  "payload": {
+    "roll_id": "combat-roll-1",
+    "investigator_id": "inv-alice",
+    "actor_id": "inv-alice",
+    "target_id": "guard",
+    "action_type": "firearm",
+    "source": "action",
+    "weapon_item_id": "item-alice-gun",
+    "weapon_label": "手枪（3发）"
+  }
+}

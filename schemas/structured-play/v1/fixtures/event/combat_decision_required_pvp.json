@@ -1,0 +1,21 @@
+{
+  "protocol_version": 1,
+  "event_id": 51,
+  "world_id": "world-fixture-1",
+  "sequence": 21,
+  "revision": 13,
+  "type": "combat_decision_required",
+  "cause_request_id": null,
+  "payload": {
+    "id": "pvp-target-consent",
+    "kind": "pvp_consent",
+    "title": "是否参与这次调查员对抗？",
+    "description": "双方都明确同意后才会继续。取消不消耗行动或资源。",
+    "options": [
+      { "id": "cancel_confrontation", "label": "不参与对抗" },
+      { "id": "confirm_confrontation", "label": "同意参与对抗" }
+    ],
+    "default_option": "cancel_confrontation",
+    "responding_investigator_id": "inv-bob"
+  }
+}

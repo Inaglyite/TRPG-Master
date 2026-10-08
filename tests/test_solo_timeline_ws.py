@@ -119,9 +119,7 @@ def seed_tree(tmp_path: Path, *, with_second_member: bool = False, pointer: str 
                 },
             )
         )
-        session.add(
-            WorldState(world_id="world-branch", schema_version=1, state={})
-        )
+        session.add(WorldState(world_id="world-branch", schema_version=1, state={}))
         session.add(
             WorldMember(
                 id=new_id("member"),
@@ -153,9 +151,7 @@ def _controller(url: str, tmp_path: Path, manager: RoomManager):
             database_url=lambda: url,
             project_root=tmp_path,
             runtime_root=tmp_path,
-            list_modules=lambda: [
-                {"id": "mansion_of_madness", "title": "疯狂宅邸"}
-            ],
+            list_modules=lambda: [{"id": "mansion_of_madness", "title": "疯狂宅邸"}],
             room_manager=lambda: manager,
         ),
     )
@@ -165,9 +161,7 @@ def _room(world_id: str, owner_id: str, *, play_mode: str = "solo") -> GameRoom:
     return GameRoom(
         world_id,
         SimpleNamespace(
-            context=SimpleNamespace(
-                module_name="mansion_of_madness", world_id=world_id
-            ),
+            context=SimpleNamespace(module_name="mansion_of_madness", world_id=world_id),
             turn_journal=SimpleNamespace(),
         ),
         RoomEventHub(world_id),
@@ -222,11 +216,25 @@ def _spy_broadcasts(room: GameRoom) -> list[dict]:
     original = room.hub.broadcast
 
     async def spy(payload, **kwargs):
+        if payload.get("type") == "solo_world_switched":
+            assert room.terminal_event_pending, "old runtime must be retired before broadcast"
         broadcasts.append(dict(payload))
         return await original(payload, **kwargs)
 
     room.hub.broadcast = spy
     return broadcasts
+
+
+def _finish_retired_action(url, room):
+    room.retirement_release_observations = []
+
+    def callback(wid, aid, status):
+        # release_action intentionally swallows callback exceptions. Record
+        # what it saw and assert outside the callback, so a regression is red.
+        room.retirement_release_observations.append((status, room.terminal_event_pending))
+        finish_room_action(url, wid, aid, status)
+
+    return callback
 
 
 def test_multiplayer_room_rejects_solo_timeline_messages(tmp_path: Path):
@@ -306,9 +314,7 @@ def test_solo_world_switch_commits_pointer_and_claims(tmp_path: Path):
     """切换成功：指针与 claim 原子迁移，广播后关闭连接，持久租约完成。"""
     url, owner, _ = seed_tree(tmp_path, pointer="world-root")
     room = _room("world-root", owner.id)
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
+    room.action_status_callback = _finish_retired_action(url, room)
     socket = _QueueSocket([{"type": "solo_world_switch", "world_id": "world-branch"}])
     broadcasts = _spy_broadcasts(room)
     # 切换成功后 handler 返回 "close"，消息循环正常退出而非等到断连
@@ -317,6 +323,7 @@ def test_solo_world_switch_commits_pointer_and_claims(tmp_path: Path):
     switched = next(b for b in broadcasts if b["type"] == "solo_world_switched")
     assert switched["world_id"] == "world-branch"
     assert switched["reason"] == "switched"
+    assert room.retirement_release_observations == [("completed", True)]
     with session_scope(url) as session:
         root = session.get(World, "world-root")
         assert root.metadata_json[POINTER_KEY] == "world-branch"
@@ -383,9 +390,7 @@ def test_solo_world_switch_rejects_non_resumable_timeline(tmp_path: Path):
 def test_solo_world_archive_removes_inactive_branch(tmp_path: Path):
     url, owner, _ = seed_tree(tmp_path, pointer="world-root")
     room = _room("world-root", owner.id)
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
+    room.action_status_callback = lambda wid, aid, status: finish_room_action(url, wid, aid, status)
     socket = _QueueSocket([{"type": "solo_world_archive", "world_id": "world-branch"}])
     try:
         _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
@@ -403,9 +408,7 @@ def test_solo_world_archive_rejects_current_and_root(tmp_path: Path):
     url, owner, _ = seed_tree(tmp_path, pointer="world-branch")
     room = _room("world-branch", owner.id)
     # 与线上一致：终态回调把持久租约置终，否则后续操作会被 running 行挡住
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
+    room.action_status_callback = lambda wid, aid, status: finish_room_action(url, wid, aid, status)
     socket = _QueueSocket(
         [
             {"type": "solo_world_archive", "world_id": "world-branch"},
@@ -469,21 +472,15 @@ def test_solo_branch_create_sets_control_plane_and_switches(tmp_path: Path):
 
     def fake_create(self, source_context, source_journal, turn_id, *, label="", user_id=None):
         return SimpleNamespace(
-            context=SimpleNamespace(
-                world_id="world-new-branch", module_name="mansion_of_madness"
-            ),
+            context=SimpleNamespace(world_id="world-new-branch", module_name="mansion_of_madness"),
             messages=[],
             source_turn_id=turn_id,
             label="分支 · 入口大厅",
         )
 
     room = _room("world-root", owner.id)
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
-    socket = _QueueSocket(
-        [{"type": "solo_branch_create", "turn_id": "turn-1", "label": ""}]
-    )
+    room.action_status_callback = _finish_retired_action(url, room)
+    socket = _QueueSocket([{"type": "solo_branch_create", "turn_id": "turn-1", "label": ""}])
     broadcasts = _spy_broadcasts(room)
     with patch.object(WorldBranchService, "create", fake_create):
         _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
@@ -491,6 +488,7 @@ def test_solo_branch_create_sets_control_plane_and_switches(tmp_path: Path):
     switched = next(b for b in broadcasts if b["type"] == "solo_world_switched")
     assert switched["world_id"] == "world-new-branch"
     assert switched["reason"] == "branch_created"
+    assert room.retirement_release_observations == [("completed", True)]
     with session_scope(url) as session:
         branch = session.get(World, "world-new-branch")
         metadata = branch.metadata_json
@@ -702,7 +700,15 @@ def test_solo_branch_create_structured_needs_no_turn_id(tmp_path: Path):
     url, owner = seed_structured_solo_world(tmp_path)
     captured: dict = {}
 
-    def fake_branch(source_context, *, project_root, runtime_root, label="", user_id=None, expected_revision=None):
+    def fake_branch(
+        source_context,
+        *,
+        project_root,
+        runtime_root,
+        label="",
+        user_id=None,
+        expected_revision=None,
+    ):
         captured["expected_revision"] = expected_revision
         captured["user_id"] = user_id
         return SimpleNamespace(
@@ -713,12 +719,8 @@ def test_solo_branch_create_structured_needs_no_turn_id(tmp_path: Path):
         )
 
     room = _room("world-structured", owner.id)
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
-    socket = _QueueSocket(
-        [{"type": "solo_branch_create", "label": "", "expected_revision": 3}]
-    )
+    room.action_status_callback = _finish_retired_action(url, room)
+    socket = _QueueSocket([{"type": "solo_branch_create", "label": "", "expected_revision": 3}])
     broadcasts = _spy_broadcasts(room)
     # 处理函数内部 import：patch 源模块属性即可（调用时才取）。
     with patch("src.structured.branch.create_structured_branch", fake_branch):
@@ -728,6 +730,7 @@ def test_solo_branch_create_structured_needs_no_turn_id(tmp_path: Path):
     switched = next(b for b in broadcasts if b["type"] == "solo_world_switched")
     assert switched["world_id"] == "world-structured-branch"
     assert captured["expected_revision"] == 3
+    assert room.retirement_release_observations == [("completed", True)]
     with session_scope(url) as session:
         branch = session.get(World, "world-structured-branch")
         metadata = branch.metadata_json
@@ -741,9 +744,7 @@ def test_solo_branch_create_structured_needs_no_turn_id(tmp_path: Path):
         )
         assert len(members) == 1
         claims = (
-            session.query(WorldInvestigator)
-            .filter_by(world_id="world-structured-branch")
-            .all()
+            session.query(WorldInvestigator).filter_by(world_id="world-structured-branch").all()
         )
         assert len(claims) == 1
         # 源世界的 claim 仍在（结构化复制而非搬走）
@@ -762,12 +763,8 @@ def test_solo_branch_create_structured_revision_conflict_rejected(tmp_path: Path
         raise StructuredError("revision_conflict", "世界版本已变化", retryable=True)
 
     room = _room("world-structured", owner.id)
-    room.action_status_callback = lambda wid, aid, status: finish_room_action(
-        url, wid, aid, status
-    )
-    socket = _QueueSocket(
-        [{"type": "solo_branch_create", "label": "", "expected_revision": 99}]
-    )
+    room.action_status_callback = lambda wid, aid, status: finish_room_action(url, wid, aid, status)
+    socket = _QueueSocket([{"type": "solo_branch_create", "label": "", "expected_revision": 99}])
     with patch("src.structured.branch.create_structured_branch", fake_branch):
         try:
             _run_loop(_controller(url, tmp_path, RoomManager()), socket, room, owner.id)
@@ -776,6 +773,7 @@ def test_solo_branch_create_structured_revision_conflict_rejected(tmp_path: Path
     rejections = _rejections(socket)
     assert len(rejections) == 1
     assert rejections[0]["code"] == "branch_failed"
+    assert not room.terminal_event_pending
     assert "版本" in rejections[0]["message"]
     with session_scope(url) as session:
         root = session.get(World, "world-structured")

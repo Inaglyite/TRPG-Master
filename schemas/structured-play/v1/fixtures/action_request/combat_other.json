@@ -1,0 +1,6 @@
+{
+  "type": "action_request", "protocol_version": 1,
+  "request_id": "req-combat-2", "world_id": "world-fixture-1",
+  "expected_revision": 12, "investigator_id": "inv-alice",
+  "action": {"kind": "combat", "encounter_id": "encounter-1", "action_type": "other", "target_id": null, "approach": "寻找遮蔽物"}
+}

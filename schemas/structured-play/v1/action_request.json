@@ -21,7 +21,8 @@
         {"$ref": "#/$defs/present_clue"},
         {"$ref": "#/$defs/use_item"},
         {"$ref": "#/$defs/move"},
-        {"$ref": "#/$defs/freeform"}
+        {"$ref": "#/$defs/freeform"},
+        {"$ref": "#/$defs/combat"}
       ]
     },
     "present_clue": {
@@ -88,6 +89,24 @@
         "kind": {"const": "move"},
         "destination_scene_id": {"$ref": "common.json#/$defs/id_string"}
       }
+    },
+    "combat": {
+      "type": "object",
+      "required": ["kind", "encounter_id", "action_type", "target_id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "combat"},
+        "weapon_item_id": {"$ref": "common.json#/$defs/id_string"},
+        "encounter_id": {"$ref": "common.json#/$defs/id_string"},
+        "action_type": {"enum": ["melee", "firearm", "threat", "move", "other"]},
+        "target_id": {"oneOf": [{"$ref": "common.json#/$defs/id_string"}, {"type": "null"}]},
+        "approach": {"type": "string", "maxLength": 200}
+      },
+      "allOf": [{
+        "if": {"properties": {"action_type": {"enum": ["melee", "firearm", "threat"]}}},
+        "then": {"properties": {"target_id": {"$ref": "common.json#/$defs/id_string"}}}
+      }],
+      "description": "申报一次战斗动作，不是执行命令；行动者取顶层 investigator_id。武器、技能与伤害由主持核验，玩家不得注入数值或防御选择。"
     },
     "freeform": {
       "type": "object",

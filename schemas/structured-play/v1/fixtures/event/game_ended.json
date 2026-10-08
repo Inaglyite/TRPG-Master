@@ -1,0 +1,15 @@
+{
+  "protocol_version": 1,
+  "event_id": 50,
+  "world_id": "world-fixture-1",
+  "sequence": 20,
+  "revision": 12,
+  "type": "game_ended",
+  "cause_request_id": null,
+  "payload": {
+    "id": "truth_and_seal",
+    "type": "good",
+    "title": "真相与封印",
+    "summary": "调查结束"
+  }
+}
