@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import copy
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -676,20 +677,20 @@ def cmd_use_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResu
 
 
 def cmd_transfer_item(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
+    from .item_holders import validated_holder
+
     item_id = _require_text(payload, "item_id", limit=160)
     quantity = payload.get("quantity")
     if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 999:
         raise StructuredError("invalid_action", "quantity 必须是 1–999 的整数。")
-    source = payload.get("from") or {}
-    target = payload.get("to") or {}
+    source = validated_holder(state, payload.get("from"))
+    target = validated_holder(state, payload.get("to"))
     entry = find_item(state, item_id)
     if entry is None:
         raise StructuredError("object_not_found", f"物品不存在：{item_id}")
     holder = entry.get("holder") or {}
     if holder.get("kind") != source.get("kind") or str(holder.get("id")) != str(source.get("id")):
         raise StructuredError("object_not_held", "物品不在指定来源处。")
-    if target.get("kind") not in {"investigator", "npc", "scene"} or not target.get("id"):
-        raise StructuredError("unknown_target", "转移去向不合法。")
     held = int(entry.get("quantity") or 0)
     if held < quantity:
         raise StructuredError("object_not_held", f"数量不足：持有 {held}，需要 {quantity}。")
@@ -702,6 +703,7 @@ def cmd_transfer_item(state: dict, payload: dict, ctx: CommandContext) -> Comman
         registry = ensure_item_registry(state)
         moved_id = new_stable_id("item")
         registry["items"][moved_id] = {
+            **copy.deepcopy(entry),
             "item_id": moved_id,
             "label": entry["label"],
             "quantity": quantity,
@@ -711,16 +713,26 @@ def cmd_transfer_item(state: dict, payload: dict, ctx: CommandContext) -> Comman
             "operations": list(entry.get("operations") or []),
         }
     events: list[EventSpec] = []
+    notified = set()
     for side in (source, target):
         if side.get("kind") == "investigator":
-            events.append(
-                EventSpec(
-                    "inventory_changed",
-                    {
-                        "investigator_id": str(side["id"]),
-                        "items": _inventory_projection(state, str(side["id"])),
-                    },
-                )
+            investigator_id = side["id"]
+            if investigator_id in notified:
+                continue
+            notified.add(investigator_id)
+            projection = {
+                "investigator_id": investigator_id,
+                "items": _inventory_projection(state, investigator_id),
+            }
+            events.extend(
+                [
+                    EventSpec(
+                        "inventory_changed",
+                        projection,
+                        {"kind": "investigators", "investigator_ids": [investigator_id]},
+                    ),
+                    EventSpec("inventory_changed", dict(projection), KEEPER),
+                ]
             )
     return CommandResult(
         result={
