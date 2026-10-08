@@ -1,8 +1,29 @@
-# 当前范围验收表（尚未宣告完成）
+# 当前范围验收表（无模型全量通过，真实模型待验收）
 
 目标：不依赖 Agent 的主持路径、云端单人/多人界面，以及贴题、舒适的生成美术与可操作布局。下面不是发版批准；正式环境没有用于本轮测试。
 
-## 当前增量：物品转交（专项闭环，整体目标仍未关闭）
+## 当前冻结版本：88021898（实验分支，未发布）
+
+本地完整浏览器验收已终态：**96项收集，94 passed /2 skipped /0 failed，28.1分钟，exit 0**。
+日志 `test-results/keeper-platform/transfer-full-browser.log`，末行 `ACCEPTANCE_EXIT_CODE=0`；
+源代码（含e2e/测试/协议/模组）与构建产物的跑前指纹 `transfer-full-source.sha256`、
+`transfer-full-dist.sha256` 在终态均逐项核对通过，受测产品代码没有中途变更。
+两项跳过是外部staging与未授权真实模型，不计通过。本次包含Electron联机/源码后端、
+人类主持过渡回合、NPC/场景转交及战斗/结案生命周期六项；不是多个版本的专项拼接。
+
+同轮猩红文档真实三客户端主线 **18/18、3.1分钟、零模型、gaps=[]**：
+`scarlet-human-mainline/1791466037473/`。独立复核终态14个主线flag为true、
+`truth_and_seal`及两名调查员各自结案账本；玩家A/B的私有进度/记忆/结局条件事件均为0，
+快照不含主持私有进度。主线不冒充付费Agent验收，NPC反击的人工主持裁定与正式战斗命令
+各按测试实际路径声明。测试改写的旧脏截图及他人的生命周期证据已恢复跑前副本；
+本轮新生成生命周期证据另留 `transfer-full-generated/keeper-combat-lifecycle/`。
+
+已推送 `origin/experiment/keeper-platform=88021898`。quality运行
+[37783505206](https://github.com/Inaglyite/TRPG-Master/actions/runs/37783505206)
+查询时后端成功、前端仍运行，未提前报CI全绿；无master合并、部署或生产测试。
+共享规则变更要求的真实模型主线仍待本轮独立授权，因此整体目标尚未关闭。
+
+## 当前增量：物品转交
 
 后端持有者存在性、拆分来源保留、定向背包回执已修。新增11项对偶；
 相关92项通过、战斗库存/事务/协议组合53项及128子项通过（两组不相加计数）。
@@ -20,7 +41,7 @@ ruff/架构/diff通过；旧版本独立内存探针证实不存在NPC/丢来源
 第一次两项失败是替身投影接线/关闭了后续要读取的主持台；第二次布局仍缺角色接线，
 真实3p通过但整组不算绿；第三次布局抓出34px真实产品缺陷，补44px后联合重跑2/2。
 失败/trace保留，未加skip/retry/force。终态后仅格式化两个未被该专项调用的测试文件，
-AST不变并重跑前端全量；产品源码与dist未变。本增量尚未重跑完整96项浏览器。
+AST不变并重跑前端全量；产品源码与dist未变。完整96项终态见顶部，不再以专项代替全量。
 视觉沿用已确认的生成档案夹，不为现有表单新增装饰位图；付费真实模型仍待独立授权。
 
 ## 上一冻结版本（b6cf6fee）
@@ -37,8 +58,8 @@ AST不变并重跑前端全量；产品源码与dist未变。本增量尚未重�
 模组正文未修改，信息发放不等于取得原件；缺少物品绑定的作者效果由人类主持选择并记录依据，Agent 不获此覆盖权限。
 新增原生图像参考 [主持档案参考图](keeper-progress-concept-v1.png) / [完整提示词](keeper-progress-prompt-v1.md)，内容只作布局示例。
 最新范围、残余与原始日志见[人类主持发现收口](SCARLET_HUMAN_DISCOVERY_ACCEPTANCE.md)。
-下一项已证实缺口：主持候选遗漏NPC库存；物品转交执行层接受不存在的NPC目标。
-仅在隔离临时库诊断（`transfer-holder-audit.log`），尚未修复，不因当前主线通过关闭整体目标。
+此版本曾证实主持候选遗漏NPC库存、转交接受不存在的NPC目标；隔离临时库诊断
+`transfer-holder-audit.log`保留。两项现已由顶部转交增量修复，不再是当前未修问题。
 中文开发检查点：`2fd6bbeb`（后端/协议）、`78102269`（前端）；提交不代表发布或Agent验收。
 完整运行中的猩红主线再次18/18、零模型、无缺口；证据 `scarlet-human-mainline/1791457936376/`。
 测试重渲染的旧脏截图及Kimi生命周期证据已按跑前保护副本恢复，不混入本次提交。
@@ -334,7 +355,7 @@ Agent调度、双方授权、可审计结局前置裁定、个人角色库写回
 
 | 用户要求 | 当前可核实证据 | 尚不能宣称的部分 |
 |---|---|---|
-| 完善无Agent路径及前端 | 本地/云端无Key新建；真实三客户端私发/检定/SAN/移动、双方战斗参与/防御/分别确认、精确选枪扣弹、合法结局/逐人奖励/另存卡；统一终态收尾、人物/战况同步；显式人物状态记录；生命周期6/6含恢复/分支；云端双标签页读档与开局自动点；游戏时间/类型化活动/无角色主持普通骰与限频，顶部各增量有真实UI证据 | 前一冻结版完整94项92/2跳过；限频补丁后组合4/4已通过，当前全套仍在运行。不拼接为一次新版全绿；共享规则的真实模型主线需独立授权 |
+| 完善无Agent路径及前端 | 本地/云端无Key新建；真实三客户端私发/检定/SAN/移动、双方战斗参与/防御/分别确认、精确选枪扣弹、合法结局/逐人奖励/另存卡；统一终态收尾、人物/战况同步；生命周期6/6含恢复/分支；云端双标签页读档与开局自动点；游戏时间/类型化活动/主持普通骰与限频；作者线索发现/实物取得/使用、NPC与场景转交 | 88021898完整96项终态94通过/2跳过，后端1973与前端1331全量通过；外部staging与共享规则的真实模型主线未执行，不宣称已发布或Agent全链验收 |
 | 云端单人/多人所有相关界面 | 下表各类入口及账号/服务器边界，云端无Key创建、房间权限/邀请/选角/移交、单人归档/分支、四宽度与短窗均有实际浏览器证据 | 不将缺少服务端领域命令的界面按钮伪装成可用，也不把环境跳过算通过 |
 | 深度用imagegen效果图/素材开发 | README链接的独立概念图与提示词、手绘档案夹/纸质指南针源图；真实1x/2x素材、九宫格/等比呈现，2x选图和实际截图通过 | 概念图不是运行截图；不采用图里的虚构状态/秘密授权文案，不将装饰图烘焙成真实数据 |
 | 美观、贴题、可读、不晃眼 | 已实际查看生成素材落地截图；棕黑底/暖色正文/档案材质，按钮命中、键盘、中文输入、短窗阅读、reduced-motion与长标题反例修复 | 视觉舒适性仍允许用户复看反馈；没有以自动绿灯代替看图 |
@@ -350,7 +371,7 @@ Agent调度、双方授权、可审计结局前置裁定、个人角色库写回
 | 登录、注册、服务器、会话过期 | AuthScreen、OnlineShell、api/client、连接档案夹 | server-session-boundaries / character-library / http-request-recovery；实际换服务器、旧401、过期账号隔离。HTTP故障注入不冒充真实存储 |
 | 本地与云端单人创建与继续 | StartScreen/LocalPlayStylePanel/local_creation、SoloLobbyScreen/PlayStylePicker | local-human-start真实无Key新建/发言/刷新/另建、零模型；structured-solo-online云端无Key开局与重登；本人兼主持的秘密边界明确提示 |
 | 多人大厅与房间 | LobbyScreen、RoomScreen、OnlineRoomDock、roomSendNow | multiplayer / room-ready-recovery / structured-human-3p；真实建房邀请选角开局、旁观加入、退出移交、同步前禁用准备、同步后不补发旧意图 |
-| 人类主持工作台 | KeeperConsole、KeeperLibrary、服务端能力和命令目录 | structured-human-3p / structured-real-integration / structured-play；叙事、私发、检定、SAN/HP、道具、移动、时间、待办；友好候选不把标签冒充稳定ID |
+| 人类主持工作台 | KeeperConsole、KeeperLibrary、服务端能力和命令目录 | structured-human-3p / scarlet-human-mainline / structured-real-integration / structured-play；叙事、私发、检定、SAN/HP、作者线索发现与实物取得、使用、NPC/场景转交、私有案件时钟、移动、时间、待办；友好候选不把标签冒充稳定ID |
 | 玩家状态、线索、道具 | InvestigatorPanel三卡、StructuredActionDialog | investigator-panel / structured-human-3p；分类折叠、出示/使用完整载荷、服务端回执才确认，不预扣、不靠自然语言解析按钮意图 |
 | 图片阅读与持久收到目录 | HandoutImageViewer、ReceivedMaterials、received_assets投影 | clue-image-reading / structured-human-3p；44px四宽度、失败重试、关闭回焦点、IME、撤回/换世界、刷新重开；另一玩家HTTP猜ID仍404；独立后端测试覆盖旁观/无角色主持/房主无接收授权 |
 | 主持资料、记忆与知识隔离 | KeeperLibrary、只读手册HTTP、记忆查询与线程投影 | structured-context-memory / structured-human-3p / 后端material与history tests；玩家帧不含主持目录/记忆，素材按需读取，Agent不增加UI资料负载 |
