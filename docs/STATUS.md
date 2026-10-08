@@ -1,13 +1,25 @@
 # 项目状态与待办
 
-## 当前结论（2026-10-08）
+## 当前结论（2026-10-09）
+
+本轮无Agent主持路径、云端单人/多人相关界面及生成美术落地的开发范围已验证收口。
+完整范围按[当前验收表](design/platform-ui/CURRENT_ACCEPTANCE.md)逐项核对，不缩成调查/社交模式。
+用户授权后，8392a94d真实DeepSeek deepseek-flash共享规则兼容性主线 **33/33、36回合、
+11次handout、21次骰点、truth_and_seal、exit 0**；约7分26秒。
+103次生成请求均有usage，高峰价/不计缓存优惠保守费用上界 **¥11.437636 < ¥20**。
+原配置/数据库/人物档案校验值不变，三个裁决回退均为既有权限/战斗/物品来源校验；无回合异常。
+脱敏摘要见[evidence](evidence/20261009-real-model-compatibility/summary.json)，完整产物在
+`/tmp/trpg-real-20261009-cy7HTi/`。真实模型结果是legacy兼容性，不冒称structured Agent完整主线；
+后者不是本轮无Agent开发目标的替代验收。结案奖励/角色保存由实际人类主线和生命周期验证。
+8392a94d的[quality](https://github.com/Inaglyite/TRPG-Master/actions/runs/37794701116)已终态success；
+以下统计与失败反例保留对应版本含义。未合并master、未部署、未触碰正式环境。
 
 实验分支当前受测版本 **7ba1155c** 已推送，产品代码继承88021898；未合并master、未部署。
 本地完整浏览器 **96项→94 passed /2 skipped /0 failed，28.1分钟、exit 0**，
 跑前源码与dist指纹在终态核对一致；日志 `test-results/keeper-platform/transfer-full-browser.log`。
 同轮真实三客户端猩红主线18/18、零模型、无登记缺口，终态truth_and_seal、14个主线flag及
 两名调查员各自结案账本已复核；玩家未收到主持私有进度/记忆/结局条件帧。
-两项浏览器跳过为外部staging和未授权真实模型，不计通过；共享规则的真实模型验收仍待独立授权。
+两项浏览器跳过为外部staging和当时未授权的真实模型规格，不计通过；后续独立真实主线见顶部。
 quality [37783505206](https://github.com/Inaglyite/TRPG-Master/actions/runs/37783505206)
 终态backend成功、frontend失败（89通过/2失败/2跳过/3未执行）：两处E2E脚本写死本机
 virtualenv，CI无该目录，启动/只读查库失败。已修共享解释器选择并在无virtualenv的独立
@@ -38,7 +50,7 @@ ruff/架构/diff检查通过。原版本三个缺陷的独立内存探针均复�
 真实3p仍含此前战斗/结案闭环；布局专项使用协议替身，不冒充真实后端。
 实际查看939及短窗截图，沿用已生成档案夹；新下拉34px真问题已补为44px，断言未降。
 两个旧验收文件纯格式修正，TypeScript AST前后一致；整仓格式检查与前端全量再跑通过。
-新完整96项浏览器已终态，见顶部；付费真实模型仍待授权，未触碰正式环境。
+新完整96项浏览器已终态，见顶部；后续获授权真实主线单独记录，未触碰正式环境。
 
 ## 上一冻结检查点（b6cf6fee，已提交并推送实验分支）
 
