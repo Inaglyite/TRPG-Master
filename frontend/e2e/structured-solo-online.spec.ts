@@ -16,7 +16,7 @@ import {
   createServer as createModelTrap,
   type Server as TrapServer,
 } from "node:net";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -30,10 +30,12 @@ import {
 
 import { assertGameHeaderFits } from "./header-layout";
 import { elapsedGameTime } from "../src/protocol/game-clock";
+import { e2ePython } from "./python-runtime";
 
 const port = 8757;
 const baseUrl = `https://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
+const python = e2ePython(repositoryRoot);
 const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 let runtimeRoot = "";
 let server: ChildProcess | null = null;
@@ -93,11 +95,6 @@ test.beforeAll(async () => {
   if (generated.status !== 0) {
     throw new Error("Failed to generate the temporary E2E TLS certificate");
   }
-  const python =
-    process.env.TRPG_E2E_PYTHON ??
-    (existsSync(resolve(repositoryRoot, ".venv/bin/python"))
-      ? resolve(repositoryRoot, ".venv/bin/python")
-      : "python");
   server = spawn(
     python,
     [
@@ -1296,7 +1293,7 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
   // Read only the isolated fixture database: both records survive as archived.
   // A missing route/physical deletion cannot masquerade as successful archival.
   const archivedRows = spawnSync(
-    process.env.TRPG_E2E_PYTHON ?? resolve(repositoryRoot, ".venv/bin/python"),
+    python,
     [
       "-c",
       'import sqlite3,sys,json; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(json.dumps(db.execute("select id,status from worlds where id in (?,?)",sys.argv[2:]).fetchall())); db.close()',

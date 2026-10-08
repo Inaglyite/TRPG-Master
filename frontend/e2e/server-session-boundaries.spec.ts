@@ -4,8 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, request, test, type Page } from "@playwright/test";
+import { e2ePython } from "./python-runtime";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
+const python = e2ePython(repositoryRoot);
 const origins = ["https://127.0.0.1:8788", "https://127.0.0.1:8789"];
 const instances: { root: string; child: ChildProcess; output: string }[] = [];
 const runId = Date.now();
@@ -39,8 +41,7 @@ test.beforeAll(async () => {
       if (tls.status !== 0)
         throw new Error("Cannot create isolated TLS fixture");
       const child = spawn(
-        process.env.TRPG_E2E_PYTHON ??
-          resolve(repositoryRoot, ".venv/bin/python3"),
+        python,
         [
           "-m",
           "uvicorn",
