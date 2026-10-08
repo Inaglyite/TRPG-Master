@@ -1,0 +1,9 @@
+# 主持线索与案件进程参考图 v1
+
+用途：参考布局、层级和色调，不作为游戏数据或扁平化按钮图片。示例人物、条件、时钟与正文均为示意，实际页面只读服务端投影。信息发放与实物取得必须区分，小屏按钮纵向排列。
+
+生成工具：内置 imagegen。原图保留在 `/home/inaglyite/.codex/generated_images/01a06c3d-3b8c-7263-82c5-de1bee5f9328/exec-3e8e3cdf-288b-4f57-a027-59a06694c6e1.png`。
+
+## 完整提示词
+
+Create a polished UI design reference mockup for a Chinese Call of Cthulhu tabletop platform HUMAN KEEPER console. Flat hand-illustrated archival dossier-folder component, NOT photorealistic, NOT a photo of physical paper. 1536x1024 landscape composition, two contrasting responsive mockups: a large desktop modal left and a compact 390px mobile drawer right. Matte near-black walnut background, very muted brass linework, warm gray readable text, small parchment receipt cards only (no bright full-page ivory). Restrained hand-drawn file-folder tab edges, subtle aged paper grain, tiny compass stamp, no glowing ornaments or heavy gradients. Clear functional hierarchy: heading 主持档案; small private badge 仅主持可见; accordion 模组线索 shows discovered and undiscovered entries with searchable list, clue 卡片 knowledge is separated from physical item acquisition; selected entry 阿伯那的银质徽章 displays prerequisites, evidence and a single investigator recipient; two visually distinct actions 发放信息 and 确认取得实物 with a concise note 阅读或出示不等于拿走. A narrow read-only 案件时钟 panel with three small segmented progress bars and level text, labelled 线索清晰度 3/5 and 危机进展 1/6; do not expose this to players. Lower area 使用物品 shows actual holder inventory dropdown, authored effect selection 封印文档 and basis field, button 确认结算. All buttons padded with minimum 44px clickable height, no crowded horizontal button row on mobile. Comfortable readable type and paragraph rhythm, concise Chinese labels. UI is game interface pixel-flat rather than real-world scene; focus on hierarchy and compactness. Present credible deliberate desktop+mobile screen layout, no browser chrome or branded logos.

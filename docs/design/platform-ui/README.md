@@ -2,6 +2,15 @@
 
 本轮目标保持完整：完善不依赖 Agent 的主持路径，以及云端单人、多人相关界面。当前仍在实施，不能以单个界面或一组测试通过宣称整个目标完成。未授权发布，本目录也不是发布证明。
 
+当前最新：补独立主线暴露的 G1–G5，准确状态以 [当前验收表](CURRENT_ACCEPTANCE.md) 顶部为准。
+上一滚动修复版完整浏览器已 92/2跳过/0失败，下面“正在跑”及“结构化无战斗/结局”是阶段历史，不是当前能力声明。
+新参考图：[主持线索与案件进程](keeper-progress-concept-v1.png)，[完整生成提示词](keeper-progress-prompt-v1.md)。
+
+最新增量与准确范围见[当前验收表](CURRENT_ACCEPTANCE.md)顶部；旧的完整94项已终态，
+不是仍在运行。本轮代码已保存为中文开发检查点 `2fd6bbeb` / `78102269`，
+完整95项已93通过/2跳过/0失败，26.0分钟、exit 0，源/dist终态一致。
+生成图和人类主持证据不代替真实模型验收，也不代表发布授权。
+
 ## 视觉方向
 
 采用 1920 年代调查档案室：哑光深木、克制黄铜、暖灰正文。生成图提供构图与材质，真实文字、状态、按钮仍由 DOM 渲染。避免闪光、金色发光文字、繁复边框和大面积亮纸底。
@@ -18,10 +27,34 @@
 - 材料查看效果图：[material-viewer-concept-v1.png](material-viewer-concept-v1.png)，[完整提示词和原图位置](material-viewer-prompt-v1.md)。校准标题／完整图片／固定关闭与缩放操作；生成地图只用于示意，不进模组，不采用窄屏重绘或裁切内容。
 - 存档管理效果图：[save-panel-concept-v1.png](save-panel-concept-v1.png)，[提示词与取舍](save-panel-prompt-v1.md)。沿用手绘九宫格档案夹，真实名称／时间由 DOM 渲染，读档与删除须确认，不采用虚构预览图或自动存档频率。
 - 主题与尺寸：`frontend/src/styles/components/platform-ui.css`；没有改写模组主题或将世界事实烘焙进图片。
+- 人类人物状态记录参考：[condition-record-concept-v1.png](condition-record-concept-v1.png)，
+  [完整提示词/原件/实现边界](STRUCTURED_COMBAT_ENDINGS_IMPLEMENTATION.md#人类状态恢复生成参考与实现边界)。
+  小面积暖纸人物摘要、暗色字段、只读核对值；不把图中文字当作存档或治疗事实。
+- 云端单人读档参考：[solo-save-restore-concept-v1.png](solo-save-restore-concept-v1.png)，
+  [完整提示词、原件及实现边界](STRUCTURED_COMBAT_ENDINGS_IMPLEMENTATION.md#云端单人结构化读档已接线)。
+  使用小暖纸摘要、暗色可滚动影响说明、固定44px确认/取消，不复制生成图的
+  步骤编号或手机外壳。已查看[939实装](solo-save-restore-939.png)、
+  [390实装](solo-save-restore-390.png)、[390×360短窗](solo-save-restore-390-short.png)。
+- 主持台存档动作复用上述读档/档案夹参考，读取禁用与保存权限分开；
+  已查看[939](keeper-save-actions-939.png)、[390短窗](keeper-save-actions-390-short.png)、
+  [多人禁用提示](keeper-save-multiplayer-390.png)，不为三按钮新增装饰位图。
+- 游戏时间只读参考（已接线）：[game-clock-concept-v1.png](game-clock-concept-v1.png)，
+  [内置imagegen原件、完整提示词与取舍](STRUCTURED_COMBAT_ENDINGS_IMPLEMENTATION.md#游戏时间只读投影已接线)。
+  只采用次级时间行、小暖纸参考和暗色字段，不采用大型标题、纸叠或示例数值。
+  已查看[390顶栏](game-clock-header-390.png)与[390×360表单](game-clock-form-390-short.png)；
+  旧服务未提供时间时如实显示未提供，实数来自实际结算投影而非图片。
+- 主持普通骰参考（已接线）：[keeper-free-dice-concept-v1.png](keeper-free-dice-concept-v1.png)，
+  [完整提示词、原件与通道边界](keeper-free-dice-prompt-v1.md)。已查看生成输出，
+  计划复用档案夹/小收据/固定按钮；不采用大标题/塔楼背景，不烘焙示例27。
+  未认领PC的主持可用独立通道，普通骰不代替技能/战斗；实际
+  [939](keeper-dice-939.png)、[390短窗](keeper-dice-390-short.png)、
+  [收据](keeper-dice-receipts.png)已查看，不能把效果图里的27当真实结果。
 
 使用内置 imagegen，未使用 CLI/API Key。生成图均为新图，没有覆盖项目既有图片；按用户反馈迭代实际组件素材，后续操作与状态界面复用已确认的构图和材质，不为小控件重复生成装饰。
 
-## 完整范围与证据要求
+## 完整范围与证据要求（早期阶段记录）
+
+下面“本轮进度”保留最初阶段的检查记录，不代表现行能力。用户已选择扩展完整战斗/结局；最新实现、受测版本与缺口见 [当前验收表](CURRENT_ACCEPTANCE.md) 和 [扩展契约](STRUCTURED_COMBAT_ENDINGS_IMPLEMENTATION.md)。新增人类裁定、合法结局、逐人奖励及明确另存/导出角色已有实际三客户端证据；[结案生成概念图](career-save-concept-v1.png)、[实装窄屏](career-save-390.png) 与完整提示词在扩展契约中。未完成项不据旧整套数字关闭。
 
 | 范围 | 必须证明的行为 | 本轮进度 |
 |---|---|---|
@@ -977,6 +1010,36 @@ aff1027b09400db5da13c688240eeab7ee43acff34d6d8ac26b7c47d7aaaa225  frontend/e2e/m
 最终同版 `/tmp/trpg-phase40-joint-final.log` **5 passed / 0 failed，3.0分钟，exit 0**：双浏览器建房邀请选角隐私开局、Electron与浏览器联机、源码后端启动回收、房间同步/短窗操作、三客户端人类主持私发检定SAN道具移动存档重连。此前修复途中另跑4项通过只作过程证据，最终声明以这次同版联合为准。
 
 前端全量1170 passed / 111 files（`/tmp/trpg-phase40-unit-final.log`）；RoomScreen定向56项、tsc/格式/最终构建/ruff/架构/diff通过。后端395个文件与阶段38指纹一致（`/tmp/trpg-phase40-backend-reuse.log`），沿用1605项，不称重新执行。前端指纹 `/tmp/trpg-platform-phase40-frontend-fingerprint.sha256` 终态复核一致；未重新跑整套72/2浏览器，未提交、推送、部署或调用付费模型。
+
+## 第四十一阶段：邀请表单可见标签
+
+实际截图显示旧表单仅以“玩家 / 72 / 5”展示条件，ARIA名称不能替代视力用户可见的字段说明。新增对偶组件测试在旧版明确失败（`/tmp/trpg-phase41-label-before.log`：1 failed / 56 passed），三个字段改用含可见span的关联label，保留原ARIA名称、验证范围与生成载荷。短窗用角色一行、两个数值并排、生成按钮一行，沿用既有档案背景与温和正文颜色，不额外生成纯排版图片。
+
+浏览器四窗口分别检查标签文字、整个label在视口内、输入至少44px与中心命中，并保留原逐按钮/同步前拒绝/主动准备/生成撤销/选角释放断言。实际查看1280/939/640/390截图，保留 [390邀请表单](room-invite-labels-390.png) 与 [939邀请表单](room-invite-labels-939.png)。
+
+受测版本 `/tmp/trpg-phase41-joint-final.log` 联机联合5/5、exit 0；`/tmp/trpg-phase41-unit-final.log` 前端1171 passed / 111 files；RoomScreen定向57项、tsc/格式/构建/ruff/架构/diff通过。后端395个文件与阶段38一致（`/tmp/trpg-phase41-backend-reuse.log`），沿用1605项，不声称重跑。前端指纹 `/tmp/trpg-platform-phase41-frontend-fingerprint.sha256` 在用户续接后复核发现7个文件变化；`/tmp/trpg-platform-phase41-frontend-fingerprint-final.log` 保留失败结果，不称当前版终态一致或已经联合通过。当前共享改动需新验收。未重跑完整浏览器、未调用付费模型，本代理未提交推送部署。
+
+## 第四十二阶段：共享版本复核与归档退出保护
+
+续接复核发现阶段41后7个共享前端文件变化（云端大厅、归档确认与共享样式），不覆盖他人改动、不称旧版通过等于新版。复核归档收回动画发现CSS只屏蔽指针、确认按钮仍可键盘操作；新增 `AdventureArchiveConfirmation.test.tsx` 对偶旧版明确失败（`/tmp/trpg-phase42-archive-before.log`），关闭期间两个按钮disabled且Escape不执行，重新打开恢复并聚焦保留，未传phase的旧弹窗行为不变。组件与大厅定向20/20（`/tmp/trpg-phase42-archive-after.log`）。
+
+共享新版初轮浏览器9 passed / 1 failed（`/tmp/trpg-phase42-joint.log`）；归档测量在入场scaleY动画中途得到40.48px，非稳定44px。`checkArchiveLayout` 现等待真实Web Animation.finished后才测，保留全部44px、padding、真实命中、账号隔离、失败重试和整树归档断言，不用强制点击/扩大超时/skip。最终冻结当前代码浏览器 `/tmp/trpg-phase42-browser-final.log` **4/4，1.7分钟，exit 0**：本地无Key新建/刷新/另建、房间短窗操作、云端结构化无Key按钮、账号过期与归档全链。没有将初轮9项与最终4项拼作完整10/10。
+
+当前前端1173 passed / 112 files（`/tmp/trpg-phase42-unit-after.log`），tsc/格式/构建/ruff/架构/diff通过。共享CSS的一处Prettier格式差异机械格式化，保留首次格式告警日志；后端395个指纹仍与阶段38一致（`/tmp/trpg-phase42-backend-reuse.log`）。当前前端指纹 `/tmp/trpg-platform-phase42-final-frontend-fingerprint.sha256` 复核一致。实际查看当前归档390/939截图；未重新跑完整浏览器或后端。本代理未提交推送部署、未调用付费模型；用户期间已有提交不归为本代理动作。
+
+## 第四十三阶段：当前整套收口回归
+
+在包含共享大厅/归档/样式改动及退出保护的当前代码上，重跑后端1605 passed / 8 skipped / 127 subtests（`/tmp/trpg-platform-phase43-full-backend.log`，exit 0）、前端1173 passed / 112 files（`/tmp/trpg-platform-phase43-unit.log`）；完整浏览器 `/tmp/trpg-platform-phase43-full-e2e.log` **74收集→72 passed / 2 skipped / 0 failed，18.6分钟，exit 0**。两项跳过是外部staging恢复与未授权真实模型；非新增失败skip。人类主持三客户端、真实本地/云端无Key开局、读档与分支、按钮/私发/权限/素材链都在同一冻结版本中通过，模型配置使用本地测试服务，不称付费模型叙事验收。
+
+构建、tsc、ruff、架构、diff通过；`/tmp/trpg-platform-phase43-fingerprint.sha256` 与终态复核一致（`/tmp/trpg-platform-phase43-fingerprint-final.log`）。核对竖横版档案夹、纸上指南针均有真正1x/2x素材，文件夹运行接九宫格，指南针接srcSet；浏览器2x断言通过。实际查看当前桌面三卡与待办截图，发现玩家说明仍使用“稳定ID/服务端投影”等实现词，下一步需转为可理解的使用说明。整体目标继续active，完整战斗/结局是否纳入待产品范围确认。未发布、未付费调用。
+
+## 第四十四阶段：玩家说明用语与可读性
+
+按前端设计技能的“用用户能理解的行为，而非实现机制解释功能”原则，线索提示改为出示只是展示、不会转交或消耗，道具提示明确先申请、主持确认后结算。同步/编号缺失仍禁用并给出联系主持或重新连接的方向，权限与缺ID不退文字的机制未改；稳定ID仍用于原请求载荷，不按姓名或自然语言猜对象。提示正文统一13px暖色，不新增动效；沿用生成档案素材，不为排版重复生成图片。
+
+四项现有回归改为验证新用户文案与同样的禁用/编辑器/ID载荷行为，旧版4 failed / 14 passed（`/tmp/trpg-phase44-copy-before.log`），当前前端全量1173项通过（`/tmp/trpg-phase44-unit.log`）。实际三客户端/三卡链与旧截图4项通过（`/tmp/trpg-phase44-browser.log`）；新增四窗口正文与截图组最终3/3（`/tmp/trpg-phase44-reading-final2.log`）。首轮新测试失败是抽屉收起时DOM仍报告visible，改为实际collapsed状态+展开动画终态后再测，保留原视口/13px断言，不算产品缺陷；原失败日志保留。
+
+实际查看1280/939/640/390，保留 [390玩家说明](player-copy-390.png)、[939玩家说明](player-copy-939.png)。tsc、格式、构建、ruff、架构、diff通过；`/tmp/trpg-platform-phase44-fingerprint.sha256` 终态一致，后端指纹与阶段43一致（`/tmp/trpg-phase44-backend-reuse.log`）。未重新跑阶段44新增后的完整75项浏览器，阶段43的72/2仍只是旧版整套证据。未提交推送发布、未付费模型调用。
 
 ### 概念图
 
