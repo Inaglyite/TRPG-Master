@@ -21,8 +21,17 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import {
+  createServer as createTcpServer,
+  type Server as TcpServer,
+} from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -231,8 +240,10 @@ function latestSnapshot(frames: Frames): any {
 function snapshotRevision(received: string[]): number {
   const list = framesOf(received, "session_snapshot");
   if (!list.length) throw new Error("尚未收到 session_snapshot");
-  const revision = (JSON.parse(list.at(-1)!) as { revision?: unknown }).revision;
-  if (typeof revision !== "number") throw new Error("session_snapshot 缺少顶层 revision");
+  const revision = (JSON.parse(list.at(-1)!) as { revision?: unknown })
+    .revision;
+  if (typeof revision !== "number")
+    throw new Error("session_snapshot 缺少顶层 revision");
   return revision;
 }
 
@@ -291,7 +302,11 @@ async function cookieHeader(context: BrowserContext): Promise<string> {
 async function openRawSocket(
   path: string,
   cookie?: string,
-): Promise<{ frames: string[]; send: (frame: unknown) => void; close: () => void }> {
+): Promise<{
+  frames: string[];
+  send: (frame: unknown) => void;
+  close: () => void;
+}> {
   const socket = new WsClient(`ws://127.0.0.1:${port}${path}`, {
     // ws 客户端默认不带 Origin；云端模式服务端按白名单校验，缺 Origin 直接 403。
     headers: { Origin: baseUrl, ...(cookie ? { Cookie: cookie } : {}) },
@@ -320,9 +335,14 @@ async function register(page: Page, username: string): Promise<void> {
 }
 
 /** 经模式选择页进入云端单人大厅并完成注册（真实入口路径）。 */
-async function registerIntoSoloLobby(page: Page, username: string): Promise<void> {
+async function registerIntoSoloLobby(
+  page: Page,
+  username: string,
+): Promise<void> {
   await page.goto(baseUrl);
-  await page.waitForSelector('[data-testid="mode-select"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="mode-select"]', {
+    timeout: 30_000,
+  });
   await page.getByRole("button", { name: /云端单人/ }).click();
   await page.getByRole("tab", { name: "注册" }).click();
   await page.getByLabel("用户名").fill(username);
@@ -375,7 +395,9 @@ async function createLocalStructuredWorld(
   frames: Frames,
 ): Promise<string> {
   await page.goto(`${baseUrl}/?mode=local`);
-  await expect(page.locator(".boot-loader")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator(".boot-loader")).toHaveCount(0, {
+    timeout: 30_000,
+  });
   await expect(page.locator("#btn-start")).toBeVisible({ timeout: 30_000 });
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: new RegExp(MODULE) }).click();
@@ -516,8 +538,10 @@ async function moveToNpcScene(page: Page, frames: Frames): Promise<string> {
   expect(moved.accepted, moved.lastError).toBe(true);
   await closeConsole(page);
   const targets = framesOf(frames.received, "state_changed")
-    .map((raw) => (JSON.parse(raw) as { payload: { targets?: unknown } })
-      .payload.targets)
+    .map(
+      (raw) =>
+        (JSON.parse(raw) as { payload: { targets?: unknown } }).payload.targets,
+    )
     .filter(Array.isArray)
     .at(-1) as Array<{ kind: string; id: string }> | undefined;
   const npc = targets?.find((target) => target.kind === "npc");
@@ -526,17 +550,17 @@ async function moveToNpcScene(page: Page, frames: Frames): Promise<string> {
 }
 
 /** 开始遭遇并把先手 NPC 的普通行动过掉，直到轮到调查员。 */
-async function startCombatWithNpc(
-  page: Page,
-  frames: Frames,
-  npcId: string,
-) {
+async function startCombatWithNpc(page: Page, frames: Frames, npcId: string) {
   await openConsole(page);
   await page.getByTestId("keeper-cmd-combat_start").click();
   await setKeeperField(page, "participants", npcId);
   const started = await submitKeeperCommand(page, frames);
   expect(started.accepted, started.lastError).toBe(true);
-  for (let turn = 0; latestCombat(frames).current_actor === npcId && turn < 3; turn += 1) {
+  for (
+    let turn = 0;
+    latestCombat(frames).current_actor === npcId && turn < 3;
+    turn += 1
+  ) {
     await page.getByTestId("keeper-cmd-combat_action").click();
     await setKeeperField(page, "actor_id", npcId);
     await setKeeperField(page, "action_type", "move");
@@ -557,7 +581,9 @@ async function startCombatWithNpc(
 /** 云端单人刷新后落在模式选择页：走真实导航重新进入当前冒险。 */
 async function reenterSoloWorld(page: Page, frames: Frames) {
   await page.reload();
-  await page.waitForSelector('[data-testid="mode-select"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="mode-select"]', {
+    timeout: 30_000,
+  });
   await page.getByRole("button", { name: /云端单人/ }).click();
   await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible({
     timeout: 30_000,
@@ -571,10 +597,7 @@ async function reenterSoloWorld(page: Page, frames: Frames) {
 }
 
 /** 用普通的主持行动把先手过到调查员（不伪造行动顺序），返回该调查员的参战 ID。 */
-async function advanceToPc(
-  page: Page,
-  frames: Frames,
-): Promise<string> {
+async function advanceToPc(page: Page, frames: Frames): Promise<string> {
   for (let turn = 0; turn < 4; turn += 1) {
     const combat = latestCombat(frames);
     const current = combat.current_actor;
@@ -662,7 +685,9 @@ test("A 战斗中保存：已结算 HP/弹药/物品 ID 落盘，刷新重连不
   // 玩家经真实申报对话框提交「开枪」，主持从待办卡里批准（cause_id 关联）。
   await page.getByRole("button", { name: "申报战斗动作", exact: true }).click();
   const declareDialog = page.getByRole("dialog", { name: "申报战斗动作" });
-  await declareDialog.getByLabel("动作", { exact: true }).selectOption("firearm");
+  await declareDialog
+    .getByLabel("动作", { exact: true })
+    .selectOption("firearm");
   await declareDialog.getByLabel("目标", { exact: true }).selectOption(npcId);
   const gunOptions = await declareDialog
     .getByLabel("使用的持有物品", { exact: true })
@@ -705,7 +730,8 @@ test("A 战斗中保存：已结算 HP/弹药/物品 ID 落盘，刷新重连不
   await expect
     .poll(() => {
       const items = latestItems(frames);
-      return items.find((item: { id: string }) => item.id === gun!.value)?.label;
+      return items.find((item: { id: string }) => item.id === gun!.value)
+        ?.label;
     })
     .toBe(".38口径左轮手枪（5发）");
   const npcAfter = latestCombat(frames).participants.find(
@@ -718,18 +744,24 @@ test("A 战斗中保存：已结算 HP/弹药/物品 ID 落盘，刷新重连不
   await quickSave(page, frames);
 
   // 刷新重连 ≠ 读档：世界必须保持已结算状态，不回滚、不重复扣弹/掷骰。
-  const resolvedBefore = framesOf(frames.received, "combat_roll_resolved").length;
+  const resolvedBefore = framesOf(
+    frames.received,
+    "combat_roll_resolved",
+  ).length;
   await reenterSoloWorld(page, frames);
   const restored = latestSnapshot(frames);
   expect(restored.character.hp).toBe(pcHpAtSave);
   expect(
-    restored.items.find((item: { id: string }) => item.id === gun!.value)?.label,
+    restored.items.find((item: { id: string }) => item.id === gun!.value)
+      ?.label,
     "重连后弹药标签必须保持 5 发，不得回滚或二次扣减",
   ).toBe(".38口径左轮手枪（5发）");
   expect(restored.combat?.active).toBe(true);
-  const restoredNpc = latestCombat(frames)?.participants?.find(
-    (p: { id: string }) => p.id === npcId,
-  ) ?? restored.combat?.participants?.find((p: { id: string }) => p.id === npcId);
+  const restoredNpc =
+    latestCombat(frames)?.participants?.find(
+      (p: { id: string }) => p.id === npcId,
+    ) ??
+    restored.combat?.participants?.find((p: { id: string }) => p.id === npcId);
   expect(restoredNpc?.hp).toBe(npcAfter.hp);
   // 战斗记录里恰好一条结算（没有因重连多掷一次）。
   const history = page.getByTestId("combat-result-history");
@@ -870,8 +902,12 @@ test("B 本地主动读档：保存过的决定/待掷骰授权失效，旧响�
     kind,
     payload,
   });
-  raw.send(replay("combat_roll", { roll_id: roll2.roll_id, response: "roll" }, "r2"));
-  raw.send(replay("combat_roll", { roll_id: roll1.roll_id, response: "roll" }, "r1"));
+  raw.send(
+    replay("combat_roll", { roll_id: roll2.roll_id, response: "roll" }, "r2"),
+  );
+  raw.send(
+    replay("combat_roll", { roll_id: roll1.roll_id, response: "roll" }, "r1"),
+  );
   raw.send(
     replay(
       "combat_decide",
@@ -886,10 +922,14 @@ test("B 本地主动读档：保存过的决定/待掷骰授权失效，旧响�
     ),
   );
   await expect
-    .poll(() => framesOf(raw.frames, "request_error").length, { timeout: 30_000 })
+    .poll(() => framesOf(raw.frames, "request_error").length, {
+      timeout: 30_000,
+    })
     .toBe(3);
   for (const rawError of framesOf(raw.frames, "request_error")) {
-    const error = JSON.parse(rawError) as { payload: { code: string; message: string } };
+    const error = JSON.parse(rawError) as {
+      payload: { code: string; message: string };
+    };
     expect(error.payload.code).toBe("request_not_found");
     expect(error.payload.message).toContain("已失效");
   }
@@ -948,7 +988,9 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
   await closeConsole(page);
   await page.getByRole("button", { name: "申报战斗动作", exact: true }).click();
   const declareDialog = page.getByRole("dialog", { name: "申报战斗动作" });
-  await declareDialog.getByLabel("动作", { exact: true }).selectOption("firearm");
+  await declareDialog
+    .getByLabel("动作", { exact: true })
+    .selectOption("firearm");
   await declareDialog.getByLabel("目标", { exact: true }).selectOption(npcId);
   const gunOptions = await declareDialog
     .getByLabel("使用的持有物品", { exact: true })
@@ -985,7 +1027,8 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
   await expect
     .poll(() => {
       const items = latestItems(frames);
-      return items.find((item: { id: string }) => item.id === gun!.value)?.label;
+      return items.find((item: { id: string }) => item.id === gun!.value)
+        ?.label;
     })
     .toBe(".38口径左轮手枪（5发）");
   const forkNpcHp = latestCombat(frames).participants.find(
@@ -1020,9 +1063,7 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
   await expect(savePanel).toBeVisible();
   await page.locator(".adventure-card.current .adventure-manage").click();
   await expect(page.getByTestId("save-panel-timelines")).toBeVisible();
-  await page
-    .locator(".timeline-branch-input")
-    .fill(`战斗分支${runId}`);
+  await page.locator(".timeline-branch-input").fill(`战斗分支${runId}`);
   await page.locator(".timeline-branch-create").click();
   // 契约：结构化分支帧不得伪造 legacy turn_id。
   await expect
@@ -1097,7 +1138,9 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
     payload: { roll_id: roll2.roll_id, response: "roll" },
   });
   await expect
-    .poll(() => framesOf(raw.frames, "request_error").length, { timeout: 30_000 })
+    .poll(() => framesOf(raw.frames, "request_error").length, {
+      timeout: 30_000,
+    })
     .toBe(1);
   const replayError = JSON.parse(framesOf(raw.frames, "request_error").at(-1)!);
   expect(replayError.payload.code).toBe("request_not_found");
@@ -1134,7 +1177,9 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
         .map((frame) => JSON.parse(frame).payload)
         .filter(
           (payload) =>
-            payload && typeof payload.hp === "number" && payload.investigator_id,
+            payload &&
+            typeof payload.hp === "number" &&
+            payload.investigator_id,
         )
         .at(-1);
       return change?.hp;
@@ -1143,7 +1188,9 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
 
   // 回大厅切到父世界（真实界面路径），父世界保持分叉点状态、等待按钮仍在。
   await page.goto(baseUrl);
-  await page.waitForSelector('[data-testid="mode-select"]', { timeout: 30_000 });
+  await page.waitForSelector('[data-testid="mode-select"]', {
+    timeout: 30_000,
+  });
   await page.getByRole("button", { name: /云端单人/ }).click();
   await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
   await page
@@ -1165,10 +1212,9 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
   expect(parentWorldAgain).toBe(parentWorldId);
   await waitForNewSnapshot(frames, 0);
   const parentSnapshot = latestSnapshot(frames);
-  expect(
-    parentSnapshot.character.hp,
-    "分支内的 HP 调整不得回流父世界",
-  ).toBe(forkPcHp);
+  expect(parentSnapshot.character.hp, "分支内的 HP 调整不得回流父世界").toBe(
+    forkPcHp,
+  );
   const parentNpc = (
     latestCombat(frames)?.participants ??
     parentSnapshot.combat?.participants ??
@@ -1378,7 +1424,9 @@ test("D 云端单人结案：非法结局被拒、合法结局与奖励可恢复
   const endGameFrame = commandEnvelope(frames, "end_game");
   raw.send(endGameFrame);
   await expect
-    .poll(() => framesOf(raw.frames, "case_settled").length, { timeout: 30_000 })
+    .poll(() => framesOf(raw.frames, "case_settled").length, {
+      timeout: 30_000,
+    })
     .toBeGreaterThan(0);
   const replayedEndedIds = framesOf(raw.frames, "game_ended").map(
     (frame) => (JSON.parse(frame) as { event_id: number }).event_id,
@@ -1394,10 +1442,9 @@ test("D 云端单人结案：非法结局被拒、合法结局与奖励可恢复
     replayedSettledIds,
     "重放只允许重投原始 case_settled（同 event_id），不得产生新事件",
   ).toEqual(originalSettledIds);
-  expect(
-    snapshotRevision(raw.frames),
-    "幂等重放不得推进世界 revision",
-  ).toBe(revisionBeforeReplay);
+  expect(snapshotRevision(raw.frames), "幂等重放不得推进世界 revision").toBe(
+    revisionBeforeReplay,
+  );
 
   // 换 command_id 的「新」结案请求 → 已结算拒绝；两种路径奖励都只有一份。
   const freshRevision = snapshotRevision(raw.frames);
@@ -1407,7 +1454,9 @@ test("D 云端单人结案：非法结局被拒、合法结局与奖励可恢复
     expected_revision: freshRevision,
   });
   await expect
-    .poll(() => framesOf(raw.frames, "request_error").length, { timeout: 30_000 })
+    .poll(() => framesOf(raw.frames, "request_error").length, {
+      timeout: 30_000,
+    })
     .toBeGreaterThan(0);
   // game_over 门禁先于结案查重：新 command_id 的结案以 invalid_action 拒绝，
   // 关键是不得产生第二次结算。
@@ -1424,10 +1473,9 @@ test("D 云端单人结案：非法结局被拒、合法结局与奖励可恢复
   const settledCaseIds = (settlements as Array<{ case?: { case_id?: string } }>)
     .map((entry) => entry?.case?.case_id)
     .filter(Boolean);
-  expect(
-    settledCaseIds,
-    "重放与重复结案后，结案账本必须恰好一条记录",
-  ).toEqual([caseId]);
+  expect(settledCaseIds, "重放与重复结案后，结案账本必须恰好一条记录").toEqual([
+    caseId,
+  ]);
   // 页面连接可能收到同 event_id 的重投副本（幂等重放的契约行为）；
   // 「只发一次奖」的正确判据是不同收据 payload 恰为一张（观众副本同 payload）。
   const distinctSettledPayloads = new Set(
@@ -1474,8 +1522,9 @@ test("E 本地读档后历史结案凭证不混入：回滚抹掉旧结案，新
     "逃离阿卡姆",
   );
   const caseA = `${worldId}:leave_arkham`;
-  const receiptA = JSON.parse(framesOf(frames.received, "case_settled").at(-1)!)
-    .payload;
+  const receiptA = JSON.parse(
+    framesOf(frames.received, "case_settled").at(-1)!,
+  ).payload;
   const investigatorId = receiptA.investigator_id as string;
 
   // 主动读档：结案连同裁定一起回滚。
@@ -1540,7 +1589,11 @@ test("E 本地读档后历史结案凭证不混入：回滚抹掉旧结案，新
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(b),
         });
-        return { ok: response.ok, status: response.status, body: await response.json() };
+        return {
+          ok: response.ok,
+          status: response.status,
+          body: await response.json(),
+        };
       },
       { path, body },
     );
@@ -1550,10 +1603,7 @@ test("E 本地读档后历史结案凭证不混入：回滚抹掉旧结案，新
     case_id: caseA,
     expected_revision: revision,
   });
-  expect(
-    previewA.ok,
-    "读档回滚后的历史结案凭证不得再用于另存角色",
-  ).toBe(false);
+  expect(previewA.ok, "读档回滚后的历史结案凭证不得再用于另存角色").toBe(false);
   const caseB = `${worldId}:devoured_by_ink`;
   const previewB = await api("/api/character-library/from-case/preview", {
     world_id: worldId,
@@ -1617,7 +1667,9 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
     [playerB, `bob${runId}`],
   ] as const) {
     await register(page, name);
-    await page.getByRole("textbox", { name: "邀请码", exact: true }).fill(invite);
+    await page
+      .getByRole("textbox", { name: "邀请码", exact: true })
+      .fill(invite);
     await page.getByRole("button", { name: "加入房间" }).click();
     await expect(page.getByRole("heading", { name: roomName })).toBeVisible();
     await page.getByRole("button", { name: "选择" }).first().click();
@@ -1669,11 +1721,18 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
 
   // ---- 旁观者开局后加入：只读，无私密帧 ----
   // 开局后邀请入口在「房间管理」：先展开房间坞（OnlineRoomDock 收起态是入口条）。
-  await keeper.getByTestId("online-room-dock").locator("button").first().click();
+  await keeper
+    .getByTestId("online-room-dock")
+    .locator("button")
+    .first()
+    .click();
   await keeper.getByRole("button", { name: "房间管理" }).click();
   // 已有玩家邀请码时面板显示邀请卡而非创建表单；撤销旧码（不影响已入房玩家）
   // 才能创建旁观者邀请。
-  await keeper.getByRole("button", { name: "撤销", exact: true }).first().click();
+  await keeper
+    .getByRole("button", { name: "撤销", exact: true })
+    .first()
+    .click();
   await keeper.getByLabel("邀请角色").selectOption("viewer");
   await keeper.getByRole("button", { name: "生成邀请码" }).click();
   const viewerInvite = (await keeper
@@ -1738,12 +1797,12 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   expect(
     framesOf(keeperFrames.received, "combat_decision_required").length,
   ).toBeGreaterThan(0);
-  expect(framesOf(otherFrames.received, "combat_decision_required")).toHaveLength(
-    0,
-  );
-  expect(framesOf(viewerFrames.received, "combat_decision_required")).toHaveLength(
-    0,
-  );
+  expect(
+    framesOf(otherFrames.received, "combat_decision_required"),
+  ).toHaveLength(0);
+  expect(
+    framesOf(viewerFrames.received, "combat_decision_required"),
+  ).toHaveLength(0);
   await expect(
     otherPage.getByTestId("combat-field-record").getByRole("button"),
   ).toHaveCount(0);
@@ -1753,15 +1812,18 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   await confirmViolenceIfAsked(actorPage, actorFrames);
   // 决定结算与 combat_roll_required 是两帧，等帧到达再取（消除竞态）。
   await expect
-    .poll(
-      () => framesOf(actorFrames.received, "combat_roll_required").length,
-      { timeout: 20_000 },
-    )
+    .poll(() => framesOf(actorFrames.received, "combat_roll_required").length, {
+      timeout: 20_000,
+    })
     .toBeGreaterThan(0);
   const roll1 = lastPayload(actorFrames.received, "combat_roll_required");
   expect(roll1?.roll_id).toBeTruthy();
-  expect(framesOf(otherFrames.received, "combat_roll_required")).toHaveLength(0);
-  expect(framesOf(viewerFrames.received, "combat_roll_required")).toHaveLength(0);
+  expect(framesOf(otherFrames.received, "combat_roll_required")).toHaveLength(
+    0,
+  );
+  expect(framesOf(viewerFrames.received, "combat_roll_required")).toHaveLength(
+    0,
+  );
   await expect(
     actorPage
       .getByTestId("combat-field-record")
@@ -1771,7 +1833,10 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   // 协议级越权：另一名玩家/旁观者拿当事人的 roll_id 直接发帧 → 拒绝。
   const decideTemplate = commandEnvelope(actorFrames, "combat_decide");
   const otherCookie = await cookieHeader(otherPage.context());
-  const rawOther = await openRawSocket(`/ws/room?world_id=${worldId}`, otherCookie);
+  const rawOther = await openRawSocket(
+    `/ws/room?world_id=${worldId}`,
+    otherCookie,
+  );
   await expect
     .poll(() => framesOf(rawOther.frames, "session_snapshot").length, {
       timeout: 30_000,
@@ -1827,7 +1892,10 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   // 主持按协议 §5.2 同时可见 investigator 向与 keeper 向副本（同一份收据，
   // 两个 event_id）；判据是收据 payload 唯一且 roll_id 一致，而非帧数。
   const keeperReceipts = framesOf(keeperFrames.received, "combat_roll_resolved")
-    .map((frame) => JSON.parse(frame) as { payload: { roll_id: string; result: unknown } })
+    .map(
+      (frame) =>
+        JSON.parse(frame) as { payload: { roll_id: string; result: unknown } },
+    )
     .filter((frame) => frame.payload.roll_id === roll1.roll_id);
   expect(
     keeperReceipts.length,
@@ -1838,8 +1906,12 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
       .size,
     "主持收到的各副本必须是同一份骰点收据",
   ).toBe(1);
-  expect(framesOf(otherFrames.received, "combat_roll_resolved")).toHaveLength(0);
-  expect(framesOf(viewerFrames.received, "combat_roll_resolved")).toHaveLength(0);
+  expect(framesOf(otherFrames.received, "combat_roll_resolved")).toHaveLength(
+    0,
+  );
+  expect(framesOf(viewerFrames.received, "combat_roll_resolved")).toHaveLength(
+    0,
+  );
   await expect(otherPage.getByTestId("combat-field-record")).toBeVisible();
 
   // ---- PvP 双向参与授权：另一玩家成为目标，随后被 adjust_stat 整体失效 ----
@@ -1889,8 +1961,7 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
     );
     const latestRaw = [...actorDecisions, ...otherDecisions].at(-1)!;
     const candidate = JSON.parse(latestRaw).payload;
-    pvpOwnerPage =
-      actorDecisions.at(-1) === latestRaw ? actorPage : otherPage;
+    pvpOwnerPage = actorDecisions.at(-1) === latestRaw ? actorPage : otherPage;
     if (candidate.kind === "pvp_consent") {
       pvpDecision = candidate;
       break;
@@ -1908,9 +1979,9 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   }
   expect(pvpDecision, "PvP 必须进入双向参与同意（pvp_consent）").toBeTruthy();
   // 同意请求只发给当事玩家（+主持），旁观者收不到。
-  expect(framesOf(viewerFrames.received, "combat_decision_required")).toHaveLength(
-    0,
-  );
+  expect(
+    framesOf(viewerFrames.received, "combat_decision_required"),
+  ).toHaveLength(0);
 
   // 主持提交事实修正（adjust_stat）→ PvP 双向授权整体失效，双方按钮消失。
 
@@ -1984,15 +2055,17 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
       timeout: 30_000,
     })
     .toBeGreaterThan(0);
-  const boundaryBefore = framesOf(rawKeeper.frames, "room_action_rejected").length;
+  const boundaryBefore = framesOf(
+    rawKeeper.frames,
+    "room_action_rejected",
+  ).length;
   rawKeeper.send({ type: "save_load", slot_id: "slot_000" });
   rawKeeper.send({ type: "solo_branch_create", label: "越界分支" });
   rawKeeper.send({ type: "turn_branch_create", label: "越界分支" });
   await expect
-    .poll(
-      () => framesOf(rawKeeper.frames, "room_action_rejected").length,
-      { timeout: 30_000 },
-    )
+    .poll(() => framesOf(rawKeeper.frames, "room_action_rejected").length, {
+      timeout: 30_000,
+    })
     .toBe(boundaryBefore + 3);
   rawKeeper.close();
   // 前端同一边界：多人房间的存档面板不渲染分支入口。
@@ -2000,9 +2073,7 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
   await keeper.getByTestId("keeper-save-panel").click();
   await expect(keeper.locator("#save-panel-overlay")).toBeVisible();
   await expect(keeper.locator(".timeline-branch-create")).toHaveCount(0);
-  await keeper
-    .getByRole("button", { name: "关闭存档管理" })
-    .click();
+  await keeper.getByRole("button", { name: "关闭存档管理" }).click();
   await expect(keeper.locator("#save-panel-overlay")).toBeHidden();
   await closeConsole(keeper);
 
@@ -2022,8 +2093,9 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
 
   const settledIdsOf = (frames: Frames) =>
     framesOf(frames.received, "case_settled").map(
-      (raw) => (JSON.parse(raw) as { payload: { investigator_id: string } })
-        .payload.investigator_id,
+      (raw) =>
+        (JSON.parse(raw) as { payload: { investigator_id: string } }).payload
+          .investigator_id,
     );
   expect(settledIdsOf(playerAFrames)).toEqual([invA]);
   expect(settledIdsOf(playerBFrames)).toEqual([invB]);
@@ -2075,7 +2147,9 @@ test("F 多人房间：掷骰/决定/骰点/奖励/控制权限隔离，PvP 授�
     },
   });
   await expect
-    .poll(() => framesOf(rawB.frames, "request_error").length, { timeout: 30_000 })
+    .poll(() => framesOf(rawB.frames, "request_error").length, {
+      timeout: 30_000,
+    })
     .toBe(1);
   await expect
     .poll(() => framesOf(rawViewer2.frames, "request_error").length, {

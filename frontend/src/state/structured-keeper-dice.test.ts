@@ -83,20 +83,16 @@ it("snapshot replaces rolled-back receipts, missing old fields and new worlds cl
 });
 
 it("bad result is not displayed and the history is bounded at 20", () => {
-  useStructuredStore
-    .getState()
-    .applyEvent({
-      ...event,
-      payload: { ...receipt, total: 100 },
-    } as StructuredEventEnvelope);
+  useStructuredStore.getState().applyEvent({
+    ...event,
+    payload: { ...receipt, total: 100 },
+  } as StructuredEventEnvelope);
   expect(useStructuredStore.getState().keeperRolls).toEqual([]);
   for (let n = 0; n < 25; n++)
-    useStructuredStore
-      .getState()
-      .applyEvent({
-        ...event,
-        event_id: n + 2,
-        payload: { ...receipt, command_id: `roll-${n}` },
-      } as StructuredEventEnvelope);
+    useStructuredStore.getState().applyEvent({
+      ...event,
+      event_id: n + 2,
+      payload: { ...receipt, command_id: `roll-${n}` },
+    } as StructuredEventEnvelope);
   expect(useStructuredStore.getState().keeperRolls).toHaveLength(20);
 });
