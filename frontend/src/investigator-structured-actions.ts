@@ -103,10 +103,9 @@ export function presentUnavailableReason(
   if (currentPanelPath() !== "structured") return null;
   const blocked = structuredPathBlockReason();
   if (blocked) return blocked;
-  if (!clueId)
-    return "该线索缺少服务端稳定 ID，已禁止结构化出示（不用文本冒充 ID）。";
+  if (!clueId) return "这条线索记录不完整，暂不能出示。请主持确认线索资料。";
   if (!currentStructuredClueOption(clueId)) {
-    return "服务端尚未提供这条线索的公开投影，暂时无法结构化出示。";
+    return "这条线索尚未同步，暂不能出示。请重新连接，或请主持确认资料已发布。";
   }
   return null;
 }
@@ -117,8 +116,7 @@ export function useUnavailableReason(
   if (currentPanelPath() !== "structured") return null;
   const blocked = structuredPathBlockReason();
   if (blocked) return blocked;
-  if (!itemId)
-    return "该物品缺少服务端稳定 ID，已禁止结构化使用（不用标签冒充 ID）。";
+  if (!itemId) return "这件道具记录不完整，暂不能使用。请主持确认道具资料。";
   return null;
 }
 

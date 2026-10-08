@@ -32,6 +32,7 @@ import {
   type StructuredAction,
   type StructuredEventEnvelope,
 } from "./protocol/structured";
+import { COMBAT_PLAYER_COMMANDS } from "./protocol/combat";
 import { applyStructuredEffects } from "./structured-effects";
 import { useAppStore } from "./state/app-store";
 import { useSceneStore } from "./state/scene-store";
@@ -193,7 +194,12 @@ function gateReason(requiresInvestigator = true): string | null {
 
 /** The UI and send path use the same identity/connection gate for player requests. */
 export function structuredPlayerRequestReason(): string | null {
-  return gateReason();
+  return (
+    gateReason() ||
+    (useStructuredStore.getState().gameOver
+      ? "本场游戏已结束，请查看结案记录，或读档/创建分支后继续。"
+      : null)
+  );
 }
 
 function trackAndSend(
@@ -249,10 +255,21 @@ export function sendStructuredAction(
   action: StructuredAction,
   label?: string,
 ): StructuredSendResult {
-  const blocked = gateReason();
+  const blocked = structuredPlayerRequestReason();
   if (blocked) return reject(blocked);
+  if (
+    action.kind === "combat" &&
+    !useStructuredStore.getState().capabilities.combatActionRequest
+  )
+    return reject("服务端尚未开放战斗申报，请更新服务端或联系主持。");
   const identity = currentStructuredIdentity();
   if (!identity) return reject("还没有进入世界，无法提交结构化请求。");
+  if (
+    action.kind === "combat" &&
+    action.weapon_item_id &&
+    !useStructuredStore.getState().capabilities.combatWeaponItemId
+  )
+    return reject("服务端尚未开放指定武器物品，请更新服务端或联系主持。");
   const built = buildActionRequest(action, identity);
   if (!built.ok) return reject(built.reason);
   const request = built.request;
@@ -347,7 +364,7 @@ export function sendCheckResponse(
   checkRequestId: string,
   decision: CheckDecision,
 ): StructuredSendResult {
-  const blocked = gateReason();
+  const blocked = structuredPlayerRequestReason();
   if (blocked) return reject(blocked);
   const identity = currentStructuredIdentity();
   if (!identity) return reject("还没有进入世界。");
@@ -371,6 +388,16 @@ export function sendCheckResponse(
 export function keeperCommandBlockReason(kind: string): string | null {
   const blocked = gateReason(false);
   if (blocked) return blocked;
+  if (
+    useStructuredStore.getState().gameOver &&
+    ![
+      "publish_message",
+      "control_keeper",
+      "record_memory",
+      "keeper_roll",
+    ].includes(kind)
+  )
+    return "本场游戏已结束，不能继续改变游戏状态。";
   if (!useStructuredStore.getState().capabilities.commands.includes(kind))
     return `服务端未开放该主持操作（${kind}），请求未提交。`;
   return null;
@@ -380,19 +407,82 @@ export function sendKeeperCommand(
   kind: string,
   payload: Record<string, unknown>,
   commandId?: string,
+  causeId?: string,
 ): StructuredSendResult {
   const blocked = keeperCommandBlockReason(kind);
   if (blocked) return reject(blocked);
+  if (
+    kind === "combat_action" &&
+    payload.weapon_item_id &&
+    !useStructuredStore.getState().capabilities.combatWeaponItemId
+  )
+    return reject("服务端尚未开放指定武器物品，请更新服务端。");
   const identity = currentStructuredIdentity();
   if (!identity) return reject("还没有进入世界。");
-  const built = buildCommandRequest(kind, payload, identity, commandId);
+  const built = buildCommandRequest(
+    kind,
+    payload,
+    identity,
+    commandId,
+    causeId,
+  );
   if (!built.ok) return reject(built.reason);
   const request = built.request;
   return trackAndSend(
     request.command_id,
     "command",
-    `主持操作：${kind}`,
+    kind === "keeper_roll" ? "主持普通骰" : `主持操作：${kind}`,
     request as unknown as Record<string, unknown>,
+  );
+}
+
+/** Battle response is a player command, never a keeper or free-roll action. */
+export function sendCombatResponse(
+  kind: "combat_roll" | "combat_decide",
+  pendingId: string,
+  response: string,
+): StructuredSendResult {
+  const blocked = gateReason();
+  if (blocked) return reject(blocked);
+  const state = useStructuredStore.getState();
+  if (!state.capabilities.commands.includes(kind))
+    return reject("服务端尚未开放战斗响应。");
+  const identity = currentStructuredIdentity();
+  if (!identity) return reject("还没有进入世界。");
+  const pending =
+    kind === "combat_roll" ? state.combatRoll : state.combatDecision;
+  const owner =
+    kind === "combat_roll"
+      ? state.combatRoll?.investigator_id
+      : state.combatDecision?.responding_investigator_id;
+  const nonce =
+    kind === "combat_roll"
+      ? state.combatRoll?.roll_id
+      : state.combatDecision?.id;
+  if (
+    !pending ||
+    owner !== identity.investigatorId ||
+    nonce !== pendingId ||
+    state.gameOver
+  )
+    return reject("该战斗待办已失效或不属于你，请等待主持重新批准。");
+  const payload =
+    kind === "combat_roll"
+      ? { roll_id: pendingId, response }
+      : { decision_id: pendingId, option_id: response };
+  const built = buildCommandRequest(kind, payload, identity);
+  if (!built.ok) return reject(built.reason);
+  return trackAndSend(
+    built.request.command_id,
+    "command",
+    kind === "combat_decide"
+      ? "战斗决定"
+      : response === "roll"
+        ? state.combatRoll?.source.startsWith("pvp_")
+          ? "确认战斗掷骰"
+          : "战斗掷骰"
+        : "取消战斗动作",
+    built.request,
   );
 }
 
@@ -474,13 +564,18 @@ export function structuredReplayReason(
   const payload = request.payload as Record<string, unknown> | null;
   if (!payload || !payload.type || !payload.world_id)
     return "重连快照不含原始请求载荷，无法安全重发；请向守秘人确认当前处理状态。";
-  const reason = gateReason(payload.type !== "command_request");
+  const playerCombat =
+    payload.type === "command_request" &&
+    (COMBAT_PLAYER_COMMANDS as readonly unknown[]).includes(payload.kind);
+  const reason = gateReason(payload.type !== "command_request" || playerCombat);
   if (reason) return reason;
-  if (payload.type === "command_request") {
+  if (payload.type === "command_request" && !playerCombat) {
     const unsupported = keeperCommandBlockReason(String(payload.kind || ""));
     if (unsupported) return unsupported;
   }
   const identity = currentStructuredIdentity();
+  if (playerCombat && request.investigatorId !== identity?.investigatorId)
+    return "原战斗响应属于另一调查员，不能用当前身份重发。";
   if (payload.world_id !== identity?.worldId)
     return "原请求属于另一世界，不能在当前世界重发。";
   if (

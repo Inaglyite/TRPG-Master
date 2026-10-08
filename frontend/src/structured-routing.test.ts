@@ -91,6 +91,35 @@ describe("结构化帧的路由", () => {
     expect(useMessageStore.getState().messages.length).toBeGreaterThan(0);
   });
 
+  it("结构化奖励不能误报为写入个人角色库", () => {
+    handleServerPayload(EVENT_FIXTURES.snapshot);
+    handleServerPayload({
+      type: "case_settled",
+      protocol_version: 1,
+      event_id: 999,
+      world_id: WORLD_ID,
+      revision: 13,
+      payload: {
+        investigator_id: "inv-alice",
+        character_id: "alice",
+        case: {
+          case_id: "case-a",
+          world_id: WORLD_ID,
+          ending_type: "good",
+          reputation_delta: 2,
+        },
+        career: { reputation: 12, case_history: [], completed_modules: [] },
+      },
+    });
+    expect(useStructuredStore.getState().caseSettlements).toHaveLength(1);
+    expect(lastSystemMessage()).not.toContain("长期履历");
+  });
+
+  it("带结构化字段的畸形结算不能降级成旧成功通知", () => {
+    handleServerPayload({ type: "case_settled", ok: true, world_id: WORLD_ID });
+    expect(lastSystemMessage()).not.toContain("长期履历");
+  });
+
   it("未知的普通消息类型仍然被明确拒绝，不会静默丢弃", () => {
     handleServerPayload({ type: "future_client_message" });
     expect(lastSystemMessage()).toContain("无法识别的协议消息");

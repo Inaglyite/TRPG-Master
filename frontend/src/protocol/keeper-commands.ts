@@ -15,6 +15,10 @@ import {
   type KeeperCommandKind,
   type SpeakerKind,
 } from "./structured";
+import { parseRulingValue, type RulingState } from "./rulings";
+import { CONDITION_KINDS } from "./conditions";
+import { TIME_ACTIVITIES } from "./time-activity";
+import { keeperDiceProblem } from "./keeper-dice";
 
 /** 字段表必须覆盖且不超过 M0 的命令集合（测试会断言两边一致）。 */
 export const KEEPER_COMMAND_KIND_SET: readonly string[] = KEEPER_COMMAND_KINDS;
@@ -29,10 +33,13 @@ export type FieldKind =
   | "bool"
   | "target"
   | "audience"
-  | "speaker";
+  | "speaker"
+  | "primitive";
 
 /** 候选来源：全部来自服务端公开投影，前端不自己编候选。 */
 export type CandidateSource =
+  | "flags"
+  | "combatants"
   | "investigators"
   | "npcs"
   | "scenes"
@@ -84,6 +91,275 @@ const TARGET_FIELD: CommandField = {
 };
 
 export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
+  {
+    kind: "keeper_roll",
+    label: "主持普通骰",
+    group: "检定",
+    help: "不需要认领调查员。只产生随机数，不结算技能、伤害或剧情；未指定接收范围时仅主持可见。不能代掷玩家待检定。",
+    fields: [
+      {
+        name: "spec",
+        label: "骰式",
+        kind: "text",
+        required: true,
+        maxLength: 40,
+      },
+      {
+        name: "visibility",
+        label: "接收范围",
+        kind: "enum",
+        required: false,
+        enumValues: ["keeper", "public"],
+      },
+    ],
+  },
+  {
+    kind: "record_condition",
+    label: "记录人物状态",
+    group: "结算与事实",
+    help: "仅人类主持使用。只调整状态标记，不增加 HP。解除昏迷或濒死前须已恢复生命；死亡不能解除。已有战斗准备会失效，需重新批准。",
+    fields: [
+      INVESTIGATOR,
+      {
+        name: "condition",
+        label: "状态",
+        kind: "enum",
+        required: true,
+        enumValues: CONDITION_KINDS,
+      },
+      {
+        name: "operation",
+        label: "变更",
+        kind: "enum",
+        required: true,
+        enumValues: ["add", "remove"],
+      },
+      {
+        name: "expected_present",
+        label: "本次核对",
+        kind: "bool",
+        required: true,
+        help: "只读前状态；实际记录有变化时，请核对后再提交。",
+      },
+      {
+        name: "basis",
+        label: "裁定依据",
+        kind: "text",
+        required: true,
+        multiline: true,
+        minLength: 1,
+        maxLength: 1000,
+      },
+    ],
+  },
+  {
+    kind: "record_ruling",
+    label: "裁定剧情条件",
+    group: "结算与事实",
+    help: "仅人类主持使用。裁定只改变已有剧情条件，不代替叙事，也不立即结算结局；请先核实并写明依据。",
+    fields: [
+      {
+        name: "flag_id",
+        label: "剧情条件（模组编号）",
+        kind: "id",
+        candidate: "flags",
+        required: true,
+      },
+      {
+        name: "expected_before",
+        label: "裁定前的状态",
+        kind: "primitive",
+        required: true,
+      },
+      {
+        name: "value",
+        label: "裁定后的状态",
+        kind: "primitive",
+        required: true,
+      },
+      {
+        name: "basis",
+        label: "裁定依据",
+        kind: "text",
+        multiline: true,
+        minLength: 1,
+        maxLength: 1000,
+        required: true,
+      },
+    ],
+  },
+  {
+    kind: "combat_start",
+    label: "开始遭遇",
+    group: "结算与事实",
+    help: "从当前场景选参战者；角色属性由服务端读取，不能临时覆盖。",
+    fields: [
+      {
+        name: "participants",
+        label: "参战者",
+        kind: "id_list",
+        required: true,
+        candidate: "combatants",
+      },
+      {
+        name: "reason",
+        label: "发生原因",
+        kind: "text",
+        required: false,
+        maxLength: 4000,
+        multiline: true,
+      },
+    ],
+  },
+  {
+    kind: "combat_action",
+    label: "批准战斗动作",
+    group: "结算与事实",
+    help: "玩家动作批准后仍要等本人选择或掷骰；主持不能代选玩家的防御。",
+    fields: [
+      {
+        name: "actor_id",
+        label: "行动者",
+        kind: "id",
+        required: true,
+        candidate: "combatants",
+      },
+      {
+        name: "action_type",
+        label: "动作",
+        kind: "enum",
+        required: true,
+        enumValues: ["melee", "firearm", "threat", "move", "other"],
+      },
+      {
+        name: "target_id",
+        label: "目标",
+        kind: "id",
+        required: false,
+        candidate: "combatants",
+      },
+      {
+        name: "description",
+        label: "动作说明",
+        kind: "text",
+        required: false,
+        maxLength: 4000,
+        multiline: true,
+      },
+      {
+        name: "skill",
+        label: "技能键",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+      },
+      {
+        name: "weapon",
+        label: "武器",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+        help: "未指定物品编号的旧命令兼容描述；指定编号时请留空。",
+      },
+      {
+        name: "weapon_item_id",
+        label: "武器物品",
+        kind: "id",
+        required: false,
+        candidate: "items",
+        help: "从行动者持有物品中选择；编号绑定本件，不能换另一把同名武器。",
+      },
+      {
+        name: "damage_spec",
+        label: "伤害骰",
+        kind: "text",
+        required: false,
+        maxLength: 20,
+      },
+      {
+        name: "damage_mode",
+        label: "伤害模式",
+        kind: "enum",
+        required: false,
+        enumValues: ["normal", "impaling", "blunt"],
+      },
+      {
+        name: "defender_choice",
+        label: "NPC 防御选择",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+      },
+      {
+        name: "bonus_dice",
+        label: "奖励骰",
+        kind: "int",
+        required: false,
+        min: 0,
+        max: 2,
+      },
+      {
+        name: "penalty_dice",
+        label: "惩罚骰",
+        kind: "int",
+        required: false,
+        min: 0,
+        max: 2,
+      },
+    ],
+  },
+  {
+    kind: "combat_end",
+    label: "结束遭遇",
+    group: "结算与事实",
+    fields: [
+      {
+        name: "reason",
+        label: "结束原因",
+        kind: "text",
+        required: true,
+        maxLength: 4000,
+        multiline: true,
+      },
+    ],
+  },
+  {
+    kind: "end_game",
+    label: "结算案件",
+    group: "结算与事实",
+    help: "模组有结局时按结局 ID 校验前置事实；先结束战斗。奖励不会自动写回个人角色库。",
+    fields: [
+      {
+        name: "ending_id",
+        label: "模组结局 ID",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+      },
+      {
+        name: "ending_type",
+        label: "结局类型",
+        kind: "enum",
+        required: false,
+        enumValues: ["good", "secret", "neutral", "bad"],
+      },
+      {
+        name: "title",
+        label: "结局标题",
+        kind: "text",
+        required: false,
+        maxLength: 4000,
+      },
+      {
+        name: "summary",
+        label: "结局叙述",
+        kind: "text",
+        required: false,
+        maxLength: 4000,
+        multiline: true,
+      },
+    ],
+  },
   {
     kind: "control_keeper",
     label: "主持控制权",
@@ -190,8 +466,35 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     kind: "grant_clue",
     label: "定向发放线索",
     group: "发言与线索",
-    help: "知情授权按接收者显式记录，不是全局开关；可同时展示授权图片。",
+    help: "只发信息不会取得物品。结算实际发现须选择作者规则和发现者；勾选取得实物后才落入该发现者背包。需要检定时关联同目标已成功检定。",
     fields: [
+      {
+        name: "discovery_rule_index",
+        label: "发现规则编号（可选，从 0 开始）",
+        kind: "int",
+        required: false,
+        min: 0,
+        max: 999,
+      },
+      {
+        ...INVESTIGATOR,
+        name: "discovery_investigator_id",
+        label: "发现者／实物持有人",
+        required: false,
+      },
+      {
+        name: "check_request_id",
+        label: "已成功检定编号（需要检定时）",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+      },
+      {
+        name: "acquire_item",
+        label: "确认取得作者声明的实物（不是仅阅读）",
+        kind: "bool",
+        required: false,
+      },
       {
         name: "clue_id",
         label: "线索",
@@ -384,6 +687,36 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     fields: [
       INVESTIGATOR,
       {
+        name: "effect_clue_id",
+        label: "作者使用效果（可选）",
+        kind: "id",
+        required: false,
+        candidate: "clues",
+      },
+      {
+        name: "effect_rule_index",
+        label: "使用规则编号（从 0 开始）",
+        kind: "int",
+        required: false,
+        min: 0,
+        max: 999,
+      },
+      {
+        name: "basis",
+        label: "效果适用依据（选择作者效果时必填）",
+        kind: "text",
+        required: false,
+        maxLength: 500,
+        multiline: true,
+      },
+      {
+        name: "check_request_id",
+        label: "已成功检定编号（需要检定时）",
+        kind: "text",
+        required: false,
+        maxLength: 160,
+      },
+      {
         name: "item_id",
         label: "物品",
         kind: "id",
@@ -471,6 +804,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     kind: "advance_time",
     label: "推进时间",
     group: "时间与移动",
+    help: "按活动类型计入模组的时间规则；未指定时按等待计时。原因只作说明，不改变活动类型。这里只计时，不代替移动、检定或战斗；不要重复结算已扣除的时间。",
     fields: [
       {
         name: "minutes",
@@ -479,6 +813,13 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         required: true,
         min: 0,
         max: 10080,
+      },
+      {
+        name: "activity",
+        label: "活动类型",
+        kind: "enum",
+        required: false,
+        enumValues: TIME_ACTIVITIES,
       },
       {
         name: "reason",
@@ -794,6 +1135,8 @@ export function findKeeperCommand(kind: string): KeeperCommandSpec | null {
 
 /** 控制台里显示的候选 ID：全部来自服务端公开投影。 */
 export type KeeperCandidates = {
+  combatants?: { id: string; name: string }[];
+  flags?: (RulingState["flags"][number] & { name: string })[];
   investigators: { id: string; name: string }[];
   npcs: { id: string; name: string }[];
   objects?: { id: string; name: string }[];
@@ -810,6 +1153,14 @@ export function candidatesFor(
   candidates: KeeperCandidates,
 ): { id: string; name: string }[] {
   if (!source) return [];
+  if (source === "flags") return candidates.flags || [];
+  if (source === "combatants")
+    return (
+      candidates.combatants || [...candidates.investigators, ...candidates.npcs]
+    ).filter(
+      (entry, index, all) =>
+        all.findIndex((other) => other.id === entry.id) === index,
+    );
   return candidates[source] ?? [];
 }
 
@@ -852,6 +1203,27 @@ export function buildKeeperPayload(
   values: FieldValues,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
+  if (spec.kind === "record_condition") {
+    return {
+      investigator_id: String(values.investigator_id || ""),
+      condition: String(values.condition || ""),
+      operation: String(values.operation || ""),
+      // Required false is meaningful; never omit or coerce an unverified value.
+      expected_present:
+        typeof values.expected_present === "boolean"
+          ? values.expected_present
+          : null,
+      basis: String(values.basis || "").trim(),
+    };
+  }
+  if (spec.kind === "record_ruling") {
+    return {
+      flag_id: String(values.flag_id || ""),
+      value: parseRulingValue(values.value),
+      expected_before: parseRulingValue(values.expected_before),
+      basis: String(values.basis || "").trim(),
+    };
+  }
   for (const field of spec.fields) {
     switch (field.name) {
       case "speaker_kind":
@@ -988,7 +1360,10 @@ export function buildKeeperPayload(
     };
   }
   for (const field of spec.fields) {
-    if (field.name.startsWith("audience_") || field.name.startsWith("target_"))
+    if (
+      field.name.startsWith("audience_") ||
+      (field.name.startsWith("target_") && spec.kind !== "combat_action")
+    )
       continue;
     if (
       field.name === "from_investigator_id" ||
@@ -1002,7 +1377,11 @@ export function buildKeeperPayload(
     }
     if (field.kind === "id_list") {
       const list = idListFrom(values, field.name);
-      if (list.length) payload[field.name] = list;
+      if (list.length)
+        payload[field.name] =
+          spec.kind === "combat_start" && field.name === "participants"
+            ? list.map((id) => ({ id }))
+            : list;
       continue;
     }
     if (field.kind === "int") {
@@ -1039,6 +1418,36 @@ export function validateKeeperFields(
   values: FieldValues,
 ): string[] {
   const errors: string[] = [];
+  if (spec.kind === "grant_clue") {
+    const rule = String(values.discovery_rule_index ?? "").trim();
+    const actor = String(values.discovery_investigator_id ?? "").trim();
+    if (rule && !actor) errors.push("结算发现时请选择发现者／实物持有人。");
+    if (
+      !rule &&
+      (actor ||
+        values.acquire_item === true ||
+        String(values.check_request_id ?? "").trim())
+    )
+      errors.push("请选择明确的模组发现规则，不能只勾选取得物品。");
+    if (
+      actor &&
+      !idListFrom(values, "recipient_investigator_ids").includes(actor)
+    )
+      errors.push("发现者必须包含在线索接收调查员中。");
+  }
+  if (spec.kind === "use_item") {
+    const effect = String(values.effect_clue_id ?? "").trim();
+    const rule = String(values.effect_rule_index ?? "").trim();
+    const basis = String(values.basis ?? "").trim();
+    if (
+      (effect ||
+        rule ||
+        basis ||
+        String(values.check_request_id ?? "").trim()) &&
+      (!effect || !rule || !basis)
+    )
+      errors.push("结算作者使用效果时，请选择效果、规则并填写适用依据。");
+  }
   for (const field of spec.fields) {
     const isAudiencePart = field.name.startsWith("audience_");
     const isTargetPart = field.name.startsWith("target_");
@@ -1068,6 +1477,11 @@ export function validateKeeperFields(
     if (field.required && blank) {
       errors.push(`请填写「${field.label}」。`);
       continue;
+    }
+    if (field.kind === "primitive" && (!blank || field.required)) {
+      const value = parseRulingValue(values[field.name]);
+      if (value === undefined || (field.name === "value" && value === null))
+        errors.push(`请先选择剧情条件并填写「${field.label}」。`);
     }
     if (field.kind === "int" && !blank) {
       const parsed = Number(values[field.name]);
@@ -1136,13 +1550,25 @@ export function validateKeeperFields(
       }
     }
   }
+  if (spec.kind === "record_condition") {
+    if (typeof values.expected_present !== "boolean")
+      errors.push("请先核对当前人物状态记录。");
+    if (values.condition === "dead" && values.operation === "remove")
+      errors.push("死亡不能通过本工具解除；如需回滚请读档或创建分支。");
+  }
+  if (spec.kind === "keeper_roll") {
+    const problem = keeperDiceProblem(String(values.spec ?? ""));
+    if (problem) errors.push(problem);
+  }
   return errors;
 }
 
 export function emptyKeeperValues(spec: KeeperCommandSpec): FieldValues {
   const values: FieldValues = {};
   for (const field of spec.fields) {
-    if (field.kind === "bool") values[field.name] = false;
+    if (spec.kind === "record_condition" && field.name === "expected_present")
+      values[field.name] = "";
+    else if (field.kind === "bool") values[field.name] = false;
     else if (field.kind === "enum" && field.enumValues?.length) {
       // 必填枚举预选第一项；**可选枚举保持空**——否则「可选」会被当成已选择，
       // 表单会凭空多提交一个字段（例如 resolve_intent 的 thread.action）。

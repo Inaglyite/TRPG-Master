@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from "react";
 
 import type { KeeperMode } from "../../../protocol/structured";
+import { playSupportNote } from "../../../protocol/play-support";
 
 const STYLES = [
   {
@@ -108,7 +109,7 @@ export function PlayStylePicker({
       </p>
       {structured && (
         <p className="play-style-limitation">
-          当前结构化模式支持调查与社交，尚无完整战斗和结局结算。
+          {playSupportNote(keeperMode)}
           {solo &&
             keeperMode === "human" &&
             " 单人人类主持由你兼任调查员和守秘人，主持资料也会对你可见。"}

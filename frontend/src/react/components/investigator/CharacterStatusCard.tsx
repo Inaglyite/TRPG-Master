@@ -4,6 +4,7 @@ import {
   useWorldPrefs,
 } from "../../../state/investigator-panel-store";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { CONDITION_LABELS } from "../../../protocol/conditions";
 
 function percentage(value?: number, maximum?: number) {
   if (!Number.isFinite(value) || !Number.isFinite(maximum) || !maximum)
@@ -19,15 +20,6 @@ function statValue(value?: number) {
 function lowWarning(ratio: number): string | null {
   return ratio > 0 && ratio <= 30 ? "偏低" : null;
 }
-
-// 服务端公开 conditions 的本地化标签；只展示已下发的事实，不做推测。
-const CONDITION_LABELS: Record<string, string> = {
-  major_wound: "重伤",
-  prone: "倒地",
-  unconscious: "昏迷",
-  dying: "濒死",
-  dead: "死亡",
-};
 
 export function CharacterStatusCard() {
   const character = useAppStore((state) => state.character);

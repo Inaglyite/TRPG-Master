@@ -148,6 +148,40 @@ afterEach(() => {
 });
 
 describe("connectRoom", () => {
+  it("4413读档重建同一世界、清旧请求队列，保留未保存笔记；普通断线不当作读档", () => {
+    vi.useFakeTimers();
+    connectRoom("world-restore");
+    const old = FakeWebSocket.latest();
+    old.open();
+    useAppStore.setState({
+      notesText: "尚未保存的个人笔记",
+      notesDirty: true,
+      notesRevision: 2,
+    });
+    roomSend({ type: "action_request", request_id: "old-unsent" });
+    old.close(4413);
+    expect(useAppStore.getState()).toMatchObject({
+      notesText: "尚未保存的个人笔记",
+      notesDirty: true,
+    });
+    vi.advanceTimersByTime(1000);
+    const fresh = FakeWebSocket.latest();
+    expect(fresh).not.toBe(old);
+    expect(fresh.url).toContain("world_id=world-restore");
+    fresh.open();
+    fresh.message(
+      JSON.stringify({
+        type: "room_full_state",
+        world_id: "world-restore",
+        status: "playing",
+        latest_event_id: 0,
+        private_state: { player_notes: { text: "服务端旧记录", revision: 2 } },
+      }),
+    );
+    expect(fresh.sent.join(" ")).not.toContain("old-unsent");
+    expect(useOnlineStore.getState().roomError).toBeNull();
+    expect(useAppStore.getState().notesText).toBe("尚未保存的个人笔记");
+  });
   it("连接 /ws/room 并携带 world_id，同时接管发送 transport", () => {
     connectRoom("world-1");
     expect(roomWsUrl("world-1")).toBe(

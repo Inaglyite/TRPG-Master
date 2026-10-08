@@ -1,4 +1,7 @@
 import type { SaveEntry } from "../../state/app-store";
+import { useSaveReadBlockReason } from "../../save-read-boundary";
+import { useStructuredStore } from "../../state/structured-store";
+import { interactionPath } from "../../protocol/structured";
 
 export type SavePointAction = {
   kind: "load" | "delete";
@@ -19,12 +22,14 @@ export function SavePointActions({
   onRequest: (action: SavePointAction) => void;
   onRename: () => void;
 }) {
+  const readBlocked = useSaveReadBlockReason();
   return (
     <>
       <button
         type="button"
         className="save-action-load"
-        disabled={!canOperate}
+        disabled={!canOperate || readBlocked !== null}
+        title={readBlocked ?? "读取这个存档点"}
         onClick={(event) =>
           onRequest({ kind: "load", save, returnFocus: event.currentTarget })
         }
@@ -75,10 +80,15 @@ export function SavePointConfirmation({
   onConfirm: () => void;
 }) {
   const loading = action.kind === "load";
+  const readBlocked = useSaveReadBlockReason();
+  const structured = useStructuredStore(
+    (state) => interactionPath(state.capabilities) === "structured",
+  );
   const name = action.save.label || action.save.scene_name || "此存档点";
   return (
     <div
       className="save-point-confirmation"
+      data-structured-load={loading && structured ? "true" : undefined}
       role="group"
       aria-label={`确认${loading ? "读取" : "删除"}${name}`}
       data-dialog-escape
@@ -95,12 +105,23 @@ export function SavePointConfirmation({
         <strong>
           {loading ? "确认读取" : "确认删除存档点"} · {name}
         </strong>
-        <p>
-          {loading
-            ? "读取将恢复到此存档，未保存进度不会保留。"
-            : "只删除这个存档点，不删除整条时间线；此操作没有自助撤销入口。"}
-          {online && " 房间存档操作仅房主可用，读档会影响房间所有成员。"}
-        </p>
+        {loading && structured ? (
+          <>
+            <ul className="save-restore-consequences">
+              <li>当前进度将回到这个存档点，未保存的进度不会保留。</li>
+              <li>旧行动、检定和战斗授权将作废，需要重新批准。</li>
+              <li>服务端确认后重新同步；普通刷新不会回滚。</li>
+            </ul>
+            {readBlocked && <p role="status">{readBlocked}</p>}
+          </>
+        ) : (
+          <p>
+            {loading
+              ? "读取将恢复到此存档，未保存进度不会保留。"
+              : "只删除这个存档点，不删除整条时间线；此操作没有自助撤销入口。"}
+            {online && " 房间存档操作仅房主可用，读档会影响房间所有成员。"}
+          </p>
+        )}
       </div>
       <div className="save-point-confirmation-actions">
         <button
@@ -114,7 +135,7 @@ export function SavePointConfirmation({
         <button
           type="button"
           className="btn-primary"
-          disabled={!canOperate}
+          disabled={!canOperate || (loading && readBlocked !== null)}
           onClick={onConfirm}
         >
           {loading ? "确认读取" : "确认删除存档点"}

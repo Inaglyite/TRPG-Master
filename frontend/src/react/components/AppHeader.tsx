@@ -11,6 +11,7 @@ import { useOnlineStore } from "../../state/online-store";
 import { sceneLabel, useSceneStore } from "../../state/scene-store";
 import { useStructuredStore } from "../../state/structured-store";
 import { MoveDialog } from "./structured/MoveDialog";
+import { GameClockReadout } from "./structured/GameClockReadout";
 import { returnToStartMenu } from "../../start";
 import { useStartStore } from "../../state/start-store";
 import { SoloAdventureExitControl } from "./online/SoloAdventureExitControl";
@@ -104,30 +105,36 @@ export function AppHeader() {
             结构化模式下右侧提供“前往…”入口：只列服务端公开目的地，
             只有已提交的场景事件会改这一行。 */}
         {gameStarted && (
-          <p
-            className="header-scene"
-            data-scene-status={sceneStatus}
-            title={`当前场景 · ${sceneText}`}
-            aria-label={`当前场景：${sceneText}`}
-          >
-            <span className="header-scene-label">
-              当前场景 · <span className="header-scene-name">{sceneText}</span>
-            </span>
-            {sceneMoveAvailable && (
-              <button
-                type="button"
-                className="btn-ghost header-scene-move"
-                data-testid="btn-move"
-                title={
-                  moveBlocked ?? "选择目的地（表示现在出发；抵达不等于调查）"
-                }
-                disabled={moveBlocked !== null}
-                onClick={() => setMoveOpen(true)}
-              >
-                前往…
-              </button>
+          <div className="header-scene-cluster">
+            <p
+              className="header-scene"
+              data-scene-status={sceneStatus}
+              title={`当前场景 · ${sceneText}`}
+              aria-label={`当前场景：${sceneText}`}
+            >
+              <span className="header-scene-label">
+                当前场景 ·{" "}
+                <span className="header-scene-name">{sceneText}</span>
+              </span>
+              {sceneMoveAvailable && (
+                <button
+                  type="button"
+                  className="btn-ghost header-scene-move"
+                  data-testid="btn-move"
+                  title={
+                    moveBlocked ?? "选择目的地（表示现在出发；抵达不等于调查）"
+                  }
+                  disabled={moveBlocked !== null}
+                  onClick={() => setMoveOpen(true)}
+                >
+                  前往…
+                </button>
+              )}
+            </p>
+            {panelPath === "structured" && (
+              <GameClockReadout variant="header" />
             )}
-          </p>
+          </div>
         )}
         {mode === "online" && <SoloAdventureExitControl />}
       </div>

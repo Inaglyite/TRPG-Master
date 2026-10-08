@@ -7,14 +7,14 @@
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--ink) 52%, transparent),
-      color-mix(in srgb, var(--ink) 8%, transparent) 48%,
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 28%, transparent),
+      color-mix(in srgb, var(--ink) 4%, transparent) 48%,
+      color-mix(in srgb, var(--ink) 36%, transparent)
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--ink) 10%, transparent),
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 6%, transparent),
+      color-mix(in srgb, var(--ink) 34%, transparent)
     ),
     var(--module-bg-image, var(--ui-start-bg)) center / cover no-repeat,
     var(--bg);
@@ -75,7 +75,9 @@
   font-style: italic;
   letter-spacing: 0.22em;
   text-align: center;
-  text-shadow: 0 1px 3px #000;
+  text-shadow:
+    0 1px 4px rgb(0 0 0 / 90%),
+    0 0 14px rgb(0 0 0 / 65%);
 }
 
 .online-header .online-subtitle {
@@ -93,6 +95,9 @@
   color: var(--text-dim);
   font-size: 13px;
   letter-spacing: 0.18em;
+  text-shadow:
+    0 1px 4px rgb(0 0 0 / 90%),
+    0 0 14px rgb(0 0 0 / 65%);
 }
 
 .mode-select-actions {
@@ -1766,6 +1771,8 @@
 .online-auth-screen .online-server {
   gap: var(--sp-3);
   padding-top: var(--sp-4);
+  /* 文件夹纸面留白：正文不要贴到纸边（尤其左侧书脊区） */
+  padding-inline: 40px;
 }
 
 .online-auth-screen .online-server-row {

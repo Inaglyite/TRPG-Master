@@ -77,6 +77,85 @@ beforeEach(() => {
 });
 
 describe("ActionStatusCard：接收不等于成功", () => {
+  it("普通骰限频是等待而非修改草稿，不自动重掷", () => {
+    const send = vi.fn(() => true);
+    setStructuredSender(send);
+    render(
+      <ActionStatusCard
+        request={request({
+          kind: "command",
+          payload: { kind: "keeper_roll", payload: { spec: "1d100" } },
+          status: "queued",
+          errorCode: "rate_limited",
+          errorMessage: "普通骰过于频繁，请约 60 秒后按原请求 ID 重试。",
+        })}
+      />,
+    );
+    expect(screen.getByText("稍后重试")).toBeInTheDocument();
+    expect(screen.queryByText("需修正后重试")).not.toBeInTheDocument();
+    expect(screen.getByText(/本次普通骰没有掷出新结果/)).toBeInTheDocument();
+    expect(screen.getByText(/不会自动重掷/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "重试（同一请求 ID）" }),
+    ).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("非骰请求限频不会显示虚假的未掷骰说明", () => {
+    render(
+      <ActionStatusCard
+        request={request({
+          status: "queued",
+          errorCode: "rate_limited",
+          errorMessage: "请求过于频繁。",
+        })}
+      />,
+    );
+    expect(screen.getByText("稍后重试")).toBeInTheDocument();
+    expect(screen.queryByText(/本次普通骰/)).not.toBeInTheDocument();
+  });
+  it("restored combat requests use explicit action labels and authorized target names, not prose recognition", () => {
+    useStructuredStore.setState({
+      targets: [{ id: "doctor", kind: "npc", name: "惠特克罗夫医生" }],
+    });
+    render(
+      <ActionStatusCard
+        request={request({
+          label: "申报战斗动作 firearm → doctor",
+          keeperAction: {
+            kind: "combat",
+            encounter_id: "encounter-1",
+            action_type: "firearm",
+            target_id: "doctor",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("申报射击 · 惠特克罗夫医生")).toBeInTheDocument();
+    expect(
+      screen.queryByText("申报战斗动作 firearm → doctor"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("a new typed declaration uses the same title and retains the exact unknown target ID", () => {
+    render(
+      <ActionStatusCard
+        request={request({
+          label: "任意叙事里提到另一人",
+          payload: {
+            action: {
+              kind: "combat",
+              encounter_id: "encounter-1",
+              action_type: "firearm",
+              target_id: "exact-target-id",
+            },
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("申报射击 · exact-target-id")).toBeInTheDocument();
+  });
+
   it("queued 在收到回执后提示待主持处理，不再说未获服务端确认", () => {
     render(
       <ActionStatusCard
@@ -287,6 +366,46 @@ describe("ActionStatusCard：接收不等于成功", () => {
 });
 
 describe("CheckRequestCard：参数来自服务端，只读与可响应区分", () => {
+  it("只按公开调查员目标的精确编号显示姓名，姓名更新不改变响应权限", () => {
+    useStructuredStore.setState({
+      targets: [{ kind: "investigator", id: "inv-alice", name: "爱丽丝" }],
+    });
+    const onRespond = vi.fn();
+    render(
+      <CheckRequestCard
+        check={check()}
+        canRespond={false}
+        onRespond={onRespond}
+      />,
+    );
+    expect(screen.getByText("爱丽丝")).toHaveAttribute("title", "inv-alice");
+    expect(screen.queryByText("inv-alice")).not.toBeInTheDocument();
+    act(() =>
+      useStructuredStore.setState({
+        targets: [
+          { kind: "investigator", id: "inv-alice", name: "爱丽丝·调查员" },
+        ],
+      }),
+    );
+    expect(screen.getByText("爱丽丝·调查员")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "掷骰" })).toBeDisabled();
+    screen.getByRole("button", { name: "掷骰" }).click();
+    expect(onRespond).not.toHaveBeenCalled();
+  });
+
+  it("未知编号不借用 NPC 或其他调查员的姓名", () => {
+    useStructuredStore.setState({
+      targets: [
+        { kind: "npc", id: "inv-alice", name: "不能借用的 NPC 姓名" },
+        { kind: "investigator", id: "inv-alice-other", name: "另一名调查员" },
+      ],
+    });
+    render(<CheckRequestCard check={check()} canRespond onRespond={vi.fn()} />);
+    expect(screen.getByText("inv-alice")).toBeInTheDocument();
+    expect(screen.queryByText("不能借用的 NPC 姓名")).not.toBeInTheDocument();
+    expect(screen.queryByText("另一名调查员")).not.toBeInTheDocument();
+  });
+
   it("展示技能/难度/奖惩骰/尝试/已知代价，参数不可编辑", () => {
     render(
       <CheckRequestCard
@@ -472,7 +591,15 @@ describe("assisted 草稿与 agent 控制权（按能力渲染）", () => {
       });
     });
     render(<StructuredDock />);
-    expect(screen.getByText(/将执行：move_party/)).toBeInTheDocument();
+    expect(screen.getByText("整队移动")).toBeInTheDocument();
+    const parameters = screen
+      .getByText("查看原始参数")
+      .parentElement!.querySelector("pre")!;
+    expect(parameters).not.toBeVisible();
+    expect(JSON.parse(parameters.textContent!)).toEqual({
+      kind: "move_party",
+      payload: { destination_scene_id: "library" },
+    });
     expect(screen.getByText(/叙事草稿：抵达图书馆/)).toBeInTheDocument();
     act(() => {
       screen.getByTestId("draft-approve").click();

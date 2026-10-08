@@ -21,6 +21,7 @@ import { useStructuredStore } from "./state/structured-store";
 import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
 import { safeSend } from "./ws";
+import { saveReadBlockReason } from "./save-read-boundary";
 
 const clueCategories = ["investigation", "event", "task", "npc"] as const;
 let knownClueKeys: Set<string> | null = null;
@@ -299,8 +300,28 @@ export function loadSave(slotId: string) {
     denyRoomOwnerOp();
     return;
   }
+  const reason = saveReadBlockReason();
+  if (reason) {
+    addMsg("system", reason);
+    return;
+  }
   closeSavePanel();
   addMsg("system", "正在读档…");
+  if (
+    useAppStore.getState().mode === "online" &&
+    interactionPath(useStructuredStore.getState().capabilities) === "structured"
+  ) {
+    const { identity } = useStructuredStore.getState();
+    safeSend(
+      JSON.stringify({
+        type: "solo_save_load",
+        world_id: identity.worldId,
+        slot_id: slotId,
+        expected_revision: identity.revision,
+      }),
+    );
+    return;
+  }
   safeSend(JSON.stringify({ type: "save_load", slot_id: slotId }));
 }
 

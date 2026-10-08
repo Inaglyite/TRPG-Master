@@ -59,6 +59,7 @@ test.beforeAll(async () => {
         TRPG_WRITE_COMPAT_EXPORTS: "0",
         OPENAI_API_KEY: "",
         GLM_API_KEY: "",
+        TRPG_ORDINARY_ROLLS_PER_MINUTE: "1",
         OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -274,6 +275,136 @@ test("本地人类主持：四窗口选择→无Key真实新建→发言→刷�
     received.filter((frame) => frame.type === "gm_turn_start"),
   ).toHaveLength(0);
   expect(modelRequests).toBe(0);
+  // Real local operator, no key: host dice use a typed command, not player free-roll.
+  await page.getByTestId("btn-keeper-dice").click();
+  await expect(page.getByRole("dialog", { name: "主持普通骰" })).toBeVisible();
+  await page.getByTestId("keeper-dice-submit").click();
+  await expect
+    .poll(
+      () =>
+        received.filter((frame) => frame.type === "keeper_roll_resolved")
+          .length,
+    )
+    .toBe(1);
+  const localDice = received.find(
+    (frame) => frame.type === "keeper_roll_resolved",
+  ).payload;
+  await expect(
+    page.locator(
+      `[data-testid="keeper-dice-receipt"][data-command-id="${localDice.command_id}"]`,
+    ),
+  ).toContainText("仅主持可见");
+  expect(sent.find((frame) => frame.kind === "keeper_roll").payload).toEqual({
+    spec: "1d100",
+    visibility: "keeper",
+  });
+  // A new ordinary roll is rate-limited, not silently converted to player
+  // dice or a fabricated result. Manual retries keep exactly the same ID.
+  await page.getByTestId("btn-keeper-dice").click();
+  await page.getByTestId("keeper-dice-submit").click();
+  const rejectedDice = sent
+    .filter((frame) => frame.kind === "keeper_roll")
+    .at(-1);
+  expect(rejectedDice.command_id).not.toBe(localDice.command_id);
+  await expect
+    .poll(() =>
+      received.some(
+        (frame) =>
+          frame.type === "request_error" &&
+          frame.payload?.command_id === rejectedDice.command_id &&
+          frame.payload?.code === "rate_limited",
+      ),
+    )
+    .toBe(true);
+  const rateCard = page.locator(
+    `[data-request-id="${rejectedDice.command_id}"]`,
+  );
+  await expect(rateCard).toContainText("稍后重试");
+  await expect(rateCard).toContainText("不会自动重掷");
+  await expect(rateCard).not.toContainText("需修正后重试");
+  for (const viewport of [
+    { width: 1280, height: 720 },
+    { width: 939, height: 640 },
+    { width: 640, height: 480 },
+    { width: 390, height: 360 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const retry = rateCard.getByRole("button", { name: "重试（同一请求 ID）" });
+    await retry.scrollIntoViewIfNeeded();
+    const geometry = await retry.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const dock = node.closest(".structured-dock")!.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        height: rect.height,
+        padding: parseFloat(style.paddingLeft),
+        nowrap: style.whiteSpace,
+        dockTop: dock.top,
+        dockBottom: dock.bottom,
+        appTop: document.querySelector("#app")!.getBoundingClientRect().top,
+        bodyScroll: document.body.scrollTop,
+        bodyHeight: document.body.scrollHeight,
+        rootScroll: document.documentElement.scrollTop,
+        rootHeight: document.scrollingElement!.scrollHeight,
+        hit: node.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        ),
+      };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.padding).toBeGreaterThanOrEqual(10);
+    expect(geometry.nowrap).toBe("nowrap");
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
+    expect(geometry.rootHeight).toBeLessThanOrEqual(viewport.height);
+    expect(geometry.bodyScroll).toBe(0);
+    expect(geometry.bodyHeight).toBeLessThanOrEqual(viewport.height);
+    expect(geometry.rootScroll).toBe(0);
+    expect(geometry.appTop).toBe(0);
+    expect(geometry.top).toBeGreaterThanOrEqual(geometry.dockTop);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.dockBottom);
+    expect(geometry.hit).toBe(true);
+    await page.screenshot({
+      path: `../docs/design/platform-ui/keeper-dice-rate-${viewport.width}.png`,
+    });
+  }
+  const diceSentBeforeRetry = sent.filter(
+    (frame) => frame.kind === "keeper_roll",
+  ).length;
+  await rateCard.getByRole("button", { name: "重试（同一请求 ID）" }).click();
+  await expect
+    .poll(() => sent.filter((frame) => frame.kind === "keeper_roll").length)
+    .toBe(diceSentBeforeRetry + 1);
+  expect(sent.filter((frame) => frame.kind === "keeper_roll").at(-1)).toEqual(
+    rejectedDice,
+  );
+  await expect
+    .poll(
+      () =>
+        received.filter(
+          (frame) =>
+            frame.type === "request_error" &&
+            frame.payload?.command_id === rejectedDice.command_id,
+        ).length,
+    )
+    .toBe(2);
+  expect(
+    received.filter((frame) => frame.type === "keeper_roll_resolved"),
+  ).toHaveLength(1);
+  expect(
+    sent.filter((frame) => frame.type === "free_roll_request"),
+  ).toHaveLength(0);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  expect(modelRequests).toBe(0);
   await page.getByTestId("btn-keeper-console").click();
   await page
     .locator('[data-field="text"] textarea')
@@ -288,6 +419,11 @@ test("本地人类主持：四窗口选择→无Key真实新建→发言→刷�
   await expect(page.getByTestId("structured-tool-row")).toBeVisible({
     timeout: 30_000,
   });
+  await expect(
+    page.locator(
+      `[data-testid="keeper-dice-receipt"][data-command-id="${localDice.command_id}"]`,
+    ),
+  ).toBeVisible();
   await expect(page.locator("#messages")).toContainText("本地无模型开局验收");
   await page.locator("#btn-new").click();
   await page.locator("#btn-start").click();

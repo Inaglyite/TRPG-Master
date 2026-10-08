@@ -28,6 +28,7 @@ import {
   type FieldValues,
   type KeeperCommandSpec,
 } from "./keeper-commands";
+import { COMBAT_PLAYER_COMMANDS, combatCommandPayloads } from "./combat";
 
 const FIXTURES = resolve(
   import.meta.dirname,
@@ -99,6 +100,23 @@ describe("M0 官方 fixtures：valid 必须被前端接受", () => {
       const parsed = commandRequestSchema.safeParse(fixture);
       if (!parsed.success) {
         throw new Error(`${name}: ${JSON.stringify(parsed.error.issues)}`);
+      }
+      if (combatCommandPayloads[parsed.data.kind]) {
+        expect(
+          combatCommandPayloads[parsed.data.kind].safeParse(parsed.data.payload)
+            .success,
+          `${name} combat payload`,
+        ).toBe(true);
+      }
+      if (
+        (COMBAT_PLAYER_COMMANDS as readonly string[]).includes(parsed.data.kind)
+      ) {
+        expect(
+          combatCommandPayloads[parsed.data.kind].safeParse(parsed.data.payload)
+            .success,
+        ).toBe(true);
+        expect(findKeeperCommand(parsed.data.kind)).toBeNull(); // no keeper UI for player decisions
+        continue;
       }
       const spec = findKeeperCommand(parsed.data.kind);
       expect(
@@ -191,7 +209,12 @@ function commandFormValuesFromPayload(
   const values: FieldValues = {};
   const declared = new Set(spec.fields.map((field) => field.name));
   for (const [key, value] of Object.entries(raw)) {
+    if (spec.fields.find((field) => field.name === key)?.kind === "primitive") {
+      values[key] = JSON.stringify(value);
+      continue;
+    }
     if (typeof value === "string" && declared.has(key)) values[key] = value;
+    if (typeof value === "boolean" && declared.has(key)) values[key] = value;
     if (Array.isArray(value) && declared.has(key))
       values[key] = value.join(", ");
   }

@@ -17,6 +17,10 @@ import {
 } from "./transitions";
 import { interactionPath } from "../../protocol/structured";
 import { useStructuredStore } from "../../state/structured-store";
+import {
+  saveReadBlockReason,
+  useSaveReadBlockReason,
+} from "../../save-read-boundary";
 import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
 import { useDialogKeyboard } from "./useDialogKeyboard";
 import { HandoutCard } from "./HandoutCard";
@@ -330,6 +334,7 @@ export function SavePanel() {
   useOnlineStore((state) => state.user);
   const canOperate =
     appMode === "local" || (appMode === "online" && isRoomOwner());
+  const readBlocked = useSaveReadBlockReason();
   const [pointAction, setPointAction] = useState<
     (SavePointAction & { worldId: string | null; appMode: string }) | null
   >(null);
@@ -349,6 +354,7 @@ export function SavePanel() {
     )
       return;
     const { kind, save } = pointAction;
+    if (kind === "load" && saveReadBlockReason() !== null) return;
     const current = saves.find(
       (entry) => entry.id === save.id && entry.world_active !== false,
     );
@@ -560,6 +566,11 @@ export function SavePanel() {
             {!canOperate && (
               <p className="save-readonly-note">
                 仅房主可管理房间存档；你可以查看现有存档。
+              </p>
+            )}
+            {canOperate && readBlocked && (
+              <p className="save-readonly-note" role="status">
+                {readBlocked}
               </p>
             )}
             {worlds.length > 0 && (

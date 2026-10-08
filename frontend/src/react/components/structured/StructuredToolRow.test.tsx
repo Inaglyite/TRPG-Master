@@ -37,7 +37,7 @@ describe("ordinary roll identity gate", () => {
   it("an unclaimed keeper cannot open a player roll", () => {
     render(<StructuredToolRow />);
     expect(screen.getByRole("button", { name: "普通掷骰" })).toBeDisabled();
-    expect(screen.getByText("未控制调查员，无法掷骰。")).toBeVisible();
+    expect(screen.getByText("调查员普通骰需先认领角色。")).toBeVisible();
   });
   it("a viewer remains read-only even with a stale previous investigator ID", () => {
     useStructuredStore.setState({

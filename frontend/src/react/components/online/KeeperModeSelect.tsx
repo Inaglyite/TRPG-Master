@@ -1,4 +1,5 @@
 import type { KeeperMode } from "../../../protocol/structured";
+import { playSupportNote } from "../../../protocol/play-support";
 
 export function KeeperModeSelect({
   value,
@@ -25,7 +26,7 @@ export function KeeperModeSelect({
         {value === "human"
           ? "无需模型配置；由主持处理行动和发布叙事。"
           : "需要自行配置模型与 API Key；主持可以接管或重试暂停请求。"}{" "}
-        当前结构化模式支持调查与社交，尚无完整战斗和结局结算。
+        {playSupportNote(value)}
       </span>
     </label>
   );

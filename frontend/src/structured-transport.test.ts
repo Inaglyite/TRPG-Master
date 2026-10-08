@@ -57,6 +57,103 @@ beforeEach(() => {
 });
 
 describe("能力门禁", () => {
+  it.each(["player", "keeper"])(
+    "%s 普通骰限频保留原请求，不自动新建或重掷；手动沿用原ID",
+    (role) => {
+      vi.useFakeTimers();
+      try {
+        enableStructured();
+        useStructuredStore.setState((state) => ({
+          capabilities: {
+            ...state.capabilities,
+            commands: [...state.capabilities.commands, "keeper_roll"],
+          },
+        }));
+        const original =
+          role === "keeper"
+            ? sendKeeperCommand("keeper_roll", {
+                spec: "1d100",
+                visibility: "keeper",
+              })
+            : sendFreeRoll("1d100");
+        expect(original.ok).toBe(true);
+        if (!original.ok) throw new Error(original.reason);
+        const frame = { ...sent[0] };
+        const id = original.requestId;
+        handleStructuredPayload({
+          ...EVENT_FIXTURES.revisionConflict,
+          event_id: 900,
+          sequence: 900,
+          cause_request_id: id,
+          payload: {
+            [role === "keeper" ? "command_id" : "request_id"]: id,
+            code: "rate_limited",
+            message: "普通骰过于频繁，请稍后按原请求 ID 重试。",
+            retryable: true,
+          },
+        });
+        vi.advanceTimersByTime(90_000);
+        expect(sent).toEqual([frame]);
+        expect(useStructuredStore.getState().requests[id]).toMatchObject({
+          status: "queued",
+          errorCode: "rate_limited",
+          awaitingAck: false,
+          payload: frame,
+        });
+        expect(useStructuredStore.getState().keeperRolls).toEqual([]);
+        expect(resendStructuredRequest(id).ok).toBe(true);
+        expect(sent).toEqual([frame, frame]);
+        handleStructuredPayload({
+          ...EVENT_FIXTURES.actionProcessing,
+          event_id: 901,
+          sequence: 901,
+          cause_request_id: id,
+          payload: { request_id: id, status: "completed" },
+        });
+        expect(useStructuredStore.getState().requests[id]).toMatchObject({
+          status: "completed",
+          errorCode: null,
+          awaitingAck: false,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+  it("结局后拒绝新行动/检定/状态命令，但旧回执重发与收尾发言仍合法", () => {
+    enableStructured();
+    const previous = sendStructuredAction({
+      kind: "move",
+      destination_scene_id: "s1",
+    });
+    expect(previous.ok).toBe(true);
+    useStructuredStore.setState({
+      gameOver: { id: "done", type: "neutral", title: "结案", summary: "结束" },
+    });
+    sent = [];
+    expect(
+      sendStructuredAction({ kind: "move", destination_scene_id: "s1" }),
+    ).toMatchObject({ ok: false, reason: expect.stringContaining("已结束") });
+    expect(sendCheckResponse("old-check", "roll")).toMatchObject({ ok: false });
+    expect(
+      sendKeeperCommand("adjust_stat", {
+        investigator_id: "inv-alice",
+        stat: "hp",
+        delta: 1,
+      }),
+    ).toMatchObject({ ok: false, reason: expect.stringContaining("已结束") });
+    expect(sent).toHaveLength(0);
+    if (previous.ok)
+      expect(resendStructuredRequest(previous.requestId).ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(
+      sendKeeperCommand("publish_message", {
+        speaker: { kind: "keeper" },
+        text: "调查结束，你们整理留下的记录。",
+      }).ok,
+    ).toBe(true);
+  });
+
   it("拒绝超长自由行动而不静默截断，也不登记或发送半句行动", () => {
     enableStructured();
     const result = sendFreeformIntent("查".repeat(2001));
@@ -655,6 +752,14 @@ describe("世界绑定", () => {
     expect(inbound.kind).toBe("foreign_world");
     expect(useStructuredStore.getState().identity.revision).toBe(before);
     expect(useStructuredStore.getState().destinations).toHaveLength(0);
+    const lateClock = handleStructuredPayload({
+      ...EVENT_FIXTURES.stateChanged,
+      world_id: WORLD_ID,
+      event_id: 91,
+      payload: { clock: { elapsed_minutes: 999 } },
+    });
+    expect(lateClock.kind).toBe("foreign_world");
+    expect(useStructuredStore.getState().clockMinutes).toBeNull();
   });
 
   it("切换世界后同 ID 请求可以重新提交（旧请求已清空）", () => {

@@ -17,6 +17,7 @@ import {
 import { useAppStore } from "../../../state/app-store";
 import { useOnlineStore } from "../../../state/online-store";
 import { useStructuredStore } from "../../../state/structured-store";
+import { DraftCommandPreview } from "./DraftCommandPreview";
 
 const CONTROL_TEXTS: Record<string, string> = {
   active: "AI 持有主持权",
@@ -121,7 +122,7 @@ export function AssistedDraftCard() {
 
   return (
     <article
-      className="structured-card keeper-draft-card"
+      className="structured-card keeper-draft-card archive-folder-panel archive-folder-panel--wide"
       data-testid="keeper-draft-card"
       aria-live="polite"
     >
@@ -132,11 +133,11 @@ export function AssistedDraftCard() {
         </span>
       </header>
       <p className="structured-card-detail">{draft.summary}</p>
-      {commands.map((command, index) => (
-        <p key={index} className="structured-card-note">
-          将执行：{command.kind}（{JSON.stringify(command.payload)}）
-        </p>
-      ))}
+      <ol className="draft-command-list" aria-label="草稿命令（按执行顺序）">
+        {commands.map((command, index) => (
+          <DraftCommandPreview key={index} command={command} index={index} />
+        ))}
+      </ol>
       {draft.narration && (
         <p className="structured-card-detail">叙事草稿：{draft.narration}</p>
       )}

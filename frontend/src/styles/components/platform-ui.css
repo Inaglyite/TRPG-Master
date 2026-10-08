@@ -1,4 +1,111 @@
 /* Room controls keep text legible without shrinking labels or danger entries. */
+.combat-field-record,
+.combat-ending-record {
+  min-width: 0;
+  padding: 66px 24px 22px;
+  background: #211a14;
+  border-radius: 6px;
+  color: var(--platform-text, #ddd3c3);
+  overflow-wrap: anywhere;
+}
+.combat-folder-label {
+  position: absolute;
+  top: 19px;
+  left: 32px;
+  color: #33271a;
+  font-weight: 700;
+}
+.combat-record-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.combat-record-heading h3,
+.combat-ending-record h3 {
+  margin: 0;
+  color: var(--platform-brass, #baa16a);
+}
+.combat-wait-stamp {
+  color: #b1bc92;
+  border: 1px solid #83936e;
+  padding: 5px 9px;
+  font-size: 13px;
+}
+.combat-record-current {
+  color: var(--platform-text, #ddd3c3);
+}
+.combat-participant-details summary,
+.combat-closed-record summary {
+  cursor: pointer;
+  padding: 12px 0;
+}
+.combat-participant-details ol {
+  padding-left: 24px;
+}
+.combat-participant-details li {
+  padding: 8px 4px;
+}
+.combat-participant-details li span {
+  display: block;
+}
+.combat-participant-details li[aria-current] {
+  color: #d3bc8b;
+}
+.combat-record-pending {
+  padding: 12px 14px;
+  border-left: 2px solid #83936e;
+  background: #30271d;
+  line-height: 1.7;
+}
+.combat-record-pending h4 {
+  margin: 0;
+}
+.combat-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.combat-record-actions button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  padding: 10px 18px;
+  white-space: nowrap;
+}
+.combat-record-actions button:focus-visible,
+.combat-participant-details summary:focus-visible {
+  outline: 2px solid #d3bc8b;
+  outline-offset: 3px;
+}
+.combat-reward-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.combat-reward-summary dt {
+  color: var(--platform-muted, #b3a998);
+  font-size: 13px;
+}
+.combat-reward-summary dd {
+  margin: 6px 0;
+  color: #b1bc92;
+  font-size: 22px;
+}
+@media (max-width: 640px) {
+  .combat-field-record,
+  .combat-ending-record {
+    padding: 62px 16px 18px;
+  }
+  .combat-record-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .combat-record-actions button {
+    width: 100%;
+  }
+}
+
 .online-room-screen
   :is(
     .online-header-side,
@@ -73,6 +180,11 @@
 }
 
 /* Player recovery actions use the archive UI's readable, actual hit targets. */
+#char-content .inv-path-note {
+  color: var(--platform-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .action-status-card .structured-card-actions > button {
   min-height: 44px;
   padding: 10px 12px;
@@ -226,6 +338,10 @@
   line-height: 1.8;
   color: var(--platform-text);
 }
+.keeper-pending-label {
+  display: block;
+  overflow-wrap: anywhere;
+}
 .keeper-pending-list li {
   display: block;
   padding: 14px;
@@ -265,7 +381,7 @@
   --platform-body:
     "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
   --platform-display: var(--font-display);
-  --platform-archive-bg: url("../../assets/ui/archive-desk-v1.webp");
+  --platform-archive-bg: url("../../assets/ui/archive-desk-v2.webp");
 }
 /* Field notebook: generated folder frame, restrained ink, fixed reachable actions. */
 #utility-panel.archive-folder-panel {
@@ -1078,7 +1194,12 @@
 
 .online-overlay {
   background:
-    linear-gradient(180deg, rgb(18 16 13 / 28%), rgb(18 16 13 / 76%)),
+    radial-gradient(
+      ellipse 56% 40% at 50% 22%,
+      rgb(12 10 8 / 50%),
+      transparent 78%
+    ),
+    linear-gradient(180deg, rgb(18 16 13 / 34%), rgb(18 16 13 / 56%)),
     var(--platform-archive-bg) center / cover no-repeat,
     #181511;
   color: var(--platform-text);
@@ -1276,22 +1397,9 @@
     max-height: calc(100dvh - 24px);
   }
 }
-/* Cloud adventure cards use the generated archive-folder material language.
-   Scope this explicitly: legacy in-game save slots keep their authored paper art. */
-.solo-lobby .adventure-card {
-  border: 1px solid var(--platform-rule);
-  border-image: none;
-  border-radius: 6px;
-  padding: 20px;
-  background: rgb(36 32 27 / 97%);
-  filter: none;
-  color: var(--platform-text);
-  transition: border-color 160ms ease;
-}
-.solo-lobby .adventure-card:hover {
-  border-color: var(--platform-brass);
-  filter: none;
-}
+/* Cloud adventure cards share the local save panel's hand-drawn archive card
+   (brass spine + parchment nine-slice from save-panel.css). Only solo-lobby
+   layout is adjusted here; the paper art and ink colors stay intact. */
 .solo-lobby .adventure-card-info {
   display: block;
   padding: 4px 0;
@@ -1306,55 +1414,169 @@
   display: block;
 }
 .solo-lobby .adventure-card .adventure-card-title {
-  color: var(--platform-text);
   font-size: 18px;
-  text-shadow: none;
-}
-.solo-lobby .adventure-card :is(.adventure-card-meta, .adventure-slot-no) {
-  color: var(--platform-muted);
-  text-shadow: none;
-}
-.solo-lobby .adventure-card .adventure-badge {
-  color: #b6c2ad;
-  background: rgb(139 155 134 / 10%);
-  border-color: #66785e;
 }
 .solo-lobby .adventure-card-actions button {
   min-height: 44px;
   padding: 0 16px;
   flex: 0 0 auto;
   white-space: nowrap;
-  text-shadow: none;
-  box-shadow: none;
-}
-.solo-lobby .adventure-card .adventure-resume {
-  border-color: var(--platform-brass);
-  background: #3a3326;
-  color: var(--platform-text);
-}
-.solo-lobby .adventure-card .adventure-manage {
-  color: var(--platform-brass);
-  border-color: var(--platform-rule);
-  background: transparent;
-}
-.solo-lobby .adventure-card .adventure-delete {
-  color: #e1c0b6;
-  border-color: #a77668;
-  background: transparent;
 }
 .solo-lobby .adventure-card button:focus-visible {
-  outline: 2px solid var(--platform-text);
+  outline: 2px solid #6d4d20;
   outline-offset: 3px;
 }
 .solo-lobby .adventure-card button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
+/* 每张冒险卡与其归档确认抽屉的容器：抽屉是卡下方的独立插页，
+   不再撑开存档卡本身（羊皮纸九切保持原始高度，不纵向拉伸）。 */
+.solo-world-item {
+  display: flex;
+  flex-direction: column;
+}
+.solo-world-item > .adventure-card {
+  position: relative;
+  z-index: 1;
+}
+/* 归档确认抽屉：从存档卡里“抽”出来的黄铜羊皮纸框（generated card）。
+   固定宽高比 + 100% 填充背景 = 整卡等比缩放，任何时刻不做九切/拉伸；
+   墨字纸面配色只在大厅上下文生效，深色浮层里的同款组件不受影响。 */
+.solo-lobby .adventure-archive-confirm {
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 1450 / 776;
+  margin-top: 8px;
+  padding: 7.5% 9% 8%;
+  border: 0;
+  border-radius: 0;
+  background: url("../../assets/ui/archive-confirm-card-v1.webp") center / 100%
+    100% no-repeat;
+  filter: drop-shadow(0 10px 22px rgb(0 0 0 / 42%));
+  color: #2e1d10;
+  transform-origin: top center;
+  animation: archive-drawer-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.solo-lobby .adventure-archive-confirm[data-phase="closing"] {
+  pointer-events: none;
+  animation: archive-drawer-out 170ms cubic-bezier(0.3, 0, 0.7, 0.15) both;
+}
+/* 抽屉只做平移/淡入淡出：图片卡在任何一帧都不发生形变。 */
+@keyframes archive-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes archive-drawer-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+.solo-lobby .adventure-archive-tab {
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  color: #6d4d20;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+.solo-lobby .adventure-archive-confirm h3 {
+  margin-bottom: 6px;
+  color: #2e1d10;
+  font-size: 20px;
+}
+.solo-lobby .adventure-archive-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.solo-lobby .adventure-archive-summary {
+  padding: 8px 10px;
+  border-left-color: #75876f;
+  background: rgba(93, 66, 30, 0.1);
+}
+.solo-lobby .adventure-archive-summary > span {
+  color: #6f5a3e;
+}
+.solo-lobby .adventure-archive-summary > strong {
+  font-size: 15px;
+}
+.solo-lobby .adventure-archive-consequences {
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.solo-lobby .adventure-archive-actions {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top-color: rgba(93, 66, 30, 0.4);
+}
+.solo-lobby .adventure-archive-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-color: rgba(93, 66, 30, 0.5);
+  background: rgba(255, 248, 230, 0.35);
+  color: #4a3417;
+  font-size: 13px;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+.solo-lobby .adventure-archive-actions button:hover:not(:disabled),
+.solo-lobby .adventure-archive-actions button:focus-visible {
+  border-color: #8a6a3a;
+  background: rgba(255, 248, 230, 0.6);
+  color: #7a5416;
+}
+.solo-lobby .adventure-archive-actions .adventure-archive-submit {
+  border-color: rgba(140, 47, 42, 0.6);
+  background: rgba(140, 47, 42, 0.1);
+  color: #8c2f2a;
+}
+.solo-lobby
+  .adventure-archive-actions
+  .adventure-archive-submit:hover:not(:disabled),
+.solo-lobby .adventure-archive-actions .adventure-archive-submit:focus-visible {
+  border-color: #8c2f2a;
+  background: rgba(140, 47, 42, 0.18);
+  color: #6e1f1c;
+}
+@media (prefers-reduced-motion: reduce) {
+  .solo-lobby .adventure-archive-confirm {
+    animation: none;
+  }
+}
 @media (max-width: 640px) {
   .adventure-archive-confirm {
     padding: 16px;
   }
   .adventure-archive-tab {
+    margin-top: -16px;
+  }
+  /* 窄屏放不下整张等比卡：大厅抽屉回到素色纸面插页，图片卡不裁剪不拉伸。 */
+  .solo-lobby .adventure-archive-confirm {
+    aspect-ratio: auto;
+    padding: 16px;
+    border: 1px solid rgba(93, 66, 30, 0.45);
+    border-radius: 8px;
+    background: #d3bc8b;
+    filter: none;
+  }
+  .solo-lobby .adventure-archive-tab {
     margin-top: -16px;
   }
   .adventure-archive-actions button {
@@ -1735,6 +1957,72 @@
   font-size: 12px;
   line-height: 1.7;
 }
+.game-clock-readout {
+  color: var(--platform-text);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.game-clock-header {
+  font-size: 11px;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  max-width: 55%;
+}
+.header-scene-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(38vw, 420px);
+  padding-left: 32px;
+}
+.header-scene-cluster .header-scene {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  padding-left: 0;
+}
+@media (max-width: 760px) {
+  .header-scene-cluster {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    max-width: none;
+    padding-left: 0;
+  }
+  .game-clock-header {
+    font-size: 10px;
+    line-height: 12px;
+    max-width: 100%;
+  }
+  #header #toolbar button {
+    height: 44px;
+  }
+}
+.game-clock-header .game-clock-label {
+  color: var(--platform-muted);
+}
+.game-clock-reference {
+  padding: 10px 14px;
+  font-size: 13px;
+  background: #d1bf9b;
+  color: #312a21;
+  border-radius: 4px;
+}
+.keeper-save-boundary {
+  border-left: 2px solid var(--platform-brass-dim, #80704d);
+  padding: 8px 12px;
+  color: var(--platform-text);
+  background: var(--platform-panel, #292118);
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
 .keeper-section-title {
   color: var(--platform-text);
   font-size: 15px;
@@ -1867,6 +2155,8 @@
    scrolls. Even a short viewport keeps close/cancel/submit in reach. */
 #move-panel.compact-game-dialog,
 #local-play-style-panel.compact-game-dialog,
+#combat-action-request.compact-game-dialog,
+#keeper-dice-panel.compact-game-dialog,
 #roll-panel.compact-game-dialog {
   display: flex;
   flex-direction: column;
@@ -1881,7 +2171,8 @@
   color: var(--platform-text);
   box-shadow: 0 16px 50px #0008;
 }
-#roll-panel.compact-game-dialog {
+#roll-panel.compact-game-dialog,
+#keeper-dice-panel.compact-game-dialog {
   width: min(460px, 100%);
 }
 .local-play-style-trigger {
@@ -2010,8 +2301,18 @@
   }
 }
 @media (max-height: 420px) {
-  #local-play-style-panel.compact-game-dialog {
+  #local-play-style-panel.compact-game-dialog,
+  #keeper-dice-panel.compact-game-dialog {
     padding: 46px 16px 12px;
+  }
+  #keeper-dice-panel .panel-action-field {
+    display: grid;
+    grid-template-columns: 66px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+  #keeper-dice-panel .panel-action-field > span {
+    margin-bottom: 0;
   }
   #local-play-style-panel > .panel-action-header {
     margin-bottom: 6px;
@@ -2104,7 +2405,8 @@
 }
 .solo-timeline-dialog.archive-folder-panel {
   width: min(760px, 100%);
-  padding: 60px 24px 24px;
+  /* 纸面留白与“修改服务器”一致：两侧 40px，避免文字贴到文件夹边缘 */
+  padding: 64px 40px 28px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -2168,16 +2470,57 @@
 
 @media (max-width: 640px) {
   #move-panel-overlay,
+  #combat-action-request-overlay,
   #roll-panel-overlay {
     padding: 12px;
     align-items: center;
   }
   #move-panel.compact-game-dialog,
   #local-play-style-panel.compact-game-dialog,
+  #combat-action-request.compact-game-dialog,
   #roll-panel.compact-game-dialog {
     max-height: calc(100dvh - 24px);
     padding-right: 20px;
     padding-left: 20px;
+  }
+}
+
+#combat-action-request .panel-action-field :is(select, textarea) {
+  min-height: 44px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--platform-text);
+  background: var(--platform-deep, #211a14);
+  border: 1px solid var(--platform-rule);
+  border-radius: 4px;
+}
+#combat-action-request .panel-action-field textarea {
+  resize: vertical;
+}
+.combat-weapon-binding-note {
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  color: var(--platform-muted);
+}
+.combat-weapon-binding-note code {
+  color: var(--platform-text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#combat-action-request .panel-action-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+#combat-action-request .panel-action-footer button {
+  flex: 0 0 auto;
+}
+@media (max-width: 640px) {
+  #combat-action-request .panel-action-footer button {
+    flex: 1 0 auto;
   }
 }
 
@@ -2539,4 +2882,690 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.8;
+}
+.combat-result-history {
+  margin: 12px 0;
+  padding: 14px 18px;
+  border: 1px solid #756342;
+  border-radius: 6px;
+  background: #211a14;
+  color: #e5d8b8;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.combat-result-history > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: #c9b77b;
+}
+.combat-result-history > summary:focus-visible {
+  outline: 2px solid #c9b77b;
+  outline-offset: 3px;
+}
+.combat-result-history ol {
+  margin: 12px 0 0;
+  padding-left: 22px;
+}
+.combat-result-history li + li {
+  border-top: 1px solid #655638;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.combat-result-history h4,
+.combat-result-history p {
+  margin: 4px 0;
+}
+.keeper-condition-reference {
+  background: #d1bf9b;
+  color: #312a21;
+  border: 1px solid #8c7852;
+  border-radius: 5px;
+  margin: 16px 0;
+  padding: 14px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  overflow-wrap: anywhere;
+}
+.keeper-command-form[data-command="record_condition"] select,
+.keeper-command-form[data-command="record_condition"] input,
+.keeper-command-form[data-command="advance_time"] select,
+.keeper-command-form[data-command="advance_time"] input {
+  min-height: 44px;
+}
+#keeper-dice-panel .panel-action-field :is(input, select) {
+  min-height: 44px;
+}
+.keeper-dice-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  background: #d1bf9b;
+  color: #312a21;
+  border: 1px solid #8c7852;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.keeper-dice-receipt strong {
+  font-family: var(--font-mono, monospace);
+}
+.keeper-dice-receipt small {
+  flex: 0 0 100%;
+}
+.keeper-dice-history summary {
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 0;
+}
+.keeper-condition-reference small,
+.keeper-condition-reference p {
+  flex: 0 0 100%;
+  margin: 0;
+}
+.keeper-condition-reference strong {
+  font-family: var(--font-display, serif);
+}
+.keeper-condition-previous {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.keeper-condition-previous > span {
+  flex: 1 1 140px;
+}
+.keeper-condition-previous small {
+  display: block;
+  color: #e0c18d;
+  margin-top: 4px;
+}
+.keeper-condition-previous > .structured-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  white-space: nowrap;
+}
+.keeper-ruling-previous,
+.keeper-ruling-ending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.keeper-ruling-previous > .structured-btn,
+.keeper-ruling-ending > .structured-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  white-space: nowrap;
+}
+.keeper-ruling-ending > span {
+  flex: 1 1 140px;
+  overflow-wrap: anywhere;
+}
+.keeper-ruling-audit {
+  padding: 16px;
+  background: #211a14;
+  border: 1px solid #756342;
+  border-radius: 6px;
+  color: #e5d8b8;
+  line-height: 1.7;
+}
+.keeper-ruling-audit summary {
+  cursor: pointer;
+  min-height: 44px;
+  color: #c9b77b;
+}
+.keeper-ruling-audit li + li {
+  border-top: 1px solid #655638;
+  padding-top: 12px;
+}
+.keeper-ruling-audit p {
+  overflow-wrap: anywhere;
+}
+#keeper-console .keeper-ruling-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #756342;
+  background: #211a14;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#keeper-console .keeper-ruling-toggle > span:first-child {
+  flex: 1 1 auto;
+}
+#keeper-console .keeper-ruling-toggle input[type="checkbox"] {
+  flex: 0 0 22px;
+  width: 22px;
+  min-width: 22px;
+  max-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  accent-color: #8b9b72;
+}
+.case-character-actions {
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid #a18c5b;
+  border-radius: 6px;
+  background: #cfbd96;
+  color: #312a21;
+  line-height: 1.7;
+}
+.case-character-actions h4 {
+  margin: 0 0 8px;
+  font-family: var(--font-title, serif);
+  font-size: 19px;
+}
+.case-character-actions p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.case-character-note {
+  font-size: 13px;
+  color: #4a402e;
+}
+.case-character-actions label {
+  display: grid;
+  gap: 6px;
+}
+.case-character-actions input {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #756342;
+  border-radius: 4px;
+  background: #e0d2af;
+  color: #312a21;
+  width: 100%;
+  box-sizing: border-box;
+}
+.case-character-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+}
+.case-character-buttons button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  white-space: nowrap;
+}
+.case-character-buttons .btn-ghost {
+  background: #282116;
+  color: #e5d8b8;
+  border-color: #8e7b4f;
+}
+.case-character-actions input:focus-visible,
+.case-character-buttons button:focus-visible {
+  outline: 2px solid #706b3c;
+  outline-offset: 3px;
+}
+.case-character-saved {
+  padding: 12px;
+  background: #67754e;
+  color: #f0e5c9;
+  border-radius: 4px;
+}
+
+/* Generated draft-review concept: readable paper slips inside the folder. */
+.structured-dock {
+  /* Long reviews scroll here, not in the overflow-hidden playfield. Native
+     input focus must never pull the whole chat panel (and its title) away. */
+  max-height: min(420px, 46vh);
+  min-height: 80px;
+  overflow-y: auto;
+  /* Leave room for the keyboard focus ring and fractional scroll rounding. */
+  scroll-padding-block: 4px;
+  flex-shrink: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) var(--bg);
+}
+.structured-tool-row > .keeper-console-toggle,
+#structured-tool-row > .keeper-console-toggle {
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin: 0;
+  white-space: nowrap;
+}
+@media (max-height: 480px) {
+  #chat-panel:has(.structured-dock) #messages {
+    min-height: 0;
+    padding-block: 8px;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *)) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    padding-block: 6px;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *))
+    #options-bar:empty {
+    display: none;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *))
+    #structured-tool-row {
+    grid-column: 1;
+    grid-row: 1;
+    margin-top: 0;
+    align-self: center;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *))
+    #context-summary-row {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    align-self: center;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *))
+    #input-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#structured-tool-row):not(:has(#options-bar > *))
+    #player-input-error {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  #chat-panel:has(.structured-dock)
+    #bottom:has(#player-input-error):has(#structured-tool-row):not(
+      :has(#options-bar > *)
+    )
+    #input-bar {
+    grid-row: 3;
+  }
+}
+.keeper-draft-card .structured-card-title {
+  font-family: var(--font-display, "Noto Serif SC", serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.keeper-draft-card .structured-card-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.keeper-draft-card .structured-card-actions button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  white-space: nowrap;
+}
+.keeper-draft-card .draft-command-list {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+/* Readable ending slips follow the generated keeper-catalogue concept.
+   Alternative outcomes are not numbered steps and never auto-fill conditions. */
+.keeper-ending-catalogue {
+  --ending-paper: #d1bf9b;
+  --ending-ink: #312a21;
+  --ending-rule: #9d8a61;
+  --ending-satisfied: #596344;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.keeper-ending-catalogue > header,
+.keeper-ending-slip-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.keeper-ending-catalogue h4,
+.keeper-ending-catalogue h5 {
+  margin: 0;
+  font: 600 18px var(--font-display, "Noto Serif SC", serif);
+  overflow-wrap: anywhere;
+}
+.keeper-ending-catalogue p {
+  margin: 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.keeper-ending-slip {
+  background: var(--ending-paper);
+  color: var(--ending-ink);
+  border: 1px solid var(--ending-rule);
+  border-radius: 4px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.keeper-ending-slip :is(code, strong) {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.ending-kind-note,
+.ending-blocked-note {
+  font-size: 13px;
+}
+.ending-condition-stamp {
+  color: var(--ending-ink);
+  border: 1px solid #785d3b;
+  padding: 4px 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.ending-condition-stamp.is-satisfied {
+  background: var(--ending-satisfied);
+  border-color: var(--ending-satisfied);
+  color: #f8edda;
+}
+.ending-condition-details,
+.ending-author-details {
+  border-top: 1px solid var(--ending-rule);
+  min-width: 0;
+}
+.keeper-ending-slip summary {
+  min-height: 44px;
+  padding: 10px 4px;
+  align-content: center;
+  cursor: pointer;
+}
+.keeper-ruling-audit .keeper-ending-slip summary {
+  color: var(--ending-ink);
+}
+.ending-condition-details ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ending-condition-details li {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 2fr) auto;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--ending-rule);
+}
+.ending-condition-details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  gap: 12px;
+  min-width: 0;
+}
+.ending-condition-details dt {
+  font-size: 13px;
+  color: #62523c;
+}
+.ending-condition-details dd {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ending-condition-status {
+  color: #654623;
+  font-size: 13px;
+}
+.ending-condition-status.is-satisfied {
+  color: #3f4b2b;
+}
+.ending-prepare-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.keeper-ending-catalogue .keeper-ending-slip button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 10px 18px;
+  white-space: nowrap;
+  color: var(--ending-ink);
+  border-color: #785d3b;
+  background: #cbb78d;
+}
+.keeper-ending-catalogue .keeper-ending-slip button:hover:not(:disabled) {
+  background: #c0aa7d;
+}
+.keeper-ending-catalogue .keeper-ending-slip button:disabled {
+  opacity: 1;
+  color: #62523c;
+  border-color: #8b7a57;
+  background: #c7b58d;
+  cursor: not-allowed;
+}
+.keeper-ending-catalogue
+  .keeper-ending-slip
+  :is(button, summary):focus-visible {
+  outline: 2px solid var(--ending-satisfied);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .ending-condition-details li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ending-condition-details dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .keeper-ending-slip {
+    padding: 12px;
+  }
+  .keeper-ending-slip button {
+    width: 100%;
+  }
+}
+.keeper-draft-card .draft-command-preview {
+  min-width: 0;
+  background: #d1bf9b;
+  color: #312a21;
+  border: 1px solid #9d8a61;
+  border-radius: 4px;
+  padding: 16px;
+}
+.keeper-draft-card .draft-command-preview h4 {
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 18px var(--font-display, "Noto Serif SC", serif);
+}
+.draft-command-preview h4 span {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  border-radius: 50%;
+  text-align: center;
+  background: #312a21;
+  color: #eadbb7;
+}
+.draft-command-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+.draft-command-facts div {
+  min-width: 0;
+}
+.draft-command-facts dt {
+  color: #62523c;
+  font-size: 13px;
+}
+.draft-command-facts dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.draft-command-caution {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.draft-command-raw {
+  margin-top: 12px;
+  border-top: 1px solid #aa9873;
+}
+.draft-command-raw summary {
+  min-height: 44px;
+  display: list-item;
+  align-content: center;
+  padding: 10px 4px;
+  cursor: pointer;
+}
+.draft-command-raw summary:focus-visible {
+  outline: 2px solid #656e4d;
+  outline-offset: 2px;
+}
+.draft-command-raw pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .keeper-draft-card .structured-card-actions {
+    flex-direction: column;
+  }
+  .keeper-draft-card .structured-card-actions button {
+    width: 100%;
+  }
+  .keeper-draft-card .draft-command-preview {
+    padding: 12px;
+  }
+  .draft-command-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .case-character-actions {
+    padding: 16px;
+  }
+  .case-character-buttons {
+    display: grid;
+  }
+  .case-character-buttons button {
+    width: 100%;
+  }
+}
+.keeper-progress-catalogue {
+  padding: 14px;
+  border: 1px solid rgba(170, 143, 94, 0.28);
+  border-radius: 6px;
+  background: rgba(25, 23, 19, 0.76);
+  margin-block-end: 16px;
+  color: #d0c6b4;
+  overflow-wrap: anywhere;
+}
+.keeper-progress-catalogue summary {
+  cursor: pointer;
+  padding-block: 10px;
+  color: #cfb37d;
+}
+.keeper-progress-clock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+}
+.keeper-progress-clock-grid article {
+  padding: 12px;
+  border: 1px solid rgba(170, 143, 94, 0.2);
+  border-radius: 4px;
+}
+.keeper-progress-clock-grid h5 {
+  margin: 0;
+  font-size: 15px;
+}
+.keeper-progress-clock-grid p,
+.keeper-authored-clue p {
+  line-height: 1.7;
+  margin-block: 8px;
+}
+.keeper-progress-clock-grid progress {
+  width: 100%;
+  accent-color: #aa9260;
+}
+.keeper-clock-number {
+  font-variant-numeric: tabular-nums;
+  color: #ddc797;
+}
+.keeper-catalogue-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 0.45fr);
+  gap: 12px;
+}
+.keeper-catalogue-filters label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.keeper-catalogue-filters input,
+.keeper-catalogue-filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  color: #d0c6b4;
+  background: #171614;
+  border: 1px solid #685939;
+  border-radius: 4px;
+}
+.keeper-authored-clue {
+  border-block-start: 1px solid rgba(170, 143, 94, 0.23);
+  padding-block: 8px;
+}
+.keeper-discovery-rule {
+  border-inline-start: 2px solid #685939;
+  margin-block: 12px;
+  padding: 8px 12px;
+}
+.keeper-discovery-rule h6 {
+  font-size: 14px;
+  margin: 0;
+  color: #cfb37d;
+}
+.keeper-catalogue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-block: 10px;
+}
+.keeper-catalogue-actions button {
+  min-height: 44px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .keeper-catalogue-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .keeper-catalogue-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .keeper-catalogue-actions button {
+    width: 100%;
+  }
 }

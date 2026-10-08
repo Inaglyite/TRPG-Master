@@ -12,7 +12,7 @@ import { desktopBridge } from "../../../desktop";
 import { useAppStore } from "../../../state/app-store";
 import { resetOnlineState, useOnlineStore } from "../../../state/online-store";
 import { ModuleSelect } from "../ModuleSelect";
-import { usePhaseTransition } from "../transitions";
+import { usePhaseTransition, useDelayedClose } from "../transitions";
 import { roomStatusLabel } from "./room-status";
 import { SoloTimelinePanel } from "./SoloTimelinePanel";
 import { PlayStylePicker } from "./PlayStylePicker";
@@ -63,6 +63,14 @@ export function SoloLobbyScreen() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const archiveInFlight = useRef(false);
   const archiveTrigger = useRef<HTMLButtonElement | null>(null);
+  // 归档确认抽屉：取消/换卡时保持挂载 170ms 播收回动画，再真正卸载；
+  // lastConfirmId 让退出动画仍落在原来那张卡上。
+  const lastArchiveConfirmId = useRef<string | null>(null);
+  if (confirmingDelete) lastArchiveConfirmId.current = confirmingDelete;
+  const archiveSwap = useDelayedClose(confirmingDelete !== null, 170);
+  const renderedArchiveId = archiveSwap.rendered
+    ? (confirmingDelete ?? lastArchiveConfirmId.current)
+    : null;
   // 删除报错内联挂在被删除的冒险卡上（worldId + 消息），不进创建卡。
   const [deleteError, setDeleteError] = useState<{
     worldId: string;
@@ -208,75 +216,78 @@ export function SoloLobbyScreen() {
           <div className="solo-world-list">
             {soloWorlds.map((world) => (
               <div
-                className="adventure-card"
+                className="solo-world-item"
                 key={world.world_id}
                 data-world={world.world_id}
               >
-                <div className="adventure-card-main">
-                  <button
-                    type="button"
-                    className="adventure-card-info"
-                    aria-label={`${adventureTitle(world)}：管理时间线`}
-                    disabled={deleteBusy}
-                    onClick={() => setTimelineWorld(world)}
-                  >
-                    <span className="adventure-slot-line">
-                      <span className="adventure-slot-no">云端存档</span>
-                      {world.metadata?.room_status && (
-                        <span className="adventure-badge">
-                          {roomStatusLabel(world.metadata.room_status)}
-                        </span>
-                      )}
-                    </span>
-                    <span className="adventure-card-title">
-                      {world.metadata?.name || moduleTitle(world.module)}
-                    </span>
-                    <span className="adventure-card-meta">
-                      {moduleTitle(world.module)}
-                    </span>
-                    <span className="adventure-card-meta dim">
-                      最后游玩 {formatTime(world.updated_at) || "未知"}
-                    </span>
-                  </button>
-                  <div className="adventure-card-actions">
+                <div className="adventure-card">
+                  <div className="adventure-card-main">
                     <button
                       type="button"
-                      className="adventure-resume"
+                      className="adventure-card-info"
+                      aria-label={`${adventureTitle(world)}：管理时间线`}
                       disabled={deleteBusy}
-                      onClick={() => void enterRoom(resumeWorldId(world))}
+                      onClick={() => setTimelineWorld(world)}
                     >
-                      继续冒险
+                      <span className="adventure-slot-line">
+                        <span className="adventure-slot-no">云端存档</span>
+                        {world.metadata?.room_status && (
+                          <span className="adventure-badge">
+                            {roomStatusLabel(world.metadata.room_status)}
+                          </span>
+                        )}
+                      </span>
+                      <span className="adventure-card-title">
+                        {world.metadata?.name || moduleTitle(world.module)}
+                      </span>
+                      <span className="adventure-card-meta">
+                        {moduleTitle(world.module)}
+                      </span>
+                      <span className="adventure-card-meta dim">
+                        最后游玩 {formatTime(world.updated_at) || "未知"}
+                      </span>
                     </button>
-                    <div className="adventure-card-sub-actions">
+                    <div className="adventure-card-actions">
                       <button
                         type="button"
-                        className="adventure-manage"
+                        className="adventure-resume"
                         disabled={deleteBusy}
-                        onClick={() => setTimelineWorld(world)}
+                        onClick={() => void enterRoom(resumeWorldId(world))}
                       >
-                        管理时间线
+                        继续冒险
                       </button>
-                      {world.role === "owner" && (
+                      <div className="adventure-card-sub-actions">
                         <button
                           type="button"
-                          className="adventure-delete"
+                          className="adventure-manage"
                           disabled={deleteBusy}
-                          onClick={(event) => {
-                            setDeleteError(null);
-                            archiveTrigger.current = event.currentTarget;
-                            setConfirmingDelete(world.world_id);
-                          }}
+                          onClick={() => setTimelineWorld(world)}
                         >
-                          归档冒险
+                          管理时间线
                         </button>
-                      )}
+                        {world.role === "owner" && (
+                          <button
+                            type="button"
+                            className="adventure-delete"
+                            disabled={deleteBusy}
+                            onClick={(event) => {
+                              setDeleteError(null);
+                              archiveTrigger.current = event.currentTarget;
+                              setConfirmingDelete(world.world_id);
+                            }}
+                          >
+                            归档冒险
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-                {confirmingDelete === world.world_id && (
+                {renderedArchiveId === world.world_id && (
                   <AdventureArchiveConfirmation
                     title={adventureTitle(world)}
                     busy={deleteBusy}
+                    phase={archiveSwap.closing ? "closing" : "open"}
                     error={
                       deleteError?.worldId === world.world_id
                         ? deleteError.message

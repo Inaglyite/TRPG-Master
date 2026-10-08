@@ -5,28 +5,33 @@ export function AdventureArchiveConfirmation({
   title,
   busy,
   error,
+  phase,
   onCancel,
   onConfirm,
 }: {
   title: string;
   busy: boolean;
   error?: string | null;
+  /** 大厅抽屉动画相位；不传（如离开冒险浮层）则无进出动画。 */
+  phase?: "open" | "closing";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const id = useId();
   const keepButton = useRef<HTMLButtonElement | null>(null);
+  const unavailable = busy || phase === "closing";
   useEffect(() => {
-    keepButton.current?.focus();
-  }, []);
+    if (phase !== "closing") keepButton.current?.focus();
+  }, [phase]);
 
   return (
     <section
       className="adventure-archive-confirm"
       aria-labelledby={id}
       data-testid="adventure-archive-confirm"
+      data-phase={phase}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && !busy) {
+        if (event.key === "Escape" && !unavailable) {
           event.preventDefault();
           event.stopPropagation();
           onCancel();
@@ -56,7 +61,7 @@ export function AdventureArchiveConfirmation({
           ref={keepButton}
           type="button"
           className="btn-ghost"
-          disabled={busy}
+          disabled={unavailable}
           onClick={onCancel}
         >
           继续保留
@@ -64,7 +69,7 @@ export function AdventureArchiveConfirmation({
         <button
           type="button"
           className="btn-ghost adventure-archive-submit"
-          disabled={busy}
+          disabled={unavailable}
           onClick={onConfirm}
         >
           {busy ? "正在归档…" : "确认归档"}

@@ -121,7 +121,13 @@ describe("LobbyScreen 房间列表", () => {
       4,
       { structured: true, keeperMode: "agent" },
     );
-    expect(screen.getByText(/尚无完整战斗和结局结算/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/复杂流程可由人类主持接管并核对结算/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/具体操作以当前服务器开放的功能为准/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/尚无完整战斗/)).not.toBeInTheDocument();
   });
 
   it("无房间名称时回退模组标题", () => {

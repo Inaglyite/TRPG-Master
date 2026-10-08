@@ -12,6 +12,10 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import {
+  createServer as createModelTrap,
+  type Server as TrapServer,
+} from "node:net";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,6 +29,7 @@ import {
 } from "@playwright/test";
 
 import { assertGameHeaderFits } from "./header-layout";
+import { elapsedGameTime } from "../src/protocol/game-clock";
 
 const port = 8757;
 const baseUrl = `https://127.0.0.1:${port}`;
@@ -33,6 +38,8 @@ const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 let runtimeRoot = "";
 let server: ChildProcess | null = null;
 let serverOutput = "";
+let modelTrap: TrapServer | null = null;
+let modelCalls = 0;
 
 async function waitForServer(): Promise<void> {
   const client = await request.newContext();
@@ -53,6 +60,14 @@ async function waitForServer(): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  modelTrap = createModelTrap((socket) => {
+    modelCalls += 1;
+    socket.destroy();
+  });
+  await new Promise<void>((done) => modelTrap!.listen(0, "127.0.0.1", done));
+  const modelAddress = modelTrap.address();
+  if (!modelAddress || typeof modelAddress === "string")
+    throw new Error("model trap unavailable");
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-structured-solo-online-"));
   const certificate = join(runtimeRoot, "certificate.pem");
   const privateKey = join(runtimeRoot, "private-key.pem");
@@ -117,7 +132,7 @@ test.beforeAll(async () => {
         TRPG_WRITE_COMPAT_EXPORTS: "0",
         // 结构化 human 世界不建模型会话；指到必死地址，被调用即测试失败。
         OPENAI_API_KEY: "e2e-placeholder",
-        OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+        OPENAI_BASE_URL: `http://127.0.0.1:${modelAddress.port}/v1`,
         TRPG_STREAM_USAGE: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -145,7 +160,13 @@ test.afterAll(async () => {
     if (server.exitCode === null) server.kill("SIGKILL");
   }
   if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
+  if (modelTrap)
+    await new Promise<void>((done) => modelTrap!.close(() => done()));
 });
+
+test.afterEach(() =>
+  expect(modelCalls, "人类云端单人链必须零模型连接").toBe(0),
+);
 
 function collectFrames(page: Page): { sent: string[]; received: string[] } {
   const sent: string[] = [];
@@ -168,11 +189,13 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   page.setDefaultTimeout(20_000);
   const frames = collectFrames(page);
   let roomSocket: WebSocketRoute | null = null;
+  let latestUpstream: WebSocketRoute | null = null;
   let holdSnapshot = false;
   const heldSnapshots: (string | Buffer)[] = [];
   await page.routeWebSocket(/\/ws\/room\?/, (client) => {
     roomSocket = client;
     const upstream = client.connectToServer();
+    latestUpstream = upstream;
     upstream.onMessage((message) => {
       if (
         holdSnapshot &&
@@ -501,12 +524,23 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   });
 
   // ---- 主持台：单人房主即主持，命令走 command_request ----
+  await page.getByTestId("btn-keeper-dice").click();
+  await page.getByTestId("keeper-dice-submit").click();
+  const soloDice = JSON.parse(framesOf(frames.sent, "command_request").at(-1)!);
+  expect(soloDice.kind).toBe("keeper_roll");
+  expect(soloDice.payload).toEqual({ spec: "1d100", visibility: "keeper" });
+  await expect(
+    page.locator(
+      `[data-testid="keeper-dice-receipt"][data-command-id="${soloDice.command_id}"]`,
+    ),
+  ).toContainText("仅主持可见");
   await page.getByTestId("btn-keeper-console").click();
   await expect(page.getByRole("dialog", { name: "主持工作台" })).toBeVisible();
-  // 本用例此前已发过一条 move_party：按增量断言，避免绝对计数互串。
+  // 此前已有 move_party/主持骰：按增量断言，不靠绝对计数互串。
   const commandsBefore = framesOf(frames.sent, "command_request").length;
   await page.getByTestId("keeper-cmd-advance_time").click();
   await page.locator('[data-field="minutes"] input').fill("30");
+  await page.locator('[data-field="activity"] select').selectOption("travel");
   await page.locator('[data-field="reason"] input').fill("驱车前往医学院");
   await page.getByTestId("keeper-submit").click();
   await expect
@@ -526,6 +560,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   expect(commandFrame.command_id).toMatch(/^cmd-/);
   expect(commandFrame.payload).toEqual({
     minutes: 30,
+    activity: "travel",
     reason: "驱车前往医学院",
   });
 
@@ -587,6 +622,11 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   await expect(page.locator("#messages")).toContainText("历史验收记录 52");
   await expect(page.locator("#messages")).not.toContainText("历史验收记录 00");
   const older = page.getByRole("button", { name: "载入更早叙事" });
+  await expect(
+    page.locator(
+      `[data-testid="keeper-dice-receipt"][data-command-id="${soloDice.command_id}"]`,
+    ),
+  ).toBeVisible();
   for (const width of [1280, 939, 640]) {
     await page.setViewportSize({ width, height: 900 });
     await older.scrollIntoViewIfNeeded();
@@ -628,10 +668,258 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   expect(await page.locator("#messages").innerText()).toMatch(
     /历史验收记录 00[\s\S]*历史验收记录 52/,
   );
+
+  // Cloud solo restoration: real owner controls, a checkpoint, later HP/check/
+  // same-revision narrative, and a second authenticated tab. No DB seeding.
+  const snapshotPayload = () =>
+    JSON.parse(framesOf(frames.received, "session_snapshot").at(-1)!).payload;
+  const actorId = snapshotPayload().investigator_id;
+  const hpBeforeRestore = snapshotPayload().character.hp;
+  const checkpointMinutes = snapshotPayload().clock.elapsed_minutes;
+  expect(Number.isSafeInteger(checkpointMinutes)).toBe(true);
+  const latestCommand = () =>
+    JSON.parse(framesOf(frames.sent, "command_request").at(-1)!);
+  const submit = async () => {
+    const before = framesOf(frames.sent, "command_request").length;
+    await page.getByTestId("keeper-submit").click();
+    await expect
+      .poll(() => framesOf(frames.sent, "command_request").length)
+      .toBe(before + 1);
+    const id = latestCommand().command_id;
+    await expect
+      .poll(() =>
+        framesOf(frames.received, "action_status").some((raw) => {
+          const p = JSON.parse(raw).payload;
+          return p.request_id === id && p.status === "completed";
+        }),
+      )
+      .toBe(true);
+    await expect(page.getByTestId("keeper-submit")).toBeEnabled();
+  };
+  const field = (name: string) =>
+    page
+      .locator(`[data-field="${name}"]`)
+      .locator("input, select, textarea")
+      .first();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByTestId("btn-keeper-console").click();
+  await page.getByTestId("keeper-save-panel").click();
+  const savePanel = page.locator("#save-panel");
+  await savePanel.locator(".adventure-card.current .adventure-manage").click();
+  const savedBefore = framesOf(frames.received, "saved").length;
+  await savePanel
+    .getByRole("button", { name: "新建存档点", exact: true })
+    .click();
+  await expect
+    .poll(() => framesOf(frames.received, "saved").length)
+    .toBeGreaterThan(savedBefore);
+  const checkpoint = savePanel
+    .locator('.slot-row:not([data-slot="slot_000"])')
+    .first();
+  await expect(checkpoint).toBeVisible();
+  const slotId = await checkpoint.getAttribute("data-slot");
+  await page.getByRole("button", { name: "关闭存档管理" }).click();
+  await page.getByTestId("keeper-cmd-adjust_stat").click();
+  await field("investigator_id").selectOption(actorId);
+  await field("field").selectOption("hp");
+  await field("delta").fill("-2");
+  await field("reason").fill("存档点之后的已结算伤害。");
+  await submit();
+  await page.getByTestId("keeper-cmd-advance_time").click();
+  await field("minutes").fill("50");
+  await field("reason").fill("存档点之后主持明确推进50分钟。");
+  await submit();
+  await expect(page.getByTestId("header-game-clock")).toContainText(
+    `已过${elapsedGameTime(checkpointMinutes + 50)}`,
+  );
+  await page.getByTestId("keeper-cmd-request_check").click();
+  await field("investigator_id").selectOption(actorId);
+  const checkpointSkill = Object.keys(snapshotPayload().character.skills)[0];
+  expect(checkpointSkill).toBeTruthy();
+  await field("skill").fill(checkpointSkill);
+  await field("attempt").fill("读档前正在等待的检定。");
+  await submit();
+  await page.getByTestId("keeper-cmd-publish_message").click();
+  await field("speaker_kind").selectOption("keeper");
+  await field("audience_kind").selectOption("public");
+  const discardedText = "存档点之后的未来叙事，不得在读档后复活。";
+  await field("text").fill(discardedText);
+  await submit();
+  await page.getByRole("button", { name: "关闭主持台" }).click();
+  const otherTab = await page.context().newPage();
+  const otherFrames = collectFrames(otherTab);
+  await otherTab.goto(`${baseUrl}/`);
+  await otherTab.getByRole("button", { name: /云端单人/ }).click();
+  await otherTab.getByRole("button", { name: "继续冒险", exact: true }).click();
+  await expect(otherTab.getByTestId("online-shell")).toHaveCount(0);
+  await expect
+    .poll(
+      () =>
+        JSON.parse(framesOf(otherFrames.received, "session_snapshot").at(-1)!)
+          .payload.character.hp,
+    )
+    .toBe(hpBeforeRestore - 2);
+  expect(snapshotPayload().server_capabilities.structured_solo_restore).toBe(
+    true,
+  );
+  await page.getByTestId("btn-keeper-console").click();
+  await page.getByTestId("keeper-save-panel").click();
+  const manage = savePanel.locator(".adventure-card.current .adventure-manage");
+  await expect(manage).toBeVisible();
+  await manage.click();
+  const selected = savePanel.locator(`.slot-row[data-slot="${slotId}"]`);
+  await selected.getByRole("button", { name: "读取", exact: true }).click();
+  const confirmation = savePanel.locator('[data-structured-load="true"]');
+  await expect(confirmation).toContainText("旧行动、检定和战斗授权将作废");
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const label of ["取消", "确认读取"]) {
+      const button = confirmation.getByRole("button", {
+        name: label,
+        exact: true,
+      });
+      await button.scrollIntoViewIfNeeded();
+      const shape = await button.evaluate((el) => {
+        const r = el.getBoundingClientRect(),
+          s = getComputedStyle(el);
+        return {
+          height: r.height,
+          padding: parseFloat(s.paddingLeft),
+          nowrap: s.whiteSpace,
+          hit: el.contains(
+            document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
+          ),
+        };
+      });
+      expect(shape.height).toBeGreaterThanOrEqual(44);
+      expect(shape.padding).toBeGreaterThanOrEqual(10);
+      expect(shape.nowrap).toBe("nowrap");
+      expect(shape.hit).toBe(true);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `../docs/design/platform-ui/solo-save-restore-${width}.png`,
+    });
+  }
+  await page.setViewportSize({ width: 390, height: 360 });
+  const confirmRestore = confirmation.getByRole("button", {
+    name: "确认读取",
+    exact: true,
+  });
+  await confirmRestore.scrollIntoViewIfNeeded();
+  const short = await confirmRestore.boundingBox();
+  expect(short!.y).toBeGreaterThanOrEqual(0);
+  expect(short!.y + short!.height).toBeLessThanOrEqual(360);
+  await page.screenshot({
+    path: "../docs/design/platform-ui/solo-save-restore-390-short.png",
+  });
+  await confirmation.getByRole("button", { name: "取消", exact: true }).click();
+  expect(framesOf(frames.sent, "solo_save_load")).toHaveLength(0);
+  await selected.getByRole("button", { name: "读取", exact: true }).click();
+  const snapshotsBefore = framesOf(frames.received, "session_snapshot").length;
+  const otherBefore = framesOf(otherFrames.received, "session_snapshot").length;
+  await confirmation
+    .getByRole("button", { name: "确认读取", exact: true })
+    .click();
+  await expect
+    .poll(() => framesOf(frames.sent, "solo_save_load").length)
+    .toBe(1);
+  const restoreFrame = JSON.parse(framesOf(frames.sent, "solo_save_load")[0]);
+  expect(restoreFrame.slot_id).toBe(slotId);
+  expect(restoreFrame.action_id).toBeTruthy();
+  expect(Number.isInteger(restoreFrame.expected_revision)).toBe(true);
+  expect(framesOf(frames.sent, "save_load")).toHaveLength(0);
+  await expect
+    .poll(() => framesOf(frames.received, "session_snapshot").length)
+    .toBeGreaterThan(snapshotsBefore);
+  await expect
+    .poll(() => framesOf(otherFrames.received, "session_snapshot").length)
+    .toBeGreaterThan(otherBefore);
+  for (const list of [frames.received, otherFrames.received]) {
+    const restored = JSON.parse(
+      framesOf(list, "session_snapshot").at(-1)!,
+    ).payload;
+    expect(restored.character.hp).toBe(hpBeforeRestore);
+    expect(restored.clock).toEqual({ elapsed_minutes: checkpointMinutes });
+    expect(restored.pending_checks).toEqual([]);
+    expect(
+      restored.message_history.messages
+        .map((m: { text: string }) => m.text)
+        .join(" "),
+    ).not.toContain(discardedText);
+  }
+  await expect(page.locator("#messages")).not.toContainText(discardedText);
+  await expect(otherTab.locator("#messages")).not.toContainText(discardedText);
+  await expect(page.getByTestId("header-game-clock")).toContainText(
+    `已过${elapsedGameTime(checkpointMinutes)}`,
+  );
+  await expect(otherTab.getByTestId("header-game-clock")).toContainText(
+    `已过${elapsedGameTime(checkpointMinutes)}`,
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByTestId("btn-keeper-console").click();
+  await page.getByTestId("keeper-cmd-adjust_stat").click();
+  await field("investigator_id").selectOption(actorId);
+  await field("field").selectOption("hp");
+  await field("delta").fill("-1");
+  await field("reason").fill("读档之后的新伤害，不得被旧请求再次回滚。");
+  await submit();
+  const rejectionsBefore = framesOf(
+    frames.received,
+    "room_action_rejected",
+  ).length;
+  latestUpstream!.send(JSON.stringify(restoreFrame)); // protocol-level replay, not normal UI driving
+  await expect
+    .poll(() => framesOf(frames.received, "room_action_rejected").length)
+    .toBeGreaterThan(rejectionsBefore);
+  await page.getByRole("button", { name: "关闭主持台" }).click();
+  await expect(page.locator("#hp-bar")).toContainText(
+    `${hpBeforeRestore - 1} /`,
+  );
+  await expect(otherTab.locator("#hp-bar")).toContainText(
+    `${hpBeforeRestore - 1} /`,
+  );
+  // The automatic opening checkpoint must contain the selected real PC,
+  // not the module template from before selection. Use the actual existing
+  // keeper control, with no quick-save/manual overwrite before this read.
+  const beforeInitialRead = framesOf(
+    frames.received,
+    "session_snapshot",
+  ).length;
+  const beforeOtherInitialRead = framesOf(
+    otherFrames.received,
+    "session_snapshot",
+  ).length;
+  await page.getByTestId("btn-keeper-console").click();
+  await page.getByTestId("keeper-load").click();
+  await expect
+    .poll(() => framesOf(frames.received, "session_snapshot").length)
+    .toBeGreaterThan(beforeInitialRead);
+  await expect
+    .poll(() => framesOf(otherFrames.received, "session_snapshot").length)
+    .toBeGreaterThan(beforeOtherInitialRead);
+  expect(snapshotPayload().investigator_id).toBe(actorId);
+  expect(snapshotPayload().character.hp).toBe(hpBeforeRestore);
+  await expect(page.locator(".header-scene-name")).toHaveText(recoveredScene);
+  await expect(otherTab.locator(".header-scene-name")).toHaveText(
+    recoveredScene,
+  );
+  expect(snapshotPayload().message_history.messages).toHaveLength(0);
+  expect(modelCalls).toBe(0);
+  await otherTab.close();
 });
 
 async function checkArchiveLayout(page: Page, surface: string) {
   const confirmation = page.getByTestId("adventure-archive-confirm");
+  await confirmation.evaluate(async (element) => {
+    await Promise.all(
+      element.getAnimations().map((animation) => animation.finished),
+    );
+  });
   for (const width of [1280, 939, 640, 390]) {
     await page.setViewportSize({
       width,
@@ -640,6 +928,14 @@ async function checkArchiveLayout(page: Page, surface: string) {
     await expect(page.locator(".boot-loader")).toHaveCount(0);
     await confirmation.scrollIntoViewIfNeeded();
     await expect(confirmation).toBeVisible();
+    if (surface === "lobby" && width <= 640) {
+      // The mobile paper fallback must not expose the busy desk underneath
+      // dark ink. Geometry alone did not catch this unreadable regression.
+      const background = await confirmation.evaluate(
+        (node) => getComputedStyle(node).backgroundColor,
+      );
+      expect(background).toMatch(/^rgb\(/);
+    }
     for (const button of await confirmation.getByRole("button").all()) {
       const layout = await button.evaluate((node) => {
         const rect = node.getBoundingClientRect();

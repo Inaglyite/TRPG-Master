@@ -146,7 +146,9 @@ describe("线索卡的路径切换", () => {
   it("结构化世界：出示按钮打开结构化编辑器，不再打开旧编辑器", () => {
     structuredClueStore();
     render(<ClueCard onImage={vi.fn()} />);
-    expect(screen.getByText(/结构化模式/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/出示只是展示，不会转交或消耗/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "出示" })[0]);
     expect(useStructuredEditorStore.getState().draft?.kind).toBe("present");
     expect(useInvestigatorPanelStore.getState().editor).toBeNull();
@@ -164,7 +166,7 @@ describe("线索卡的路径切换", () => {
     expect(
       screen.queryByRole("button", { name: "出示" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/等待服务端提供公开线索投影/)).toBeInTheDocument();
+    expect(screen.getByText(/线索资料尚未同步/)).toBeInTheDocument();
   });
 
   it("结构化世界缺少稳定 ID 时禁用出示，并说明不用文本冒充 ID", () => {
@@ -186,7 +188,8 @@ describe("线索卡的路径切换", () => {
     render(<ClueCard onImage={vi.fn()} />);
     const buttons = screen.getAllByRole("button", { name: "出示" });
     const blocked = buttons.find((button) => button.hasAttribute("disabled"));
-    expect(blocked?.getAttribute("title")).toContain("稳定 ID");
+    expect(blocked).toBeDisabled();
+    expect(blocked?.getAttribute("title")).toContain("线索记录不完整");
   });
 });
 
@@ -228,7 +231,7 @@ describe("道具卡的路径切换", () => {
   it("结构化：使用按钮带物品 ID/数量/操作打开结构化编辑器", () => {
     structuredClueStore();
     render(<InventoryCard />);
-    expect(screen.getByText(/结构化模式/)).toBeInTheDocument();
+    expect(screen.getByText(/使用会先提交申请/)).toBeInTheDocument();
     const row = document.querySelector('[data-item-id="item_bandage"]')!;
     fireEvent.click(row.querySelector("button")!);
     const draft = useStructuredEditorStore.getState().draft!;

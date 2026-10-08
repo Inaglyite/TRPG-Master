@@ -121,7 +121,8 @@ describe("AppHeader 当前场景行", () => {
     expect(line?.textContent).toBe("当前场景 · 医学院地下停尸房");
     // 标题在前、场景行紧随其后：位置就在模组标题下方。
     const heading = container.querySelector(".header-leading h1");
-    expect(heading?.nextElementSibling).toBe(line);
+    expect(heading?.nextElementSibling).toBe(line?.parentElement);
+    expect(line?.parentElement?.firstElementChild).toBe(line);
   });
 
   it("同步期间与确实缺失分别显示占位文字", () => {

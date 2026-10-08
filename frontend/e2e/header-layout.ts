@@ -14,7 +14,7 @@ export async function assertGameHeaderFits(page: Page): Promise<void> {
     const box = node.getBoundingClientRect();
     const children = Array.from(
       node.querySelectorAll(
-        ".header-title, #conn-status, #toolbar button, .header-scene, #btn-solo-adventure-exit",
+        ".header-title, #conn-status, #toolbar button, .header-scene, [data-testid='header-game-clock'], #btn-solo-adventure-exit",
       ),
     );
     return children.map((child) => {

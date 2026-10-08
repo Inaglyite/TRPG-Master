@@ -704,7 +704,15 @@ export function handleServerPayload(raw: unknown) {
   const data: any = parsed;
   // 结构化事件优先：按 world + event_id 去重后投影到既有 UI。
   // 版本不匹配时明确提示并停止结构化提交，不退回自然语言发送。
-  if (STRUCTURED_EVENT_TYPES.has(String(data.type))) {
+  // Legacy case_settled shares the name but has an explicit ok receipt and no
+  // structured envelope. Malformed structured receipts must not fall through.
+  const legacyCaseReceipt =
+    data.type === "case_settled" &&
+    typeof data.ok === "boolean" &&
+    !["world_id", "event_id", "revision", "payload", "protocol_version"].some(
+      (key) => Object.prototype.hasOwnProperty.call(data, key),
+    );
+  if (STRUCTURED_EVENT_TYPES.has(String(data.type)) && !legacyCaseReceipt) {
     const inbound = handleStructuredPayload(data);
     if (inbound.kind === "protocol_mismatch") {
       addMsg("error", "服务端使用了不同版本的协议，已停止结构化提交。", true);
@@ -1220,10 +1228,23 @@ export function handleServerPayload(raw: unknown) {
       break;
     }
     case "character_state":
+      if (
+        interactionPath(useStructuredStore.getState().capabilities) ===
+        "structured"
+      )
+        break;
       // 新游戏/读档确认后立即采用服务端的权威角色，避免显示静态占位角色。
       updateCharPanel(data.data);
       break;
     case "state_data":
+      // A late legacy reply (including an empty room-owned PC) is not an
+      // authoritative structured projection. Mixing it with session_snapshot
+      // erased the restored card, clues and location after reconnect.
+      if (
+        interactionPath(useStructuredStore.getState().capabilities) ===
+        "structured"
+      )
+        break;
       // 开场前的预取状态可能属于旧存档；回合中的状态又可能早于叙述。
       // done 后会重新请求最终状态，因此这两种响应都不应提前渲染。
       if (getGameStarted() && !gmTurnActive) {

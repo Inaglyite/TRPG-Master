@@ -11,6 +11,32 @@
  */
 
 import { create } from "zustand";
+import { readGameMinutes } from "../protocol/game-clock";
+import {
+  keeperRollReceiptSchema,
+  type KeeperRollReceipt,
+} from "../protocol/keeper-dice";
+import { rulingStateSchema, type RulingState } from "../protocol/rulings";
+import {
+  keeperProgressSchema,
+  type KeeperProgress,
+} from "../protocol/keeper-progress";
+import {
+  combatSchema,
+  combatDecisionSchema,
+  combatRollSchema,
+  combatResultSchema,
+  endingSchema,
+  caseSettlementSchema,
+  COMBAT_PLAYER_COMMANDS,
+  readProjection,
+  type CombatState,
+  type CombatDecision,
+  type CombatRoll,
+  type CombatResult,
+  type Ending,
+  type CaseSettlement,
+} from "../protocol/combat";
 import {
   narrativeHistorySchema,
   type NarrativeHistoryPage,
@@ -484,6 +510,14 @@ function applyRequestUpdate(
 }
 
 type StructuredState = {
+  keeperProgress: KeeperProgress | null;
+  keeperRulings: RulingState | null;
+  combat: CombatState | null;
+  combatDecision: CombatDecision | null;
+  combatRoll: CombatRoll | null;
+  combatResults: CombatResult[];
+  gameOver: Ending | null;
+  caseSettlements: CaseSettlement[];
   capabilities: ServerCapabilities;
   /** 明确的协议不可用提示；有值时 UI 禁用新入口并禁止走旧文字通道。 */
   protocolNotice: string | null;
@@ -492,6 +526,8 @@ type StructuredState = {
   destinations: PublicDestination[];
   /** Read-only stable ID from committed scene snapshots/events, for catalog markers. */
   currentSceneId: string;
+  clockMinutes: number | null;
+  keeperRolls: KeeperRollReceipt[];
   clues: ClueOption[];
   items: ItemOption[];
   /** 主持资料（服务端可选下发；缺省时控制台显示“未提供”）。 */
@@ -566,12 +602,22 @@ type StructuredActions = {
 };
 
 export const initialStructuredState: StructuredState = {
+  keeperProgress: null,
+  keeperRulings: null,
+  combat: null,
+  combatDecision: null,
+  combatRoll: null,
+  combatResults: [],
+  gameOver: null,
+  caseSettlements: [],
   capabilities: { ...NO_STRUCTURED_CAPABILITIES },
   protocolNotice: null,
   identity: { ...EMPTY_IDENTITY },
   targets: [],
   destinations: [],
   currentSceneId: "",
+  clockMinutes: null,
+  keeperRolls: [],
   clues: [],
   items: [],
   keeperMaterial: [],
@@ -636,8 +682,18 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
         return {
           identity: { ...state.identity, worldId: id, revision: revision ?? 0 },
           targets: [],
+          keeperRulings: null,
+          keeperProgress: null,
+          combat: null,
+          combatDecision: null,
+          combatRoll: null,
+          combatResults: [],
+          gameOver: null,
+          caseSettlements: [],
           destinations: [],
           currentSceneId: "",
+          clockMinutes: null,
+          keeperRolls: [],
           clues: [],
           items: [],
           keeperMaterial: [],
@@ -852,6 +908,44 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             payload.scene !== undefined
               ? str((payload.scene as Record<string, unknown> | null)?.id)
               : state.currentSceneId,
+          clockMinutes: readGameMinutes(payload.clock),
+          keeperRolls: Array.isArray(payload.keeper_rolls)
+            ? payload.keeper_rolls
+                .flatMap((value) => {
+                  const parsed = keeperRollReceiptSchema.safeParse(value);
+                  return parsed.success ? [parsed.data] : [];
+                })
+                .slice(-20)
+            : [],
+          combat: readProjection(combatSchema, payload.combat),
+          keeperRulings: readProjection(
+            rulingStateSchema,
+            payload.keeper_rulings,
+          ),
+          keeperProgress: readProjection(
+            keeperProgressSchema,
+            payload.keeper_progress,
+          ),
+          combatDecision: readProjection(
+            combatDecisionSchema,
+            payload.combat_decision,
+          ),
+          combatRoll: readProjection(combatRollSchema, payload.combat_roll),
+          combatResults: Array.isArray(payload.combat_results)
+            ? payload.combat_results
+                .flatMap((value) => {
+                  const parsed = readProjection(combatResultSchema, value);
+                  return parsed ? [parsed] : [];
+                })
+                .slice(-20)
+            : [],
+          gameOver: readProjection(endingSchema, payload.game_over),
+          caseSettlements: Array.isArray(payload.case_settlements)
+            ? payload.case_settlements.flatMap((entry) => {
+                const receipt = readProjection(caseSettlementSchema, entry);
+                return receipt ? [receipt] : [];
+              })
+            : [],
           clues:
             payload.clues !== undefined
               ? readClues(payload.clues)
@@ -965,6 +1059,109 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
         };
 
         switch (envelope.type) {
+          case "keeper_progress_updated": {
+            const keeperProgress = readProjection(
+              keeperProgressSchema,
+              payload,
+            );
+            return keeperProgress ? { ...base, keeperProgress } : base;
+          }
+          case "keeper_roll_resolved": {
+            const parsed = keeperRollReceiptSchema.safeParse(payload);
+            return parsed.success
+              ? {
+                  ...base,
+                  keeperRolls: [
+                    ...state.keeperRolls.filter(
+                      (r) => r.command_id !== parsed.data.command_id,
+                    ),
+                    parsed.data,
+                  ].slice(-20),
+                }
+              : base;
+          }
+          case "ending_catalog_updated":
+          case "ruling_recorded": {
+            if (
+              envelope.type === "ending_catalog_updated" &&
+              !Array.isArray(payload.ending_catalog)
+            )
+              return base;
+            const keeperRulings = readProjection(rulingStateSchema, payload);
+            return keeperRulings ? { ...base, keeperRulings } : base;
+          }
+          case "combat_updated": {
+            const combat = readProjection(combatSchema, payload);
+            if (!combat) return base;
+            return {
+              ...base,
+              combat,
+              combatRoll:
+                combat.active && combat.awaiting_roll ? state.combatRoll : null,
+              combatDecision:
+                combat.active &&
+                combat.awaiting_decision &&
+                !combat.awaiting_roll
+                  ? state.combatDecision
+                  : null,
+            };
+          }
+          case "combat_decision_required": {
+            const combatDecision = readProjection(
+              combatDecisionSchema,
+              payload,
+            );
+            return combatDecision
+              ? { ...base, combatDecision, combatRoll: null }
+              : base;
+          }
+          case "combat_roll_required": {
+            const combatRoll = readProjection(combatRollSchema, payload);
+            return combatRoll
+              ? { ...base, combatRoll, combatDecision: null }
+              : base;
+          }
+          case "combat_roll_resolved": {
+            const result = readProjection(combatResultSchema, payload.result);
+            return {
+              ...base,
+              combatResults: result
+                ? [
+                    ...state.combatResults.filter(
+                      (r) => r.roll_id !== result.roll_id,
+                    ),
+                    result,
+                  ].slice(-20)
+                : state.combatResults,
+              combatRoll:
+                state.combatRoll?.roll_id === payload.roll_id
+                  ? null
+                  : state.combatRoll,
+            };
+          }
+          case "game_ended": {
+            const gameOver = readProjection(endingSchema, payload);
+            return gameOver
+              ? { ...base, gameOver, combatRoll: null, combatDecision: null }
+              : base;
+          }
+          case "case_settled": {
+            const receipt = readProjection(caseSettlementSchema, payload);
+            if (!receipt) return base;
+            return {
+              ...base,
+              caseSettlements: [
+                ...state.caseSettlements.filter(
+                  (r) =>
+                    !(
+                      r.investigator_id === receipt.investigator_id &&
+                      r.case.case_id === receipt.case.case_id
+                    ),
+                ),
+                receipt,
+              ],
+            };
+          }
           case "handout_presented": {
             const id = str(payload.asset_id);
             if (
@@ -1273,9 +1470,15 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
                   : state.destinations,
               identity: { ...state.identity, revision: envelope.revision },
             };
+          case "clue_updated":
           case "clue_granted": {
             const clueId = str(payload.clue_id);
-            if (!clueId || state.clues.some((clue) => clue.id === clueId)) {
+            if (
+              envelope.type === "clue_updated" &&
+              !state.clues.some((c) => c.id === clueId)
+            )
+              return base;
+            if (!clueId) {
               return {
                 ...base,
                 identity: { ...state.identity, revision: envelope.revision },
@@ -1284,7 +1487,7 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             return {
               ...base,
               clues: [
-                ...state.clues,
+                ...state.clues.filter((clue) => clue.id !== clueId),
                 {
                   id: clueId,
                   category: str(payload.category, "investigation"),
@@ -1312,6 +1515,9 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
             ])[0];
             return {
               ...base,
+              clockMinutes: Object.hasOwn(payload, "clock")
+                ? readGameMinutes(payload.clock)
+                : state.clockMinutes,
               keeperInvestigators: state.keeperInvestigators.map((sheet) =>
                 sheet.investigatorId !== str(payload.investigator_id) ||
                 !changes
@@ -1374,6 +1580,13 @@ export const useStructuredStore = create<StructuredState & StructuredActions>(
               errorMessage: null,
               payload,
               digest,
+              ...(payload &&
+              typeof payload === "object" &&
+              (COMBAT_PLAYER_COMMANDS as readonly unknown[]).includes(
+                (payload as Record<string, unknown>).kind,
+              )
+                ? { investigatorId: state.identity.investigatorId }
+                : {}),
               sends: 0,
               createdAt: now,
               updatedAt: now,
@@ -1666,6 +1879,7 @@ function snapshotIntentKind(kind: string | undefined): RequestIntentKind {
   return kind === "move" ||
     kind === "present_clue" ||
     kind === "use_item" ||
+    kind === "combat" ||
     kind === "freeform"
     ? kind
     : "freeform";
@@ -1692,6 +1906,8 @@ export function requestLabel(kind: RequestIntentKind): string {
       return "前往";
     case "freeform":
       return "行动";
+    case "combat":
+      return "申报战斗动作";
     case "free_roll":
       return "掷骰";
     case "check_response":

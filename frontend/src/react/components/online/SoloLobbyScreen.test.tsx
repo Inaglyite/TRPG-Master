@@ -318,16 +318,23 @@ describe("SoloLobbyScreen 操作", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("归档被拒");
   });
 
-  it("Escape 取消确认并把焦点还给归档入口", () => {
+  it("Escape 取消确认并把焦点还给归档入口", async () => {
     render(<SoloLobbyScreen />);
     const trigger = screen.getByRole("button", { name: "归档冒险" });
     fireEvent.click(trigger);
     fireEvent.keyDown(screen.getByRole("button", { name: "继续保留" }), {
       key: "Escape",
     });
-    expect(
-      screen.queryByTestId("adventure-archive-confirm"),
-    ).not.toBeInTheDocument();
+    // 抽屉收回动画：先标记 closing 保持挂载，动画结束后才卸载。
+    expect(screen.getByTestId("adventure-archive-confirm")).toHaveAttribute(
+      "data-phase",
+      "closing",
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("adventure-archive-confirm"),
+      ).not.toBeInTheDocument(),
+    );
     expect(trigger).toHaveFocus();
     expect(deleteSoloWorld).not.toHaveBeenCalled();
   });

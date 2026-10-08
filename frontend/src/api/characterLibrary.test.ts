@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../state/app-store";
 import { useOnlineStore } from "../state/online-store";
+import { useStructuredStore } from "../state/structured-store";
 import { setCloudOrigin } from "./client";
 import { invalidateCloudRequests } from "./request-context";
 import {
@@ -8,6 +9,9 @@ import {
   deleteLibraryEntry,
   duplicateLibraryEntry,
   exportLibraryEntry,
+  exportCaseCharacter,
+  previewCaseCharacter,
+  saveCaseCharacter,
   getLibraryCard,
   inspectLibraryCard,
   listCharacterLibrary,
@@ -31,6 +35,7 @@ describe("角色库请求路由与导出边界", () => {
     localStorage.clear();
     useAppStore.setState({ mode: "local" });
     useOnlineStore.setState({ user: null });
+    useStructuredStore.getState().reset();
     vi.stubGlobal("fetch", vi.fn());
   });
   afterEach(() => {
@@ -148,5 +153,142 @@ describe("角色库请求路由与导出边界", () => {
       reader.readAsText(blobs[0]);
     });
     expect(JSON.parse(text)).toEqual(envelope);
+  });
+
+  it("结案预览与显式保存沿用本地路由和凭证，不提交原始角色状态", async () => {
+    const source = {
+      world_id: "w",
+      investigator_id: "i",
+      case_id: "w:end",
+      expected_revision: 8,
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        json({
+          ok: true,
+          card: envelope.card,
+          warnings: [],
+          revision: 8,
+          receipt_digest: "a".repeat(64),
+          saved_entry: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        json({ ok: true, entry, warnings: [], deduplicated: false }),
+      );
+    const preview = await previewCaseCharacter(source);
+    await saveCaseCharacter({
+      ...source,
+      receipt_digest: preview.receipt_digest,
+      name: "结案副本",
+    });
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:8765/api/character-library/from-case/preview",
+      "http://localhost:8765/api/character-library/from-case",
+    ]);
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body))).toEqual(
+      {
+        ...source,
+        receipt_digest: "a".repeat(64),
+        name: "结案副本",
+      },
+    );
+  });
+
+  it.each(["world", "investigator", "receipt", "mode", "account", "session"])(
+    "结案导出期间 %s 变化，不下载旧卡",
+    async (change) => {
+      useAppStore.setState({ mode: "online" });
+      useOnlineStore.setState({ user: { id: "A", username: "甲" } });
+      useStructuredStore.setState({
+        identity: {
+          ...useStructuredStore.getState().identity,
+          worldId: "w",
+          investigatorId: "i",
+        },
+      });
+      let finish!: (response: Response) => void;
+      vi.mocked(fetch).mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const OriginalURL = URL;
+      const createObjectURL = vi.fn(() => "blob:test");
+      vi.stubGlobal(
+        "URL",
+        class extends OriginalURL {
+          static createObjectURL = createObjectURL;
+          static revokeObjectURL = vi.fn();
+        },
+      );
+      const pending = exportCaseCharacter(
+        {
+          world_id: "w",
+          investigator_id: "i",
+          case_id: "w:end",
+          expected_revision: 8,
+        },
+        "副本",
+      ).catch((e) => e);
+      if (change === "world" || change === "investigator")
+        useStructuredStore.setState({
+          identity: {
+            ...useStructuredStore.getState().identity,
+            ...(change === "world"
+              ? { worldId: "other" }
+              : { investigatorId: "other" }),
+          },
+        });
+      else if (change === "receipt")
+        useStructuredStore.setState({
+          caseSettlements: [
+            {
+              investigator_id: "i",
+              character_id: "i",
+              case: {
+                case_id: "w:end",
+                world_id: "w",
+                ending_type: "good",
+                reputation_delta: 2,
+              },
+              career: {
+                case_history: [],
+                reputation: 0,
+                completed_modules: [],
+              },
+            },
+          ],
+        });
+      else if (change === "mode") useAppStore.setState({ mode: "local" });
+      else if (change === "account")
+        useOnlineStore.setState({ user: { id: "B", username: "乙" } });
+      else invalidateCloudRequests();
+      finish(json(envelope));
+      expect(await pending).toMatchObject({ code: "request_context_changed" });
+      expect(createObjectURL).not.toHaveBeenCalled();
+    },
+  );
+
+  it("畸形结案导出响应不得下载为角色卡", async () => {
+    useStructuredStore.setState({
+      identity: {
+        ...useStructuredStore.getState().identity,
+        worldId: "w",
+        investigatorId: "i",
+      },
+    });
+    vi.mocked(fetch).mockResolvedValue(json({ ok: true, error: "not a card" }));
+    await expect(
+      exportCaseCharacter(
+        {
+          world_id: "w",
+          investigator_id: "i",
+          case_id: "w:end",
+          expected_revision: 8,
+        },
+        "副本",
+      ),
+    ).rejects.toThrow();
   });
 });

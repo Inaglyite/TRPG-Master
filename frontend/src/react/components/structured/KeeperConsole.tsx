@@ -10,6 +10,18 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { parseRulingValue } from "../../../protocol/rulings";
+import { KeeperEndingCatalogue } from "./KeeperEndingCatalogue";
+import { KeeperProgressCatalogue } from "./KeeperProgressCatalogue";
+import { KeeperSaveActions } from "./KeeperSaveActions";
+import { GameClockReadout } from "./GameClockReadout";
+import { CONDITION_LABELS } from "../../../protocol/conditions";
+import { TIME_ACTIVITY_LABELS } from "../../../protocol/time-activity";
+import {
+  ConditionPreviousRecord,
+  ConditionRecordReference,
+  conditionRecordProblem,
+} from "./ConditionRecordReference";
 import { focusableControls, trapDialogTab } from "../dialogFocus";
 
 import {
@@ -29,7 +41,6 @@ import {
   type KeeperCandidates,
   type KeeperCommandSpec,
 } from "../../../protocol/keeper-commands";
-import { loadSave, openSavePanel, quickSave } from "../../../panels";
 import { useAppStore } from "../../../state/app-store";
 import {
   structuredUnavailableReason,
@@ -51,6 +62,12 @@ const LEGACY_PLACEHOLDER_ID = "legacy-pc";
 
 // Labels are presentation only. Wire values still follow the frozen schema.
 const CHOICE_LABELS: Record<string, string> = {
+  ...CONDITION_LABELS,
+  add: "添加",
+  remove: "移除",
+  melee: "近战",
+  firearm: "射击",
+  threat: "威胁",
   queued: "待主持处理",
   processing: "处理中",
   failed: "处理失败",
@@ -103,23 +120,59 @@ const CHOICE_LABELS: Record<string, string> = {
   ruling: "主持裁定",
 };
 
-function actionBody(action: StructuredAction | undefined): string {
+export function actionTitle(
+  action: StructuredAction | undefined,
+  fallback: string,
+  candidates: Partial<KeeperCandidates> = {},
+): string {
+  const name = (id: string, entries: { id: string; name: string }[] = []) =>
+    entries.find((entry) => entry.id === id)?.name.trim() || id;
+  if (!action || action.kind === "freeform") return fallback;
+  switch (action.kind) {
+    case "move":
+      return `申请前往：${name(action.destination_scene_id, candidates.scenes)}`;
+    case "present_clue":
+      return `申请出示：${name(action.clue_id, candidates.clues)}`;
+    case "use_item":
+      return `申请使用：${name(action.item_id, candidates.items)} ×${action.quantity}`;
+    case "combat":
+      return `申报战斗动作：${CHOICE_LABELS[action.action_type] || action.action_type}`;
+  }
+}
+
+export function actionBody(
+  action: StructuredAction | undefined,
+  candidates: Partial<KeeperCandidates> = {},
+): string {
   if (!action) return "服务端未提供完整请求正文。";
+  const named = (id: string, entries: { id: string; name: string }[] = []) => {
+    const name = entries.find((entry) => entry.id === id)?.name.trim();
+    return name && name !== id ? `${name}（${id}）` : id;
+  };
   const target =
     "target" in action && action.target
       ? "id" in action.target
-        ? action.target.id
+        ? named(
+            action.target.id,
+            action.target.kind === "npc"
+              ? candidates.npcs
+              : action.target.kind === "investigator"
+                ? candidates.investigators
+                : candidates.objects,
+          )
         : action.target.text
       : "未指定";
   switch (action.kind) {
     case "freeform":
       return action.text;
     case "move":
-      return `申请前往：${action.destination_scene_id}`;
+      return `申请前往：${named(action.destination_scene_id, candidates.scenes)}`;
     case "present_clue":
-      return `线索：${action.clue_id}\n方式：${CHOICE_LABELS[action.presentation]}\n目标：${target}\n${action.question || ""}`;
+      return `线索：${named(action.clue_id, candidates.clues)}\n方式：${CHOICE_LABELS[action.presentation]}${action.physical_item_id ? `\n出示实物：${named(action.physical_item_id, candidates.items)}` : ""}\n目标：${target}\n${action.question || ""}`;
     case "use_item":
-      return `物品：${action.item_id} ×${action.quantity}\n用法：${action.operation}\n目标：${target}\n${action.approach || ""}`;
+      return `物品：${named(action.item_id, candidates.items)}\n本次申请数量：${action.quantity}\n用法：${action.operation === "custom" ? "即兴用法（custom）" : action.operation}\n目标：${target}\n${action.approach || ""}`;
+    case "combat":
+      return `动作：${CHOICE_LABELS[action.action_type] || action.action_type}\n目标：${action.target_id ? named(action.target_id, [...(candidates.investigators || []), ...(candidates.npcs || [])]) : "未指定"}\n遭遇：${action.encounter_id}\n${action.approach || ""}`;
   }
 }
 
@@ -147,9 +200,13 @@ export function KeeperConsole() {
   const targets = useStructuredStore((state) => state.targets);
   const destinations = useStructuredStore((state) => state.destinations);
   const clues = useStructuredStore((state) => state.clues);
+  const keeperProgress = useStructuredStore((state) => state.keeperProgress);
+  const currentSceneId = useStructuredStore((state) => state.currentSceneId);
   const items = useStructuredStore((state) => state.items);
   const keeperMaterial = useStructuredStore((state) => state.keeperMaterial);
+  const keeperRulings = useStructuredStore((state) => state.keeperRulings);
   const keeperAssets = useStructuredStore((state) => state.keeperAssets);
+  const combat = useStructuredStore((state) => state.combat);
   const keeperInvestigators = useStructuredStore(
     (state) => state.keeperInvestigators,
   );
@@ -172,6 +229,9 @@ export function KeeperConsole() {
   const [errors, setErrors] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<string>("");
   const [submittedId, setSubmittedId] = useState<string | null>(null);
+  const [preparedCombatRequest, setPreparedCombatRequest] = useState<
+    string | undefined
+  >();
 
   const appMode = useAppStore((state) => state.mode);
   const connection = useAppStore((state) => state.connection);
@@ -217,6 +277,14 @@ export function KeeperConsole() {
   );
   const candidates: KeeperCandidates = useMemo(
     () => ({
+      combatants: combat?.active
+        ? combat.participants?.map((p) => ({ id: p.id, name: p.name }))
+        : undefined,
+      flags:
+        keeperRulings?.flags.map((flag) => ({
+          ...flag,
+          name: `${flag.id} · 当前：${flag.value === null ? "未记录" : String(flag.value)}`,
+        })) || [],
       // 房间调查员名单来自房间镜像与成员信息：keeper 需要它指定线索接收者、
       // 检定对象与 HP/SAN 目标。房间快照的 targets 可能不含调查员，不能只靠它。
       investigators: [
@@ -266,13 +334,33 @@ export function KeeperConsole() {
           all.findIndex((other) => other.id === entry.id) === index,
       ),
       scenes: destinations.map((scene) => ({ id: scene.id, name: scene.name })),
-      objects: targets
-        .filter((target) => target.kind === "scene_object")
-        .map((target) => ({ id: target.id, name: target.name })),
-      clues: clues.map((clue) => ({
-        id: clue.id,
-        name: clue.text.slice(0, 40) || clue.id,
-      })),
+      objects: [
+        ...targets
+          .filter((target) => target.kind === "scene_object")
+          .map((target) => ({ id: target.id, name: target.name })),
+        ...(keeperProgress?.clues || [])
+          .filter(
+            (c) =>
+              c.rules.some((r) => r.requires_success) &&
+              (!c.related_scenes.length ||
+                c.related_scenes.includes(currentSceneId)),
+          )
+          .map((c) => ({
+            id: c.id,
+            name: `发现检定对象 · ${c.granted_item || c.text.slice(0, 40) || c.id}`,
+          })),
+      ].filter(
+        (entry, index, all) =>
+          all.findIndex((e) => e.id === entry.id) === index,
+      ),
+      clues: [...(keeperProgress?.clues || []), ...clues]
+        .filter(
+          (c, i, all) => all.findIndex((other) => other.id === c.id) === i,
+        )
+        .map((clue) => ({
+          id: clue.id,
+          name: clue.text.slice(0, 40) || clue.id,
+        })),
       items: (keeperInvestigators.length
         ? keeperInvestigators.flatMap((sheet) => sheet.inventory)
         : items
@@ -308,11 +396,15 @@ export function KeeperConsole() {
     }),
     [
       targets,
+      combat,
       destinations,
       clues,
+      keeperProgress,
+      currentSceneId,
       items,
       keeperAssets,
       keeperMaterial,
+      keeperRulings,
       keeperInvestigators,
       roomInvestigators,
       roomMembers,
@@ -320,6 +412,16 @@ export function KeeperConsole() {
       openThreads,
     ],
   );
+
+  const requestCatalog = (investigatorId: string | null | undefined) => ({
+    ...candidates,
+    // 不借用汇总候选里其他角色的库存数量。
+    items: (
+      keeperInvestigators.find(
+        (sheet) => sheet.investigatorId === investigatorId,
+      )?.inventory ?? items
+    ).map((item) => ({ id: item.id, name: item.label })),
+  });
 
   const spec = findKeeperCommand(activeKind);
 
@@ -332,6 +434,7 @@ export function KeeperConsole() {
     setErrors([]);
     setFeedback("");
     setSubmittedId(null);
+    setPreparedCombatRequest(undefined);
   }, [identity.worldId, currentUserId, appMode]);
 
   useEffect(() => {
@@ -342,6 +445,7 @@ export function KeeperConsole() {
     setDrafts({});
     setFeedback("");
     setSubmittedId(null);
+    setPreparedCombatRequest(undefined);
   }, [authorized]);
 
   const submitted = submittedId ? requestsMap[submittedId] : null;
@@ -368,6 +472,15 @@ export function KeeperConsole() {
   const submit = () => {
     if (!spec || submissionPending) return;
     const problems = validateKeeperFields(spec, values);
+    if (spec.kind === "record_condition") {
+      const issue = conditionRecordProblem(
+        keeperInvestigators.find(
+          (sheet) => sheet.investigatorId === values.investigator_id,
+        ),
+        values,
+      );
+      if (issue) problems.push(issue);
+    }
     setErrors(problems);
     if (problems.length) return;
     if (commandBlocked) {
@@ -375,7 +488,12 @@ export function KeeperConsole() {
       return;
     }
     const payload = buildKeeperPayload(spec, values);
-    const result = sendKeeperCommand(spec.kind, payload);
+    const result = sendKeeperCommand(
+      spec.kind,
+      payload,
+      undefined,
+      spec.kind === "combat_action" ? preparedCombatRequest : undefined,
+    );
     if (!result.ok) {
       setErrors([result.reason]);
       setFeedback("");
@@ -387,11 +505,16 @@ export function KeeperConsole() {
     setSubmittedId(result.requestId);
   };
 
-  const prepareCommand = (kind: string, fields: FieldValues) => {
+  const prepareCommand = (
+    kind: string,
+    fields: FieldValues,
+    causeId?: string,
+  ) => {
     const next = findKeeperCommand(kind);
     if (!next) return;
     setDrafts((old) => ({ ...old, [activeKind]: { ...values } }));
     setActiveKind(kind);
+    setPreparedCombatRequest(causeId);
     setValues({ ...emptyKeeperValues(next), ...fields });
     setErrors([]);
     setFeedback("");
@@ -530,8 +653,15 @@ export function KeeperConsole() {
                               )?.name || request.investigatorId}
                             </p>
                           )}
-                          <span className="keeper-pending-label">
-                            {request.label}
+                          <span
+                            className="keeper-pending-label"
+                            title={request.label}
+                          >
+                            {actionTitle(
+                              request.keeperAction,
+                              request.label,
+                              requestCatalog(request.investigatorId),
+                            )}
                           </span>
                           <code className="keeper-pending-id">
                             {request.requestId}
@@ -544,13 +674,47 @@ export function KeeperConsole() {
                           <details>
                             <summary>查看完整请求</summary>
                             <p className="keeper-pending-body">
-                              {actionBody(request.keeperAction)}
+                              {actionBody(
+                                request.keeperAction,
+                                requestCatalog(request.investigatorId),
+                              )}
                             </p>
                           </details>
                           <p className="keeper-note">
                             请求尚未收尾；下方只准备表单，不自动批准或结算。
                           </p>
                           <div className="keeper-pending-actions">
+                            {request.investigatorId &&
+                              request.keeperAction?.kind === "combat" && (
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  disabled={
+                                    blocked !== null ||
+                                    !capabilities.commands.includes(
+                                      "combat_action",
+                                    )
+                                  }
+                                  onClick={() => {
+                                    const action = request.keeperAction;
+                                    if (action?.kind !== "combat") return;
+                                    prepareCommand(
+                                      "combat_action",
+                                      {
+                                        actor_id: request.investigatorId!,
+                                        action_type: action.action_type,
+                                        target_id: action.target_id || "",
+                                        description: action.approach || "",
+                                        weapon_item_id:
+                                          action.weapon_item_id || "",
+                                      },
+                                      request.requestId,
+                                    );
+                                  }}
+                                >
+                                  准备战斗动作
+                                </button>
+                              )}
                             {request.investigatorId &&
                               request.keeperAction?.kind === "use_item" && (
                                 <button
@@ -720,41 +884,53 @@ export function KeeperConsole() {
                 {capabilities.memoryQuery && authorized && (
                   <MemoryQueryPanel candidates={candidates} blocked={blocked} />
                 )}
-                <section aria-label="存档与续团">
-                  <h4 className="keeper-section-title">存档与续团</h4>
-                  <p className="keeper-note">
-                    主持可以直接存档、读档或打开存档管理；服务端仍会按房间权限复核
-                    （多人房间的存档操作是房主权限）。
-                  </p>
-                  <div className="structured-card-actions">
-                    <button
-                      type="button"
-                      className="btn-ghost structured-btn"
-                      data-testid="keeper-save"
-                      onClick={() => quickSave()}
-                    >
-                      快速存档
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost structured-btn"
-                      data-testid="keeper-load"
-                      onClick={() => loadSave("slot_000")}
-                    >
-                      读取自动存档
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost structured-btn"
-                      data-testid="keeper-save-panel"
-                      onClick={() => openSavePanel("manage")}
-                    >
-                      存档管理
-                    </button>
-                  </div>
-                </section>
+                <KeeperSaveActions />
               </aside>
               <div className="keeper-workspace-editor">
+                {keeperProgress && (
+                  <KeeperProgressCatalogue
+                    state={keeperProgress}
+                    sceneId={currentSceneId}
+                    blocked={blocked}
+                    onPrepare={prepareCommand}
+                  />
+                )}
+                {keeperRulings && (
+                  <details
+                    className="keeper-ruling-audit"
+                    data-testid="keeper-ruling-audit"
+                  >
+                    <summary>剧情裁定与结局资格</summary>
+                    <p className="structured-card-note">
+                      仅主持可见。前置条件满足不等于立即结束游戏，结局仍须显式结算。
+                    </p>
+                    <KeeperEndingCatalogue
+                      state={keeperRulings}
+                      blocked={
+                        keeperCommandBlockReason("end_game") ||
+                        (combat?.active ? "请先结算或明确结束当前战斗。" : null)
+                      }
+                      onPrepare={(id) =>
+                        prepareCommand("end_game", { ending_id: id })
+                      }
+                    />
+                    <ol>
+                      {keeperRulings.recent
+                        .slice(-5)
+                        .reverse()
+                        .map((ruling, i) => (
+                          <li key={`${ruling.revision}-${i}`}>
+                            <p>
+                              {ruling.flag_id}：{String(ruling.before)} →{" "}
+                              {String(ruling.after)} · 版本 {ruling.revision}
+                            </p>
+                            <p>依据：{ruling.basis}</p>
+                            <p>裁定者：{ruling.user_id}</p>
+                          </li>
+                        ))}
+                    </ol>
+                  </details>
+                )}
                 <section aria-label="主持操作">
                   <h4 className="keeper-section-title">主持操作</h4>
                   <div className="keeper-command-groups">
@@ -802,6 +978,7 @@ export function KeeperConsole() {
                                     [activeKind]: values,
                                   }));
                                   setActiveKind(command.kind);
+                                  setPreparedCombatRequest(undefined);
                                   setValues(
                                     drafts[command.kind] ??
                                       emptyKeeperValues(command),
@@ -825,9 +1002,26 @@ export function KeeperConsole() {
                   <section
                     aria-label="命令表单"
                     className="keeper-command-form"
+                    data-command={spec.kind}
                   >
                     <h4 className="keeper-section-title">{spec.label}</h4>
                     {spec.help && <p className="keeper-note">{spec.help}</p>}
+                    {spec.kind === "advance_time" && (
+                      <>
+                        <GameClockReadout variant="reference" />
+                        <p className="keeper-note">
+                          只有提交并结算后才会改变游戏时间。
+                        </p>
+                      </>
+                    )}
+                    {spec.kind === "record_condition" && (
+                      <ConditionRecordReference
+                        sheet={keeperInvestigators.find(
+                          (sheet) =>
+                            sheet.investigatorId === values.investigator_id,
+                        )}
+                      />
+                    )}
                     {commandBlocked && (
                       <p role="status" className="keeper-note">
                         {commandBlocked}
@@ -843,14 +1037,91 @@ export function KeeperConsole() {
                           field={field}
                           spec={spec}
                           values={values}
-                          candidates={candidates}
+                          candidates={
+                            spec.kind === "combat_action"
+                              ? {
+                                  ...candidates,
+                                  items: (
+                                    keeperInvestigators.find(
+                                      (sheet) =>
+                                        sheet.investigatorId ===
+                                        values.actor_id,
+                                    )?.inventory ||
+                                    (identity.investigatorId === values.actor_id
+                                      ? items
+                                      : [])
+                                  ).map((item) => ({
+                                    id: item.id,
+                                    name: `${item.label} · ×${item.quantity} · ${item.id.slice(-8)}`,
+                                  })),
+                                }
+                              : candidates
+                          }
                           keeperInvestigators={keeperInvestigators}
-                          disabled={commandBlocked !== null || !authorized}
+                          disabled={
+                            commandBlocked !== null ||
+                            !authorized ||
+                            (field.name === "weapon_item_id" &&
+                              !capabilities.combatWeaponItemId)
+                          }
                           onChange={(name, value) =>
-                            setValues((current) => ({
-                              ...current,
-                              [name]: value,
-                            }))
+                            setValues((current) => {
+                              if (
+                                spec.kind === "record_condition" &&
+                                (name === "investigator_id" ||
+                                  name === "condition")
+                              ) {
+                                const next = { ...current, [name]: value };
+                                const sheet = keeperInvestigators.find(
+                                  (entry) =>
+                                    entry.investigatorId ===
+                                    next.investigator_id,
+                                );
+                                return {
+                                  ...next,
+                                  expected_present: sheet
+                                    ? sheet.conditions.includes(
+                                        String(next.condition),
+                                      )
+                                    : "",
+                                };
+                              }
+                              if (
+                                spec.kind === "combat_action" &&
+                                name === "actor_id"
+                              )
+                                return {
+                                  ...current,
+                                  actor_id: value,
+                                  weapon_item_id: "",
+                                };
+                              if (
+                                spec.kind === "record_ruling" &&
+                                name === "flag_id"
+                              ) {
+                                const flag = candidates.flags?.find(
+                                  (f) => f.id === value,
+                                );
+                                return {
+                                  ...current,
+                                  flag_id: value,
+                                  expected_before: flag
+                                    ? JSON.stringify(flag.value)
+                                    : "",
+                                  value: flag
+                                    ? JSON.stringify(
+                                        flag.value ??
+                                          (flag.type === "boolean"
+                                            ? false
+                                            : flag.type === "integer"
+                                              ? 0
+                                              : ""),
+                                      )
+                                    : "",
+                                };
+                              }
+                              return { ...current, [name]: value };
+                            })
                           }
                         />
                       </div>
@@ -918,7 +1189,9 @@ export function KeeperConsole() {
                             : "等待收件确认……"
                           : spec.kind === "publish_message"
                             ? "发布叙事"
-                            : "提交命令"}
+                            : spec.kind === "record_condition"
+                              ? "记录变更"
+                              : "提交命令"}
                       </button>
                     </div>
                   </section>
@@ -949,6 +1222,93 @@ function KeeperField({
   disabled: boolean;
   onChange: (name: string, value: string | number | boolean) => void;
 }) {
+  if (spec.kind === "record_condition" && field.name === "expected_present") {
+    return (
+      <ConditionPreviousRecord
+        sheet={keeperInvestigators.find(
+          (sheet) => sheet.investigatorId === values.investigator_id,
+        )}
+        condition={String(values.condition || "")}
+        previous={values.expected_present}
+        disabled={disabled}
+        onRefresh={(present) => onChange(field.name, present)}
+      />
+    );
+  }
+  if (field.kind === "primitive") {
+    const flag = candidates.flags?.find((f) => f.id === values.flag_id);
+    const value = parseRulingValue(values[field.name]);
+    if (!flag)
+      return <p className="structured-card-note">先选择已有剧情条件。</p>;
+    if (field.name === "expected_before")
+      return (
+        <div className="keeper-ruling-previous">
+          <span>
+            {field.label}：
+            <output>
+              {value === null
+                ? "未记录"
+                : typeof value === "boolean"
+                  ? value
+                    ? "成立"
+                    : "不成立"
+                  : String(value ?? "")}
+            </output>
+          </span>
+          <button
+            type="button"
+            className="btn-ghost structured-btn"
+            disabled={disabled}
+            onClick={() => onChange(field.name, JSON.stringify(flag.value))}
+          >
+            读取当前值
+          </button>
+        </div>
+      );
+    if (flag.type === "boolean")
+      return (
+        <label className="panel-action-field keeper-field-inline keeper-ruling-toggle">
+          <span>{field.label}</span>
+          <input
+            type="checkbox"
+            checked={value === true}
+            disabled={disabled}
+            onChange={(e) =>
+              onChange(field.name, JSON.stringify(e.target.checked))
+            }
+          />
+          <span>{value === true ? "条件成立" : "条件不成立"}</span>
+        </label>
+      );
+    return (
+      <label className="panel-action-field">
+        <span>{field.label}</span>
+        <input
+          type={flag.type === "integer" ? "number" : "text"}
+          step={flag.type === "integer" ? 1 : undefined}
+          min={flag.type === "integer" ? -1000000 : undefined}
+          max={flag.type === "integer" ? 1000000 : undefined}
+          maxLength={200}
+          disabled={disabled}
+          value={
+            typeof value === "number" || typeof value === "string" ? value : ""
+          }
+          onChange={(e) =>
+            onChange(
+              field.name,
+              flag.type === "integer" && e.target.value === ""
+                ? ""
+                : JSON.stringify(
+                    flag.type === "integer"
+                      ? Number(e.target.value)
+                      : e.target.value,
+                  ),
+            )
+          }
+        />
+      </label>
+    );
+  }
   if (
     spec.kind === "publish_message" &&
     field.name === "speaker_id" &&
@@ -992,14 +1352,22 @@ function KeeperField({
             if (field.name === "speaker_kind") onChange("speaker_id", "");
           }}
         >
-          {!field.required && <option value="">未填写（不提交此项）</option>}
+          {!field.required && (
+            <option value="">
+              {field.name === "activity" && spec.kind === "advance_time"
+                ? "未指定（按等待计时）"
+                : "未填写（不提交此项）"}
+            </option>
+          )}
           {(field.enumValues ?? []).map((value) => (
             <option key={value} value={value}>
-              {spec.kind === "publish_message" &&
-              field.name === "speaker_kind" &&
-              value === "keeper"
-                ? "守秘人旁白"
-                : (CHOICE_LABELS[value] ?? value)}
+              {field.name === "activity" && spec.kind === "advance_time"
+                ? (TIME_ACTIVITY_LABELS[value] ?? value)
+                : spec.kind === "publish_message" &&
+                    field.name === "speaker_kind" &&
+                    value === "keeper"
+                  ? "守秘人旁白"
+                  : (CHOICE_LABELS[value] ?? value)}
             </option>
           ))}
         </select>

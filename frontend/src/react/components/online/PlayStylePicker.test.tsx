@@ -39,6 +39,9 @@ describe("PlayStylePicker", () => {
       "true",
     );
     expect(screen.getByRole("note")).toHaveTextContent("不调用模型");
+    expect(screen.getByText(/调查、社交、战斗与结案/)).toBeVisible();
+    expect(screen.getByText(/当前服务器开放的功能/)).toBeVisible();
+    expect(screen.queryByText(/尚无完整战斗/)).not.toBeInTheDocument();
   });
 
   it("does not promise keeper secrecy from the same solo player", () => {

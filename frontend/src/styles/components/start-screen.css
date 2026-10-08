@@ -6,14 +6,14 @@
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--ink) 52%, transparent),
-      color-mix(in srgb, var(--ink) 8%, transparent) 48%,
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 28%, transparent),
+      color-mix(in srgb, var(--ink) 4%, transparent) 48%,
+      color-mix(in srgb, var(--ink) 36%, transparent)
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--ink) 10%, transparent),
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 6%, transparent),
+      color-mix(in srgb, var(--ink) 34%, transparent)
     ),
     var(--module-bg-image, var(--ui-start-bg)) center / cover no-repeat,
     var(--bg);
@@ -43,14 +43,14 @@
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--ink) 52%, transparent),
-      color-mix(in srgb, var(--ink) 8%, transparent) 48%,
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 28%, transparent),
+      color-mix(in srgb, var(--ink) 4%, transparent) 48%,
+      color-mix(in srgb, var(--ink) 36%, transparent)
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--ink) 10%, transparent),
-      color-mix(in srgb, var(--ink) 58%, transparent)
+      color-mix(in srgb, var(--ink) 6%, transparent),
+      color-mix(in srgb, var(--ink) 34%, transparent)
     ),
     var(--layer-image, var(--ui-start-bg)) center / cover no-repeat,
     var(--bg);

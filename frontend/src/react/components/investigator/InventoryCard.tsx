@@ -39,7 +39,7 @@ export function InventoryCard() {
     >
       {path === "structured" && (
         <p className="inv-path-note" data-path="structured">
-          结构化模式：按物品 ID 与数量提交，前端不预扣，由服务端按规则结算。
+          使用会先提交申请；主持确认后才结算效果和消耗。
         </p>
       )}
       {items.length === 0 && (
@@ -68,7 +68,7 @@ export function InventoryCard() {
               type="button"
               className="btn-ghost inv-row-btn inv-use-btn"
               disabled={blocked !== null}
-              title={blocked ?? "提交一次使用请求（提交不等于扣减）"}
+              title={blocked ?? "申请使用这件道具，确认前不会扣减数量"}
               onClick={() => {
                 if (path === "structured") {
                   beginUseItem({

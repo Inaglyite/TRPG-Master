@@ -66,6 +66,11 @@ test("结构化界面截图：桌面 / 窄屏 / 长名称 / 主持台", async ({
   await expect(page.locator(".check-request-card")).toBeVisible({
     timeout: 20_000,
   });
+  const investigator = page
+    .locator(".check-request-card .structured-facts dd")
+    .first();
+  await expect(investigator).toHaveText("爱丽丝");
+  await expect(investigator).toHaveAttribute("title", "inv-alice");
   await page.getByTestId("btn-move").click();
   await page
     .getByRole("dialog", { name: "前往…" })
@@ -87,6 +92,7 @@ test("结构化界面截图：桌面 / 窄屏 / 长名称 / 主持台", async ({
 
   // 窄屏：按钮不挤压、正文不被遮挡。
   await page.setViewportSize({ width: 390, height: 780 });
+  await expect(investigator).toHaveText("爱丽丝");
   await page.waitForTimeout(400);
   await page.screenshot({
     path: `${screenshotsDir}/structured-narrow.png`,
@@ -108,6 +114,51 @@ test("结构化界面截图：桌面 / 窄屏 / 长名称 / 主持台", async ({
     path: `${screenshotsDir}/structured-move-dialog.png`,
   });
   await page.keyboard.press("Escape");
+});
+
+test("玩家三卡说明：四窗口正文可读，不用实现术语解释出示和使用", async ({
+  page,
+}) => {
+  await enterGame(page);
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: 480 });
+    const panel = page.locator("#char-panel");
+    if (
+      await panel.evaluate((element) => element.classList.contains("collapsed"))
+    )
+      await page.locator("#btn-panel").click();
+    await expect(panel).not.toHaveClass(/collapsed/);
+    await panel.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished),
+      );
+    });
+    for (const card of ["clues", "items"]) {
+      const toggle = page.locator(`#inv-card-toggle-${card}`);
+      if ((await toggle.getAttribute("aria-expanded")) !== "true")
+        await toggle.click();
+      const note = page
+        .locator(`.inv-card-${card} > .inv-card-body .inv-path-note`)
+        .first();
+      await note.scrollIntoViewIfNeeded();
+      await expect(note).not.toContainText(/稳定 ID|物品 ID|投影|服务端/);
+      const shape = await note.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          font: parseFloat(style.fontSize),
+          inside:
+            rect.top >= 0 &&
+            rect.bottom <= innerHeight &&
+            rect.left >= 0 &&
+            rect.right <= innerWidth,
+        };
+      });
+      expect(shape.font).toBeGreaterThanOrEqual(13);
+      expect(shape.inside).toBe(true);
+    }
+    await page.screenshot({ path: `/tmp/trpg-player-copy-${width}.png` });
+  }
 });
 
 test("主持台截图：命令表单与待处理行动", async ({ page }) => {

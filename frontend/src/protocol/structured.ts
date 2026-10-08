@@ -15,6 +15,14 @@
  */
 
 import { z } from "zod";
+import {
+  COMBAT_ACTIONS,
+  COMBAT_COMMAND_KINDS,
+  combatCommandPayloads,
+} from "./combat";
+import { rulingPayloadSchema } from "./rulings";
+import { conditionPayloadSchema } from "./conditions";
+import { keeperRollPayloadSchema } from "./keeper-dice";
 
 /** 与后端协商的协议版本；服务端不认这个值时前端明确提示，不回退旧协议。 */
 export const STRUCTURED_PROTOCOL_VERSION = 1;
@@ -113,11 +121,36 @@ export const freeformActionSchema = z.object({
     .refine((text) => Array.from(text).length <= 2000, "行动文字最多 2000 字"),
 });
 
+export const combatActionRequestSchema = z
+  .object({
+    kind: z.literal("combat"),
+    weapon_item_id: z.string().min(1).max(160).optional(),
+    encounter_id: z.string().min(1).max(160),
+    action_type: z.enum(COMBAT_ACTIONS),
+    target_id: z.string().min(1).max(160).nullable(),
+    approach: z.string().max(200).optional(),
+  })
+  .strict()
+  .superRefine((action, ctx) => {
+    if (
+      ["melee", "firearm", "threat"].includes(action.action_type) &&
+      !action.target_id
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["target_id"],
+        message: "请选择参战目标",
+      });
+    }
+  });
+export type CombatActionRequest = z.infer<typeof combatActionRequestSchema>;
+
 export const structuredActionSchema = z.discriminatedUnion("kind", [
   presentClueActionSchema,
   useItemActionSchema,
   moveActionSchema,
   freeformActionSchema,
+  combatActionRequestSchema,
 ]);
 export type StructuredAction = z.infer<typeof structuredActionSchema>;
 export type PresentClueAction = z.infer<typeof presentClueActionSchema>;
@@ -204,6 +237,13 @@ export function buildCancelRequest(
  * 不接受表外 kind：`execute_arbitrary_sql` 这类请求必须在前端就被拒绝。
  */
 export const KEEPER_COMMAND_KINDS = [
+  "keeper_roll",
+  "combat_start",
+  "combat_action",
+  "combat_end",
+  "record_ruling",
+  "record_condition",
+  "end_game",
   "publish_message",
   "request_check",
   "resolve_check",
@@ -233,8 +273,9 @@ export const commandRequestSchema = z.object({
   command_id: z.string().min(1).max(160),
   world_id: z.string().min(1).max(160),
   expected_revision: z.number().int().nonnegative(),
-  kind: z.enum(KEEPER_COMMAND_KINDS),
+  kind: z.enum([...KEEPER_COMMAND_KINDS, ...COMBAT_COMMAND_KINDS]),
   payload: z.record(z.string(), z.unknown()),
+  cause_id: z.string().min(1).max(160).nullable().optional(),
 });
 export type CommandRequest = z.infer<typeof commandRequestSchema>;
 
@@ -258,6 +299,17 @@ export type Audience =
   | { kind: "investigators"; investigator_ids: string[] };
 
 export const STRUCTURED_EVENT_TYPES = [
+  "clue_updated",
+  "keeper_progress_updated",
+  "keeper_roll_resolved",
+  "ending_catalog_updated",
+  "combat_updated",
+  "combat_decision_required",
+  "combat_roll_required",
+  "combat_roll_resolved",
+  "ruling_recorded",
+  "game_ended",
+  "case_settled",
   "session_snapshot",
   "action_ack",
   "action_status",
@@ -620,6 +672,9 @@ export type ServerCapabilities = {
   useItem: boolean;
   /** M5：主持侧只读记忆查询（玩家侧不提供） */
   memoryQuery: boolean;
+  combatActionRequest: boolean;
+  combatWeaponItemId: boolean;
+  structuredSoloRestore: boolean;
 };
 
 export const NO_STRUCTURED_CAPABILITIES: ServerCapabilities = {
@@ -637,6 +692,9 @@ export const NO_STRUCTURED_CAPABILITIES: ServerCapabilities = {
   presentClue: false,
   useItem: false,
   memoryQuery: false,
+  combatActionRequest: false,
+  combatWeaponItemId: false,
+  structuredSoloRestore: false,
 };
 
 function asBoolean(value: unknown): boolean {
@@ -706,6 +764,9 @@ export function readServerCapabilities(value: unknown): ServerCapabilities {
       structured &&
       (asBoolean(raw.move_action) || commands.includes("move_party")),
     memoryQuery: structured && asBoolean(raw.memory_query),
+    combatActionRequest: structured && asBoolean(raw.combat_action_request),
+    combatWeaponItemId: structured && asBoolean(raw.combat_weapon_item_id),
+    structuredSoloRestore: structured && asBoolean(raw.structured_solo_restore),
     presentClue:
       structured &&
       (asBoolean(raw.present_clue) || commands.includes("present_information")),
@@ -948,8 +1009,28 @@ export function buildCommandRequest(
   payload: Record<string, unknown>,
   identity: Pick<StructuredIdentity, "worldId" | "expectedRevision">,
   commandId: string = newCommandId(),
+  causeId?: string,
 ): BuildOutcome<CommandRequest> {
   if (!identity.worldId) return { ok: false, reason: "还没有进入世界。" };
+  if (kind === "keeper_roll") {
+    const valid = keeperRollPayloadSchema.safeParse(payload);
+    if (!valid.success)
+      return { ok: false, reason: describeIssue(valid.error) };
+    if (causeId) return { ok: false, reason: "主持普通骰不能关联玩家行动。" };
+  }
+  if (kind === "record_condition") {
+    const valid = conditionPayloadSchema.safeParse(payload);
+    if (!valid.success)
+      return { ok: false, reason: describeIssue(valid.error) };
+  }
+  if (kind === "record_ruling") {
+    const valid = rulingPayloadSchema.safeParse(payload);
+    if (!valid.success)
+      return { ok: false, reason: describeIssue(valid.error) };
+  }
+  const combatPayload = combatCommandPayloads[kind]?.safeParse(payload);
+  if (combatPayload && !combatPayload.success)
+    return { ok: false, reason: describeIssue(combatPayload.error) };
   const parsed = commandRequestSchema.safeParse({
     type: "command_request",
     protocol_version: STRUCTURED_PROTOCOL_VERSION,
@@ -958,6 +1039,7 @@ export function buildCommandRequest(
     expected_revision: identity.expectedRevision,
     kind,
     payload,
+    ...(causeId ? { cause_id: causeId } : {}),
   });
   if (!parsed.success)
     return { ok: false, reason: describeIssue(parsed.error) };

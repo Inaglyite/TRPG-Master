@@ -27,6 +27,7 @@ export const serverMessageTypes = [
   "world_context",
   "local_start_result",
   "world_list",
+  "solo_save_restored",
   "turn_branched",
   "turn_branch_failed",
   "world_switched",

@@ -119,9 +119,21 @@ const sendQueue: string[] = [];
 const MAX_SEND_QUEUE = 64;
 const LAST_ROOM_KEY = "trpg-online-world-id";
 const ROLE_CHANGE_RECONNECT_NOTICE = "房间角色已更新，正在重新连接……";
+const RESTORE_RECONNECT_NOTICE = "存档已读取，正在重新同步当前进度…";
 
 /** 清除仅属于上一位玩家/上一房间的本地展示数据，避免切房或串号泄露。 */
-function clearPrivatePresentationState(): void {
+function clearPrivatePresentationState(preserveNotes = false): void {
+  const previous = useAppStore.getState();
+  const draft =
+    preserveNotes && previous.notesDirty
+      ? {
+          notesText: previous.notesText,
+          notesRevision: previous.notesRevision,
+          notesDirty: true,
+          notesStatus: "未保存：保留此窗口的草稿",
+          notesStatusKind: "",
+        }
+      : {};
   clearTransientHandouts();
   useAppStore.setState({
     activeWorldId: null,
@@ -146,6 +158,7 @@ function clearPrivatePresentationState(): void {
     savePanelOpen: false,
     saves: [],
     quickSaveState: "idle",
+    ...draft,
   });
   useStartStore.setState({
     gameStarted: false,
@@ -241,6 +254,28 @@ function open(): void {
       // 时间线切换/连接重定向：solo_world_switched 已把 activeWorldId 指向
       // 新时间线，OnlineShell 会建立新连接。区别于 4404 房间删除：此处不
       // 报错、不登出，也不向旧世界发起自动重连。
+      return;
+    }
+    if (event.code === 4413) {
+      // Restore rebuilds this SAME world. Discard every pre-restore queue and
+      // cursor in all same-owner tabs; ordinary reconnection keeps them intact.
+      bumpOnlineRequestEpoch();
+      sendQueue.length = 0;
+      lastEventId = null;
+      activeRoomTurnId = null;
+      pendingRoomRecoveryTurnId = null;
+      resetStructuredTransport();
+      useStructuredStore.getState().reset();
+      clearPrivatePresentationState(true);
+      displayWorldHistory([]);
+      useOnlineStore.setState({
+        privateEvents: [],
+        privateState: null,
+        roomSnapshotReady: false,
+        roomError: RESTORE_RECONNECT_NOTICE,
+        roomErrorCode: null,
+      });
+      scheduleReconnect();
       return;
     }
     if (event.code === 4401) {
@@ -436,6 +471,7 @@ const ACTION_ID_TYPES = new Set([
   "action",
   "continue",
   "save_load",
+  "solo_save_load",
   "turn_rewrite",
   "save",
   "save_create",
@@ -604,6 +640,13 @@ function handleRoomMessage(raw: unknown): void {
       }
       break;
     }
+    case "solo_save_restored": {
+      if (message.world_id === activeWorldId) {
+        setConnectionState("connecting");
+        useAppStore.setState({ inputEnabled: false });
+      }
+      break;
+    }
     case "room_full_state": {
       // latest_event_id 必须重置游标（包括服务重启后旧游标大于最新序号的情况）。
       if (typeof message.latest_event_id === "number") {
@@ -636,11 +679,13 @@ function handleRoomMessage(raw: unknown): void {
             ? message.active_investigator_id
             : null,
         roomError:
-          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE
+          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE ||
+          state.roomError === RESTORE_RECONNECT_NOTICE
             ? null
             : state.roomError,
         roomErrorCode:
-          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE
+          state.roomError === ROLE_CHANGE_RECONNECT_NOTICE ||
+          state.roomError === RESTORE_RECONNECT_NOTICE
             ? null
             : state.roomErrorCode,
       }));

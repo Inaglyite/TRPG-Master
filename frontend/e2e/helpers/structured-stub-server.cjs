@@ -47,6 +47,8 @@ function structuredCapabilities() {
     move_action: true,
     present_clue: true,
     use_item: true,
+    combat_action_request: true,
+    combat_weapon_item_id: true,
     commands: [
       "move_party",
       "request_check",
@@ -105,7 +107,14 @@ function roleFor(request) {
 }
 
 function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
-  const keeperUi = ["keeper-ui", "keeper-ui-readonly"].includes(scenario);
+  const keeperUi = [
+    "keeper-ui",
+    "keeper-ui-readonly",
+    "keeper-ui-long-label",
+    "keeper-ruling",
+    "keeper-ending-catalog",
+    "keeper-draft-review",
+  ].includes(scenario);
   const server = http.createServer((req, res) => {
     if (req.url && req.url.startsWith("/api/health")) {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -270,6 +279,7 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
       if (frame.type === "action_request") {
         send("action_ack", { request_id: frame.request_id, status: "queued" });
         const action = frame.action || {};
+        if (action.kind === "combat") return; // declaration is not execution
 
         if (action.kind === "freeform" && scenario === "revisions") {
           // 同一 revision 的两条不同聊天事件：都必须渲染。
@@ -464,6 +474,18 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
       }
 
       if (frame.type === "command_request") {
+        if (scenario === "keeper-ruling" && frame.kind === "record_ruling") {
+          const fixture = JSON.parse(
+            fs.readFileSync(
+              path.resolve(
+                __dirname,
+                "../../../schemas/structured-play/v1/fixtures/event/ruling_recorded.json",
+              ),
+              "utf8",
+            ),
+          );
+          send("ruling_recorded", fixture.payload, 13);
+        }
         send("action_ack", { request_id: frame.command_id, status: "queued" });
         send("action_status", {
           request_id: frame.command_id,
@@ -471,7 +493,10 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
           outcome: "success",
           detail: `命令 ${frame.kind} 已执行。`,
         });
-        if (scenario === "keeper-ui" && frame.kind === "resolve_draft") {
+        if (
+          ["keeper-ui", "keeper-draft-review"].includes(scenario) &&
+          frame.kind === "resolve_draft"
+        ) {
           send("keeper_draft_resolved", {
             draft_id: frame.payload.draft_id,
             decision: frame.payload.decision,
@@ -519,9 +544,24 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
                           ...structuredCapabilities().commands,
                           "resolve_draft",
                           "control_keeper",
+                          ...([
+                            "keeper-ruling",
+                            "keeper-ending-catalog",
+                          ].includes(scenario)
+                            ? ["record_ruling", "end_game"]
+                            : []),
                         ],
                 }
-              : structuredCapabilities(),
+              : scenario.startsWith("combat-")
+                ? {
+                    ...structuredCapabilities(),
+                    commands: [
+                      ...structuredCapabilities().commands,
+                      "combat_roll",
+                      "combat_decide",
+                    ],
+                  }
+                : structuredCapabilities(),
             keeper: keeperUi
               ? { user_id: "local", mode: "human" }
               : role === "keeper"
@@ -529,10 +569,29 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
                 : { mode: "human" },
             scene: { id: "miskatonic_university", name: "密斯卡托尼克大学" },
             destinations,
-            investigator_id: role === "player-b" ? "inv-bob" : "inv-alice",
+            investigator_id:
+              role === "player-b" || scenario === "combat-observer"
+                ? "inv-bob"
+                : "inv-alice",
             targets: PUBLIC_TARGETS,
             clues: CLUES,
-            items: ITEMS,
+            items:
+              scenario === "combat-declare"
+                ? [
+                    {
+                      id: "weapon-first",
+                      label: "手枪（3发）",
+                      quantity: 1,
+                      operations: [],
+                    },
+                    {
+                      id: "weapon-second",
+                      label: "手枪（5发）",
+                      quantity: 1,
+                      operations: [],
+                    },
+                  ]
+                : ITEMS,
             requests: keeperUi
               ? [
                   {
@@ -540,7 +599,9 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
                     status: "paused",
                     request_type: "action_request",
                     summary:
-                      "调查员准备前往远在阿卡姆城另一端的医学院并继续调查遗体与值班医生的关系",
+                      scenario === "keeper-ui-long-label"
+                        ? "Destination_" + "X".repeat(148)
+                        : "调查员准备前往远在阿卡姆城另一端的医学院并继续调查遗体与值班医生的关系",
                     detail: "模型调用超时",
                   },
                 ]
@@ -549,18 +610,188 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
               ? [
                   {
                     draft_id: "draft-layout",
-                    summary: "建议先向医生出示死亡证明。",
-                    proposed_commands: [
-                      {
-                        kind: "advance_time",
-                        payload: { minutes: 10, reason: "准备交涉" },
-                      },
-                    ],
+                    summary:
+                      scenario === "keeper-draft-review"
+                        ? "请审核战斗准备与等待事项。"
+                        : "建议先向医生出示死亡证明。",
+                    proposed_commands:
+                      scenario === "keeper-draft-review"
+                        ? [
+                            {
+                              kind: "combat_action",
+                              payload: {
+                                actor_id: "inv-alice",
+                                target_id: "john_whitcroft",
+                                action_type: "melee",
+                                damage_spec: "1d3",
+                              },
+                            },
+                            {
+                              kind: "resolve_intent",
+                              payload: {
+                                request_id: "paused-layout-action",
+                                resolution: "awaiting_player",
+                                outcome: "not_executed",
+                                pending_action: {
+                                  kind: "freeform",
+                                  note: "准备动作后，等待调查员自己回应",
+                                },
+                              },
+                            },
+                          ]
+                        : [
+                            {
+                              kind: "advance_time",
+                              payload: { minutes: 10, reason: "准备交涉" },
+                            },
+                          ],
                     narration: "医生低头看着你递来的文件，等待你的解释。",
                   },
                 ]
               : [],
             pending_checks: [],
+            ...(scenario.startsWith("combat-")
+              ? {
+                  combat: {
+                    active: scenario !== "combat-ending",
+                    encounter_id: "layout-encounter",
+                    round: 2,
+                    current_actor:
+                      scenario === "combat-pvp-ready" ? "inv-bob" : "inv-alice",
+                    turn_order:
+                      scenario === "combat-pvp-ready"
+                        ? ["inv-bob", "inv-alice"]
+                        : ["inv-alice", "john_whitcroft"],
+                    awaiting_roll: ![
+                      "combat-ending",
+                      "combat-declare",
+                    ].includes(scenario),
+                    participants: [
+                      {
+                        id: "inv-alice",
+                        name: "爱丽丝",
+                        kind: "pc",
+                        hp: 8,
+                        max_hp: 10,
+                        conditions: [],
+                      },
+                      {
+                        id:
+                          scenario === "combat-pvp-ready"
+                            ? "inv-bob"
+                            : "john_whitcroft",
+                        name:
+                          scenario === "combat-pvp-ready"
+                            ? "鲍勃"
+                            : "约翰·惠特克罗夫特医生",
+                        kind: scenario === "combat-pvp-ready" ? "pc" : "npc",
+                        hp: 6,
+                        max_hp: 8,
+                        conditions: [],
+                      },
+                    ],
+                  },
+                  combat_roll: ["combat-ending", "combat-declare"].includes(
+                    scenario,
+                  )
+                    ? null
+                    : {
+                        roll_id: "layout-roll",
+                        investigator_id: "inv-alice",
+                        actor_id:
+                          scenario === "combat-pvp-ready"
+                            ? "inv-bob"
+                            : "inv-alice",
+                        target_id:
+                          scenario === "combat-pvp-ready"
+                            ? "inv-alice"
+                            : "john_whitcroft",
+                        action_type:
+                          scenario === "combat-pvp-ready" ? "melee" : "firearm",
+                        source:
+                          scenario === "combat-pvp-ready"
+                            ? "pvp_defense"
+                            : "action",
+                      },
+                  ...(scenario === "combat-ending"
+                    ? {
+                        game_over: {
+                          id: "truth",
+                          type: "good",
+                          title: "真相与封印",
+                          summary: "调查告一段落，你把留下的记录整理成册。",
+                        },
+                        case_settlements: [
+                          {
+                            investigator_id: "inv-alice",
+                            character_id: "alice",
+                            case: {
+                              case_id: "layout-case",
+                              world_id: "layout-world",
+                              ending_type: "good",
+                              reputation_delta: 2,
+                            },
+                            career: {
+                              reputation: 12,
+                              case_history: [],
+                              completed_modules: ["scarlet"],
+                            },
+                          },
+                        ],
+                      }
+                    : {}),
+                }
+              : {}),
+            ...(scenario === "combat-record"
+              ? {
+                  combat_results: [
+                    JSON.parse(
+                      fs.readFileSync(
+                        path.resolve(
+                          __dirname,
+                          "../../../schemas/structured-play/v1/fixtures/event/combat_roll_resolved.json",
+                        ),
+                        "utf8",
+                      ),
+                    ).payload.result,
+                  ],
+                }
+              : {}),
+            ...(["keeper-ruling", "keeper-ending-catalog"].includes(scenario)
+              ? {
+                  keeper_rulings: {
+                    flags: [{ id: "sealed", type: "boolean", value: false }],
+                    recent: [],
+                    eligible_endings: [],
+                    ...(scenario === "keeper-ending-catalog"
+                      ? {
+                          ending_catalog: [
+                            JSON.parse(
+                              fs.readFileSync(
+                                path.resolve(
+                                  __dirname,
+                                  "../../../schemas/structured-play/v1/fixtures/event/ending_catalog_updated.json",
+                                ),
+                                "utf8",
+                              ),
+                            ).payload.ending_catalog[0],
+                            {
+                              id: "leave",
+                              title: "离开阿卡姆",
+                              ending_type: "neutral",
+                              description: "调查员明确决定离开。",
+                              trigger: "案件收尾",
+                              eligible: true,
+                              can_prepare: true,
+                              blocked_reason: "",
+                              conditions: [],
+                            },
+                          ],
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
             cursor: { event_id: eventId, revision: 12 },
           });
         }

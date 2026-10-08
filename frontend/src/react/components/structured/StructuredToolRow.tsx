@@ -13,6 +13,8 @@ import { useStructuredStore } from "../../../state/structured-store";
 import { useAppStore } from "../../../state/app-store";
 import { useOnlineStore } from "../../../state/online-store";
 import { RollDialog } from "./StructuredCards";
+import { KeeperConsole } from "./KeeperConsole";
+import { KeeperDiceTool } from "./KeeperDiceTool";
 
 export function StructuredToolRow() {
   const path = useStructuredStore((state) =>
@@ -40,7 +42,7 @@ export function StructuredToolRow() {
             investigatorId ||
             (mode === "online" && me?.investigator?.character_key)
           )
-        ? "未控制调查员，无法掷骰。"
+        ? "调查员普通骰需先认领角色。"
         : !capabilities.structuredProtocol
           ? "服务端能力不完整，暂不能提交结构化请求。"
           : !capabilities.freeRoll
@@ -61,6 +63,8 @@ export function StructuredToolRow() {
       >
         🎲 掷骰
       </button>
+      <KeeperDiceTool />
+      <KeeperConsole />
       {disabledReason &&
         (connection !== "connected" ||
           !capabilities.freeRoll ||

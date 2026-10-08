@@ -13,7 +13,155 @@ import {
   initialStructuredState,
   useStructuredStore,
 } from "../../../state/structured-store";
-import { KeeperConsole, keeperAuthorized } from "./KeeperConsole";
+import {
+  KeeperConsole,
+  keeperAuthorized,
+  actionBody,
+  actionTitle,
+} from "./KeeperConsole";
+
+describe("主持请求摘要按授权候选解释对象", () => {
+  const candidates = {
+    scenes: [{ id: "medical", name: "医学院" }],
+    npcs: [{ id: "shared", name: "医生" }],
+    investigators: [{ id: "shared", name: "调查员甲" }],
+    clues: [{ id: "letter", name: "密封信件" }],
+    items: [{ id: "kit", name: "急救包" }],
+  };
+  it("折叠标题显示已知对象名称，缺资料不猜名称，自由行动保留原标题", () => {
+    expect(
+      actionTitle(
+        { kind: "move", destination_scene_id: "medical" },
+        "原始编号标题",
+        candidates,
+      ),
+    ).toBe("申请前往：医学院");
+    expect(
+      actionTitle(
+        { kind: "move", destination_scene_id: "unknown" },
+        "原始编号标题",
+        candidates,
+      ),
+    ).toBe("申请前往：unknown");
+    expect(
+      actionTitle(
+        { kind: "freeform", text: "我想了解medical" },
+        "玩家自由行动",
+        candidates,
+      ),
+    ).toBe("玩家自由行动");
+    expect(actionTitle(undefined, "尚未同步的请求", candidates)).toBe(
+      "尚未同步的请求",
+    );
+    expect(
+      actionTitle(
+        {
+          kind: "use_item",
+          item_id: "kit",
+          quantity: 2,
+          operation: "custom",
+          approach: "包扎",
+        },
+        "使用物品 kit",
+        candidates,
+      ),
+    ).toBe("申请使用：急救包 ×2");
+  });
+  it("即兴用法为人类可读说明，未知操作保留原值", () => {
+    expect(
+      actionBody(
+        {
+          kind: "use_item",
+          item_id: "kit",
+          quantity: 1,
+          operation: "custom",
+          approach: "包扎",
+        },
+        candidates,
+      ),
+    ).toContain("用法：即兴用法（custom）");
+    expect(
+      actionBody(
+        {
+          kind: "use_item",
+          item_id: "kit",
+          quantity: 1,
+          operation: "unfamiliar",
+        },
+        candidates,
+      ),
+    ).toContain("用法：unfamiliar");
+  });
+  it("移动同时显示场景名与原编号，不解析自由文字", () => {
+    expect(
+      actionBody({ kind: "move", destination_scene_id: "medical" }, candidates),
+    ).toBe("申请前往：医学院（medical）");
+    expect(
+      actionBody({ kind: "freeform", text: "去medical看看" }, candidates),
+    ).toBe("去medical看看");
+  });
+  it("出示按目标类型解释姓名，保留方式、问题和线索编号", () => {
+    expect(
+      actionBody(
+        {
+          kind: "present_clue",
+          clue_id: "letter",
+          presentation: "describe",
+          physical_item_id: null,
+          target: { kind: "investigator", id: "shared" },
+          question: "认得吗？",
+        },
+        candidates,
+      ),
+    ).toContain("目标：调查员甲（shared）");
+    const body = actionBody(
+      {
+        kind: "present_clue",
+        clue_id: "letter",
+        presentation: "describe",
+        physical_item_id: null,
+        target: { kind: "npc", id: "shared" },
+        question: "认得吗？",
+      },
+      candidates,
+    );
+    expect(body).toContain("线索：密封信件（letter）");
+    expect(body).toContain("目标：医生（shared）");
+    expect(body).toContain("认得吗？");
+  });
+  it("使用数量不与库存数量混为一谈；未知对象保留编号", () => {
+    const body = actionBody(
+      {
+        kind: "use_item",
+        item_id: "kit",
+        quantity: 1,
+        operation: "custom",
+        target: { kind: "npc", id: "missing" },
+        approach: "包扎伤口",
+      },
+      candidates,
+    );
+    expect(body).toContain("物品：急救包（kit）");
+    expect(body).toContain("本次申请数量：1");
+    expect(body).toContain("目标：missing");
+    expect(body).toContain("包扎伤口");
+  });
+  it("出示原件摘要包含绑定的实物，未解析目标保留玩家原文", () => {
+    const body = actionBody(
+      {
+        kind: "present_clue",
+        clue_id: "letter",
+        presentation: "original",
+        physical_item_id: "sealed-letter",
+        target: { kind: "unresolved", text: "门口的来客" },
+      },
+      candidates,
+    );
+    expect(body).toContain("出示实物：sealed-letter");
+    expect(body).toContain("目标：门口的来客");
+    expect(body).not.toContain("目标：医生");
+  });
+});
 
 let sent: Record<string, unknown>[] = [];
 
@@ -51,6 +199,61 @@ beforeEach(() => {
 });
 
 describe("keeper 授权", () => {
+  it("主持作者目录补全未发现线索候选，当前场景的发现对象可用于正式检定", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState({
+      currentSceneId: "study",
+      keeperProgress: {
+        clocks: [],
+        clues: [
+          {
+            id: "diary",
+            category: "investigation",
+            text: "未发现的私人日记",
+            discovered: false,
+            granted_item: "私人日记",
+            item_id: "",
+            holder_id: "",
+            related_scenes: ["study"],
+            rules: [
+              {
+                index: 0,
+                intent: "search",
+                skill: "spot_hidden",
+                difficulty: "regular",
+                requires_success: true,
+                approach: "检查暗格",
+                sanity_note: "",
+                conditions: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-grant_clue"));
+    expect(
+      document.querySelector('[data-field="clue_id"] option[value="diary"]'),
+    ).not.toBeNull();
+    expect(
+      useStructuredStore.getState().clues.some((c) => c.id === "diary"),
+    ).toBe(false);
+    fireEvent.click(screen.getByTestId("keeper-cmd-request_check"));
+    expect(
+      document.querySelector(
+        '[data-field="target"] option[value="scene_object:diary"]',
+      ),
+    ).not.toBeNull();
+    act(() => useStructuredStore.setState({ currentSceneId: "library" }));
+    expect(
+      document.querySelector(
+        '[data-field="target"] option[value="scene_object:diary"]',
+      ),
+    ).toBeNull();
+    expect(sent).toEqual([]);
+  });
   it("Tab 排除关闭 details、隐藏祖先与 disabled fieldset；其他浮层的 Escape 不关闭主持台", () => {
     enableStructured({ user_id: null, mode: "human" });
     render(<KeeperConsole />);
@@ -92,6 +295,230 @@ describe("keeper 授权", () => {
 });
 
 describe("KeeperConsole", () => {
+  it("推进时间显示默认等待并显式选择类型，编辑不提交且不改变当前时间", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState({ clockMinutes: 60 });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-advance_time"));
+    const activity = screen.getByLabelText("活动类型");
+    expect(activity).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "未指定（按等待计时）" }),
+    ).toBeInTheDocument();
+    fireEvent.change(activity, { target: { value: "travel" } });
+    fireEvent.change(screen.getByLabelText("分钟"), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("原因"), {
+      target: { value: "wait 等待（只作说明）" },
+    });
+    expect(sent).toHaveLength(0);
+    expect(useStructuredStore.getState().clockMinutes).toBe(60);
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent[0]).toMatchObject({
+      kind: "advance_time",
+      payload: {
+        minutes: 20,
+        activity: "travel",
+        reason: "wait 等待（只作说明）",
+      },
+    });
+    expect(useStructuredStore.getState().clockMinutes).toBe(60);
+  });
+  it("人物状态仅核对真实角色卡，保留false，提交前不改变角色", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((s) => ({
+      capabilities: {
+        ...s.capabilities,
+        commands: [...s.capabilities.commands, "record_condition"],
+      },
+      keeperInvestigators: [
+        {
+          investigatorId: "inv-alice",
+          name: "调查员甲",
+          occupation: "记者",
+          hp: 1,
+          maxHp: 10,
+          san: 50,
+          maxSan: 99,
+          attributes: {},
+          skills: {},
+          conditions: [],
+          inventory: [],
+        },
+      ],
+    }));
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-record_condition"));
+    expect(screen.getByLabelText("本次核对的状态")).toHaveTextContent("待核对");
+    expect(sent).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("调查员"), {
+      target: { value: "inv-alice" },
+    });
+    fireEvent.change(screen.getByLabelText("状态"), {
+      target: { value: "unconscious" },
+    });
+    expect(screen.getByLabelText("本次核对的状态")).toHaveTextContent("未记录");
+    expect(screen.getByLabelText("人物状态参考")).toHaveTextContent(
+      "HP 1 / 10",
+    );
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("裁定依据"), {
+      target: { value: "主持根据已发生事件记录昏迷。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "记录变更" }));
+    expect(sent[0]).toMatchObject({
+      kind: "record_condition",
+      payload: {
+        investigator_id: "inv-alice",
+        condition: "unconscious",
+        operation: "add",
+        expected_present: false,
+      },
+    });
+    expect(
+      useStructuredStore.getState().keeperInvestigators[0].conditions,
+    ).toEqual([]);
+  });
+
+  it("真实前状态变化不自动改草稿，手动重新核对；HP0不能解除昏迷", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((s) => ({
+      capabilities: {
+        ...s.capabilities,
+        commands: [...s.capabilities.commands, "record_condition"],
+      },
+      keeperInvestigators: [
+        {
+          investigatorId: "inv-alice",
+          name: "调查员甲",
+          occupation: "记者",
+          hp: 0,
+          maxHp: 10,
+          san: 50,
+          maxSan: 99,
+          attributes: {},
+          skills: {},
+          conditions: [],
+          inventory: [],
+        },
+      ],
+    }));
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-record_condition"));
+    fireEvent.change(screen.getByLabelText("调查员"), {
+      target: { value: "inv-alice" },
+    });
+    fireEvent.change(screen.getByLabelText("状态"), {
+      target: { value: "unconscious" },
+    });
+    fireEvent.change(screen.getByLabelText("变更"), {
+      target: { value: "remove" },
+    });
+    fireEvent.change(screen.getByLabelText("裁定依据"), {
+      target: { value: "希望解除昏迷，但仍须核对生命值。" },
+    });
+    act(() =>
+      useStructuredStore.setState((s) => ({
+        keeperInvestigators: s.keeperInvestigators.map((sheet) => ({
+          ...sheet,
+          conditions: ["unconscious", "major_wound"],
+        })),
+      })),
+    );
+    expect(screen.getByLabelText("本次核对的状态")).toHaveTextContent("未记录");
+    expect(screen.getByText("记录已变化，请重新核对")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "记录变更" }));
+    expect(sent).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "核对当前记录" }));
+    expect(screen.getByLabelText("本次核对的状态")).toHaveTextContent("存在");
+    fireEvent.click(screen.getByRole("button", { name: "记录变更" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("HP 大于 0");
+    expect(sent).toHaveLength(0);
+    act(() =>
+      useStructuredStore.setState((s) => ({
+        keeperInvestigators: s.keeperInvestigators.map((sheet) => ({
+          ...sheet,
+          hp: 1,
+        })),
+      })),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "记录变更" }));
+    expect(sent[0]).toMatchObject({
+      kind: "record_condition",
+      payload: { expected_present: true, operation: "remove" },
+    });
+    expect(
+      useStructuredStore.getState().keeperInvestigators[0].conditions,
+    ).toEqual(["unconscious", "major_wound"]);
+  });
+
+  it("人类裁定使用真实类型与冻结旧值，提交不乐观改变状态", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((s) => ({
+      capabilities: {
+        ...s.capabilities,
+        commands: [...s.capabilities.commands, "record_ruling"],
+      },
+      keeperRulings: {
+        flags: [{ id: "sealed", type: "boolean", value: false }],
+        recent: [],
+        eligible_endings: [],
+      },
+    }));
+    const sent = vi.fn((_frame: unknown) => true);
+    setStructuredSender(sent);
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-record_ruling"));
+    fireEvent.change(screen.getByLabelText("剧情条件（模组编号）"), {
+      target: { value: "sealed" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /裁定后的状态/ }));
+    fireEvent.change(screen.getByLabelText("裁定依据"), {
+      target: { value: "仪式完成，主持确认。" },
+    });
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent.mock.calls[0][0]).toMatchObject({
+      kind: "record_ruling",
+      payload: {
+        flag_id: "sealed",
+        expected_before: false,
+        value: true,
+        basis: "仪式完成，主持确认。",
+      },
+    });
+    expect(useStructuredStore.getState().keeperRulings?.flags[0].value).toBe(
+      false,
+    );
+  });
+  it("结局资格只准备表单，不偷偷结束游戏", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((s) => ({
+      capabilities: {
+        ...s.capabilities,
+        commands: [...s.capabilities.commands, "end_game"],
+      },
+      keeperRulings: {
+        flags: [],
+        recent: [],
+        eligible_endings: [
+          { id: "seal", title: "封印完成", ending_type: "good" },
+        ],
+      },
+    }));
+    const sent = vi.fn((_frame: unknown) => true);
+    setStructuredSender(sent);
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByText("剧情裁定与结局资格"));
+    fireEvent.click(screen.getByRole("button", { name: "准备结算" }));
+    expect(screen.getByLabelText("模组结局 ID")).toHaveValue("seal");
+    expect(sent).not.toHaveBeenCalled();
+  });
   it("记忆查询完整发送超过20字的合法文本，接受中文逗号", () => {
     enableStructured({ user_id: null, mode: "human" });
     useStructuredStore.setState((state) => ({
@@ -281,6 +708,120 @@ describe("KeeperConsole", () => {
       expect((sent[0].payload as { target: unknown }).target).toEqual(target);
     },
   );
+  it("prepares typed combat request without executing and preserves original cause on explicit approval", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState((s) => ({
+      capabilities: {
+        ...s.capabilities,
+        commands: [...s.capabilities.commands, "combat_action"],
+        combatWeaponItemId: true,
+      },
+      keeperInvestigators: ["inv-alice", "inv-bob"].map((id) => ({
+        investigatorId: id,
+        name: id === "inv-alice" ? "爱丽丝" : "鲍勃",
+        occupation: "记者",
+        hp: 8,
+        maxHp: 10,
+        san: 60,
+        maxSan: 99,
+        attributes: {},
+        skills: {},
+        conditions: [],
+        inventory: [
+          {
+            id: id === "inv-alice" ? "weapon-second" : "bob-weapon",
+            label: "手枪（5发）",
+            quantity: 1,
+            operations: [],
+          },
+        ],
+      })),
+      combat: {
+        active: true,
+        participants: [
+          {
+            id: "inv-alice",
+            name: "爱丽丝",
+            kind: "pc",
+            hp: 8,
+            max_hp: 10,
+            conditions: [],
+          },
+          {
+            id: "guard",
+            name: "守卫",
+            kind: "npc",
+            hp: 8,
+            max_hp: 10,
+            conditions: [],
+          },
+          {
+            id: "inv-bob",
+            name: "鲍勃",
+            kind: "pc",
+            hp: 8,
+            max_hp: 10,
+            conditions: [],
+          },
+        ],
+      },
+    }));
+    useStructuredStore.getState().applyEvent({
+      ...EVENT_FIXTURES.snapshot,
+      type: "intent_pending",
+      payload: {
+        request_id: "combat-intent",
+        investigator_id: "inv-alice",
+        summary: "申报战斗动作",
+        action: {
+          kind: "combat",
+          encounter_id: "encounter-a",
+          action_type: "firearm",
+          target_id: "guard",
+          approach: "掩护同伴",
+          weapon_item_id: "weapon-second",
+        },
+      },
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByRole("button", { name: "准备战斗动作" }));
+    expect(screen.getByLabelText("行动者")).toHaveValue("inv-alice");
+    expect(screen.getByLabelText("目标", { exact: true })).toHaveValue("guard");
+    expect(screen.getByLabelText("动作")).toHaveValue("firearm");
+    const weaponSelect = screen.getByLabelText("武器物品") as HTMLSelectElement;
+    expect(weaponSelect).toHaveValue("weapon-second");
+    expect([...weaponSelect.options].map((o) => o.value)).not.toContain(
+      "bob-weapon",
+    );
+    expect(sent).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      kind: "combat_action",
+      cause_id: "combat-intent",
+      payload: {
+        actor_id: "inv-alice",
+        target_id: "guard",
+        action_type: "firearm",
+        description: "掩护同伴",
+        weapon_item_id: "weapon-second",
+      },
+    });
+    fireEvent.change(screen.getByLabelText("行动者"), {
+      target: { value: "inv-bob" },
+    });
+    const changedWeaponSelect = screen.getByLabelText(
+      "武器物品",
+    ) as HTMLSelectElement;
+    expect(changedWeaponSelect).toHaveValue("");
+    expect([...changedWeaponSelect.options].map((o) => o.value)).toContain(
+      "bob-weapon",
+    );
+    expect([...changedWeaponSelect.options].map((o) => o.value)).not.toContain(
+      "weapon-second",
+    );
+  });
   it("prepares the exact item request without consuming, settling or submitting it", () => {
     enableStructured({ user_id: null, mode: "human" });
     useStructuredStore.getState().applyEvent({

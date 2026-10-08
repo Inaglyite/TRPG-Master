@@ -12,7 +12,7 @@
  * 全程不调用模型：模型 base URL 指向关闭端口，任何误调用都会以错误暴露。
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -129,6 +129,54 @@ function collectFrames(page: Page): { sent: string[]; received: string[] } {
     socket.on("framereceived", (event) => received.push(String(event.payload)));
   });
   return { sent, received };
+}
+
+/** Scripted producer, not a real-model claim; all state lives in this test's runtime root. */
+function produceAssistedCombatDraft(
+  worldId: string,
+  requestId: string,
+  action: Record<string, unknown>,
+) {
+  const produced = spawnSync(
+    pythonPath(),
+    [
+      "-c",
+      [
+        "import asyncio, json, sys",
+        "from sqlalchemy import select",
+        "from src.storage.database import PlayerRequest, session_scope",
+        "from src.structured.agent import KeeperAgentRunner",
+        "world_id, request_id, action = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])",
+        "from src.storage.database import database_url",
+        "url = database_url()",
+        "async def caller(system, context):",
+        "    return json.dumps({'assessment':'验收：准备对抗，等待双方响应。', 'narration':'', 'commands':[{'kind':'combat_action','payload':action},{'kind':'resolve_intent','payload':{'request_id':request_id,'resolution':'awaiting_player','outcome':'not_executed','pending_action':{'kind':'freeform','note':'准备对抗，等待双方参与、选择防御并确认掷骰'}}}]}, ensure_ascii=False)",
+        "result = asyncio.run(KeeperAgentRunner(url, caller=caller).run_assisted(world_id=world_id, trigger_request_id=request_id))",
+        "assert result.stop_reason == 'draft_ready', result.stop_reason",
+        "with session_scope(url) as session:",
+        "    draft = session.scalar(select(PlayerRequest).where(PlayerRequest.world_id == world_id, PlayerRequest.request_type == 'keeper_draft').order_by(PlayerRequest.created_at.desc()))",
+        "    print(json.dumps({'draft_id':draft.request_id}))",
+      ].join("\n"),
+      worldId,
+      requestId,
+      JSON.stringify(action),
+    ],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        TRPG_RUNTIME_ROOT: runtimeRoot,
+        TRPG_DATABASE_URL: `sqlite:///${join(runtimeRoot, "e2e.db")}`,
+        TRPG_WRITE_COMPAT_EXPORTS: "0",
+        OPENAI_API_KEY: "e2e-placeholder",
+        OPENAI_BASE_URL: "http://127.0.0.1:9/v1",
+      },
+      encoding: "utf-8",
+    },
+  );
+  if (produced.status !== 0)
+    throw new Error(produced.stderr || produced.stdout);
+  return JSON.parse(produced.stdout.trim());
 }
 
 async function register(page: Page, username: string): Promise<void> {
@@ -522,6 +570,188 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
         frame.includes("session_snapshot"),
       ),
     ).not.toHaveLength(0);
+
+    // Actor-free keeper dice: actual commands, server privacy, no model or game effects.
+    const diceStartSnapshot = JSON.parse(
+      framesOf(keeperFrames.received, "session_snapshot").at(-1)!,
+    ).payload;
+    expect(diceStartSnapshot.investigator_id).toBeNull();
+    await expect(keeper.getByTestId("btn-keeper-dice")).toBeEnabled();
+    for (const player of [playerA, playerB])
+      await expect(player.getByTestId("btn-keeper-dice")).toHaveCount(0);
+    await keeper.getByTestId("btn-keeper-dice").click();
+    const diceDialog = keeper.getByRole("dialog", {
+      name: "主持普通骰",
+      exact: true,
+    });
+    await expect(
+      diceDialog.getByRole("combobox", { name: "接收范围" }),
+    ).toHaveValue("keeper");
+    for (const [width, height] of [
+      [1280, 900],
+      [939, 900],
+      [640, 900],
+      [390, 900],
+      [390, 360],
+    ]) {
+      await keeper.setViewportSize({ width, height });
+      for (const control of [
+        diceDialog.getByRole("textbox", { name: "骰式" }),
+        diceDialog.getByRole("combobox", { name: "接收范围" }),
+        diceDialog.getByTestId("keeper-dice-submit"),
+        diceDialog.getByRole("button", { name: "关闭", exact: true }),
+      ]) {
+        await control.scrollIntoViewIfNeeded();
+        const shape = await control.evaluate((node) => {
+          const r = node.getBoundingClientRect(),
+            s = getComputedStyle(node);
+          const label = node
+            .closest("label")
+            ?.querySelector("span")
+            ?.getBoundingClientRect();
+          const body = node
+            .closest(".panel-action-body")
+            ?.getBoundingClientRect();
+          return {
+            height: r.height,
+            padding: parseFloat(s.paddingLeft),
+            nowrap: s.whiteSpace,
+            within:
+              r.left >= 0 &&
+              r.right <= innerWidth &&
+              r.top >= 0 &&
+              r.bottom <= innerHeight,
+            hit: node.contains(
+              document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
+            ),
+            labelVisible:
+              !label ||
+              !body ||
+              (label.top >= Math.max(body.top, 0) &&
+                label.bottom <= Math.min(body.bottom, innerHeight)),
+          };
+        });
+        expect(shape.height).toBeGreaterThanOrEqual(44);
+        expect(shape.within).toBe(true);
+        expect(shape.hit).toBe(true);
+        expect(shape.labelVisible).toBe(true);
+        if (await control.evaluate((node) => node.tagName === "BUTTON")) {
+          expect(shape.padding).toBeGreaterThanOrEqual(13);
+          expect(shape.nowrap).toBe("nowrap");
+        }
+      }
+      expect(
+        await keeper.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      if (height === 360) {
+        const bothLabels = await diceDialog.evaluate((dialog) => {
+          const body = dialog
+            .querySelector(".panel-action-body")!
+            .getBoundingClientRect();
+          return [
+            ...dialog.querySelectorAll(".panel-action-field > span"),
+          ].every((span) => {
+            const r = span.getBoundingClientRect();
+            return r.top >= body.top && r.bottom <= body.bottom;
+          });
+        });
+        expect(bothLabels).toBe(true);
+      }
+      await keeper.screenshot({
+        path: resolve(
+          repositoryRoot,
+          `docs/design/platform-ui/keeper-dice-${width}${height === 360 ? "-short" : ""}.png`,
+        ),
+      });
+    }
+    await keeper.getByTestId("keeper-dice-submit").click();
+    const privateDice = JSON.parse(
+      framesOf(keeperFrames.sent, "command_request").at(-1)!,
+    );
+    expect(privateDice.kind).toBe("keeper_roll");
+    expect(privateDice.payload).toEqual({
+      spec: "1d100",
+      visibility: "keeper",
+    });
+    await expect
+      .poll(() =>
+        framesOf(keeperFrames.received, "keeper_roll_resolved").some(
+          (raw) =>
+            JSON.parse(raw).payload.command_id === privateDice.command_id,
+        ),
+      )
+      .toBe(true);
+    for (const frames of [playerAFrames, playerBFrames])
+      expect(
+        frames.received.some((raw) => raw.includes(privateDice.command_id)),
+      ).toBe(false);
+    await expect(
+      keeper.locator(
+        `[data-testid="keeper-dice-receipt"][data-command-id="${privateDice.command_id}"]`,
+      ),
+    ).toContainText("仅主持可见");
+    await keeper.setViewportSize({ width: 1440, height: 900 });
+    await keeper.getByTestId("btn-keeper-dice").click();
+    await diceDialog.getByRole("textbox", { name: "骰式" }).fill("2d6+3");
+    await diceDialog
+      .getByRole("combobox", { name: "接收范围" })
+      .selectOption("public");
+    await keeper.getByTestId("keeper-dice-submit").click();
+    const publicDice = JSON.parse(
+      framesOf(keeperFrames.sent, "command_request").at(-1)!,
+    );
+    for (const [page, frames] of [
+      [keeper, keeperFrames],
+      [playerA, playerAFrames],
+      [playerB, playerBFrames],
+    ] as const) {
+      await expect
+        .poll(() =>
+          framesOf(frames.received, "keeper_roll_resolved").some(
+            (raw) =>
+              JSON.parse(raw).payload.command_id === publicDice.command_id,
+          ),
+        )
+        .toBe(true);
+      await expect(
+        page.locator(
+          `[data-testid="keeper-dice-receipt"][data-command-id="${publicDice.command_id}"]`,
+        ),
+      ).toContainText("公开");
+    }
+    const resultBodies = [keeperFrames, playerAFrames, playerBFrames].map(
+      (frames) =>
+        JSON.parse(
+          framesOf(frames.received, "keeper_roll_resolved").find(
+            (raw) =>
+              JSON.parse(raw).payload.command_id === publicDice.command_id,
+          )!,
+        ).payload,
+    );
+    expect(resultBodies[0]).toEqual(resultBodies[1]);
+    expect(resultBodies[1]).toEqual(resultBodies[2]);
+    expect(resultBodies[0].total).toBeGreaterThanOrEqual(5);
+    expect(resultBodies[0].total).toBeLessThanOrEqual(15);
+    const diceEvents = framesOf(
+      keeperFrames.received,
+      "keeper_roll_resolved",
+    ).map((raw) => JSON.parse(raw));
+    expect(
+      diceEvents.every((e) => e.revision === diceStartSnapshot.revision),
+    ).toBe(true);
+    await keeper.screenshot({
+      path: resolve(
+        repositoryRoot,
+        "docs/design/platform-ui/keeper-dice-receipts.png",
+      ),
+    });
+    const commandsAfterDice = framesOf(
+      keeperFrames.sent,
+      "command_request",
+    ).length;
+    expect(commandsAfterDice).toBe(2);
 
     // ---- ① 主持定向私发线索给甲（乙不可见） ----
     await keeper.getByTestId("btn-keeper-console").click();
@@ -974,9 +1204,9 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
       .poll(() => framesOf(keeperFrames.sent, "command_request").length, {
         timeout: 20_000,
       })
-      .toBe(3); // 一次图片分发 + 一次公开叙事 + 一次私发线索；不能多发命令。
+      .toBe(commandsAfterDice + 3); // 两次普通骰之外，仍恰好三条原命令。
     const grantFrame = JSON.parse(
-      framesOf(keeperFrames.sent, "command_request")[2],
+      framesOf(keeperFrames.sent, "command_request")[commandsAfterDice + 2],
     ) as { kind: string; payload: Record<string, unknown> };
     expect(grantFrame.kind).toBe("grant_clue");
     expect(grantFrame.payload).toMatchObject({
@@ -1138,6 +1368,16 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
       .getByTestId("keeper-pending-request")
       .filter({ hasText: item.id });
     await expect(useRequest).toBeVisible();
+    await expect(useRequest.locator(".keeper-pending-label")).toHaveText(
+      `申请使用：${item.label} ×1`,
+    );
+    await useRequest.getByText("查看完整请求", { exact: true }).click();
+    await expect(useRequest.locator(".keeper-pending-body")).toContainText(
+      "本次申请数量：1",
+    );
+    await expect(useRequest.locator(".keeper-pending-body")).toContainText(
+      `${item.label}（${item.id}）`,
+    );
     const useId = await useRequest.locator(".keeper-pending-id").textContent();
     const useFrame = JSON.parse(
       framesOf(playerAFrames.sent, "action_request").at(-1)!,
@@ -1156,7 +1396,7 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
       keeperFrames.sent,
       "command_request",
     ).length;
-    for (const width of [1280, 939, 640]) {
+    for (const width of [1280, 939, 640, 390]) {
       await keeper.setViewportSize({ width, height: 900 });
       const prepare = useRequest.getByRole("button", {
         name: "准备使用",
@@ -1292,6 +1532,24 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
     await expect(playerA.getByTestId("structured-tool-row")).toBeVisible({
       timeout: 90_000,
     });
+    await expect(
+      playerA.locator(
+        `[data-testid="keeper-dice-receipt"][data-command-id="${publicDice.command_id}"]`,
+      ),
+    ).toBeVisible();
+    const restoredRolls = JSON.parse(
+      framesOf(playerAFrames.received, "session_snapshot").at(-1)!,
+    ).payload.keeper_rolls;
+    expect(
+      restoredRolls.some(
+        (r: { command_id: string }) => r.command_id === publicDice.command_id,
+      ),
+    ).toBe(true);
+    expect(
+      restoredRolls.some(
+        (r: { command_id: string }) => r.command_id === privateDice.command_id,
+      ),
+    ).toBe(false);
     await expect
       .poll(
         () =>
@@ -1444,7 +1702,59 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
 
     // ---- ⑤ 存档入口 + 甲刷新重连 ----
     await keeper.getByTestId("btn-keeper-console").click();
+    const latestClock =
+      framesOf(keeperFrames.received, "state_changed")
+        .map((raw) => JSON.parse(raw).payload.clock?.elapsed_minutes)
+        .filter((value) => typeof value === "number")
+        .at(-1) ??
+      JSON.parse(framesOf(keeperFrames.received, "session_snapshot").at(-1)!)
+        .payload.clock.elapsed_minutes;
+    expect(Number.isSafeInteger(latestClock)).toBe(true);
+    expect(latestClock).toBeLessThanOrEqual(200);
+    await keeper.getByTestId("keeper-cmd-advance_time").click();
+    await setKeeperField(keeper, "minutes", String(200 - latestClock));
+    await setKeeperField(keeper, "activity", "wait");
+    await setKeeperField(
+      keeper,
+      "reason",
+      "主持明确推进时间；并非对白里提到某个日期。",
+    );
+    const timeSubmit = await submitKeeperCommand(keeper, keeperFrames);
+    expect(timeSubmit.accepted, timeSubmit.lastError).toBe(true);
+    expect(
+      JSON.parse(framesOf(keeperFrames.sent, "command_request").at(-1)!).payload
+        .activity,
+    ).toBe("wait");
+    await expect(keeper.getByTestId("reference-game-clock")).toContainText(
+      "已过3小时20分钟",
+    );
+    for (const page of [keeper, playerA, playerB]) {
+      await expect(page.getByTestId("header-game-clock")).toContainText(
+        "已过3小时20分钟",
+      );
+    }
     await expect(keeper.getByTestId("keeper-save-panel")).toBeVisible();
+    // Actual owner + human keeper in a multiplayer room: save/management remain
+    // usable, but restoring this shared world is not an available UI action.
+    await expect(keeper.getByTestId("keeper-load")).toBeDisabled();
+    await expect(keeper.getByTestId("keeper-save")).toBeEnabled();
+    await expect(keeper.getByTestId("keeper-save-panel")).toBeEnabled();
+    await expect(keeper.getByTestId("keeper-save-reason")).toContainText(
+      "当前多人房间不支持读档",
+    );
+    for (const width of [1280, 939, 640, 390]) {
+      await keeper.setViewportSize({ width, height: 900 });
+      const saveRegion = keeper.getByRole("region", { name: "存档与续团" });
+      await saveRegion.scrollIntoViewIfNeeded();
+      await expect(keeper.getByTestId("keeper-save-reason")).toBeVisible();
+      await keeper.screenshot({
+        path: resolve(
+          repositoryRoot,
+          `docs/design/platform-ui/keeper-save-multiplayer-${width}.png`,
+        ),
+      });
+    }
+    await keeper.setViewportSize({ width: 1280, height: 900 });
     await keeper.getByRole("button", { name: "关闭主持台" }).click();
 
     const sceneNow = await keeper.locator(".header-scene-name").innerText();
@@ -1455,6 +1765,534 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
     await expect(playerA.locator(".header-scene-name")).toHaveText(sceneNow, {
       timeout: 30_000,
     });
+    await expect(playerA.getByTestId("header-game-clock")).toContainText(
+      "已过3小时20分钟",
+    );
+
+    // Real human battle flow, not a scripted model/stub projection. Use only
+    // authored in-scene NPCs and the actual investigator cards; no DB seeding.
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-combat_start").click();
+    const latestTargets = framesOf(keeperFrames.received, "state_changed")
+      .map((raw) => JSON.parse(raw).payload.targets)
+      .filter(Array.isArray)
+      .at(-1);
+    expect(latestTargets, "移动后没有刷新在场目标").toBeTruthy();
+    const combatNpc = latestTargets.find(
+      (target: { kind: string; id: string }) => target.kind === "npc",
+    );
+    expect(combatNpc, "当前真实场景缺少参战NPC").toBeTruthy();
+    await setKeeperField(keeper, "participants", combatNpc.id);
+    const startedCombat = await submitKeeperCommand(keeper, keeperFrames);
+    expect(startedCombat.accepted, startedCombat.lastError).toBe(true);
+    const latestCombat = () =>
+      JSON.parse(framesOf(keeperFrames.received, "combat_updated").at(-1)!)
+        .payload;
+    // A faster NPC can have initiative. Its non-dice movement is an ordinary
+    // keeper command, not an artificial rewrite of initiative.
+    for (
+      let turn = 0;
+      latestCombat().current_actor === combatNpc.id && turn < 3;
+      turn += 1
+    ) {
+      await keeper.getByTestId("keeper-cmd-combat_action").click();
+      await setKeeperField(keeper, "actor_id", combatNpc.id);
+      await setKeeperField(keeper, "action_type", "move");
+      await setKeeperField(keeper, "description", "退到房间另一侧。");
+      const movedNpc = await submitKeeperCommand(keeper, keeperFrames);
+      expect(movedNpc.accepted, movedNpc.lastError).toBe(true);
+    }
+    const actor = latestCombat().current_actor;
+    const actingPage = actor === playerAInvestigator ? playerA : playerB;
+    const otherPage = actingPage === playerA ? playerB : playerA;
+    const actingFrames = actingPage === playerA ? playerAFrames : playerBFrames;
+    const otherFrames = actingPage === playerA ? playerBFrames : playerAFrames;
+    expect(
+      latestCombat().participants.find(
+        (p: { id: string; kind: string }) => p.id === actor,
+      )?.kind,
+    ).toBe("pc");
+    const privateBefore =
+      framesOf(otherFrames.received, "combat_decision_required").length +
+      framesOf(otherFrames.received, "combat_roll_required").length;
+    await keeper.getByTestId("keeper-cmd-combat_action").click();
+    await setKeeperField(keeper, "actor_id", actor);
+    await setKeeperField(keeper, "target_id", combatNpc.id);
+    await setKeeperField(keeper, "action_type", "melee");
+    await setKeeperField(keeper, "damage_spec", "1d3");
+    const preparedCombat = await submitKeeperCommand(keeper, keeperFrames);
+    expect(preparedCombat.accepted, preparedCombat.lastError).toBe(true);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    const battleCard = actingPage.getByTestId("combat-field-record");
+    await expect(battleCard).toBeVisible();
+    // Non-hostile authored NPCs require the player's explicit violence choice.
+    const decisionFrames = framesOf(
+      actingFrames.received,
+      "combat_decision_required",
+    );
+    if (latestCombat().awaiting_decision) {
+      const decision = JSON.parse(decisionFrames.at(-1)!).payload;
+      expect(decision.kind).toBe("irreversible_violence");
+      const proceed = decision.options.find(
+        (option: { id: string }) => option.id === "confirm_violence",
+      );
+      expect(proceed).toBeTruthy();
+      await battleCard
+        .getByRole("button", { name: proceed.label, exact: true })
+        .click();
+    }
+    await expect(
+      battleCard.getByRole("button", { name: "掷骰", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      otherPage.getByTestId("combat-field-record").getByRole("button"),
+    ).toHaveCount(0);
+    await expect(
+      keeper.getByTestId("combat-field-record").getByRole("button"),
+    ).toHaveCount(0);
+    await actingPage.reload();
+    await expect(
+      actingPage
+        .getByTestId("combat-field-record")
+        .getByRole("button", { name: "掷骰", exact: true }),
+    ).toBeEnabled({ timeout: 90_000 });
+    const rollsBefore = framesOf(
+      actingFrames.received,
+      "combat_roll_resolved",
+    ).length;
+    await actingPage
+      .getByTestId("combat-field-record")
+      .getByRole("button", { name: "掷骰", exact: true })
+      .click();
+    await expect
+      .poll(
+        () => framesOf(actingFrames.received, "combat_roll_resolved").length,
+      )
+      .toBeGreaterThan(rollsBefore);
+    const receipt = JSON.parse(
+      framesOf(actingFrames.received, "combat_roll_resolved").at(-1)!,
+    ).payload.result;
+    expect(receipt.rolls.length).toBeGreaterThan(0);
+    for (const page of [keeper, actingPage]) {
+      const history = page.getByTestId("combat-result-history");
+      await expect(history).toBeVisible();
+      await history.locator("summary").click();
+      await expect(history).toContainText(`d100=${receipt.rolls[0].roll}`);
+    }
+    await expect(otherPage.getByTestId("combat-result-history")).toHaveCount(0);
+    await actingPage.reload();
+    await expect(actingPage.getByTestId("combat-result-history")).toBeVisible({
+      timeout: 90_000,
+    });
+    await actingPage
+      .getByTestId("combat-result-history")
+      .locator("summary")
+      .click();
+    await expect(actingPage.getByTestId("combat-result-history")).toContainText(
+      `d100=${receipt.rolls[0].roll}`,
+    );
+    await expect(
+      actingPage.getByTestId("combat-field-record").getByRole("button"),
+    ).toHaveCount(0);
+    expect(
+      framesOf(otherFrames.received, "combat_decision_required").length +
+        framesOf(otherFrames.received, "combat_roll_required").length,
+    ).toBe(privateBefore);
+    // Actual authored .38 revolver, selected by the owner's button and stable
+    // registry ID. Advance initiative only through ordinary keeper commands;
+    // no DB rewrites, fake inventory or model calls establish this premise.
+    await keeper.getByTestId("btn-keeper-console").click();
+    let shooter = "",
+      gunId = "";
+    for (let step = 0; step < 8; step++) {
+      const currentActor = latestCombat().current_actor;
+      await keeper.getByTestId("keeper-cmd-combat_action").click();
+      await setKeeperField(keeper, "actor_id", currentActor);
+      const kind = latestCombat().participants.find(
+        (p: { id: string }) => p.id === currentActor,
+      )?.kind;
+      if (kind === "pc") {
+        const choices = await keeper
+          .locator('[data-field="weapon_item_id"] option')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => ({
+              id: (node as HTMLOptionElement).value,
+              label: node.textContent || "",
+            })),
+          );
+        const gun = choices.find((choice) =>
+          choice.label.startsWith(".38口径左轮手枪（6发）"),
+        );
+        if (gun) {
+          shooter = currentActor;
+          gunId = gun.id;
+          break;
+        }
+      }
+      await setKeeperField(keeper, "action_type", "other");
+      await setKeeperField(
+        keeper,
+        "description",
+        "观察现场，等待下一位调查员准备动作。",
+      );
+      const waited = await submitKeeperCommand(keeper, keeperFrames);
+      expect(waited.accepted, waited.lastError).toBe(true);
+    }
+    expect(gunId, "没有轮到真实持有模组左轮的调查员").not.toBe("");
+    const gunPage = shooter === playerAInvestigator ? playerA : playerB;
+    const gunFrames = gunPage === playerA ? playerAFrames : playerBFrames;
+    const otherGunFrames = gunPage === playerA ? playerBFrames : playerAFrames;
+    const otherInventoryEvents = framesOf(
+      otherGunFrames.received,
+      "inventory_changed",
+    ).length;
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    await gunPage
+      .getByRole("button", { name: "申报战斗动作", exact: true })
+      .click();
+    const shotDialog = gunPage.getByRole("dialog", { name: "申报战斗动作" });
+    await shotDialog
+      .getByLabel("动作", { exact: true })
+      .selectOption("firearm");
+    await shotDialog
+      .getByLabel("目标", { exact: true })
+      .selectOption(combatNpc.id);
+    await shotDialog
+      .getByLabel("使用的持有物品", { exact: true })
+      .selectOption(gunId);
+    await shotDialog.getByRole("button", { name: "提交申报" }).click();
+    const shotRequest = JSON.parse(
+      framesOf(gunFrames.sent, "action_request").at(-1)!,
+    );
+    expect(shotRequest.action).toMatchObject({
+      kind: "combat",
+      action_type: "firearm",
+      weapon_item_id: gunId,
+    });
+    await expect
+      .poll(() =>
+        framesOf(gunFrames.received, "action_ack").some(
+          (raw) =>
+            JSON.parse(raw).payload.request_id === shotRequest.request_id,
+        ),
+      )
+      .toBe(true);
+    await keeper.getByTestId("btn-keeper-console").click();
+    const shotPending = keeper
+      .getByTestId("keeper-pending-request")
+      .filter({ hasText: shotRequest.request_id });
+    await shotPending.getByRole("button", { name: "准备战斗动作" }).click();
+    await expect(keeper.getByLabel("武器物品")).toHaveValue(gunId);
+    await setKeeperField(keeper, "damage_spec", "1d2");
+    const preparedShot = await submitKeeperCommand(keeper, keeperFrames);
+    expect(preparedShot.accepted, preparedShot.lastError).toBe(true);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    const gunCard = gunPage.getByTestId("combat-field-record");
+    if (latestCombat().awaiting_decision) {
+      const decision = JSON.parse(
+        framesOf(gunFrames.received, "combat_decision_required").at(-1)!,
+      ).payload;
+      const proceed = decision.options.find(
+        (o: { id: string }) => o.id === "confirm_violence",
+      );
+      await gunCard
+        .getByRole("button", { name: proceed.label, exact: true })
+        .click();
+    }
+    await expect(gunCard).toContainText("批准时选定：.38口径左轮手枪（6发）");
+    // A committed keeper injury must update the exact character and encounter,
+    // retire old dice consent live and after reconnect, and not leak the full
+    // private stat projection to the other player. No shot has occurred yet.
+    const shooterBefore = latestCombat().participants.find(
+      (p: { id: string }) => p.id === shooter,
+    );
+    const oldShotRoll = JSON.parse(
+      framesOf(gunFrames.received, "combat_roll_required").at(-1)!,
+    ).payload.roll_id;
+    const otherStatEvents = framesOf(
+      otherGunFrames.received,
+      "state_changed",
+    ).length;
+    const shotReceiptsBefore = framesOf(
+      gunFrames.received,
+      "combat_roll_resolved",
+    ).length;
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-adjust_stat").click();
+    await setKeeperField(keeper, "investigator_id", shooter);
+    await setKeeperField(keeper, "field", "hp");
+    await setKeeperField(keeper, "delta", "-1");
+    await setKeeperField(
+      keeper,
+      "reason",
+      "主持确认旧伤恶化，需要重新批准本次动作。",
+    );
+    const injured = await submitKeeperCommand(keeper, keeperFrames);
+    expect(injured.accepted, injured.lastError).toBe(true);
+    await expect(
+      gunCard.getByRole("button", { name: "掷骰", exact: true }),
+    ).toHaveCount(0);
+    await expect
+      .poll(
+        () =>
+          latestCombat().participants.find(
+            (p: { id: string }) => p.id === shooter,
+          ).hp,
+      )
+      .toBe(shooterBefore.hp - 1);
+    expect(framesOf(otherGunFrames.received, "state_changed")).toHaveLength(
+      otherStatEvents,
+    );
+    expect(framesOf(gunFrames.received, "combat_roll_resolved")).toHaveLength(
+      shotReceiptsBefore,
+    );
+    expect(framesOf(otherGunFrames.received, "inventory_changed")).toHaveLength(
+      otherInventoryEvents,
+    );
+    await gunPage.reload();
+    await expect(gunPage.getByTestId("structured-tool-row")).toBeVisible({
+      timeout: 90_000,
+    });
+    await expect
+      .poll(
+        () =>
+          JSON.parse(framesOf(gunFrames.received, "session_snapshot").at(-1)!)
+            .payload.character.hp,
+      )
+      .toBe(shooterBefore.hp - 1);
+    const injurySnapshot = JSON.parse(
+      framesOf(gunFrames.received, "session_snapshot").at(-1)!,
+    ).payload;
+    expect(injurySnapshot.combat_roll).toBeNull();
+    expect(
+      injurySnapshot.items.find((item: { id: string }) => item.id === gunId)
+        .label,
+    ).toBe(".38口径左轮手枪（6发）");
+    if (
+      (await gunPage.locator("#char-panel").getAttribute("class"))?.includes(
+        "collapsed",
+      )
+    ) {
+      await gunPage.locator("#btn-panel").click();
+    }
+    await expect(gunPage.locator("#hp-bar")).toContainText(
+      `${shooterBefore.hp - 1} / ${shooterBefore.max_hp}`,
+    );
+    await gunPage.screenshot({
+      path: "../docs/design/platform-ui/combat-vitals-synced.png",
+      fullPage: true,
+    });
+    // Human clinical records use real sheets and commands, not database seeding
+    // or narrative inference. Adding/removing prone never heals or fires a gun.
+    await expect(
+      keeper.getByRole("dialog", { name: "主持工作台" }),
+    ).toBeVisible();
+    await keeper.getByTestId("keeper-cmd-record_condition").click();
+    await setKeeperField(keeper, "investigator_id", shooter);
+    await setKeeperField(keeper, "condition", "prone");
+    await setKeeperField(keeper, "operation", "add");
+    const clinicalBasis = `主持确认调查员暂时倒地，未改变生命值。clinical-private-${runId}`;
+    await setKeeperField(keeper, "basis", clinicalBasis);
+    const clinicalForm = keeper.getByRole("region", { name: "命令表单" });
+    await expect(keeper.getByLabel("本次核对的状态")).toHaveText("未记录");
+    const privateStatsBefore = framesOf(
+      otherGunFrames.received,
+      "state_changed",
+    ).length;
+    const rollsBeforeRecord = framesOf(
+      gunFrames.received,
+      "combat_roll_resolved",
+    ).length;
+    for (const width of [1280, 939, 640, 390]) {
+      await keeper.setViewportSize({ width, height: 900 });
+      for (const field of ["investigator_id", "condition", "operation"]) {
+        const select = keeper.locator(`[data-field="${field}"] select`);
+        await select.scrollIntoViewIfNeeded();
+        expect((await select.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
+      await keeper.getByLabel("人物状态参考").scrollIntoViewIfNeeded();
+      await expect(keeper.getByLabel("人物状态参考")).toContainText(
+        `HP ${shooterBefore.hp - 1}`,
+      );
+      await keeper.screenshot({
+        path: `../docs/design/platform-ui/condition-record-reading-${width}.png`,
+      });
+      for (const control of [
+        keeper.getByRole("button", { name: "核对当前记录" }),
+        keeper.getByRole("button", { name: "记录变更" }),
+      ]) {
+        await control.scrollIntoViewIfNeeded();
+        const geometry = await control.evaluate((el) => {
+          const rect = el.getBoundingClientRect(),
+            style = getComputedStyle(el);
+          return {
+            height: rect.height,
+            padding: parseFloat(style.paddingLeft),
+            nowrap: style.whiteSpace,
+            hit: el.contains(
+              document.elementFromPoint(
+                rect.x + rect.width / 2,
+                rect.y + rect.height / 2,
+              ),
+            ),
+          };
+        });
+        expect(geometry.height).toBeGreaterThanOrEqual(44);
+        expect(geometry.padding).toBeGreaterThanOrEqual(10);
+        expect(geometry.nowrap).toBe("nowrap");
+        expect(geometry.hit).toBe(true);
+      }
+      expect(
+        await keeper.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await keeper.screenshot({
+        path: `../docs/design/platform-ui/condition-record-${width}.png`,
+      });
+    }
+    await keeper.setViewportSize({ width: 390, height: 360 });
+    await keeper
+      .getByRole("button", { name: "记录变更" })
+      .scrollIntoViewIfNeeded();
+    const shortButton = await keeper
+      .getByRole("button", { name: "记录变更" })
+      .boundingBox();
+    expect(shortButton!.y).toBeGreaterThanOrEqual(0);
+    expect(shortButton!.y + shortButton!.height).toBeLessThanOrEqual(360);
+    await keeper.screenshot({
+      path: "../docs/design/platform-ui/condition-record-390-short.png",
+    });
+    await keeper.setViewportSize({ width: 1280, height: 900 });
+    expect((await submitKeeperCommand(keeper, keeperFrames)).accepted).toBe(
+      true,
+    );
+    await expect
+      .poll(
+        () =>
+          latestCombat().participants.find(
+            (p: { id: string }) => p.id === shooter,
+          ).conditions,
+      )
+      .toContain("prone");
+    expect(
+      latestCombat().participants.find((p: { id: string }) => p.id === shooter)
+        .hp,
+    ).toBe(shooterBefore.hp - 1);
+    // The captured false remains frozen after the live true arrives.
+    await expect(keeper.getByLabel("本次核对的状态")).toHaveText("未记录");
+    await expect(clinicalForm).toContainText("记录已变化");
+    await keeper.getByRole("button", { name: "核对当前记录" }).click();
+    await setKeeperField(keeper, "operation", "remove");
+    await setKeeperField(
+      keeper,
+      "basis",
+      "调查员已站起，主持只移除倒地标记，不补生命。",
+    );
+    expect((await submitKeeperCommand(keeper, keeperFrames)).accepted).toBe(
+      true,
+    );
+    await expect
+      .poll(
+        () =>
+          latestCombat().participants.find(
+            (p: { id: string }) => p.id === shooter,
+          ).conditions,
+      )
+      .not.toContain("prone");
+    expect(framesOf(gunFrames.received, "combat_roll_resolved")).toHaveLength(
+      rollsBeforeRecord,
+    );
+    expect(framesOf(otherGunFrames.received, "state_changed")).toHaveLength(
+      privateStatsBefore,
+    );
+    expect(framesOf(otherGunFrames.received, "inventory_changed")).toHaveLength(
+      otherInventoryEvents,
+    );
+    expect(otherGunFrames.received.join(" ")).not.toContain(clinicalBasis);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    const snapshotsBeforeClinicalReload = framesOf(
+      gunFrames.received,
+      "session_snapshot",
+    ).length;
+    await gunPage.reload();
+    await expect
+      .poll(() => framesOf(gunFrames.received, "session_snapshot").length)
+      .toBeGreaterThan(snapshotsBeforeClinicalReload);
+    await expect
+      .poll(() => {
+        const character = JSON.parse(
+          framesOf(gunFrames.received, "session_snapshot").at(-1)!,
+        ).payload.character;
+        return {
+          hp: character.hp,
+          prone: character.conditions.includes("prone"),
+        };
+      })
+      .toEqual({ hp: shooterBefore.hp - 1, prone: false });
+    // The original request is still a task, not implicitly marked successful.
+    // Re-approval is explicit and creates fresh consent bound to the same gun.
+    await keeper.getByTestId("btn-keeper-console").click();
+    await shotPending.getByRole("button", { name: "准备战斗动作" }).click();
+    await setKeeperField(keeper, "damage_spec", "1d2");
+    const approvedAgain = await submitKeeperCommand(keeper, keeperFrames);
+    expect(approvedAgain.accepted, approvedAgain.lastError).toBe(true);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    if (latestCombat().awaiting_decision) {
+      const freshDecision = JSON.parse(
+        framesOf(gunFrames.received, "combat_decision_required").at(-1)!,
+      ).payload;
+      const proceed = freshDecision.options.find(
+        (o: { id: string }) => o.id === "confirm_violence",
+      );
+      await gunCard
+        .getByRole("button", { name: proceed.label, exact: true })
+        .click();
+    }
+    await expect(gunCard).toContainText("批准时选定：.38口径左轮手枪（6发）");
+    const freshShotRoll = JSON.parse(
+      framesOf(gunFrames.received, "combat_roll_required").at(-1)!,
+    ).payload.roll_id;
+    expect(freshShotRoll).not.toBe(oldShotRoll);
+    await gunCard.getByRole("button", { name: "掷骰", exact: true }).click();
+    await expect
+      .poll(() =>
+        framesOf(gunFrames.received, "inventory_changed").some((raw) =>
+          JSON.parse(raw).payload.items?.some(
+            (item: { id: string; label: string }) =>
+              item.id === gunId && item.label === ".38口径左轮手枪（5发）",
+          ),
+        ),
+      )
+      .toBe(true);
+    expect(framesOf(otherGunFrames.received, "inventory_changed")).toHaveLength(
+      otherInventoryEvents,
+    );
+    const shotResult = JSON.parse(
+      framesOf(gunFrames.received, "combat_roll_resolved").at(-1)!,
+    ).payload.result;
+    expect(shotResult.action_type).toBe("firearm");
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-resolve_intent").click();
+    await setKeeperField(keeper, "request_id", shotRequest.request_id);
+    await setKeeperField(keeper, "resolution", "completed");
+    await setKeeperField(
+      keeper,
+      "outcome",
+      shotResult.outcome === "attacker_hit" ? "success" : "failure",
+    );
+    const resolvedShot = await submitKeeperCommand(keeper, keeperFrames);
+    expect(resolvedShot.accepted, resolvedShot.lastError).toBe(true);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-combat_end").click();
+    await setKeeperField(keeper, "reason", "双方停手，由主持结束本次遭遇。");
+    const stoppedCombat = await submitKeeperCommand(keeper, keeperFrames);
+    expect(stoppedCombat.accepted, stoppedCombat.lastError).toBe(true);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    for (const page of [keeper, playerA, playerB]) {
+      await expect(page.getByTestId("combat-field-record")).toHaveCount(0);
+    }
 
     // The room is asynchronous, not an old alternating-turn lobby.
     await expect(playerA.getByTestId("online-room-dock")).toContainText(
@@ -1528,6 +2366,404 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
         path: `/tmp/trpg-viewer-readonly-${width}.png`,
       });
     }
+
+    // Player-to-player confrontation: both controllers participate, the target
+    // chooses defence, then separately readies dice before the attacker's roll.
+    // No model and no DB rewriting; use the actual cards/initiative.
+    await keeper.getByRole("button", { name: "返回游戏", exact: true }).click();
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-combat_start").click();
+    await setKeeperField(keeper, "participants", playerAInvestigator);
+    const startedPvp = await submitKeeperCommand(keeper, keeperFrames);
+    expect(startedPvp.accepted, startedPvp.lastError).toBe(true);
+    const pvpActorId = latestCombat().current_actor;
+    const pvpActorPage = pvpActorId === playerAInvestigator ? playerA : playerB;
+    const pvpTargetPage = pvpActorPage === playerA ? playerB : playerA;
+    const pvpTargetId = latestCombat().participants.find(
+      (p: { id: string; kind: string }) =>
+        p.kind === "pc" && p.id !== pvpActorId,
+    )?.id;
+    expect(pvpTargetId, "真实遭遇里没有另一名调查员").toBeTruthy();
+    const pvpTargetFrames =
+      pvpTargetPage === playerA ? playerAFrames : playerBFrames;
+    const pvpActorFrames =
+      pvpActorPage === playerA ? playerAFrames : playerBFrames;
+    const pvpHpBefore = latestCombat().participants.map(
+      (p: { id: string; hp: number }) => [p.id, p.hp],
+    );
+    await pvpActorPage
+      .getByRole("button", { name: "申报战斗动作", exact: true })
+      .click();
+    const combatDeclaration = pvpActorPage.getByRole("dialog", {
+      name: "申报战斗动作",
+    });
+    await combatDeclaration
+      .getByLabel("目标", { exact: true })
+      .selectOption(pvpTargetId);
+    await combatDeclaration
+      .getByLabel("补充做法（选填）")
+      .fill("我提出与同伴进行对抗，先等双方确认。");
+    const beforeDraftIntent = framesOf(
+      pvpActorFrames.sent,
+      "action_request",
+    ).length;
+    await combatDeclaration
+      .getByRole("button", { name: "提交申报", exact: true })
+      .click();
+    await expect
+      .poll(() => framesOf(pvpActorFrames.sent, "action_request").length)
+      .toBeGreaterThan(beforeDraftIntent);
+    const declarationFrame = JSON.parse(
+      framesOf(pvpActorFrames.sent, "action_request").at(-1)!,
+    );
+    expect(declarationFrame.action).toMatchObject({
+      kind: "combat",
+      action_type: "melee",
+      target_id: pvpTargetId,
+      encounter_id: latestCombat().encounter_id,
+    });
+    const draftRequest = declarationFrame.request_id;
+    await expect
+      .poll(() =>
+        framesOf(pvpActorFrames.received, "action_ack").some(
+          (raw) => JSON.parse(raw).payload.request_id === draftRequest,
+        ),
+      )
+      .toBe(true);
+    const draftWorldId = JSON.parse(
+      framesOf(keeperFrames.received, "session_snapshot").at(-1)!,
+    ).world_id;
+    const scriptedDraft = produceAssistedCombatDraft(
+      draftWorldId,
+      draftRequest,
+      {
+        actor_id: pvpActorId,
+        target_id: pvpTargetId,
+        action_type: "melee",
+        damage_spec: "1d3",
+      },
+    );
+    // Reconnect restores the real persisted draft. No production model is used.
+    await keeper.reload();
+    const draftReview = keeper.getByTestId("keeper-draft-card");
+    await expect(draftReview).toContainText("验收：准备对抗，等待双方响应。", {
+      timeout: 90000,
+    });
+    await expect(draftReview).toContainText("批准战斗动作");
+    expect(
+      latestCombat().participants.map((p: { id: string; hp: number }) => [
+        p.id,
+        p.hp,
+      ]),
+    ).toEqual(pvpHpBefore);
+    await expect(
+      pvpActorPage.getByRole("button", { name: "申报战斗动作", exact: true }),
+    ).toBeDisabled();
+    await draftReview.getByTestId("draft-approve").click();
+    await expect(draftReview).toHaveCount(0);
+    expect(
+      JSON.parse(framesOf(keeperFrames.sent, "command_request").at(-1)!),
+    ).toMatchObject({
+      kind: "resolve_draft",
+      payload: { draft_id: scriptedDraft.draft_id, decision: "approved" },
+    });
+    const pvpActorCard = pvpActorPage.getByTestId("combat-field-record");
+    const pvpTargetCard = pvpTargetPage.getByTestId("combat-field-record");
+    await expect(
+      pvpActorCard.getByRole("button", { name: "同意参与对抗" }),
+    ).toBeEnabled();
+    await expect(pvpTargetCard.getByRole("button")).toHaveCount(0);
+    await expect(
+      keeper.getByTestId("combat-field-record").getByRole("button"),
+    ).toHaveCount(0);
+    await pvpActorCard.getByRole("button", { name: "同意参与对抗" }).click();
+    await pvpTargetCard.getByRole("button", { name: "同意参与对抗" }).click();
+    await pvpTargetCard
+      .getByRole("button", { name: "闪避", exact: true })
+      .click();
+    await expect(pvpTargetCard).toContainText("双方确认前不会产生骰点");
+    const pvpTargetResultCount = framesOf(
+      pvpTargetFrames.received,
+      "combat_roll_resolved",
+    ).length;
+    await pvpTargetCard
+      .getByRole("button", { name: "确认掷骰", exact: true })
+      .click();
+    await expect(
+      pvpActorCard.getByRole("button", { name: "确认掷骰", exact: true }),
+    ).toBeEnabled();
+    expect(
+      latestCombat().participants.map((p: { id: string; hp: number }) => [
+        p.id,
+        p.hp,
+      ]),
+    ).toEqual(pvpHpBefore);
+    const readyFrames = () =>
+      framesOf(pvpTargetFrames.received, "combat_roll_resolved")
+        .slice(pvpTargetResultCount)
+        .map((raw) => JSON.parse(raw).payload);
+    // The actor's socket can receive its waiting card before the target's
+    // independent socket delivers this receipt. Wait for the target's OWN
+    // committed event; do not retry an action or weaken the exact-count check.
+    await expect.poll(readyFrames).toHaveLength(1);
+    const readyReceipt = readyFrames()[0];
+    expect(readyReceipt).not.toHaveProperty("result");
+    expect(readyReceipt.roll_id).toBe(
+      JSON.parse(framesOf(pvpTargetFrames.sent, "command_request").at(-1)!)
+        .payload.roll_id,
+    );
+    await pvpActorPage.reload();
+    await expect(
+      pvpActorPage
+        .getByTestId("combat-field-record")
+        .getByRole("button", { name: "确认掷骰", exact: true }),
+    ).toBeEnabled({ timeout: 90000 });
+    await pvpActorPage
+      .getByTestId("combat-field-record")
+      .getByRole("button", { name: "确认掷骰", exact: true })
+      .click();
+    for (const [page, frames, id] of [
+      [pvpActorPage, pvpActorFrames, pvpActorId],
+      [pvpTargetPage, pvpTargetFrames, pvpTargetId],
+    ] as const) {
+      await expect
+        .poll(() =>
+          framesOf(frames.received, "combat_roll_resolved").some((raw) => {
+            const result = JSON.parse(raw).payload.result;
+            return (
+              result?.investigator_id === id &&
+              result?.target_id === pvpTargetId
+            );
+          }),
+        )
+        .toBe(true);
+      await expect(
+        page
+          .getByTestId("combat-field-record")
+          .getByRole("button")
+          .filter({ hasNotText: "申报战斗动作" }),
+      ).toHaveCount(0);
+    }
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-combat_end").click();
+    await setKeeperField(keeper, "reason", "双方结束这次对抗，转入案件收尾。");
+    const closedPvp = await submitKeeperCommand(keeper, keeperFrames);
+    expect(closedPvp.accepted, closedPvp.lastError).toBe(true);
+    // A combat result does not infer completion of arbitrary freeform intent.
+    // Here the human explicitly finishes the stated exchange after ending it.
+    await keeper.getByTestId("keeper-cmd-resolve_intent").click();
+    await setKeeperField(keeper, "request_id", draftRequest);
+    await setKeeperField(keeper, "resolution", "completed");
+    await setKeeperField(keeper, "outcome", "success");
+    await setKeeperField(
+      keeper,
+      "note",
+      "双方已完成这次对抗并停手，原申请由主持明确收尾。",
+    );
+    const resolvedDraftIntent = await submitKeeperCommand(keeper, keeperFrames);
+    expect(resolvedDraftIntent.accepted, resolvedDraftIntent.lastError).toBe(
+      true,
+    );
+    await expect(
+      pvpActorPage.getByTestId("structured-interaction-card"),
+    ).toHaveCount(0);
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+
+    // A real authored neutral ending: both players explicitly abandon the case,
+    // the human keeper narrates/rules the fact, then settles it through end_game.
+    // This is not a claim of completing the full scarlet story/harness.
+    const departureRequests: string[] = [];
+    for (const [page, frames] of [
+      [playerA, playerAFrames],
+      [playerB, playerBFrames],
+    ] as const) {
+      await page
+        .locator("#user-input")
+        .fill("我确认放弃这次调查，与同伴一起离开阿卡姆。");
+      await page.locator("#btn-send").click();
+      await expect
+        .poll(() => framesOf(frames.sent, "action_request").length)
+        .toBeGreaterThan(0);
+      departureRequests.push(
+        JSON.parse(framesOf(frames.sent, "action_request").at(-1)!).request_id,
+      );
+    }
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-publish_message").click();
+    await setKeeperField(
+      keeper,
+      "text",
+      "你们一致决定收手，离开阿卡姆，把未解之谜留在身后。",
+    );
+    const closingNarration = await submitKeeperCommand(keeper, keeperFrames);
+    expect(closingNarration.accepted, closingNarration.lastError).toBe(true);
+    for (const requestId of departureRequests) {
+      await keeper.getByTestId("keeper-cmd-resolve_intent").click();
+      await setKeeperField(keeper, "request_id", requestId);
+      await setKeeperField(keeper, "resolution", "completed");
+      await setKeeperField(keeper, "outcome", "success");
+      const closedIntent = await submitKeeperCommand(keeper, keeperFrames);
+      expect(closedIntent.accepted, closedIntent.lastError).toBe(true);
+    }
+    // Real outstanding work remains when the group decides to end. It must be
+    // cancelled transactionally, not falsely reported as a successful check.
+    await playerA.locator("#user-input").fill("离开前我还想核对刚才的记录。");
+    const actionsBeforeClosure = framesOf(
+      playerAFrames.sent,
+      "action_request",
+    ).length;
+    await playerA.locator("#btn-send").click();
+    await expect
+      .poll(() => framesOf(playerAFrames.sent, "action_request").length)
+      .toBeGreaterThan(actionsBeforeClosure);
+    const remainingRequest = JSON.parse(
+      framesOf(playerAFrames.sent, "action_request").at(-1)!,
+    ).request_id;
+    await keeper.getByTestId("keeper-cmd-resolve_intent").click();
+    await setKeeperField(keeper, "request_id", remainingRequest);
+    await setKeeperField(keeper, "resolution", "awaiting_player");
+    await setKeeperField(keeper, "pending_action_kind", "freeform");
+    await setKeeperField(keeper, "pending_action_note", "核对记录，尚未执行");
+    const awaitingClosure = await submitKeeperCommand(keeper, keeperFrames);
+    expect(awaitingClosure.accepted, awaitingClosure.lastError).toBe(true);
+    await expect(
+      playerA.getByTestId("structured-interaction-card"),
+    ).toBeVisible();
+    await keeper.getByTestId("keeper-cmd-request_check").click();
+    await setKeeperField(keeper, "investigator_id", playerAInvestigator);
+    await setKeeperField(keeper, "skill", skillOptions[0]);
+    await setKeeperField(keeper, "attempt", "尚未落实的核对");
+    await setKeeperField(keeper, "visibility", "public");
+    const pendingClosureCheck = await submitKeeperCommand(keeper, keeperFrames);
+    expect(pendingClosureCheck.accepted, pendingClosureCheck.lastError).toBe(
+      true,
+    );
+    await expect(
+      playerA.locator('.check-request-card[data-status="pending"]'),
+    ).toBeVisible();
+    const resolvedChecksBeforeClosure = framesOf(
+      playerAFrames.received,
+      "check_resolved",
+    ).length;
+    const audit = keeper.getByTestId("keeper-ruling-audit");
+    await audit.locator(":scope > summary").click();
+    const authoredLeave = audit.locator('[data-ending-id="leave_arkham"]');
+    await expect(authoredLeave).toContainText("条件未齐");
+    await expect(
+      authoredLeave.getByRole("button", { name: "准备结算" }),
+    ).toBeDisabled();
+    await authoredLeave.locator(".ending-condition-details > summary").click();
+    await expect(authoredLeave).toContainText("investigation_abandoned");
+    await keeper.getByTestId("keeper-cmd-record_ruling").click();
+    await setKeeperField(keeper, "flag_id", "investigation_abandoned");
+    await keeper.getByRole("checkbox", { name: /裁定后的状态/ }).check();
+    const privateRulingBasis = `两位玩家明确同意离开；主持已叙述落实。ruling-private-${runId}`;
+    await setKeeperField(keeper, "basis", privateRulingBasis);
+    const ruledDeparture = await submitKeeperCommand(keeper, keeperFrames);
+    expect(ruledDeparture.accepted, ruledDeparture.lastError).toBe(true);
+    await expect(audit).toContainText("逃离阿卡姆");
+    await expect(authoredLeave).toContainText("条件已齐");
+    const beforeEndingPreparation = framesOf(
+      keeperFrames.sent,
+      "command_request",
+    ).length;
+    await authoredLeave.getByRole("button", { name: "准备结算" }).click();
+    expect(framesOf(keeperFrames.sent, "command_request")).toHaveLength(
+      beforeEndingPreparation,
+    );
+    await expect(keeper.getByLabel("模组结局 ID")).toHaveValue("leave_arkham");
+    const endedCase = await submitKeeperCommand(keeper, keeperFrames);
+    expect(endedCase.accepted, endedCase.lastError).toBe(true);
+    for (const frames of [playerAFrames, playerBFrames]) {
+      expect(framesOf(frames.received, "ending_catalog_updated")).toHaveLength(
+        0,
+      );
+      expect(framesOf(frames.received, "ruling_recorded")).toHaveLength(0);
+      for (const raw of framesOf(frames.received, "session_snapshot")) {
+        expect(JSON.parse(raw).payload).not.toHaveProperty("keeper_rulings");
+      }
+    }
+    await keeper.getByRole("button", { name: "关闭主持台" }).click();
+    for (const page of [keeper, playerA, playerB]) {
+      await expect(
+        page.locator('.check-request-card[data-status="pending"]'),
+      ).toHaveCount(0);
+      await expect(page.getByTestId("structured-interaction-card")).toHaveCount(
+        0,
+      );
+    }
+    await expect(
+      playerA.locator(
+        '.action-status-card[data-request-id="' + remainingRequest + '"]',
+      ),
+    ).toContainText("剩余事项不再执行");
+    expect(framesOf(playerAFrames.received, "check_resolved")).toHaveLength(
+      resolvedChecksBeforeClosure,
+    );
+    for (const page of [keeper, playerA, playerB]) {
+      await expect(page.getByTestId("combat-ending-record")).toContainText(
+        "逃离阿卡姆",
+      );
+    }
+    for (const page of [playerA, playerB]) {
+      await expect(page.getByTestId("combat-ending-record")).toContainText(
+        "本案声望变化",
+      );
+      await page.reload();
+      await expect(page.getByTestId("combat-ending-record")).toContainText(
+        "逃离阿卡姆",
+        { timeout: 90_000 },
+      );
+    }
+    // Each player's explicit save creates their own library copy. A keeper
+    // without a character never gets a substitute save button for the party.
+    await expect(keeper.getByTestId("case-character-actions")).toHaveCount(0);
+    for (const [page, name] of [
+      [playerA, "玩家甲的结案副本"],
+      [playerB, "玩家乙的结案副本"],
+    ] as const) {
+      const card = page.getByTestId("case-character-actions");
+      await expect(card.getByLabel("新角色名")).toBeEnabled({ timeout: 30000 });
+      await card.getByLabel("新角色名").fill(name);
+      await card.getByRole("button", { name: "保存为新角色" }).click();
+      await expect(
+        card.getByRole("button", { name: "已保存", exact: true }),
+      ).toBeDisabled({ timeout: 30000 });
+      const ownEntries = await page.evaluate(
+        async () =>
+          (
+            await (
+              await fetch("/api/character-library", { credentials: "include" })
+            ).json()
+          ).entries,
+      );
+      expect(
+        ownEntries.filter((entry: { name: string }) => entry.name === name),
+      ).toHaveLength(1);
+      const otherName =
+        name === "玩家甲的结案副本" ? "玩家乙的结案副本" : "玩家甲的结案副本";
+      expect(
+        ownEntries.some((entry: { name: string }) => entry.name === otherName),
+      ).toBe(false);
+      await page.reload();
+      await expect(
+        page
+          .getByTestId("case-character-actions")
+          .getByRole("button", { name: "已保存", exact: true }),
+      ).toBeDisabled({ timeout: 90000 });
+    }
+    for (const frames of [playerAFrames, playerBFrames, viewerFrames]) {
+      expect(framesOf(frames.received, "ruling_recorded")).toHaveLength(0);
+      expect(
+        frames.received.some((frame) => frame.includes(privateRulingBasis)),
+      ).toBe(false);
+    }
+    // The earlier reconnect deliberately resets this optional dock to collapsed.
+    const roomDockToggle = keeper.locator(".online-room-dock-toggle");
+    if ((await roomDockToggle.getAttribute("aria-expanded")) !== "true")
+      await roomDockToggle.click();
+    await expect(roomDockToggle).toHaveAttribute("aria-expanded", "true");
+    await keeper.getByRole("button", { name: "房间管理" }).click();
 
     // Ownership and secret-reading authorization remain separate. A new owner
     // can manage the room, but does not silently inherit keeper documents.

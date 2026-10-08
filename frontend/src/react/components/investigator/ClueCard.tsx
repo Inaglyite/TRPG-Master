@@ -222,7 +222,7 @@ export function ClueCard({
     >
       {path === "structured" && (
         <p className="inv-path-note" data-path="structured">
-          结构化模式：线索以服务端投影的稳定 ID 提交，出示不等于转交或消耗。
+          出示只是展示，不会转交或消耗；结果由主持确认。
         </p>
       )}
       <div
@@ -248,7 +248,7 @@ export function ClueCard({
       <div className="inv-clue-groups" key={filter}>
         {total === 0 && path === "structured" && !ready && (
           <div className="clue-empty">
-            等待服务端提供公开线索投影；结构化模式下不会用文本标签替代 ID。
+            线索资料尚未同步，暂不能出示。请重新连接，或请主持确认资料已发布。
           </div>
         )}
         {total === 0 && (path === "legacy" || ready) && (

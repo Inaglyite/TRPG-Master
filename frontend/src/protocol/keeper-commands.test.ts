@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   KEEPER_COMMANDS,
@@ -15,9 +17,48 @@ function fill(kind: string, values: FieldValues): FieldValues {
 }
 
 describe("主持命令字段表（对照 M0 command_request.json）", () => {
+  it("时间类型与schema一致，未填写不猜原因，显式选择独立提交", () => {
+    const schema = JSON.parse(
+      readFileSync(
+        resolve(
+          import.meta.dirname,
+          "../../../schemas/structured-play/v1/command_request.json",
+        ),
+        "utf8",
+      ),
+    );
+    const spec = findKeeperCommand("advance_time")!;
+    expect(spec.fields.find((f) => f.name === "activity")?.enumValues).toEqual(
+      schema.$defs.advance_time.properties.payload.properties.activity.enum,
+    );
+    const values = fill("advance_time", {
+      minutes: "20",
+      reason: "我写了赶路与等待",
+    });
+    expect(values.activity).toBe("");
+    expect(buildKeeperPayload(spec, values)).toEqual({
+      minutes: 20,
+      reason: values.reason,
+    });
+    expect(buildKeeperPayload(spec, { ...values, activity: "travel" })).toEqual(
+      {
+        minutes: 20,
+        reason: values.reason,
+        activity: "travel",
+      },
+    );
+    expect(
+      validateKeeperFields(spec, { ...values, activity: "等两天" }).join(""),
+    ).toContain("活动类型");
+  });
   it("覆盖 M0 定义的全部命令，且不发明命令", () => {
     expect(KEEPER_COMMANDS.map((command) => command.kind).sort()).toEqual(
       [
+        "keeper_roll",
+        "combat_start",
+        "combat_action",
+        "combat_end",
+        "end_game",
         "adjust_stat",
         "control_keeper",
         "advance_time",
@@ -27,6 +68,8 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
         "present_information",
         "publish_message",
         "record_fact",
+        "record_ruling",
+        "record_condition",
         "record_memory",
         "request_check",
         "resolve_draft",
@@ -104,6 +147,34 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
 });
 
 describe("主持表单 → M0 payload", () => {
+  it("参战者转成稳定 ID 对象，不能由表单覆盖角色数值", () => {
+    const spec = findKeeperCommand("combat_start")!;
+    const values = fill("combat_start", { participants: "alice,guard" });
+    expect(validateKeeperFields(spec, values)).toEqual([]);
+    expect(buildKeeperPayload(spec, values)).toEqual({
+      participants: [{ id: "alice" }, { id: "guard" }],
+    });
+    expect(findKeeperCommand("combat_roll")).toBeNull();
+    expect(findKeeperCommand("combat_decide")).toBeNull();
+  });
+  it("攻击目标不被通用 target_* 字段清理误删", () => {
+    const spec = findKeeperCommand("combat_action")!;
+    const values = fill("combat_action", {
+      actor_id: "alice",
+      target_id: "guard",
+      action_type: "firearm",
+      damage_spec: "1d6",
+      bonus_dice: "1",
+    });
+    expect(validateKeeperFields(spec, values)).toEqual([]);
+    expect(buildKeeperPayload(spec, values)).toMatchObject({
+      actor_id: "alice",
+      target_id: "guard",
+      action_type: "firearm",
+      damage_spec: "1d6",
+      bonus_dice: 1,
+    });
+  });
   it("multi-line conditions preserve the schema's eight-by-200 boundary without silently truncating", () => {
     const spec = findKeeperCommand("resolve_intent")!;
     const values = fill("resolve_intent", {

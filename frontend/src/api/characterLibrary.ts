@@ -4,6 +4,7 @@ import { ApiError, apiFetch, type ApiRequestInit } from "./client";
 import { useAppStore } from "../state/app-store";
 import { useOnlineStore } from "../state/online-store";
 import { currentCloudRequestGeneration } from "./request-context";
+import { useStructuredStore } from "../state/structured-store";
 
 async function libraryFetch<S extends z.ZodTypeAny>(
   path: string,
@@ -64,6 +65,90 @@ export const libraryEntrySchema = z.looseObject({
   updated_at: z.string().optional(),
 });
 export type LibraryEntry = z.infer<typeof libraryEntrySchema>;
+
+export type CaseCharacterSource = {
+  world_id: string;
+  investigator_id: string;
+  case_id: string;
+  expected_revision: number;
+  name?: string;
+  receipt_digest?: string;
+};
+const casePreviewSchema = z.object({
+  ok: z.boolean(),
+  card: z.record(z.string(), z.unknown()),
+  warnings: z.array(z.string()),
+  revision: z.number().int().positive(),
+  receipt_digest: z.string().regex(/^[a-f0-9]{64}$/),
+  saved_entry: libraryEntrySchema.nullable(),
+});
+const caseSaveSchema = z.object({
+  ok: z.boolean(),
+  entry: libraryEntrySchema,
+  warnings: z.array(z.string()),
+  deduplicated: z.boolean(),
+});
+export async function previewCaseCharacter(source: CaseCharacterSource) {
+  return libraryFetch(
+    "/api/character-library/from-case/preview",
+    casePreviewSchema,
+    { method: "POST", body: source },
+  );
+}
+export async function saveCaseCharacter(source: CaseCharacterSource) {
+  return libraryFetch("/api/character-library/from-case", caseSaveSchema, {
+    method: "POST",
+    body: source,
+  });
+}
+export async function exportCaseCharacter(
+  source: CaseCharacterSource,
+  name: string,
+) {
+  const mode = useAppStore.getState().mode;
+  const generation = currentCloudRequestGeneration();
+  const liveCase = () =>
+    useStructuredStore
+      .getState()
+      .caseSettlements.find(
+        (r) =>
+          r.investigator_id === source.investigator_id &&
+          r.case.case_id === source.case_id,
+      )?.case;
+  const receiptScope = JSON.stringify(liveCase() || null);
+  const data = await libraryFetch(
+    "/api/character-library/from-case/export",
+    z.looseObject({
+      format: z.literal("trpg-character-card"),
+      format_version: z.literal(1),
+      card: z.record(z.string(), z.unknown()),
+    }),
+    { method: "POST", body: source },
+  );
+  const identity = useStructuredStore.getState().identity;
+  if (
+    mode !== useAppStore.getState().mode ||
+    identity.worldId !== source.world_id ||
+    identity.investigatorId !== source.investigator_id ||
+    receiptScope !== JSON.stringify(liveCase() || null) ||
+    (mode === "online" && generation !== currentCloudRequestGeneration())
+  )
+    throw new ApiError(
+      "会话、角色或案件已变化，旧结案卡未下载",
+      0,
+      "request_context_changed",
+    );
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `character-${name || "card"}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 export const libraryIssueSchema = z.looseObject({
   field: z.string(),

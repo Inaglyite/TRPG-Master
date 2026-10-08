@@ -337,7 +337,7 @@ export function StructuredActionDialog() {
                 </label>
                 <span className="panel-action-note">
                   可用 ×{draft.availableQuantity}
-                  ；提交不会立即扣减，由服务端按规则结算。
+                  ；提交申请不会立即扣减，主持确认后才结算。
                 </span>
               </div>
 

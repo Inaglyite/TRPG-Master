@@ -11,11 +11,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../../state/app-store";
 import { useOnlineStore } from "../../../state/online-store";
+import { KeeperDiceHistory } from "./KeeperDiceTool";
 
 import {
   freeRollReason,
+  structuredActionSchema,
   type InteractionThread,
 } from "../../../protocol/structured";
+import { COMBAT_ACTION_LABELS } from "../../../protocol/combat";
 import { reopenStructuredEditor } from "../../../investigator-structured-actions";
 import {
   resendStructuredRequest,
@@ -39,6 +42,7 @@ import {
 
 import { AssistedDraftCard, KeeperControlNotice } from "./AssistedAgentCards";
 import { CompactGameDialog } from "../CompactGameDialog";
+import { CombatAndEndingCards } from "./CombatAndEndingCards";
 
 const STATUS_LABELS: Record<string, string> = {
   queued: "已发出，等待收件确认",
@@ -76,6 +80,8 @@ export function ActionStatusCard({
   const connection = useAppStore((state) => state.connection);
   const mode = useAppStore((state) => state.mode);
   const worldId = useStructuredStore((state) => state.identity.worldId);
+  const targets = useStructuredStore((state) => state.targets);
+  const combat = useStructuredStore((state) => state.combat);
   useStructuredStore((state) => state.identity.investigatorId);
   useStructuredStore((state) => state.identity.revision);
   useStructuredStore((state) => state.requests);
@@ -86,6 +92,23 @@ export function ActionStatusCard({
     [mode, worldId, userId, request.requestId, request.updatedAt],
   );
   const payload = request.payload as Record<string, unknown> | null;
+  const parsedAction = structuredActionSchema.safeParse(payload?.action);
+  const action =
+    request.keeperAction ??
+    (parsedAction.success ? parsedAction.data : undefined);
+  const combatTarget =
+    action?.kind === "combat" && action.target_id
+      ? combat?.participants?.find((p) => p.id === action.target_id)?.name ||
+        targets.find((p) => p.id === action.target_id)?.name ||
+        action.target_id
+      : "";
+  const keeperDice =
+    request.kind === "command" && payload?.kind === "keeper_roll";
+  const displayLabel = keeperDice
+    ? "主持普通骰"
+    : action?.kind === "combat"
+      ? `申报${COMBAT_ACTION_LABELS[action.action_type]}${combatTarget ? ` · ${combatTarget}` : ""}`
+      : request.label;
   const cancelCandidate =
     (payload?.type || request.requestType) === "action_request" &&
     request.status === "queued" &&
@@ -99,15 +122,18 @@ export function ActionStatusCard({
     request.status === "queued"
       ? request.errorCode === "not_sent"
         ? "未能发出"
-        : request.errorCode
-          ? "需修正后重试"
-          : request.serverReceived
-            ? "已收件，待守秘人处理"
-            : STATUS_LABELS.queued
+        : request.errorCode === "rate_limited"
+          ? "稍后重试"
+          : request.errorCode
+            ? "需修正后重试"
+            : request.serverReceived
+              ? "已收件，待守秘人处理"
+              : STATUS_LABELS.queued
       : (STATUS_LABELS[request.status] ?? request.status);
-  const outcome = request.outcome
-    ? (OUTCOME_LABELS[request.outcome] ?? request.outcome)
-    : null;
+  const outcome =
+    !keeperDice && request.outcome
+      ? (OUTCOME_LABELS[request.outcome] ?? request.outcome)
+      : null;
   const awaiting =
     request.status === "awaiting_player" && !suppressAwaiting
       ? request.awaiting
@@ -126,7 +152,7 @@ export function ActionStatusCard({
       aria-live="polite"
     >
       <header className="structured-card-head">
-        <span className="structured-card-title">{request.label}</span>
+        <span className="structured-card-title">{displayLabel}</span>
         <span
           className={`structured-badge structured-badge--${request.status}`}
         >
@@ -172,6 +198,13 @@ export function ActionStatusCard({
           {request.errorMessage}
         </p>
       )}
+      {request.errorCode === "rate_limited" &&
+        (keeperDice || request.kind === "free_roll") && (
+          <p className="structured-card-hint">
+            本次普通骰没有掷出新结果。按提示等待后，可用原请求 ID
+            重试；不会自动重掷。
+          </p>
+        )}
       {outcome && <p className="structured-card-note">{outcome}</p>}
       {request.detail && (
         <p className="structured-card-detail">{request.detail}</p>
@@ -328,6 +361,15 @@ export function CheckRequestCard({
   canRespond: boolean;
   onRespond: (decision: "roll" | "decline") => void;
 }) {
+  // 仅用公开目标表；主持的私密人物卡不参与玩家侧姓名解析。
+  const investigatorName = useStructuredStore((state) =>
+    state.targets
+      .find(
+        (target) =>
+          target.kind === "investigator" && target.id === check.investigatorId,
+      )
+      ?.name.trim(),
+  );
   const pending = check.status === "pending";
   const result = check.result;
   const modifier =
@@ -350,15 +392,19 @@ export function CheckRequestCard({
         <span className={`structured-badge structured-badge--${check.status}`}>
           {pending
             ? "等待掷骰"
-            : result?.outcome === "declined"
-              ? "已放弃"
-              : "已结算"}
+            : check.status === "cancelled"
+              ? "已取消"
+              : result?.outcome === "declined"
+                ? "已放弃"
+                : "已结算"}
         </span>
       </header>
       <dl className="structured-facts">
         <div>
           <dt>调查员</dt>
-          <dd>{check.investigatorId || "—"}</dd>
+          <dd title={check.investigatorId || undefined}>
+            {investigatorName || check.investigatorId || "—"}
+          </dd>
         </div>
         <div>
           <dt>难度</dt>
@@ -419,6 +465,10 @@ export function CheckRequestCard({
 
 /** 抽屉区：assisted 草稿 / agent 状态 / 待检定 / 待处理请求。挂在聊天区上方。 */
 export function StructuredDock() {
+  const keeperRolls = useStructuredStore((state) => state.keeperRolls);
+  const combat = useStructuredStore((state) => state.combat);
+  const combatResults = useStructuredStore((state) => state.combatResults);
+  const gameOver = useStructuredStore((state) => state.gameOver);
   // zustand selector 必须返回稳定引用：派生数组在 useMemo 里算，
   // 否则每次 store 通知都会拿到新数组，触发无限重渲染。
   const requestRecords = useStructuredStore((state) => state.requests);
@@ -485,7 +535,12 @@ export function StructuredDock() {
     !protocolNotice &&
     keeperDraft === null &&
     keeperControl === null &&
-    !canControl
+    !canControl &&
+    !combat?.active &&
+    !combat?.outcome &&
+    combatResults.length === 0 &&
+    !gameOver &&
+    keeperRolls.length === 0
   ) {
     return null;
   }
@@ -511,13 +566,17 @@ export function StructuredDock() {
         </p>
       )}
       <KeeperControlNotice />
+      <CombatAndEndingCards />
+      <KeeperDiceHistory />
       <AssistedDraftCard />
       {responses.map((check) => (
         <CheckRequestCard
           key={check.checkRequestId}
           check={check}
           canRespond={
-            Boolean(investigatorId) && check.investigatorId === investigatorId
+            !gameOver &&
+            Boolean(investigatorId) &&
+            check.investigatorId === investigatorId
           }
           onRespond={(decision) => {
             void import("../../../structured-transport").then((module) =>
