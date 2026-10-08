@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { holdingsSchema } from "./item-holders";
 
 export const keeperProgressSchema = z
   .object({
+    holdings: holdingsSchema.optional(),
     clues: z.array(
       z
         .object({

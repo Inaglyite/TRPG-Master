@@ -2932,7 +2932,9 @@
 .keeper-command-form[data-command="record_condition"] select,
 .keeper-command-form[data-command="record_condition"] input,
 .keeper-command-form[data-command="advance_time"] select,
-.keeper-command-form[data-command="advance_time"] input {
+.keeper-command-form[data-command="advance_time"] input,
+.keeper-command-form[data-command="transfer_item"] select,
+.keeper-command-form[data-command="transfer_item"] input {
   min-height: 44px;
 }
 #keeper-dice-panel .panel-action-field :is(input, select) {

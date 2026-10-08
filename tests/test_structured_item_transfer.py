@@ -158,3 +158,27 @@ def test_player_cannot_use_keeper_transfer_to_take_npc_item(game):
             principal=Principal(kind="player", user_id="u-alice", investigator_ids=("inv-alice",)),
         )
     assert saved(game) == before
+
+
+def test_private_holdings_include_npc_and_scene_and_refresh_after_transfer(game):
+    service, context = game[1], game[0]
+    snapshot = service.session_snapshot(world_id=context.world_id, principal=KEEPER)
+    holdings = snapshot["keeper_progress"]["holdings"]
+    item = next(i for i in holdings["items"] if i["label"] == "NPC私有钥匙")
+    assert item["holder"] == {"kind": "npc", "id": "keeper_npc"}
+    assert {"kind": "scene", "id": "library", "name": "图书馆"} in holdings["holders"]
+    result = transfer(game, item["holder"], {"kind": "scene", "id": "library"}, label=item["label"])
+    progress = [e for e in result["events"] if e["type"] == "keeper_progress_updated"]
+    assert len(progress) == 1 and progress[0]["audience"] == {"kind": "keeper"}
+    after = service.session_snapshot(world_id=context.world_id, principal=KEEPER)
+    assert progress[0]["payload"]["holdings"] == after["keeper_progress"]["holdings"]
+    player = Principal(kind="player", user_id="u-bob", investigator_ids=("inv-bob",))
+    assert "keeper_progress" not in service.session_snapshot(
+        world_id=context.world_id, principal=player
+    )
+    assert all(
+        e["type"] != "keeper_progress_updated"
+        for e in service.replay_events(
+            world_id=context.world_id, after_sequence=0, principal=player
+        )
+    )

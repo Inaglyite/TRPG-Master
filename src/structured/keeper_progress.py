@@ -3,6 +3,7 @@
 import json
 
 from .discoveries import condition_met, required_flags
+from .item_holders import holdings_projection
 
 
 def keeper_progress(state: dict) -> dict:
@@ -75,4 +76,4 @@ def keeper_progress(state: dict) -> dict:
                 "advance_when": [str(s) for s in definition.get("advance_when") or []],
             }
         )
-    return {"clues": clues, "clocks": clocks}
+    return {"clues": clues, "clocks": clocks, "holdings": holdings_projection(state)}

@@ -3,6 +3,15 @@
   "$id": "https://trpg-master.local/schemas/structured-play/v1/keeper_progress.json",
   "type": "object", "additionalProperties": false, "required": ["clues", "clocks"],
   "properties": {
+    "holdings": {"type": "object", "additionalProperties": false, "required": ["holders", "items"], "properties": {
+      "holders": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "name"], "properties": {
+        "kind": {"enum": ["investigator", "npc", "scene"]}, "id": {"type": "string", "minLength": 1, "maxLength": 160}, "name": {"type": "string"}
+      }}},
+      "items": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "label", "quantity", "holder"], "properties": {
+        "id": {"type": "string"}, "label": {"type": "string"}, "quantity": {"type": "integer", "minimum": 1},
+        "holder": {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"enum": ["investigator", "npc", "scene"]}, "id": {"type": "string", "minLength": 1, "maxLength": 160}}}
+      }}}
+    }},
     "clues": {"type": "array", "items": {
       "type": "object", "additionalProperties": false,
       "required": ["id", "category", "text", "discovered", "granted_item", "item_id", "holder_id", "related_scenes", "rules"],

@@ -17,6 +17,7 @@ import { KeeperSaveActions } from "./KeeperSaveActions";
 import { GameClockReadout } from "./GameClockReadout";
 import { CONDITION_LABELS } from "../../../protocol/conditions";
 import { TIME_ACTIVITY_LABELS } from "../../../protocol/time-activity";
+import { HOLDER_LABEL, holderValue } from "../../../protocol/item-holders";
 import {
   ConditionPreviousRecord,
   ConditionRecordReference,
@@ -277,6 +278,30 @@ export function KeeperConsole() {
   );
   const candidates: KeeperCandidates = useMemo(
     () => ({
+      holders: (
+        keeperProgress?.holdings?.holders || [
+          ...keeperInvestigators.map((i) => ({
+            kind: "investigator" as const,
+            id: i.investigatorId,
+            name: i.name,
+          })),
+          ...targets.flatMap((t) =>
+            t.kind === "investigator" || t.kind === "npc"
+              ? [{ kind: t.kind, id: t.id, name: t.name }]
+              : [],
+          ),
+          ...destinations.map((s) => ({ kind: "scene" as const, ...s })),
+        ]
+      )
+        .filter(
+          (h, i, all) =>
+            all.findIndex((other) => holderValue(other) === holderValue(h)) ===
+            i,
+        )
+        .map((h) => ({
+          id: holderValue(h),
+          name: `${HOLDER_LABEL[h.kind]} · ${h.name}`,
+        })),
       combatants: combat?.active
         ? combat.participants?.map((p) => ({ id: p.id, name: p.name }))
         : undefined,
@@ -361,9 +386,11 @@ export function KeeperConsole() {
           id: clue.id,
           name: clue.text.slice(0, 40) || clue.id,
         })),
-      items: (keeperInvestigators.length
-        ? keeperInvestigators.flatMap((sheet) => sheet.inventory)
-        : items
+      items: (
+        keeperProgress?.holdings?.items ||
+        (keeperInvestigators.length
+          ? keeperInvestigators.flatMap((sheet) => sheet.inventory)
+          : items)
       )
         .filter(
           (item, index, all) =>
@@ -371,7 +398,7 @@ export function KeeperConsole() {
         )
         .map((item) => ({
           id: item.id,
-          name: `${item.label} ×${item.quantity}`,
+          name: `${item.label} ×${item.quantity}${"holder" in item ? ` · ${HOLDER_LABEL[item.holder.kind]} · ${keeperProgress?.holdings?.holders.find((h) => holderValue(h) === holderValue(item.holder))?.name || item.holder.id}` : ""}`,
         })),
       assets: keeperAssets.map((entry) => ({
         id: entry.id,
@@ -830,7 +857,7 @@ export function KeeperConsole() {
                     </div>
                     <div>
                       <dt>物品</dt>
-                      <dd>{items.length} 项</dd>
+                      <dd>{candidates.items.length} 项</dd>
                     </div>
                     <div>
                       <dt>可交互目标</dt>
@@ -1055,7 +1082,23 @@ export function KeeperConsole() {
                                     name: `${item.label} · ×${item.quantity} · ${item.id.slice(-8)}`,
                                   })),
                                 }
-                              : candidates
+                              : spec.kind === "use_item" &&
+                                  keeperProgress?.holdings
+                                ? {
+                                    ...candidates,
+                                    items: keeperProgress.holdings.items
+                                      .filter(
+                                        (item) =>
+                                          item.holder.kind === "investigator" &&
+                                          item.holder.id ===
+                                            values.investigator_id,
+                                      )
+                                      .map((item) => ({
+                                        id: item.id,
+                                        name: `${item.label} ×${item.quantity}`,
+                                      })),
+                                  }
+                                : candidates
                           }
                           keeperInvestigators={keeperInvestigators}
                           disabled={
@@ -1066,6 +1109,22 @@ export function KeeperConsole() {
                           }
                           onChange={(name, value) =>
                             setValues((current) => {
+                              if (
+                                spec.kind === "transfer_item" &&
+                                name === "item_id"
+                              ) {
+                                const item =
+                                  keeperProgress?.holdings?.items.find(
+                                    (i) => i.id === value,
+                                  );
+                                return {
+                                  ...current,
+                                  item_id: value,
+                                  from_holder: item
+                                    ? holderValue(item.holder)
+                                    : "",
+                                };
+                              }
                               if (
                                 spec.kind === "record_condition" &&
                                 (name === "investigator_id" ||

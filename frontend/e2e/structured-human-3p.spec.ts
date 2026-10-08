@@ -1510,8 +1510,12 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
     await keeper.getByTestId("keeper-cmd-transfer_item").click();
     await setKeeperField(keeper, "item_id", otherItem.id);
     await setKeeperField(keeper, "quantity", String(otherItem.quantity));
-    await setKeeperField(keeper, "from_investigator_id", playerAInvestigator);
-    await setKeeperField(keeper, "to_investigator_id", bInvestigator);
+    await setKeeperField(
+      keeper,
+      "from_holder",
+      `investigator/${playerAInvestigator}`,
+    );
+    await setKeeperField(keeper, "to_holder", `investigator/${bInvestigator}`);
     const transferred = await submitKeeperCommand(keeper, keeperFrames);
     expect(transferred.accepted, transferred.lastError).toBe(true);
     await expect(
@@ -1528,6 +1532,71 @@ test("三客户端：人类主持 + 两位玩家，无模型完成私发/检定/
     await expect(
       playerB.locator(`.inv-item-row[data-item-id="${otherItem.id}"]`),
     ).toBeVisible();
+    // Real human UI custody circuit: PC -> NPC -> scene -> PC. The same
+    // existing object survives; no DB injection or fabricated inventory.
+    const privateProgress = JSON.parse(
+      framesOf(keeperFrames.received, "keeper_progress_updated").at(-1)!,
+    ).payload;
+    const custodians = privateProgress.holdings.holders as {
+      kind: string;
+      id: string;
+      name: string;
+    }[];
+    const npcCustodian = custodians.find((h) => h.kind === "npc");
+    const sceneCustodian = custodians.find((h) => h.kind === "scene");
+    expect(npcCustodian).toBeTruthy();
+    expect(sceneCustodian).toBeTruthy();
+    let fromHolder = `investigator/${bInvestigator}`;
+    const aInventoryBeforeCircuit = framesOf(
+      playerAFrames.received,
+      "inventory_changed",
+    ).length;
+    for (const toHolder of [
+      `npc/${npcCustodian!.id}`,
+      `scene/${sceneCustodian!.id}`,
+      `investigator/${bInvestigator}`,
+    ]) {
+      await keeper.getByTestId("keeper-cmd-transfer_item").click();
+      await setKeeperField(keeper, "item_id", otherItem.id);
+      await expect(keeper.getByLabel("来源", { exact: true })).toHaveValue(
+        fromHolder,
+      );
+      await setKeeperField(keeper, "quantity", String(otherItem.quantity));
+      await setKeeperField(keeper, "to_holder", toHolder);
+      const moved = await submitKeeperCommand(keeper, keeperFrames);
+      expect(moved.accepted, moved.lastError).toBe(true);
+      const progress = JSON.parse(
+        framesOf(keeperFrames.received, "keeper_progress_updated").at(-1)!,
+      ).payload;
+      expect(
+        progress.holdings.items.find(
+          (i: { id: string }) => i.id === otherItem.id,
+        ).holder,
+      ).toEqual({
+        kind: toHolder.split("/")[0],
+        id: toHolder.slice(toHolder.indexOf("/") + 1),
+      });
+      fromHolder = toHolder;
+    }
+    expect(framesOf(playerAFrames.received, "inventory_changed")).toHaveLength(
+      aInventoryBeforeCircuit,
+    );
+    expect(
+      framesOf(playerAFrames.received, "keeper_progress_updated"),
+    ).toHaveLength(0);
+    expect(
+      framesOf(playerBFrames.received, "keeper_progress_updated"),
+    ).toHaveLength(0);
+    await keeper.reload();
+    await expect(keeper.getByTestId("btn-keeper-console")).toBeVisible({
+      timeout: 90_000,
+    });
+    await keeper.getByTestId("btn-keeper-console").click();
+    await keeper.getByTestId("keeper-cmd-transfer_item").click();
+    await setKeeperField(keeper, "item_id", otherItem.id);
+    await expect(keeper.getByLabel("来源", { exact: true })).toHaveValue(
+      `investigator/${bInvestigator}`,
+    );
     await playerA.reload();
     await expect(playerA.getByTestId("structured-tool-row")).toBeVisible({
       timeout: 90_000,

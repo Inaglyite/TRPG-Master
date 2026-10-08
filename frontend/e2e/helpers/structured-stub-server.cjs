@@ -106,7 +106,12 @@ function roleFor(request) {
   return url.searchParams.get("role") || "player-a";
 }
 
-function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
+function startServer({
+  port,
+  scenario = "full",
+  destinations = DESTINATIONS,
+  keeperProgress = null,
+}) {
   const keeperUi = [
     "keeper-ui",
     "keeper-ui-readonly",
@@ -569,6 +574,9 @@ function startServer({ port, scenario = "full", destinations = DESTINATIONS }) {
                 : { mode: "human" },
             scene: { id: "miskatonic_university", name: "密斯卡托尼克大学" },
             destinations,
+            ...((keeperUi || role === "keeper") && keeperProgress
+              ? { keeper_progress: keeperProgress }
+              : {}),
             investigator_id:
               role === "player-b" || scenario === "combat-observer"
                 ? "inv-bob"

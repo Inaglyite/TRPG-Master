@@ -128,8 +128,8 @@ describe("M0 官方 fixtures：valid 必须被前端接受", () => {
       for (const key of Object.keys(parsed.data.payload)) {
         const mapped =
           declared.has(key) ||
-          (key === "from" && declared.has("from_investigator_id")) ||
-          (key === "to" && declared.has("to_investigator_id")) ||
+          (key === "from" && declared.has("from_holder")) ||
+          (key === "to" && declared.has("to_holder")) ||
           (key === "target" && declared.has("target_id")) ||
           (key === "audience" && declared.has("audience_kind")) ||
           (key === "speaker" && declared.has("speaker_kind")) ||

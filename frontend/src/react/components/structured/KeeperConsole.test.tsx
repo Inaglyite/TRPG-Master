@@ -199,6 +199,51 @@ beforeEach(() => {
 });
 
 describe("keeper 授权", () => {
+  it("真实持有物候选含NPC/场景，选物品自动带入来源，提交只发既有嵌套协议", () => {
+    enableStructured({ user_id: null, mode: "human" });
+    useStructuredStore.setState({
+      keeperProgress: {
+        clues: [],
+        clocks: [],
+        holdings: {
+          holders: [
+            { kind: "npc", id: "hidden-npc", name: "未公开的看守" },
+            { kind: "scene", id: "library", name: "图书馆" },
+          ],
+          items: [
+            {
+              id: "hidden-key",
+              label: "库房钥匙",
+              quantity: 1,
+              holder: { kind: "npc", id: "hidden-npc" },
+            },
+          ],
+        },
+      },
+    });
+    render(<KeeperConsole />);
+    fireEvent.click(screen.getByTestId("btn-keeper-console"));
+    fireEvent.click(screen.getByTestId("keeper-cmd-transfer_item"));
+    expect(
+      screen.getByRole("option", { name: /库房钥匙.*未公开的看守/ }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("物品"), {
+      target: { value: "hidden-key" },
+    });
+    expect(screen.getByLabelText("来源")).toHaveValue("npc/hidden-npc");
+    fireEvent.change(screen.getByLabelText("去向"), {
+      target: { value: "scene/library" },
+    });
+    fireEvent.change(screen.getByLabelText("数量"), { target: { value: "1" } });
+    fireEvent.click(screen.getByTestId("keeper-submit"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload).toEqual({
+      item_id: "hidden-key",
+      quantity: 1,
+      from: { kind: "npc", id: "hidden-npc" },
+      to: { kind: "scene", id: "library" },
+    });
+  });
   it("主持作者目录补全未发现线索候选，当前场景的发现对象可用于正式检定", () => {
     enableStructured({ user_id: null, mode: "human" });
     useStructuredStore.setState({

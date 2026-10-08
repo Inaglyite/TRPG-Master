@@ -19,6 +19,7 @@ import { parseRulingValue, type RulingState } from "./rulings";
 import { CONDITION_KINDS } from "./conditions";
 import { TIME_ACTIVITIES } from "./time-activity";
 import { keeperDiceProblem } from "./keeper-dice";
+import { readHolder } from "./item-holders";
 
 /** 字段表必须覆盖且不超过 M0 的命令集合（测试会断言两边一致）。 */
 export const KEEPER_COMMAND_KIND_SET: readonly string[] = KEEPER_COMMAND_KINDS;
@@ -39,6 +40,7 @@ export type FieldKind =
 /** 候选来源：全部来自服务端公开投影，前端不自己编候选。 */
 export type CandidateSource =
   | "flags"
+  | "holders"
   | "combatants"
   | "investigators"
   | "npcs"
@@ -760,6 +762,7 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
   {
     kind: "transfer_item",
     label: "转移物品",
+    help: "按实际持有物选择来源和去向；可以转交给调查员、NPC或放在场景中。只有服务端提交成功才改变归属；转交不等于告知线索内容。",
     group: "角色与物品",
     fields: [
       {
@@ -778,18 +781,18 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
         max: 999,
       },
       {
-        name: "from_investigator_id",
+        name: "from_holder",
         label: "来源",
         kind: "id",
         required: true,
-        candidate: "investigators",
+        candidate: "holders",
       },
       {
-        name: "to_investigator_id",
+        name: "to_holder",
         label: "去向",
         kind: "id",
         required: true,
-        candidate: "investigators",
+        candidate: "holders",
       },
       {
         name: "note",
@@ -1135,6 +1138,7 @@ export function findKeeperCommand(kind: string): KeeperCommandSpec | null {
 
 /** 控制台里显示的候选 ID：全部来自服务端公开投影。 */
 export type KeeperCandidates = {
+  holders?: { id: string; name: string }[];
   combatants?: { id: string; name: string }[];
   flags?: (RulingState["flags"][number] & { name: string })[];
   investigators: { id: string; name: string }[];
@@ -1367,7 +1371,9 @@ export function buildKeeperPayload(
       continue;
     if (
       field.name === "from_investigator_id" ||
-      field.name === "to_investigator_id"
+      field.name === "to_investigator_id" ||
+      field.name === "from_holder" ||
+      field.name === "to_holder"
     )
       continue;
     const value = values[field.name];
@@ -1400,11 +1406,11 @@ export function buildKeeperPayload(
     if (text) payload[field.name] = text;
   }
   if (spec.kind === "transfer_item") {
-    payload.from = {
+    payload.from = readHolder(values.from_holder) || {
       kind: "investigator",
       id: String(values.from_investigator_id ?? ""),
     };
-    payload.to = {
+    payload.to = readHolder(values.to_holder) || {
       kind: "investigator",
       id: String(values.to_investigator_id ?? ""),
     };
@@ -1514,10 +1520,8 @@ export function validateKeeperFields(
     if (field.name === "clue_id" && blank) errors.push("请选择线索。");
   }
   if (spec.kind === "transfer_item") {
-    if (!String(values.from_investigator_id ?? "").trim())
-      errors.push("请选择来源调查员。");
-    if (!String(values.to_investigator_id ?? "").trim())
-      errors.push("请选择去向调查员。");
+    if (!readHolder(values.from_holder)) errors.push("请选择实际来源持有者。");
+    if (!readHolder(values.to_holder)) errors.push("请选择实际去向持有者。");
   }
   if (spec.kind === "present_information") {
     const target = targetFrom(values);

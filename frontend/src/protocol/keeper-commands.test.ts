@@ -115,8 +115,8 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
     expect(required("transfer_item")).toEqual([
       "item_id",
       "quantity",
-      "from_investigator_id",
-      "to_investigator_id",
+      "from_holder",
+      "to_holder",
     ]);
   });
 
@@ -302,8 +302,8 @@ describe("主持表单 → M0 payload", () => {
         fill("transfer_item", {
           item_id: "item_bandage",
           quantity: "2",
-          from_investigator_id: "inv-alice",
-          to_investigator_id: "inv-bob",
+          from_holder: "investigator/inv-alice",
+          to_holder: "investigator/inv-bob",
         }),
       ),
     ).toEqual([]);
@@ -312,8 +312,8 @@ describe("主持表单 → M0 payload", () => {
       fill("transfer_item", {
         item_id: "item_bandage",
         quantity: "2",
-        from_investigator_id: "inv-alice",
-        to_investigator_id: "inv-bob",
+        from_holder: "investigator/inv-alice",
+        to_holder: "investigator/inv-bob",
       }),
     );
     expect(payload).toEqual({

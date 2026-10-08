@@ -4,6 +4,11 @@ import {
 } from "../../../protocol/keeper-commands";
 import { useStructuredStore } from "../../../state/structured-store";
 import { TIME_ACTIVITY_LABELS } from "../../../protocol/time-activity";
+import {
+  HOLDER_LABEL,
+  holderValue,
+  holderSchema,
+} from "../../../protocol/item-holders";
 
 const labels: Record<string, string> = {
   melee: "近战",
@@ -55,6 +60,12 @@ export function DraftCommandPreview({
       .map((t) => [t.id, t.name] as const),
   );
   const sources: Partial<Record<CandidateSource, Map<string, string>>> = {
+    holders: new Map(
+      (state.keeperProgress?.holdings?.holders || []).map((h) => [
+        holderValue(h),
+        `${HOLDER_LABEL[h.kind]} · ${h.name}`,
+      ]),
+    ),
     investigators,
     npcs,
     combatants: new Map([
@@ -64,6 +75,9 @@ export function DraftCommandPreview({
     ]),
     scenes: new Map(state.destinations.map((d) => [d.id, d.name])),
     items: new Map([
+      ...(state.keeperProgress?.holdings?.items || []).map(
+        (i) => [i.id, i.label] as const,
+      ),
       ...state.items.map((i) => [i.id, i.label] as const),
       ...state.keeperInvestigators.flatMap((i) =>
         i.inventory.map((item) => [item.id, item.label] as const),
@@ -115,6 +129,14 @@ export function DraftCommandPreview({
       );
     if (typeof raw === "object") {
       const obj = raw as Record<string, unknown>;
+      if (fieldName === "from" || fieldName === "to") {
+        const holder = holderSchema.safeParse(obj);
+        if (holder.success)
+          return (
+            sources.holders?.get(holderValue(holder.data)) ||
+            `${HOLDER_LABEL[holder.data.kind]} · ${holder.data.id}`
+          );
+      }
       if (fieldName === "audience") {
         if (obj.kind === "public") return "所有人";
         if (obj.kind === "keeper") return "仅主持";
@@ -157,6 +179,8 @@ export function DraftCommandPreview({
                     pending_action: "尚未执行",
                     disclosed: "已告知",
                     thread: "交互线程",
+                    from: "来源",
+                    to: "去向",
                   } as Record<string, string>
                 )[key] ||
                 `参数：${key}`}
