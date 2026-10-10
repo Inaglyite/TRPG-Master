@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export const DEFAULT_TITLE = "TRPG Game";
-export const DEFAULT_SUBTITLE = "A TRPG of Madness & Mystery";
+export const DEFAULT_SUBTITLE = "-A TRPG Game for Solo or Group Play-";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
