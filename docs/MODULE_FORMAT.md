@@ -1,6 +1,6 @@
 # 模组作者入口
 
-完整字段、示例与编译诊断保留在[模组格式参考](reference/MODULE_FORMAT.md)。本入口只说明制作流程与运行边界；不要靠摘要猜可用字段。
+本入口说明制作流程与运行边界。现行字段以 [schema](../schemas/trpgmod/) 和 `src/modules/module_format.py` 为准；完整历史示例及编译诊断说明原样保留在[归档资料](INDEX.md#归档资料)，不要靠摘要猜可用字段。
 
 ## 1. 作者态与运行态
 
@@ -25,9 +25,9 @@ python tools/module_packager.py validate dist/my-module.trpgmod
 
 | 内容 | 位置 |
 |---|---|
-| 包结构、稳定 ID、场景/NPC/线索、发现与失败保底 | [格式参考](reference/MODULE_FORMAT.md) |
-| v2 主线安全、危机与结局契约、编译诊断 | 同上；实际校验 `src/modules/module_format.py`、`module_compiler.py` |
-| 素材、主题、Lorebook、技能声明 | 同上；`schemas/trpgmod/` 与 `skills/catalog.json` |
+| 包结构、稳定 ID、场景/NPC/线索、发现与失败保底 | `schemas/trpgmod/`、`src/modules/module_format.py`；示例见[归档资料](INDEX.md#归档资料) |
+| v2 主线安全、危机与结局契约、编译诊断 | `src/modules/module_format.py`、`module_compiler.py` |
+| 素材、主题、Lorebook、技能声明 | `schemas/trpgmod/`、`skills/catalog.json` |
 | 包安装安全、版本并存 | `src/modules/module_registry.py` |
 | 游戏命令与玩家可见性 | [协议](PROTOCOL.md) |
 | 尚未实现的地图/工坊方向 | [状态与后续方向](STATUS.md) |

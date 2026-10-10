@@ -1,6 +1,6 @@
 # 协议入口
 
-现行入口，更新于 2026-10-08；平台/UI扩展已保存为开发检查点 `2fd6bbeb`（后端/协议）和 `78102269`（前端）；在此基础上继续补物品转交执行校验。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；不作为已发布声明。
+现行入口，整理于 2026-10-10；产品基线 `2b66a582`。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；实际发布与验收范围见[状态](STATUS.md)。
 
 ### 物品转交的执行边界
 
@@ -19,8 +19,8 @@
 
 | 范围 | 正本/详细参考 | 入口 |
 |---|---|---|
-| 账号、模组、设置、世界等 HTTP；legacy WS 与房间控制 | [HTTP 与 legacy API](reference/API.md)；实际 HTTP OpenAPI 与路由 | `server.py`、`src/auth`、`src/web`、`src/multiplayer` |
-| structured_v1 行动、命令、事件 | [JSON Schema](../schemas/structured-play/v1/) + [语义详表](reference/STRUCTURED_PROTOCOL_V1.md) | `src/structured/{gateway,validation,service}.py` |
+| 账号、模组、设置、世界等 HTTP；legacy WS 与房间控制 | 实际 HTTP OpenAPI 与路由；旧 API 说明见[归档入口](INDEX.md#归档资料) | `server.py`、`src/auth`、`src/web`、`src/multiplayer` |
+| structured_v1 行动、命令、事件 | [JSON Schema](../schemas/structured-play/v1/) + 本文；历史语义详表见[归档入口](INDEX.md#归档资料) | `src/structured/{gateway,validation,service}.py` |
 | 模组作者格式 | [模组格式](MODULE_FORMAT.md) + [模组 schema](../schemas/trpgmod/) | `src/modules/` |
 
 `/ws` 和 `/ws/room` 是传输入口，不直接表示运行模式。以服务端世界元数据与 `server_capabilities` 协商；结构化协议缺失/不支持时明确报错，不静默回退旧文字动作。

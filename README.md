@@ -2,7 +2,7 @@
 
 中文跑团平台：玩家提交行动，守秘人决定如何主持，服务端负责权限、检定和状态落账。守秘人可以是人类，也可以是通过工具工作的 Agent。
 
-当前仓库同时保留 legacy AI 回合模式和实验性的 structured_v1 平台模式。**实验分支能力不代表正式环境已上线，Agent 真实模型验收也不能由人类主持测试替代。** 当前确认状态见[项目状态](docs/STATUS.md)。
+当前仓库同时保留 legacy AI 回合模式和 structured_v1 平台模式。`2b66a582` 已发布到正式环境和 Pi staging；**人类主持验收不能替代 structured Agent 的真实模型完整主线验收。** 当前确认状态见[项目状态](docs/STATUS.md)。
 
 <p align="center">
   <img src="docs/screenshots/menu.png" alt="模组选择" width="48%"/>
@@ -22,7 +22,7 @@
 - 世界、素材、存档与分支；legacy 从历史回合分叉，结构化单人从当前已提交版本分叉。
 - 模组包、Schema 校验、编译诊断和素材工具链。
 
-两种模式的规则和上下文能力并非完全等价。例如 legacy 的战斗、发现规则、Lorebook/Skill 注入不能因平台模式存在就视为已自动迁入。详细边界见[架构](docs/ARCHITECTURE.md)。
+结构化平台已接通人类主持的战斗、发现、实物取得、结案和角色保存；两种模式的上下文与主持方式仍不完全等价，不能将旧模式的主线通过当作新 Agent 的验收。详细边界见[架构](docs/ARCHITECTURE.md)。
 
 ## 快速开始
 
@@ -69,12 +69,11 @@ python3 start.py --config
 | [模组](docs/MODULE_FORMAT.md) | 模组作者入口、格式与迁移边界 |
 | [状态](docs/STATUS.md) | 已验收范围、发布门槛、未完成项与限制 |
 
-完整字段表、旧引擎详解和模块索引在[详细参考](docs/reference/README.md)。
-过程计划、事故调查与交付报告在[历史归档](docs/archive/README.md)，证据及截图保留原路径。
+完整目录与归档说明见[文档入口](docs/INDEX.md)。详细参考、旧引擎说明、设计稿、过程报告和原始证据已原样迁往同级 `mid_product`，不再混在源码仓库里；机器可读契约仍以仓库内 schema、fixtures 和实现为准。
 
 ## 协作与发布
 
 - 日常测试只在本地；预发布优先使用 Pi staging。
 - 正式环境不是测试环境。生产发布必须明确授权，按运维流程执行。
 - 修改协议先同步 Schema/fixtures，再由前后端共同验收；测试通过要注明版本、环境和跳过项。
-- `AGENTS.md` 是仓库协作约束，文档整理不改变其权限规则。
+- 本机 `AGENTS.md` 属于私有协作约定，不提交；共享开发、归档及环境保护规则由 `docs/DEVELOPMENT.md`、`docs/OPERATIONS.md` 维护。

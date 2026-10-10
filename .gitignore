@@ -41,3 +41,6 @@ release/
 htmlcov/
 frontend/ui/
 frontend/ui_raw/
+# 根目录验收产物及本地 mid_product 链接，不隐藏业务源码。
+/test-results
+/frontend/tsconfig.tsbuildinfo
