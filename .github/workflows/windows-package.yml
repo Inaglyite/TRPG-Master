@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
+      - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
       - "frontend/package-lock.json"
@@ -26,6 +27,7 @@ on:
     paths:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
+      - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
       - "frontend/package-lock.json"

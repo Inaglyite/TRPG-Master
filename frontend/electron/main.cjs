@@ -264,6 +264,7 @@ async function startPackagedBackend(exePath, runtimeRoot) {
       // src.app.config 在 PyInstaller 的 _internal/ 中自动定位。
       TRPG_PROJECT_ROOT: runtimeRoot,
       TRPG_RUNTIME_ROOT: runtimeRoot,
+      TRPG_ENABLE_EDITOR_UPDATES: "1",
       // 本次启动的连接凭证：只经子进程环境交付（S03）。
       [LOCAL_TOKEN_ENV]: localLaunchToken,
     },
@@ -289,7 +290,11 @@ async function startSourceBackend(launcherPath) {
     command: resolvedLauncher,
     args: ["--backend-only"],
     cwd: path.dirname(resolvedLauncher),
-    env: { ...process.env, [LOCAL_TOKEN_ENV]: localLaunchToken },
+    env: {
+      ...process.env,
+      TRPG_ENABLE_EDITOR_UPDATES: "1",
+      [LOCAL_TOKEN_ENV]: localLaunchToken,
+    },
     label: "源码后端",
     // 首次安装依赖可能明显慢于正常重启。
     timeoutMs: 180000,

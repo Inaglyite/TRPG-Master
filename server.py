@@ -1669,7 +1669,7 @@ async def serve_asset(module_name: str, filename: str):
 # ---- 静态文件 ----
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 # /editor 必须先于 "/" 注册（前端 SPA 兜底会吞掉未匹配路径）。
-mount_editor_bundle(app, PROJECT_ROOT)
+mount_editor_bundle(app, PROJECT_ROOT, RUNTIME_ROOT)
 if FRONTEND_DIR.exists():
     app.mount("/", FrontendStaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 else:

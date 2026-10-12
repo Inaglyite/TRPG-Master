@@ -33,6 +33,7 @@ release/
 /modules/
 .module-imports/
 .editor-projects/
+editor-updates/
 *.trpgmod
 .screenshots/
 .pytest_cache/

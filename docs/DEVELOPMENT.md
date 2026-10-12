@@ -73,3 +73,22 @@ npm run test:e2e
 本机 `test-results` 可用被本地 Git 排除的链接指向 `mid_product/trpg-master/work/test-results`，使新产物也写到仓库外；该链接不提交。其他机器与 CI 不依赖本机归档目录，测试仍可使用默认输出位置。归档及原始轨迹可能含私有测试上下文，目录需限制为本人访问。
 
 新日志、trace、截图、临时诊断脚本、生成美术原稿及过程报告统一放仓库父目录的 `mid_product/<仓库目录名>/work/<任务标识>/`，不写死开发机绝对路径。完整验收冻结到独立的 `<日期>-<任务标识>/`，附版本、目录索引和校验和，后续任务不覆盖冻结资料。现有应用素材、业务代码、schema、fixtures 和测试源码继续在仓库内；真实配置、Key、数据库及玩家存档不得当作中间产物搬动。原始资料不整包推送或外发，共享前先脱敏并确认范围。
+
+## 6. 模组工坊独立更新
+
+桌面壳启动的本地后端启用 `TRPG_ENABLE_EDITOR_UPDATES=1`。编辑器打开后检查
+`Inaglyite/TRPG_Mod_Editor` 的 `editor-web-v<版本>` Release，展示版本及更新说明；
+用户确认后才下载。文件菜单的“检查编辑器更新”会主动重新检查。
+源码后端单独启动时默认关闭；需要本地验收时显式设置该变量。
+
+新版网页资源存放在运行目录 `editor-updates/versions/`，校验 SHA256、大小、
+解压路径与 `editor_api=1` 后原子切换 `active.json`。当前页面不强制刷新，
+下次访问 `/editor/` 使用新版；旧资源与安装包附带版本继续保留。新版入口
+缺失或损坏时使用内置版，完整游戏升级附带更高版本时优先使用该内置版。
+云端账号模式禁用这一更新接口，继续按正式部署流程更新。
+
+编辑器仓库的 `editor-web-release` workflow 手动构建、验收并上传
+`editor-web.zip` 与 `editor-web-update.json`；测试包默认预发布，不进入稳定通道。
+隔离验收可用 `TRPG_EDITOR_UPDATE_TEST_TAG=editor-web-test-<标识>` 指向具体测试包。
+内置快照仍由 `bash tools/sync_editor_bundle.sh ../TRPG_Mod_Editor` 同步。
+旧游戏客户端需先升级一次以获得该机制，此后兼容的编辑器网页更新无需重发游戏安装包。
