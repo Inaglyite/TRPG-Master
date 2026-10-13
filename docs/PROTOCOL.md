@@ -279,11 +279,14 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 或 `event:序号`；事件引用保存为不可变的 `note-event:SHA256`，已冻结引用可续用。
 授权与控制权在幂等查询前校验，笔记不改变角色知识或游戏规则；辅助草稿仍须
 由人类批准。正式载荷与正例见 `command_request.json` 及其fixtures。
+`harness-chapter-` 为阶段摘要保留前缀，Agent不能直接写或重放其更正；
+辅助草稿批准时以人类主持身份保存。更正保留 `reviewed_sources`，被更正的
+旧章节只供按ID追溯，不再进入当前章节索引。
 
 人类主持的只读HTTP入口是 `POST /api/worlds/{id}/keeper-knowledge`。
 请求 `{kind:"module|notes|history|receipt|chapters",text?,source_id?,offset?,sha256?,limit?}`；
 只接受当前世界授权keeper，owner/player/viewer不能读取。模组检索按关键词匹配，
-空格分词；正文ID只能来自注册表。`notes` 的ID为笔记ID，`receipt` 为command_id，
+空格分词（最多16词，匹配任一词）；正文ID只能来自注册表。`notes` 的ID为笔记ID，`receipt` 为command_id，
 `history` 的事件/分支历史ID由索引返回。读取不执行命令，不接受客户端路径。
 
 列表返回 `items/total_matches/complete/next_offset`；正文返回
@@ -296,6 +299,13 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 分类记忆、原始command_id与来源hash。它是私有历史回忆，推测和未履行承诺
 不得当当前事实。自动摘要也占默认6次模型调用预算；辅助主持的预览只在批准
 草稿时通过 `record_keeper_note` 保存，待批准前不改变世界JSON。
+`GET keeper-guide` 的私有笔记文档含可选 `summary/keeper_note`，后者提供
+带CAS版本的表单载荷；“更正这份笔记”只准备表单，确认提交才执行。
+
+新命令回执正文含 `emitted_events`（原始事件与受众）及
+`emitted_events_complete`。旧记录缺事件档案时为false，不表示当时没有发言。
+批准草稿的 `executed_commands` 保存每条 `kind/payload/result`；缓存返回仍不重发
+事件。历史索引的 `source_is_proposal=true` 标出未执行草稿，片段均须读取原文核对。
 
 Agent在决策 `queries` 使用同一组只读查询及原有 `memory` 查询；默认每运行
 最多8次查询、6次模型调用，正文页8000字符。查询决策不执行同批commands/
@@ -305,7 +315,10 @@ narration，失败与预算拒绝也必须先回喂。当前回执不含读档�
 
 新存档私有元数据 `structured_receipt_cursor` 保存确切命令成员与事件摘要；
 切回另一存档恢复其合法成员，删除摘要不匹配的旧事件。历史检索的
-`receipt:命令ID` 可恢复有效发言的正文；公开存档列表剥离该内部游标。
+`receipt-event:行ID:序号` 可恢复有效发言；旧无事件档案的publish_message仍可用
+`receipt:命令ID` 读取现有正文。公开存档列表剥离该内部游标。
+私有 `harness_timeline_generation` 在每次读档后递增；辅助查询、草稿生成和批准
+核对同一代数，防止revision复用时沿用已废弃时间线的查询反馈。
 
 同时核对 schema/fixtures、后端校验与领域授权、Agent 可见命令说明、前端 builder、`server-message.ts` 外层白名单、结构化事件解析、实时投影、快照恢复、错误提示。
 

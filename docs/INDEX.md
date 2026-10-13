@@ -16,9 +16,13 @@
 `7bd0e51d` 的后续完整 GitHub quality 记录冻结于
 `mid_product/trpg-master/2026-10-13-agent-harness-memory-ci/`：2005后端/167子测试、
 1339前端单测、95浏览器E2E/2门控skip。该结论不覆盖后续新增阶段摘要代码。
-阶段摘要的当前本地工作记录在 `work/agent-harness-chapters-20261013/`；
-包含开发检查点8203c7a6、全量2008项后端记录和真实模型220条背景之后的自动
-摘要与早期约定回忆，仍在补充人类查阅和完整来源验收，尚未冻结为完整交付。
+阶段摘要与完整事件回执的本地/模型验收冻结到
+`mid_product/trpg-master/2026-10-13-agent-harness-long-memory/`：保留
+`agent-harness-chapters-20261013/`、`agent-harness-receipts-20261013/` 的原相对结构，
+包含ccf8290e源码指纹、2024项后端/1340项前端、三宽度真实后端截图、完整事件
+回执/人类摘要更正/读档并发验收、所有真实模型轮次及共享费用账本。包含曾经
+耗尽上下文预算的失败原件，不以其后的成功覆盖。最新CI结果另行记录，不能
+用7bd0e51d的CI替代后续提交；归档不是公开上传包。
 
 2026-10-13 的主持资料、私有笔记与可恢复回执验收位于
 `mid_product/trpg-master/2026-10-13-agent-harness-memory/`（相对仓库父目录）：
