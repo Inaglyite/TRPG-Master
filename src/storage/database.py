@@ -630,6 +630,19 @@ class GameCommand(Base):
         lazy="selectin",
         order_by="CommandEventReceipt.ordinal",
     )
+    request_receipt: Mapped[CommandRequestReceipt | None] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, lazy="selectin", uselist=False,
+    )
+
+
+class CommandRequestReceipt(Base):
+    """Private originating player requests frozen with a committed command."""
+
+    __tablename__ = "command_request_receipts"
+    command_row_id: Mapped[str] = mapped_column(
+        ForeignKey("game_commands.id", ondelete="CASCADE"), primary_key=True
+    )
+    context_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
 
 
 class CommandEventReceipt(Base):

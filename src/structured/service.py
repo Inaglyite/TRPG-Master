@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from src.storage.database import (
     CheckRequest,
     CommandEventReceipt,
+    CommandRequestReceipt,
     EventOutbox,
     GameCommand,
     PlayerRequest,
@@ -352,6 +353,9 @@ class StructuredPlayService:
                 revision=int(row.revision),
                 command_id=command_id,
             )
+            from .command_receipts import capture_request_context
+
+            request_context = capture_request_context(session, world_id, kind, payload, cause_id)
             outcome = execute_domain(kind, handler, state, payload, ctx)
             if kind == "control_keeper":
                 epoch = int(current_control(session, world_id).epoch)
@@ -395,6 +399,7 @@ class StructuredPlayService:
                 cause_id=cause_id or "",
                 revision=int(row.revision),
                 created_at=utcnow(),
+                request_receipt=CommandRequestReceipt(context_json=request_context),
             )
             session.add(command_record)
             # 事件因果标签：有上游请求归上游（玩家请求卡随之更新），否则归

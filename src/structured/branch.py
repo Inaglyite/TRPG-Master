@@ -30,6 +30,7 @@ from src.storage.database import (
     CharacterMemory,
     CheckRequest,
     CommandEventReceipt,
+    CommandRequestReceipt,
     EventOutbox,
     GameCommand,
     InteractionThread,
@@ -317,6 +318,11 @@ def create_structured_branch(
                         cause_id=command.cause_id,
                         revision=int(command.revision),
                         created_at=command.created_at,
+                        request_receipt=CommandRequestReceipt(
+                            context_json=copy.deepcopy(command.request_receipt.context_json)
+                        )
+                        if command.request_receipt
+                        else None,
                         event_receipts=[
                             CommandEventReceipt(
                                 ordinal=event.ordinal,

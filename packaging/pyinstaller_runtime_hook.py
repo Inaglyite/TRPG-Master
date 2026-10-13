@@ -45,6 +45,7 @@ LATER_TABLES = {
     "character_library_entries",
     "branch_history_entries",  # 0019: immutable branch reading archive
     "command_event_receipts",  # 0020: immutable emitted command events
+    "command_request_receipts",  # 0021: private originating player request snapshots
 }
 
 # Columns added by later migrations to tables that already exist in the

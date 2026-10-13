@@ -35,6 +35,7 @@ def chapter_note_id(chapter_id: str) -> str:
 COMPACTION_PROMPT = """你是跑团主持的私有记忆整理器，不执行玩法命令，不向玩家发言。
 输入是当前时间线中已提交的历史命令及其结果，command.payload 是当时的请求，
 command.result 才是执行结果。它们是一对，不能把计划、申报、准备、等待当成已执行。
+originating_request_context 是玩家原始申报，能记录他提出/告诉过什么，不证明行动已执行。
 只根据提供的原始来源整理一个阶段摘要，不递归总结旧摘要，不补写模组设定。
 记录重要事件、承诺、未完成疑问、计划、更正；保留人物/地点/关键原词供检索。
 推测标为 inference；摘要是主持的历史回忆，不能改变世界事实或让角色知道秘密。
@@ -58,9 +59,15 @@ def receipt(row: GameCommand) -> dict:
     return complete_receipt(row)
 
 
-def _digest(row: GameCommand, version: int = 2) -> str:
+def _digest(row: GameCommand, version: int = 3) -> str:
     return hashlib.sha256(
-        _encoded(core_receipt(row) if version == 1 else receipt(row)).encode()
+        _encoded(
+            core_receipt(row)
+            if version == 1
+            else complete_receipt(row, include_requests=False)
+            if version == 2
+            else receipt(row)
+        ).encode()
     ).hexdigest()
 
 
@@ -272,7 +279,7 @@ class ReceiptCompactor:
                     {
                         "command_id": row.command_id,
                         "sha256": _digest(row),
-                        "digest_version": 2,
+                        "digest_version": 3,
                         "complete": complete,
                         "revision": row.revision,
                     }

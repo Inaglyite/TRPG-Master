@@ -15,6 +15,7 @@ from test_structured_commands import make_structured_world
 
 from src.storage.database import (
     CommandEventReceipt,
+    CommandRequestReceipt,
     EventOutbox,
     GameCommand,
     World,
@@ -194,6 +195,75 @@ class CompleteReceiptTests(unittest.TestCase):
                 0, session.scalar(select(func.count()).select_from(CommandEventReceipt))
             )
             self.assertEqual(0, session.scalar(select(func.count()).select_from(EventOutbox)))
+            self.assertEqual(
+                0, session.scalar(select(func.count()).select_from(CommandRequestReceipt))
+            )
+
+    def test_completed_private_player_request_survives_fork_and_enters_raw_compaction(self):
+        self.service.submit_action_request(
+            world_id="sp-world",
+            principal=self.player,
+            request={
+                "request_id": "private-promise",
+                "investigator_id": "inv-alice",
+                "action": {
+                    "kind": "freeform",
+                    "text": "我曾用暗号灰松联系医生，现在仅说明计划，并未执行。",
+                },
+            },
+        )
+        result = self.command(
+            "close-request",
+            "resolve_intent",
+            {
+                "request_id": "private-promise",
+                "resolution": "completed",
+                "outcome": "not_executed",
+                "note": "说明已收到",
+            },
+        )
+        self.assertNotIn("灰松", json.dumps(result["result"], ensure_ascii=False))
+        receipt = self.read({"kind": "receipt", "source_id": "close-request"})
+        self.assertTrue(receipt["originating_request_context_complete"])
+        self.assertFalse(receipt["originating_request_context"]["request_is_executed_fact"])
+        self.assertIn(
+            "灰松",
+            receipt["originating_request_context"]["requests"][0]["payload"]["action"]["text"],
+        )
+        branch = create_structured_branch(
+            self.context, project_root=self.root, runtime_root=self.root, label="请求原文"
+        )
+        with session_scope(self.db) as session:
+            from src.storage.database import PlayerRequest
+
+            self.assertFalse(
+                session.scalars(
+                    select(PlayerRequest).where(
+                        PlayerRequest.world_id == branch.context.world_id,
+                        PlayerRequest.request_id == "private-promise",
+                    )
+                ).all()
+            )
+        child = self.read(
+            {"kind": "receipt", "source_id": "close-request"}, branch.context.world_id
+        )
+        self.assertEqual(
+            receipt["originating_request_context"], child["originating_request_context"]
+        )
+        hits = self.knowledge.query(
+            branch.context.world_id, self.keeper, {"kind": "receipt", "text": "灰松"}
+        )
+        self.assertEqual("close-request", hits["items"][0]["source_id"])
+        prepared = ReceiptCompactor(self.db).prepare(
+            branch.context.world_id, self.keeper, tail_receipts=0, minimum_old=1
+        )
+        self.assertIn("灰松", json.dumps(prepared["inputs"], ensure_ascii=False))
+        with self.assertRaises(StructuredError):
+            self.knowledge.query(
+                branch.context.world_id,
+                self.player,
+                {"kind": "receipt", "source_id": "close-request"},
+            )
 
 
 def test_old_database_bootstrap_adds_receipt_table_without_altering_command_data(tmp_path):

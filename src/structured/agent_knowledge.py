@@ -17,6 +17,7 @@ from sqlalchemy import String, cast, func, or_, select
 from src.storage.database import (
     BranchHistoryEntry,
     CommandEventReceipt,
+    CommandRequestReceipt,
     EventOutbox,
     GameCommand,
     World,
@@ -294,6 +295,9 @@ class AgentKnowledge:
                             text_matches(GameCommand.payload, text),
                             GameCommand.event_receipts.any(
                                 text_matches(CommandEventReceipt.event_json, text)
+                            ),
+                            GameCommand.request_receipt.has(
+                                text_matches(CommandRequestReceipt.context_json, text)
                             ),
                             GameCommand.kind.icontains(text, autoescape=True),
                             GameCommand.command_id.icontains(text, autoescape=True),
