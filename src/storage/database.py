@@ -624,6 +624,26 @@ class GameCommand(Base):
     cause_id: Mapped[str] = mapped_column(String(160), default="", index=True)
     revision: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    event_receipts: Mapped[list[CommandEventReceipt]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+        order_by="CommandEventReceipt.ordinal",
+    )
+
+
+class CommandEventReceipt(Base):
+    """Immutable emitted events owned by their command, independent of outbox rollback."""
+
+    __tablename__ = "command_event_receipts"
+
+    command_row_id: Mapped[str] = mapped_column(
+        ForeignKey("game_commands.id", ondelete="CASCADE"), primary_key=True
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    event_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, default=dict)
 
 
 class CheckRequest(Base):

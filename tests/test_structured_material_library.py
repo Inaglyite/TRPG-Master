@@ -17,6 +17,7 @@ from src.structured.errors import StructuredError
 from src.structured.gateway import StructuredGateway
 from src.structured.materials import asset_entries, keeper_investigators
 from src.structured.principal import Principal
+from src.structured.receipt_compaction import ReceiptCompactor, chapter_note_id
 from src.structured.service import StructuredPlayService, audience_visible
 from src.structured.validation import validate_event
 from src.web.structured_asset_http import read_world_asset, register_structured_asset_routes
@@ -29,6 +30,105 @@ from src.web.structured_guide_http import (
 PIXEL = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmV8AAAAASUVORK5CYII="
 )
+
+
+def test_human_reads_automatic_chapter_and_cas_correction_supersedes_it(library):
+    from src.structured.agent_knowledge import AgentKnowledge
+
+    context, deps, service = library
+    keeper = Principal(kind="keeper", user_id="u-keeper")
+    service.execute_command(
+        world_id=context.world_id,
+        principal=keeper,
+        kind="publish_message",
+        command_id="old-promise",
+        expected_revision=None,
+        payload={
+            "speaker": {"kind": "keeper"},
+            "audience": {"kind": "public"},
+            "text": "医生答应明日同行，尚未执行。",
+        },
+    )
+    compactor = ReceiptCompactor(context.database_url)
+    prepared = compactor.prepare(context.world_id, keeper, tail_receipts=0, minimum_old=1)
+    chapter = compactor.finish(
+        prepared,
+        {
+            "title": "医生的同行承诺",
+            "summary": "明日同行，尚未执行。",
+            "keywords": ["医生", "同行"],
+            "entries": [
+                {"category": "promise", "text": "明日同行尚未执行。", "sources": ["old-promise"]}
+            ],
+        },
+    )
+    compactor.persist(context.world_id, keeper, chapter)
+    with session_scope(context.database_url) as session:
+        before = copy.deepcopy(session.get(WorldState, context.world_id).state)
+    guide = read_keeper_guide(deps, context.world_id, "u-keeper")
+    note_id = chapter_note_id(chapter["chapter_id"])
+    document = next(d for d in guide["documents"] if d["id"] == "keeper-note:" + note_id)
+    assert "阶段摘要" in document["title"]
+    assert "当前版本：0" in document["text"]
+    assert "承诺：明日同行尚未执行" in document["text"]
+    assert "sha256" not in document["text"]
+    assert read_keeper_guide(deps, context.world_id, "u-alice") is None
+    with session_scope(context.database_url) as session:
+        assert session.get(WorldState, context.world_id).state == before
+    payload = {
+        "note_id": note_id,
+        "expected_note_revision": 0,
+        "title": "医生改约",
+        "summary": "改为后日",
+        "content": "## 主持更正\n医生改约后日同行，尚未执行。",
+        "category": "promise",
+    }
+    result = service.execute_command(
+        world_id=context.world_id,
+        principal=keeper,
+        kind="record_keeper_note",
+        payload=payload,
+        command_id="correct",
+        expected_revision=None,
+    )
+    assert result["result"]["note"]["sources"] == ["receipt:old-promise"]
+    with pytest.raises(StructuredError, match="主持笔记已被修改"):
+        service.execute_command(
+            world_id=context.world_id,
+            principal=keeper,
+            kind="record_keeper_note",
+            payload=payload,
+            command_id="stale-correct",
+            expected_revision=None,
+        )
+    knowledge = AgentKnowledge(context.database_url)
+    assert knowledge.query(context.world_id, keeper, {"kind": "chapters"})["items"] == []
+    history = knowledge.query(
+        context.world_id,
+        keeper,
+        {"kind": "chapters", "source_id": chapter["chapter_id"]},
+        char_budget=16000,
+    )
+    assert json.loads(history["content"])["superseded_by"] == note_id
+    guide = read_keeper_guide(deps, context.world_id, "u-keeper")
+    corrected = [d for d in guide["documents"] if d["id"] == "keeper-note:" + note_id]
+    assert len(corrected) == 1
+    assert "后日同行" in corrected[0]["text"]
+    assert "当前版本：1" in corrected[0]["text"]
+    from src.structured.principal import bind_agent_control
+
+    with session_scope(context.database_url) as session:
+        bind_agent_control(session, context.world_id, "agent-correction")
+    for key in ["agent-new-correction", "correct"]:
+        with pytest.raises(StructuredError, match="需要人类主持批准"):
+            service.execute_command(
+                world_id=context.world_id,
+                principal=Principal(kind="agent", run_id="agent-correction"),
+                kind="record_keeper_note",
+                payload=payload,
+                command_id=key,
+                expected_revision=None,
+            )
 
 
 def test_keeper_who_controls_a_character_retains_only_their_own_player_identity(library):

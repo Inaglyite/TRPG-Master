@@ -335,3 +335,53 @@ it("主持笔记与作者手册分开，只读展示当前版本，刷新重新�
   );
   expect(send).not.toHaveBeenCalled();
 });
+
+it("更正笔记只准备带当前版本和出处的表单，提交之前不发送命令", async () => {
+  const prepare = vi.fn();
+  useStructuredStore.setState({
+    capabilities: {
+      ...initialStructuredState.capabilities,
+      commands: ["record_keeper_note"],
+    },
+  });
+  readGuide.mockResolvedValue({
+    module_title: "案卷",
+    source_version: "v1",
+    warnings: [],
+    documents: [
+      {
+        id: "keeper-note:promise",
+        title: "主持笔记 · 承诺",
+        text: "完整正文",
+        summary: "改约后日，尚未执行",
+        keeper_note: {
+          note_id: "promise",
+          expected_note_revision: 3,
+          title: "承诺",
+          summary: "改约后日，尚未执行",
+          content: "## 承诺\n改约后日",
+          category: "promise",
+          status: "open",
+          sources: ["receipt:old-command"],
+        },
+      },
+    ],
+  });
+  render(
+    <KeeperLibrary investigators={[]} blocked={null} onPrepare={prepare} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /打开资料库/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^主持笔记$/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "更正这份笔记" }));
+  expect(prepare).toHaveBeenCalledWith("record_keeper_note", {
+    note_id: "promise",
+    expected_note_revision: "3",
+    title: "承诺",
+    summary: "改约后日，尚未执行",
+    content: "## 承诺\n改约后日",
+    category: "promise",
+    status: "open",
+    sources: "receipt:old-command",
+  });
+  expect(send).not.toHaveBeenCalled();
+});

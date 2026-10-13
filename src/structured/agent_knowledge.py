@@ -16,6 +16,7 @@ from sqlalchemy import String, cast, func, or_, select
 
 from src.storage.database import (
     BranchHistoryEntry,
+    CommandEventReceipt,
     EventOutbox,
     GameCommand,
     World,
@@ -105,6 +106,10 @@ class AgentKnowledge:
             )
             for index, entry in enumerate(entries):
                 if isinstance(entry, dict) and isinstance(entry.get("content"), str):
+                    if len(documents) >= 200:
+                        raise StructuredError(
+                            "invalid_action", "模组资料超过200份上限，未静默截断。"
+                        )
                     documents.append(
                         {
                             "id": f"lore:{index}",
@@ -161,6 +166,18 @@ class AgentKnowledge:
                 if source_id:
                     chapter = next((c for c in chapters if c["chapter_id"] == source_id), None)
                     if chapter is None:
+                        stored = (state.get("harness_chapters") or {}).get(source_id)
+                        if stored and stored.get("superseded_by"):
+                            probe = {
+                                "harness_chapters": {
+                                    source_id: {
+                                        k: v for k, v in stored.items() if k != "superseded_by"
+                                    }
+                                }
+                            }
+                            if valid_chapters(session, world_id, probe):
+                                chapter = stored  # Explicit historical read, never active index.
+                    if chapter is None:
                         raise StructuredError("unknown_target", "阶段记忆不存在于当前时间线。")
                     return page(source_id, encoded(chapter), query, budget)
                 return self._hits(
@@ -188,6 +205,7 @@ class AgentKnowledge:
                     return {
                         **page(source_id, doc["content"], query, budget),
                         "module_version": world.module_version,
+                        "enabled": doc.get("enabled", True),
                     }
                 hits = []
                 for doc in docs:
@@ -256,6 +274,9 @@ class AgentKnowledge:
                         or_(
                             text_matches(GameCommand.result, text),
                             text_matches(GameCommand.payload, text),
+                            GameCommand.event_receipts.any(
+                                text_matches(CommandEventReceipt.event_json, text)
+                            ),
                             GameCommand.kind.icontains(text, autoescape=True),
                             GameCommand.command_id.icontains(text, autoescape=True),
                             GameCommand.cause_id.icontains(text, autoescape=True),
@@ -284,6 +305,31 @@ class AgentKnowledge:
                 )
             if kind == "history":
                 if source_id:
+                    if source_id.startswith("receipt-event:"):
+                        key, _, ordinal = source_id.removeprefix("receipt-event:").rpartition(":")
+                        found = session.execute(
+                            select(CommandEventReceipt, GameCommand.command_id)
+                            .join(GameCommand, GameCommand.id == CommandEventReceipt.command_row_id)
+                            .where(
+                                GameCommand.world_id == world_id,
+                                GameCommand.status == "committed",
+                                GameCommand.error_code != "timeline_discarded",
+                                CommandEventReceipt.command_row_id == key,
+                                CommandEventReceipt.ordinal == int(ordinal)
+                                if ordinal.isdigit()
+                                else False,
+                            )
+                        ).first()
+                        if found is None:
+                            raise StructuredError(
+                                "unknown_target", "历史事件回执不属于当前时间线。"
+                            )
+                        return page(
+                            source_id,
+                            encoded({"command_id": found[1], **found[0].event_json}),
+                            query,
+                            budget,
+                        )
                     if source_id.startswith("note-event:"):
                         frozen = (state.get("keeper_note_sources") or {}).get(source_id)
                         if frozen is None:
@@ -356,13 +402,40 @@ class AgentKnowledge:
                         BranchHistoryEntry.ordinal,
                     ),
                     (GameCommand, GameCommand.payload, "receipt", GameCommand.created_at),
+                    (
+                        CommandEventReceipt,
+                        CommandEventReceipt.event_json,
+                        "receipt-event",
+                        GameCommand.created_at,
+                    ),
                 ):
-                    stmt = select(model).where(model.world_id == world_id)
+                    if prefix == "receipt-event":
+                        stmt = (
+                            select(model)
+                            .join(GameCommand, GameCommand.id == model.command_row_id)
+                            .where(
+                                GameCommand.world_id == world_id,
+                                GameCommand.status == "committed",
+                                GameCommand.error_code != "timeline_discarded",
+                                model.event_type == "message_completed",
+                                ~select(EventOutbox.id)
+                                .where(
+                                    EventOutbox.world_id == world_id,
+                                    EventOutbox.event_type == "message_completed",
+                                    EventOutbox.payload["message_id"].as_string()
+                                    == model.message_id,
+                                )
+                                .exists(),
+                            )
+                        )
+                    else:
+                        stmt = select(model).where(model.world_id == world_id)
                     if prefix == "receipt":
                         stmt = stmt.where(
                             GameCommand.kind == "publish_message",
                             GameCommand.status == "committed",
                             GameCommand.error_code != "timeline_discarded",
+                            ~GameCommand.event_receipts.any(),
                             ~select(EventOutbox.id)
                             .where(
                                 EventOutbox.world_id == world_id,
@@ -385,14 +458,27 @@ class AgentKnowledge:
                     )
                     matched += total
                     for row in rows:
-                        content = row.message if prefix == "archive" else row.payload
+                        content = (
+                            row.message
+                            if prefix == "archive"
+                            else row.event_json
+                            if prefix == "receipt-event"
+                            else row.payload
+                        )
                         raw = encoded(content)
                         position = max(0, raw.casefold().find(text.casefold()) - 80) if text else 0
                         hits.append(
                             {
-                                "source_id": f"{prefix}:{row.sequence if prefix == 'event' else row.ordinal if prefix == 'archive' else row.command_id}",
+                                "source_id": f"{prefix}:{row.sequence if prefix == 'event' else row.ordinal if prefix == 'archive' else str(row.command_row_id) + ':' + str(row.ordinal) if prefix == 'receipt-event' else row.command_id}",
+                                "event_type": row.event_type
+                                if prefix in {"event", "receipt-event"}
+                                else "message_completed",
+                                "source_is_proposal": prefix == "event"
+                                and row.event_type == "keeper_draft",
                                 "audience": row.audience
-                                if prefix != "receipt"
+                                if prefix not in {"receipt", "receipt-event"}
+                                else row.event_json.get("audience", {"kind": "keeper"})
+                                if prefix == "receipt-event"
                                 else row.payload.get("audience", {"kind": "keeper"}),
                                 "excerpt": raw[position : position + 320],
                             }
@@ -404,15 +490,9 @@ class AgentKnowledge:
 
     @staticmethod
     def _receipt(row: GameCommand) -> dict:
-        return {
-            "command_id": row.command_id,
-            "kind": row.kind,
-            "result": row.result,
-            "status": row.status,
-            "revision": row.revision,
-            "cause_id": row.cause_id,
-            "payload": row.payload,
-        }
+        from .command_receipts import complete_receipt
+
+        return complete_receipt(row)
 
     @staticmethod
     def _database_hits(hits, query, budget, total):

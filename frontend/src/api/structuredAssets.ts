@@ -26,7 +26,30 @@ const guideSchema = z.object({
   module_title: z.string(),
   source_version: z.string(),
   documents: z.array(
-    z.object({ id: z.string(), title: z.string(), text: z.string() }),
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      text: z.string(),
+      summary: z.string().optional(),
+      keeper_note: z
+        .object({
+          note_id: z.string(),
+          expected_note_revision: z.number().int().nonnegative(),
+          title: z.string(),
+          summary: z.string(),
+          content: z.string(),
+          category: z.enum([
+            "event",
+            "promise",
+            "open_question",
+            "plan",
+            "inference",
+          ]),
+          status: z.enum(["open", "resolved", "archived"]),
+          sources: z.array(z.string()),
+        })
+        .optional(),
+    }),
   ),
   warnings: z.array(z.string()),
 });

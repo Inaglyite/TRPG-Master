@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 
 from sqlalchemy import select
@@ -66,7 +67,7 @@ def resolve_draft(state: dict, payload: dict, ctx: CommandContext) -> CommandRes
             outcome = execute_domain(kind, _KIND_HANDLERS[kind], state, body, inner_ctx)
             events.extend(outcome.events)
             bump = bump or outcome.bump_revision
-            results.append({"kind": kind, "result": outcome.result})
+            results.append({"kind": kind, "payload": copy.deepcopy(body), "result": outcome.result})
         narration = str(draft.get("narration") or "")
         if narration:
             message = _KIND_HANDLERS["publish_message"](

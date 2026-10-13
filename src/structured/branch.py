@@ -29,6 +29,7 @@ from src.app.runtime import RuntimeContext
 from src.storage.database import (
     CharacterMemory,
     CheckRequest,
+    CommandEventReceipt,
     EventOutbox,
     GameCommand,
     InteractionThread,
@@ -316,6 +317,15 @@ def create_structured_branch(
                         cause_id=command.cause_id,
                         revision=int(command.revision),
                         created_at=command.created_at,
+                        event_receipts=[
+                            CommandEventReceipt(
+                                ordinal=event.ordinal,
+                                event_type=event.event_type,
+                                message_id=event.message_id,
+                                event_json=copy.deepcopy(event.event_json),
+                            )
+                            for event in command.event_receipts
+                        ],
                     )
                 )
             # 当前交互线程：只复制开放线程（终态已是历史，由记忆覆盖）。

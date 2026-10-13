@@ -127,6 +127,11 @@ export function KeeperLibrary({
     );
   }, [assets, clues, material, category, query, currentSceneId, guide, party]);
   const entry = entries.find((item) => item.id === selected) ?? entries[0];
+  const editableNote =
+    category === "notes"
+      ? guide?.documents.find((document) => document.id === entry?.id)
+          ?.keeper_note
+      : undefined;
   const person =
     category === "investigator"
       ? party.find((sheet) => sheet.investigatorId === entry?.id)
@@ -315,7 +320,14 @@ export function KeeperLibrary({
                   {item.current && (
                     <span className="keeper-library-current">当前场景</span>
                   )}
-                  {item.text && <span>{item.text.slice(0, 80)}</span>}
+                  {item.text && (
+                    <span>
+                      {("summary" in item && typeof item.summary === "string"
+                        ? item.summary
+                        : item.text
+                      ).slice(0, 80)}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -527,6 +539,28 @@ export function KeeperLibrary({
                   ) : (
                     <>
                       <p className="keeper-library-text">{entry.text}</p>
+                      {editableNote &&
+                        capabilities.commands.includes(
+                          "record_keeper_note",
+                        ) && (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={blocked !== null}
+                            onClick={() => {
+                              onPrepare("record_keeper_note", {
+                                ...editableNote,
+                                expected_note_revision: String(
+                                  editableNote.expected_note_revision,
+                                ),
+                                sources: editableNote.sources.join(","),
+                              });
+                              setExpanded(false);
+                            }}
+                          >
+                            更正这份笔记
+                          </button>
+                        )}
                       {category === "clue" &&
                         capabilities.commands.includes("grant_clue") && (
                           <button

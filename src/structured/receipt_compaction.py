@@ -11,17 +11,26 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 
 from sqlalchemy import func, select
 
 from src.storage.database import GameCommand, PlayerRequest, WorldState, session_scope
 
+from .command_receipts import complete_receipt, core_receipt
 from .errors import StructuredError
 from .principal import Principal, check_command_authority, resolve_keeper_principal
 
 MAX_CHAPTERS = 256
 MAX_CHAPTER_BYTES = 1024 * 1024
 CHAPTER_NOTE_PREFIX = "harness-chapter-"
+
+
+def chapter_note_id(chapter_id: str) -> str:
+    if not re.fullmatch(r"chapter:[0-9a-f]{64}", chapter_id):
+        raise ValueError("阶段摘要编号无效")
+    return CHAPTER_NOTE_PREFIX + chapter_id.split(":", 1)[1]
+
 
 COMPACTION_PROMPT = """你是跑团主持的私有记忆整理器，不执行玩法命令，不向玩家发言。
 输入是当前时间线中已提交的历史命令及其结果，command.payload 是当时的请求，
@@ -46,19 +55,13 @@ def _encoded(value) -> str:
 
 
 def receipt(row: GameCommand) -> dict:
-    return {
-        "command_id": row.command_id,
-        "kind": row.kind,
-        "result": row.result,
-        "status": row.status,
-        "revision": row.revision,
-        "cause_id": row.cause_id,
-        "payload": row.payload,
-    }
+    return complete_receipt(row)
 
 
-def _digest(row: GameCommand) -> str:
-    return hashlib.sha256(_encoded(receipt(row)).encode()).hexdigest()
+def _digest(row: GameCommand, version: int = 2) -> str:
+    return hashlib.sha256(
+        _encoded(core_receipt(row) if version == 1 else receipt(row)).encode()
+    ).hexdigest()
 
 
 def _without_generated_memory(value):
@@ -113,7 +116,8 @@ def _current_rows(session, world_id: str, ids: list[str]) -> dict:
 
 def valid_chapters(session, world_id: str, state: dict) -> list[dict]:
     """Restore/fork validity follows exact receipt bodies, not reused revisions."""
-    chapters = list((state.get("harness_chapters") or {}).values())
+    chapters = [c for c in (state.get("harness_chapters") or {}).values()
+                if isinstance(c, dict) and not c.get("superseded_by")]
     for note_id, note in (state.get("keeper_notebook") or {}).items():
         if not note_id.startswith(CHAPTER_NOTE_PREFIX):
             continue
@@ -150,8 +154,10 @@ def valid_chapters(session, world_id: str, state: dict) -> list[dict]:
         c["chapter_id"]: c
         for c in chapters
         if isinstance(c.get("chapter_id"), str)
+        and re.fullmatch(r"chapter:[0-9a-f]{64}", c["chapter_id"])
         and all(
-            s["command_id"] in rows and _digest(rows[s["command_id"]]) == s["sha256"]
+            s["command_id"] in rows
+            and _digest(rows[s["command_id"]], s.get("digest_version", 1)) == s["sha256"]
             for s in c["sources"]
         )
     }
@@ -180,10 +186,13 @@ class ReceiptCompactor:
             if len(chapters) >= MAX_CHAPTERS:
                 return None  # Originals remain readable; quota is exposed in context.
             covered = {s["command_id"] for c in chapters for s in c["sources"]}
+            for chapter in (state.state or {}).get("harness_chapters", {}).values():
+                if chapter.get("superseded_by"):
+                    covered.update(s["command_id"] for s in chapter["sources"])
             # A human may replace a generated chapter note with ordinary Markdown.
             # Its explicit receipt references still count as reviewed history;
             # do not regenerate and overwrite that correction with version zero.
-            for note_id, note in (state.state.get("keeper_notebook") or {}).items():
+            for note_id, note in ((state.state or {}).get("keeper_notebook") or {}).items():
                 if note_id.startswith(CHAPTER_NOTE_PREFIX):
                     covered.update(
                         source.split(":", 1)[1]
@@ -253,6 +262,7 @@ class ReceiptCompactor:
                     {
                         "command_id": row.command_id,
                         "sha256": _digest(row),
+                        "digest_version": 2,
                         "complete": complete,
                         "revision": row.revision,
                     }
@@ -335,7 +345,8 @@ class ReceiptCompactor:
                 raise StructuredError("unknown_world", "世界状态不存在。")
             rows = _current_rows(session, world_id, [s["command_id"] for s in chapter["sources"]])
             if any(
-                s["command_id"] not in rows or _digest(rows[s["command_id"]]) != s["sha256"]
+                s["command_id"] not in rows
+                or _digest(rows[s["command_id"]], s.get("digest_version", 1)) != s["sha256"]
                 for s in chapter["sources"]
             ):
                 raise StructuredError("stale_target", "摘要生成期间时间线已变化，未保存旧记忆。")
@@ -356,7 +367,8 @@ class ReceiptCompactor:
             _authorized(session, world_id, principal)
             rows = _current_rows(session, world_id, [s["command_id"] for s in chapter["sources"]])
             if any(
-                s["command_id"] not in rows or _digest(rows[s["command_id"]]) != s["sha256"]
+                s["command_id"] not in rows
+                or _digest(rows[s["command_id"]], s.get("digest_version", 1)) != s["sha256"]
                 for s in chapter["sources"]
             ):
                 raise StructuredError("stale_target", "摘要生成期间时间线已变化，未采用旧记忆。")
@@ -367,7 +379,7 @@ class ReceiptCompactor:
         return {
             "kind": "record_keeper_note",
             "payload": {
-                "note_id": CHAPTER_NOTE_PREFIX + chapter["chapter_id"].split(":")[1][:24],
+                "note_id": chapter_note_id(chapter["chapter_id"]),
                 "expected_note_revision": 0,
                 "title": chapter["title"],
                 "summary": chapter["summary"][:240],

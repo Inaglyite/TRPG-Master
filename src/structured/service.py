@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from src.storage.database import (
     CheckRequest,
+    CommandEventReceipt,
     EventOutbox,
     GameCommand,
     PlayerRequest,
@@ -237,6 +238,13 @@ class StructuredPlayService:
             # a revoked controller must not receive an old private receipt.
             combat_epoch = None
             if kind == "record_keeper_note":
+                from .receipt_compaction import CHAPTER_NOTE_PREFIX
+
+                if (
+                    payload["note_id"].startswith(CHAPTER_NOTE_PREFIX)
+                    and principal.kind != "keeper"
+                ):
+                    raise StructuredError("keeper_required", "自动阶段摘要的更正需要人类主持批准。")
                 combat_epoch = check_command_authority(session, world_id, principal)
             if kind in _HUMAN_REPLAY_GUARDED:
                 if principal.kind != "keeper":
@@ -373,29 +381,37 @@ class StructuredPlayService:
                 )
             )
             self._write_state(row, state, bump=outcome.bump_revision)
-            session.add(
-                GameCommand(
-                    id=new_row_id("cmdrow"),
-                    world_id=world_id,
-                    command_id=command_id,
-                    kind=kind,
-                    payload=copy.deepcopy(payload),
-                    payload_digest=digest,
-                    principal=principal.as_dict(),
-                    controller_epoch=epoch,
-                    status="committed",
-                    result=copy.deepcopy(outcome.result),
-                    cause_id=cause_id or "",
-                    revision=int(row.revision),
-                    created_at=utcnow(),
-                )
+            command_record = GameCommand(
+                id=new_row_id("cmdrow"),
+                world_id=world_id,
+                command_id=command_id,
+                kind=kind,
+                payload=copy.deepcopy(payload),
+                payload_digest=digest,
+                principal=principal.as_dict(),
+                controller_epoch=epoch,
+                status="committed",
+                result=copy.deepcopy(outcome.result),
+                cause_id=cause_id or "",
+                revision=int(row.revision),
+                created_at=utcnow(),
             )
+            session.add(command_record)
             # 事件因果标签：有上游请求归上游（玩家请求卡随之更新），否则归
             # 命令自身（让网关与客户端能按 command_id 回收命令的投递与重试）。
             effective_cause = cause_id or command_id
             envelopes = self._append_events(
                 session, world_id, int(row.revision), effective_cause, outcome.events
             )
+            command_record.event_receipts = [
+                CommandEventReceipt(
+                    ordinal=index,
+                    event_type=event["type"],
+                    message_id=(event.get("payload") or {}).get("message_id"),
+                    event_json=copy.deepcopy(event),
+                )
+                for index, event in enumerate(envelopes)
+            ]
             revision_after = int(row.revision)
         # 事务在此已提交（session_scope 退出即 commit）；事件在提交成功后才返回发布。
         # 记忆派生只在提交成功之后、独立事务里运行：派生失败只记日志，

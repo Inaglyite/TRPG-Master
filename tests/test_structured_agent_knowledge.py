@@ -146,6 +146,25 @@ class AgentKnowledgeTests(unittest.IsolatedAsyncioTestCase):
             checkpoint = session.get(WorldState, "sp-world").state["harness_checkpoint"]
             self.assertEqual(context["memory_checkpoint"], checkpoint)
 
+    def test_disabled_module_source_keeps_status_on_full_read_and_document_quota(self):
+        path = self.root / "mod/test-module/lorebook.json"
+        path.write_text(
+            json.dumps(
+                {"data": {"entries": [{"enabled": False, "content": "弃用暗号"}]}},
+                ensure_ascii=False,
+            )
+        )
+        hits = self.knowledge.query("sp-world", self.keeper, {"kind": "module", "text": "弃用暗号"})
+        self.assertFalse(hits["items"][0]["enabled"])
+        body = self.knowledge.query(
+            "sp-world", self.keeper, {"kind": "module", "source_id": hits["items"][0]["source_id"]}
+        )
+        self.assertFalse(body["enabled"])
+        self.assertEqual("弃用暗号", body["content"])
+        path.write_text(json.dumps({"data": {"entries": [{"content": "参考"}] * 200}}))
+        with self.assertRaisesRegex(StructuredError, "200份上限"):
+            self.knowledge.query("sp-world", self.keeper, {"kind": "module"})
+
     def test_fork_receipts_notes_and_event_sources_are_frozen(self):
         from src.structured.branch import create_structured_branch
 

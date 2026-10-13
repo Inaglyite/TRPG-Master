@@ -48,6 +48,9 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
         module_name = world.module_name
         state_row = session.get(WorldState, world_id)
         notes = (state_row.state or {}).get("keeper_notebook", {}) if state_row else {}
+        from src.structured.receipt_compaction import chapter_note_id, readable_note, valid_chapters
+
+        chapters = valid_chapters(session, world_id, state_row.state or {}) if state_row else []
     try:
         record = deps.module_registry.resolve(module_name)
         root = record.path.resolve()
@@ -61,14 +64,26 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
         warnings: list[str] = []
         used_bytes = 0
 
-        def add(key: str, title: str, text: str) -> None:
+        def add(
+            key: str,
+            title: str,
+            text: str,
+            *,
+            summary: str | None = None,
+            keeper_note: dict | None = None,
+        ) -> None:
             nonlocal used_bytes
-            size = len(text.encode("utf-8"))
+            document = {"id": key, "title": title[:160], "text": text}
+            if summary is not None:
+                document["summary"] = summary
+            if keeper_note is not None:
+                document["keeper_note"] = keeper_note
+            size = len(json.dumps(document, ensure_ascii=False).encode("utf-8"))
             if len(documents) >= MAX_DOCUMENTS or used_bytes + size > MAX_SOURCE_BYTES:
                 raise ValueError("资料总量超出上限，该条未载入")
             used_bytes += size
             if text.strip():
-                documents.append({"id": key, "title": title[:160], "text": text})
+                documents.append(document)
 
         for key, title, path in candidates:
             if not path.exists():
@@ -79,15 +94,49 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
                 warnings.append(f"{title[:160]}：无法完整读取，未显示截断内容。")
         for key, note in notes.items():
             try:
-                from src.structured.receipt_compaction import readable_note
-
                 add(
                     f"keeper-note:{key}",
                     f"主持笔记 · {note['title']}",
                     f"笔记ID：{key}\n当前版本：{note['note_revision']}\n类型：{note['category']} · 状态：{note['status']}\n\n{note['summary']}\n\n{readable_note(note['content'])}\n\n出处：{', '.join(note['sources']) or '主持记录（无执行出处）'}",
+                    summary=note["summary"],
+                    keeper_note={
+                        "note_id": key,
+                        "expected_note_revision": note["note_revision"],
+                        "title": note["title"],
+                        "summary": note["summary"],
+                        "content": readable_note(note["content"]),
+                        "category": note["category"],
+                        "status": note["status"],
+                        "sources": note["sources"],
+                    },
                 )
             except (KeyError, ValueError):
                 warnings.append(f"主持笔记 {key}：无法完整载入，请通过主持资料查询接口读取。")
+        for chapter in chapters:
+            note_id = chapter_note_id(chapter["chapter_id"])
+            if note_id in notes:
+                continue
+            try:
+                add(
+                    f"keeper-note:{note_id}",
+                    f"阶段摘要 · {chapter['title']}",
+                    f"笔记ID：{note_id}\n当前版本：0（自动阶段摘要，首次更正填0）\n\n"
+                    + readable_note(json.dumps(chapter, ensure_ascii=False))
+                    + "\n\n可在“保存主持笔记”更正；批准保存后以主持更正为准，原摘要保留供追溯。",
+                    summary=chapter["summary"][:240],
+                    keeper_note={
+                        "note_id": note_id,
+                        "expected_note_revision": 0,
+                        "title": chapter["title"],
+                        "summary": chapter["summary"][:240],
+                        "content": readable_note(json.dumps(chapter, ensure_ascii=False)),
+                        "category": "event",
+                        "status": "archived",
+                        "sources": ["receipt:" + s["command_id"] for s in chapter["sources"]],
+                    },
+                )
+            except (KeyError, ValueError):
+                warnings.append("阶段摘要无法完整载入，请通过主持资料查询读取。")
         lore = root / "lorebook.json"
         if lore.exists():
             try:

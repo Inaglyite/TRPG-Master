@@ -1099,6 +1099,7 @@
   font-size: 12px;
   line-height: 1.7;
   margin-top: 7px;
+  overflow-wrap: anywhere;
 }
 .keeper-library-entry > .keeper-library-current {
   color: var(--platform-brass);
