@@ -270,7 +270,7 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 
 ## 7. 协议变更检查
 
-### 主持笔记与资料查询（2026-10-12，本地实现）
+### 主持笔记与资料查询（2026-10-13，实验实现）
 
 `record_keeper_note` 接受 `note_id/expected_note_revision/title/summary/content/category`，
 可选 `status/sources`。版本0新建；更正必须匹配当前笔记版本。类型为
