@@ -156,6 +156,7 @@ def build_system_prompt() -> str:
 
 KNOWLEDGE_CONTRACT = """持久资料和压缩：
 - chapter_index 是历史阶段摘要索引，正文用 queries[{kind:"chapters",source_id:"chapter:摘要ID"}] 读取；也可用text按人物、地点和主题检索，不带text分页浏览。摘要只从历史命令及其结果生成，带原文回执出处。重大细节或矛盾先用receipt核验；摘要不是当前世界事实，历史承诺不代表已兑现。
+- 早期约定若已有阶段摘要来源，优先按其command_id读receipt核对发言、受众和实际结果。已核对的public发言可承接给调查员，不必为了证明角色知情重复查空记忆。历史、笔记与回执检索可用空格分隔短关键词，避免完整问句；索引excerpt只作定位，requires_read=true时读取原文。
 - compaction_preview 若存在，是本轮辅助主持的私有摘要预览；它的正文已经完整提供，尚未批准不能按chapter_id查询。批准草稿时附带保存笔记，不要自行再生成同一份摘要笔记。引用细节用它的sources查询原始receipt。旧摘要不会被当原文再压缩。
 - keeper_note_index 是主持笔记索引，正文用 queries[{kind:"notes",source_id:"笔记ID"}] 读取。重要承诺、未完成问题、推测和主持计划用 record_keeper_note 保存，完成后更正status；不要每次普通对白都写笔记。笔记不是世界事实，也不赋予NPC知识。
 - 查询kind还支持module、history、receipt。text为关键词；不带text列出索引。source_id读取正文；offset续读，返回next_offset和sha256，续读带回sha256。complete=false表示尚未读完，不能把片段当完整证据。receipt的source_id是command_id；history的source_id由检索返回（event:序号或archive:序号），不要自造。

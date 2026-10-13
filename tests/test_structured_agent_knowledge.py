@@ -165,6 +165,42 @@ class AgentKnowledgeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(StructuredError, "200份上限"):
             self.knowledge.query("sp-world", self.keeper, {"kind": "module"})
 
+    def test_background_receipts_are_bounded_pointers_but_full_originals_remain_readable(self):
+        for i in range(20):
+            self.command(
+                f"large-talk-{i}",
+                "publish_message",
+                {
+                    "speaker": {"kind": "keeper"},
+                    "audience": {"kind": "public"},
+                    "text": "日常背景" * 200 + f"最后原文{i}",
+                },
+            )
+        context = self.knowledge.context("sp-world")
+        self.assertLess(len(json.dumps(context["execution_receipts"], ensure_ascii=False)), 4000)
+        self.assertTrue(all(item["requires_read"] for item in context["execution_receipts"]))
+        body = json.loads(self.read_all("receipt", "large-talk-19"))
+        self.assertIn("最后原文19", body["payload"]["text"])
+        self.assertTrue(body["emitted_events_complete"])
+
+    def test_multi_keyword_history_search_finds_raw_evidence_without_exact_phrase(self):
+        self.command(
+            "promise-source",
+            "publish_message",
+            {
+                "speaker": {"kind": "keeper"},
+                "audience": {"kind": "public"},
+                "text": "老医生答应周三见面，口令纸鸢。",
+            },
+        )
+        result = self.knowledge.query(
+            "sp-world", self.keeper, {"kind": "history", "text": "老医生 约定 见面 口令"}
+        )
+        self.assertGreater(result["total_matches"], 0)
+        self.assertTrue(result["items"][0]["requires_read"])
+        body = self.read_all("history", result["items"][0]["source_id"])
+        self.assertIn("口令纸鸢", body)
+
     def test_fork_receipts_notes_and_event_sources_are_frozen(self):
         from src.structured.branch import create_structured_branch
 

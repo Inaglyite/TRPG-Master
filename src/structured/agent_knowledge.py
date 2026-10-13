@@ -35,8 +35,16 @@ def text_matches(field, text):
     # SQLite's JSON serializer may escape Chinese; PostgreSQL's JSON text uses
     # Unicode. Search both representations with literal wildcard escaping.
     return or_(
-        cast(field, String).icontains(text, autoescape=True),
-        cast(field, String).icontains(json.dumps(text, ensure_ascii=True)[1:-1], autoescape=True),
+        *(
+            condition
+            for term in re.split(r"\s+", text.strip())
+            for condition in (
+                cast(field, String).icontains(term, autoescape=True),
+                cast(field, String).icontains(
+                    json.dumps(term, ensure_ascii=True)[1:-1], autoescape=True
+                ),
+            )
+        )
     )
 
 
@@ -143,6 +151,8 @@ class AgentKnowledge:
         text = str(query.get("text") or "")
         if len(text) > 200:
             raise StructuredError("invalid_action", "查询关键词最多200字。")
+        if len(re.split(r"\s+", text.strip())) > 16:
+            raise StructuredError("invalid_action", "最多16个查询关键词，请缩小范围。")
         source_id = str(query.get("source_id") or "")
         kind = query.get("kind")
         if int(query.get("offset", 0)) < 0:
@@ -191,7 +201,11 @@ class AgentKnowledge:
                             "requires_read": True,
                         }
                         for c in reversed(chapters)
-                        if not text or text.casefold() in encoded(c).casefold()
+                        if not text
+                        or any(
+                            term.casefold() in encoded(c).casefold()
+                            for term in re.split(r"\s+", text.strip())
+                        )
                     ],
                     query,
                     budget,
@@ -253,7 +267,11 @@ class AgentKnowledge:
                     [
                         n
                         for n in note_index(state)
-                        if not text or text.casefold() in encoded(notes[n["note_id"]]).casefold()
+                        if not text
+                        or any(
+                            term.casefold() in encoded(notes[n["note_id"]]).casefold()
+                            for term in re.split(r"\s+", text.strip())
+                        )
                     ],
                     query,
                     budget,
@@ -475,6 +493,7 @@ class AgentKnowledge:
                                 else "message_completed",
                                 "source_is_proposal": prefix == "event"
                                 and row.event_type == "keeper_draft",
+                                "requires_read": True,
                                 "audience": row.audience
                                 if prefix not in {"receipt", "receipt-event"}
                                 else row.event_json.get("audience", {"kind": "keeper"})
@@ -650,21 +669,33 @@ class AgentKnowledge:
                 .limit(8)
             ).all()
             recent = []
+            receipt_chars = 0
             for command in reversed(receipts):
                 receipt = self._receipt(command)
-                raw = encoded(receipt)
+                compact = {
+                    k: receipt[k]
+                    for k in ("command_id", "kind", "status", "revision", "cause_id", "result")
+                }
+                raw = encoded(compact)
                 recent.append(
-                    receipt
-                    if len(raw) <= 2400
+                    {
+                        **compact,
+                        "full_receipt_query": {"kind": "receipt", "source_id": command.command_id},
+                    }
+                    if command.kind != "publish_message"
+                    and len(raw) <= 1600
+                    and receipt_chars + len(raw) <= 4000
                     else {
                         "command_id": command.command_id,
                         "kind": command.kind,
                         "revision": command.revision,
+                        "cause_id": command.cause_id,
                         "requires_read": True,
-                        "total_chars": len(raw),
+                        "total_chars": len(encoded(receipt)),
                         "query": {"kind": "receipt", "source_id": command.command_id},
                     }
                 )
+                receipt_chars += len(encoded(recent[-1]))
             return {
                 "timeline_generation": int(state.get("harness_timeline_generation", 0)),
                 "chapter_index": chapter_index,
