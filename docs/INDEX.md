@@ -13,6 +13,12 @@
 
 ## 归档资料
 
+原始玩家请求档案及分支长期记忆验收冻结于
+`mid_product/trpg-master/2026-10-13-agent-harness-request-memory/`：f7ea6908源码指纹、
+2025项本地后端、两轮真实模型请求专项及共享费用账本，保留首轮误称“公开记录”
+的原件与修正后证据。包含733f7302的完整CI日志（2032后端、1340前端、95 E2E），
+该CI不覆盖新增0021；最终提交的CI须按其SHA单独核对。原件不随源码推送。
+
 `7bd0e51d` 的后续完整 GitHub quality 记录冻结于
 `mid_product/trpg-master/2026-10-13-agent-harness-memory-ci/`：2005后端/167子测试、
 1339前端单测、95浏览器E2E/2门控skip。该结论不覆盖后续新增阶段摘要代码。

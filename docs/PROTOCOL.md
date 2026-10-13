@@ -304,6 +304,11 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 
 新命令回执正文含 `emitted_events`（原始事件与受众）及
 `emitted_events_complete`。旧记录缺事件档案时为false，不表示当时没有发言。
+`originating_request_context` 冻结关联玩家请求的原始载荷与执行前状态，
+`originating_request_context_complete` 表示是否保存该档案；新命令即使无关联请求
+也保存空列表，旧缺档案为null/false。上下文标为keeper受众、非公开发言，
+`request_is_executed_fact=false`；计划是否执行须查命令结果。分支保留该档案，
+不会将已结束请求重新加入待办。
 批准草稿的 `executed_commands` 保存每条 `kind/payload/result`；缓存返回仍不重发
 事件。历史索引的 `source_is_proposal=true` 标出未执行草稿，片段均须读取原文核对。
 
