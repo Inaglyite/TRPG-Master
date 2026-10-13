@@ -50,6 +50,7 @@ from .errors import StructuredError
 from .execution import POST_GAME_COMMANDS, execute_domain
 from .ids import canonical_digest, new_row_id
 from .keeper_dice import keeper_roll, visible_keeper_rolls
+from .keeper_notebook import record_keeper_note
 from .principal import (
     Principal,
     check_command_authority,
@@ -78,6 +79,7 @@ _KIND_HANDLERS = {
     "record_ruling": record_ruling,
     "record_condition": record_condition,
     "keeper_roll": keeper_roll,
+    "record_keeper_note": record_keeper_note,
 }
 
 _HUMAN_REPLAY_GUARDED = {"record_ruling", "record_condition", "resolve_draft", "keeper_roll"}
@@ -214,7 +216,12 @@ class StructuredPlayService:
         handler = _KIND_HANDLERS.get(kind)
         if handler is None:
             raise StructuredError("invalid_action", f"未知命令：{kind}")
-        if kind in _COMBAT_COMMANDS or kind in {"record_ruling", "record_condition", "keeper_roll"}:
+        if kind in _COMBAT_COMMANDS or kind in {
+            "record_ruling",
+            "record_condition",
+            "keeper_roll",
+            "record_keeper_note",
+        }:
             validate_command(kind, payload)
         if kind == "keeper_roll" and cause_id:
             raise StructuredError("invalid_action", "主持普通骰不能关联或完成玩家行动。")
@@ -229,6 +236,8 @@ class StructuredPlayService:
             # Battle responses must re-read control before replay lookup as well:
             # a revoked controller must not receive an old private receipt.
             combat_epoch = None
+            if kind == "record_keeper_note":
+                combat_epoch = check_command_authority(session, world_id, principal)
             if kind in _HUMAN_REPLAY_GUARDED:
                 if principal.kind != "keeper":
                     raise StructuredError("keeper_required", "该操作需要人类主持授权。")
@@ -298,6 +307,11 @@ class StructuredPlayService:
                         "result": copy.deepcopy(existing.result),
                         "events": [],
                         "deduplicated": True,
+                        **(
+                            {"timeline_discarded": True}
+                            if existing.error_code == "timeline_discarded"
+                            else {}
+                        ),
                     }
                 raise StructuredError(
                     "duplicate_request_conflict",
@@ -1642,6 +1656,7 @@ class StructuredPlayService:
             "record_condition",
             "keeper_roll",
             "record_memory",
+            "record_keeper_note",
             "resolve_draft",
             "control_keeper",
             "combat_start",

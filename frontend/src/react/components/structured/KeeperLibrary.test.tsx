@@ -305,3 +305,35 @@ describe("KeeperLibrary", () => {
     expect(useStructuredStore.getState().keeperAssets).toEqual([]);
   });
 });
+
+it("主持笔记与作者手册分开，只读展示当前版本，刷新重新取资料", async () => {
+  readGuide.mockResolvedValue({
+    module_title: "案卷",
+    source_version: "v1",
+    warnings: [],
+    documents: [
+      { id: "module", title: "模组正文", text: "作者正文" },
+      {
+        id: "keeper-note:promise",
+        title: "主持笔记 · 法伦的承诺",
+        text: "当前版本：2\n## 承诺\n后日同行，仍未执行。",
+      },
+    ],
+  });
+  openLibrary();
+  fireEvent.click(
+    screen.getByRole("button", { name: "主持笔记", exact: true }),
+  );
+  const preview = screen.getByRole("article", { name: "资料预览" });
+  await waitFor(() => expect(preview).toHaveTextContent("当前版本：2"));
+  expect(preview).toHaveTextContent("仍未执行");
+  expect(
+    screen.queryByRole("button", { name: /模组正文/ }),
+  ).not.toBeInTheDocument();
+  const calls = readGuide.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "刷新笔记" }));
+  await waitFor(() =>
+    expect(readGuide.mock.calls.length).toBeGreaterThan(calls),
+  );
+  expect(send).not.toHaveBeenCalled();
+});

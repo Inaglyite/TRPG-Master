@@ -306,28 +306,27 @@ class CharacterMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(sum(len(row["content"]) for row in rows), 600)
 
     async def test_agent_query_budget_is_enforced(self):
-        from src.structured.agent import KeeperAgentRunner
+        from src.structured.agent import AgentBudget, KeeperAgentRunner
 
         self.submit("req-1", {"kind": "freeform", "text": "你好。"})
         caller = _ScriptedCaller(
             [
                 _decision(
-                    assessment="查记忆",
                     queries=[{"kind": "memory", "text": f"q{i}"} for i in range(6)],
                     commands=[],
-                    narration="",
+                    narration="不能在查询前发布",
                     stop_reason="done",
-                )
+                ),
+                _decision(commands=[], narration="查询后回答", stop_reason="done"),
             ]
         )
-        runner = KeeperAgentRunner(self.db_url, caller=caller)
+        runner = KeeperAgentRunner(self.db_url, caller=caller, budget=AgentBudget(max_queries=3))
         result = await runner.run(world_id="sp-world", trigger_request_id="req-1")
         self.assertEqual("done", result.status)
-        context = json.loads(caller.calls[0])
-        self.assertIn("character_memories", context)
-        # 预算 3：第 4 条起被拒绝并回喂（请求停在 paused 前 run_log 里应有提示，
-        # 这里验证运行没有因查询失控：模型调用次数受预算约束）。
-        self.assertLessEqual(result.model_calls, 6)
+        self.assertEqual(2, result.model_calls)
+        second = json.loads(caller.calls[1])
+        self.assertTrue(any("查询预算已用完" in entry for entry in second["run_log"]))
+        self.assertNotIn("不能在查询前发布", json.dumps(second["recent_history"]))
 
     # ------------------------------------------------- 6) 分支与读档隔离
 

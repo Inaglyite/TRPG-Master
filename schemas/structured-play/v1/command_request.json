@@ -4,6 +4,7 @@
   "title": "command_request：主持领域命令信封",
   "description": "人类主持台与 Agent 适配器共用的命令入口。客户端不发送 principal/controller_epoch：身份由服务端会话或委派解析，epoch 在受理时由服务端绑定当前控制权。payload 按 kind 严格校验，禁止万能 execute_tool(name,args) 与任意 state_set。",
   "oneOf": [
+    {"$ref": "#/$defs/record_keeper_note"},
     {"$ref": "#/$defs/keeper_roll"},
     {
       "$ref": "#/$defs/control_keeper"
@@ -82,6 +83,83 @@
     }
   ],
   "$defs": {
+    "record_keeper_note": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "record_keeper_note"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "note_id",
+            "expected_note_revision",
+            "title",
+            "summary",
+            "content",
+            "category"
+          ],
+          "properties": {
+            "note_id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
+            },
+            "expected_note_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "content": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            "category": {
+              "enum": [
+                "event",
+                "promise",
+                "open_question",
+                "plan",
+                "inference"
+              ]
+            },
+            "status": {
+              "enum": [
+                "open",
+                "resolved",
+                "archived"
+              ]
+            },
+            "sources": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "maxLength": 180,
+                "pattern": "^(receipt:.+|event:[0-9]+|note-event:[a-f0-9]{64})$"
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "keeper_roll": {
       "type": "object",
       "properties": {

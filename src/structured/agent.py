@@ -81,8 +81,8 @@ class AgentBudget:
     max_narration_chars: int = 4000  # 单条叙述截断，防止失控输出刷屏
     # 记忆按需查询的预算：普通对话不能每轮无限查；达到上限后查询请求被拒绝
     # 并回喂给模型（停止条件显式，不是静默吞掉）。
-    max_queries: int = 3
-    query_result_chars: int = 800
+    max_queries: int = 8
+    query_result_chars: int = 8000
     context_memory_chars: int = 800  # 自动注入上下文的记忆区块预算
     context_memory_limit: int = 8
 
@@ -111,12 +111,16 @@ class KeeperAgentRunner:
         *,
         caller: ModelCaller,
         budget: AgentBudget | None = None,
+        module_resolver=None,
     ):
         self.database_url = database_url
         self.service = StructuredPlayService(database_url)
         self.caller = caller
         self.budget = budget or AgentBudget()
         self._pause_outcomes: list[dict] = []
+        from .agent_knowledge import AgentKnowledge
+
+        self.knowledge = AgentKnowledge(database_url, module_resolver=module_resolver)
 
     # ------------------------------------------------------------------
     # 控制权
@@ -135,7 +139,14 @@ class KeeperAgentRunner:
     # 上下文与决策解析
     # ------------------------------------------------------------------
 
-    def _build_context(self, world_id: str, trigger_request_id: str, run_log: list[str]) -> str:
+    def _build_context(
+        self,
+        world_id: str,
+        trigger_request_id: str,
+        run_log: list[str],
+        *,
+        persist_checkpoint: bool = True,
+    ) -> str:
         keeper = Principal(kind="agent", run_id="context-preview")
         snapshot = self.service.session_snapshot(world_id=world_id, principal=keeper)
         from . import interactions as _interactions
@@ -217,6 +228,7 @@ class KeeperAgentRunner:
                 .where(
                     GameCommand.world_id == world_id,
                     GameCommand.status == "committed",
+                    GameCommand.error_code != "timeline_discarded",
                     GameCommand.kind.in_(
                         [
                             "combat_start",
@@ -258,6 +270,7 @@ class KeeperAgentRunner:
             "trigger_request_id": trigger_request_id or None,
             "run_log": run_log[-12:],  # 本运行的近期命令结果回喂
         }
+        context.update(self.knowledge.context(world_id, persist_checkpoint=persist_checkpoint))
         return json.dumps(context, ensure_ascii=False)
 
     def _recent_transcript(self, world_id: str, limit: int = 8) -> list[dict]:
@@ -390,6 +403,7 @@ class KeeperAgentRunner:
         queries: list,
         queries_run: int,
         run_log: list[str],
+        principal: Principal | None = None,
     ) -> int:
         """执行决策里的只读查询。返回新耗用的查询次数（预算外一律拒绝并回喂）。"""
         if not isinstance(queries, list):
@@ -403,8 +417,24 @@ class KeeperAgentRunner:
                     f"查询预算已用完（本轮最多 {self.budget.max_queries} 次）；请直接判断或结束本轮。"
                 )
                 break
-            if not isinstance(query, dict) or str(query.get("kind") or "") != "memory":
-                run_log.append("未知查询类型（当前只支持 kind=memory），已跳过。")
+            if not isinstance(query, dict):
+                run_log.append("查询必须为对象，已跳过。")
+                continue
+            if query.get("kind") != "memory":
+                spent += 1
+                try:
+                    if principal is None:
+                        raise StructuredError("keeper_required", "资料查询缺少本次主持身份。")
+                    value = self.knowledge.query(
+                        world_id, principal, query, char_budget=self.budget.query_result_chars
+                    )
+                    run_log.append(
+                        f"{query.get('kind')} 查询结果：" + json.dumps(value, ensure_ascii=False)
+                    )
+                except (StructuredError, ValueError, TypeError, OSError) as exc:
+                    run_log.append(
+                        f"查询被拒绝：{getattr(exc, 'code', 'invalid_action')} {getattr(exc, 'message', str(exc))}"
+                    )
                 continue
             try:
                 rows = self.service.query_memories(
@@ -427,7 +457,10 @@ class KeeperAgentRunner:
                 continue
             lines = []
             for row in rows:
-                lines.append(f"- [{row['character_id']}|{row['knowledge_type']}] {row['content']}")
+                lines.append(
+                    f"- [{row['character_id']}|{row['knowledge_type']}] {row['content']}\n  source="
+                    + json.dumps(row.get("source") or {}, ensure_ascii=False)
+                )
             run_log.append("memory 查询结果：\n" + "\n".join(lines))
         return spent
 
@@ -460,6 +493,16 @@ class KeeperAgentRunner:
                 return "budget", rejected
             kind = str(command.get("kind") or "")
             payload = command.get("payload")
+            if rejected and (
+                kind == "publish_message"
+                or (
+                    kind == "resolve_intent"
+                    and isinstance(payload, dict)
+                    and payload.get("resolution") == "completed"
+                )
+            ):
+                spent.append(f"{kind} 暂缓：本步有失败命令，请先读取回执并重新判断。")
+                continue
             if not kind or not isinstance(payload, dict):
                 spent.append(f"命令 {index} 缺少 kind/payload，已跳过")
                 continue
@@ -479,6 +522,22 @@ class KeeperAgentRunner:
             except StructuredError as exc:
                 rejected += 1
                 spent.append(f"{kind} 未过命令 schema：{exc.message}")
+                spent.append(
+                    json.dumps(
+                        {
+                            "command_id": command_id,
+                            "kind": kind,
+                            "status": "not_executed",
+                            "payload": payload,
+                            "error": {
+                                "code": exc.code,
+                                "message": exc.message,
+                                "retryable": exc.retryable,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                )
                 continue
             try:
                 outcome = await asyncio.to_thread(
@@ -496,11 +555,44 @@ class KeeperAgentRunner:
                     return "takeover", rejected
                 rejected += 1
                 spent.append(f"{kind} 被拒绝：{exc.code} {exc.message}")
+                spent.append(
+                    json.dumps(
+                        {
+                            "command_id": command_id,
+                            "kind": kind,
+                            "status": "not_executed",
+                            "payload": payload,
+                            "error": {
+                                "code": exc.code,
+                                "message": exc.message,
+                                "retryable": exc.retryable,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                )
                 continue
             except Exception as exc:  # 未知错误：停在本命令，已提交不回滚
                 logger.exception("agent 命令异常 world=%s kind=%s", world_id, kind)
                 rejected += 1
                 spent.append(f"{kind} 内部错误：{type(exc).__name__}")
+                continue
+            if outcome.get("timeline_discarded"):
+                rejected += 1
+                spent.append(
+                    json.dumps(
+                        {
+                            "command_id": command_id,
+                            "kind": kind,
+                            "status": "not_executed",
+                            "error": {
+                                "code": "stale_target",
+                                "message": "该回执属于已丢弃时间线，未执行当前动作；请使用新命令ID。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                )
                 continue
             result.commands_committed += 1
             combat_wait = combat_wait or any(
@@ -526,8 +618,24 @@ class KeeperAgentRunner:
                     )
                     return None, rejected
                 return "combat_wait" if combat_wait else "await", rejected
+            from .agent_knowledge import encoded
+
+            receipt = {key: outcome[key] for key in ("status", "command_id", "revision", "result")}
+            raw_receipt = encoded(receipt)
             spent.append(
-                f"{kind} committed: {json.dumps(outcome['result'], ensure_ascii=False)[:200]}"
+                f"{kind} committed: "
+                + (
+                    raw_receipt
+                    if len(raw_receipt) <= self.budget.query_result_chars
+                    else encoded(
+                        {
+                            "command_id": command_id,
+                            "requires_read": True,
+                            "total_chars": len(raw_receipt),
+                            "query": {"kind": "receipt", "source_id": command_id},
+                        }
+                    )
+                )
             )
             await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
         return "combat_wait" if combat_wait else None, rejected
@@ -563,6 +671,18 @@ class KeeperAgentRunner:
         - 其余情况：工具 → 叙述 → resolve_intent。收尾排在最后，客户端才会先看到
           权威事件（移动/线索/检定），卡片再收尾。
         """
+        if any(
+            isinstance(command, dict)
+            and isinstance(command.get("payload"), dict)
+            and isinstance(command["payload"].get("speaker"), dict)
+            and isinstance(command["payload"].get("audience"), dict)
+            and command.get("kind") == "publish_message"
+            and (command.get("payload") or {}).get("speaker", {}).get("kind") == "keeper"
+            and (command.get("payload") or {}).get("audience", {}).get("kind") == "public"
+            for command in commands
+        ):
+            # An explicit public keeper message already carries the narrative.
+            narration = ""
         for index, command in enumerate(commands):
             payload = command.get("payload") if isinstance(command.get("payload"), dict) else {}
             if (
@@ -787,12 +907,47 @@ class KeeperAgentRunner:
         run_id = new_run_id()
         result = AgentRunResult(run_id=run_id)
         result.model_calls = 1
-        context_text = self._build_context(world_id, trigger_request_id, [])
+        context_text = self._build_context(
+            world_id, trigger_request_id, [], persist_checkpoint=False
+        )
         # 绑定模型实际看到的版本，而不是模型返回后才读取的世界版本。
         source_revision = json.loads(context_text)["snapshot"]["revision"]
         try:
-            raw = await self.caller(build_system_prompt(), context_text)
-            decision = self._parse_decision(raw)
+            run_log: list[str] = []
+            queries_run = 0
+            from src.storage.database import WorldMember
+
+            with session_scope(self.database_url) as session:
+                control = current_control(session, world_id)
+                members = session.scalars(
+                    select(WorldMember).where(
+                        WorldMember.world_id == world_id, WorldMember.can_keeper.is_(True)
+                    )
+                ).all()
+                member = next(
+                    (m for m in members if m.user_id == control.controller_id), None
+                ) or next(iter(members), None)
+                reader = Principal(kind="keeper", user_id=member.user_id) if member else None
+            for step in range(self.budget.max_model_calls):
+                result.model_calls = step + 1
+                context_text = self._build_context(
+                    world_id, trigger_request_id, run_log, persist_checkpoint=False
+                )
+                source_revision = json.loads(context_text)["snapshot"]["revision"]
+                raw = await self.caller(build_system_prompt(), context_text)
+                decision = self._parse_decision(raw)
+                spent = self._run_queries(
+                    world_id=world_id,
+                    queries=decision.get("queries") or [],
+                    queries_run=queries_run,
+                    run_log=run_log,
+                    principal=reader,
+                )
+                queries_run += spent
+                if not decision.get("queries"):
+                    break
+            else:
+                raise StructuredError("keeper_unavailable", "助手查询预算耗尽，尚未生成草稿。")
         except EmptyModelOutput as exc:
             result.status = "paused"
             result.stop_reason = (
@@ -1017,8 +1172,12 @@ class KeeperAgentRunner:
                     queries=decision.get("queries") or [],
                     queries_run=queries_run,
                     run_log=run_log,
+                    principal=principal,
                 )
                 queries_run += queries_this_step
+                if decision.get("queries"):
+                    # Consume query results before effects or narration.
+                    continue
                 committed_before = result.commands_committed
                 narration = str(decision.get("narration") or "")[: self.budget.max_narration_chars]
                 commands = self._order_commands(decision.get("commands") or [], narration)
@@ -1123,6 +1282,31 @@ class KeeperAgentRunner:
                                     broadcast=broadcast,
                                 )
                     return result
+                if trigger_request_id and not step_rejected:
+                    with session_scope(self.database_url) as session:
+                        trigger = session.scalar(
+                            select(PlayerRequest).where(
+                                PlayerRequest.world_id == world_id,
+                                PlayerRequest.request_id == trigger_request_id,
+                            )
+                        )
+                        queued = session.scalar(
+                            select(PlayerRequest.id)
+                            .where(
+                                PlayerRequest.world_id == world_id,
+                                PlayerRequest.request_type != "keeper_draft",
+                                PlayerRequest.status.in_(("queued", "processing")),
+                            )
+                            .limit(1)
+                        )
+                        resolved = trigger is not None and trigger.status in {
+                            "completed",
+                            "declined",
+                            "cancelled",
+                        }
+                    if resolved and queued is None:
+                        result.stop_reason = "requests_resolved"
+                        return result
                 if result.commands_committed == committed_before and not queries_this_step:
                     # 本步零提交且零查询：命令被拒或模型空转。连续多步如此就停下，
                     # 不要用同样的失败烧完整个步数预算（真实模型验收实测：

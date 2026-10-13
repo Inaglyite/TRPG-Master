@@ -17,6 +17,31 @@ function fill(kind: string, values: FieldValues): FieldValues {
 }
 
 describe("主持命令字段表（对照 M0 command_request.json）", () => {
+  it("主持笔记完整传递Markdown、版本0和出处，超长正文被拒绝", () => {
+    const spec = findKeeperCommand("record_keeper_note")!;
+    const values = {
+      note_id: "promise",
+      expected_note_revision: "0",
+      title: "承诺",
+      summary: "未完成",
+      content: "## 承诺\n明日同行",
+      category: "promise",
+      status: "open",
+      sources: "receipt:cmd-one,event:8",
+    };
+    expect(validateKeeperFields(spec, values)).toEqual([]);
+    expect(buildKeeperPayload(spec, values)).toEqual({
+      ...values,
+      expected_note_revision: 0,
+      sources: ["receipt:cmd-one", "event:8"],
+    });
+    expect(
+      validateKeeperFields(spec, {
+        ...values,
+        content: "x".repeat(16001),
+      }).join(""),
+    ).toContain("正文");
+  });
   it("时间类型与schema一致，未填写不猜原因，显式选择独立提交", () => {
     const schema = JSON.parse(
       readFileSync(
@@ -71,6 +96,7 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
         "record_ruling",
         "record_condition",
         "record_memory",
+        "record_keeper_note",
         "request_check",
         "resolve_draft",
         "resolve_check",

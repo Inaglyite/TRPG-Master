@@ -14,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from src.auth.service import auth_required, local_request_trusted, request_user
-from src.storage.database import World, session_scope
+from src.storage.database import World, WorldState, session_scope
 from src.structured.gateway import StructuredGateway
 
 MAX_DOCUMENT_BYTES = 256 * 1024
@@ -46,6 +46,8 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
         if world is None:
             return None
         module_name = world.module_name
+        state_row = session.get(WorldState, world_id)
+        notes = (state_row.state or {}).get("keeper_notebook", {}) if state_row else {}
     try:
         record = deps.module_registry.resolve(module_name)
         root = record.path.resolve()
@@ -75,6 +77,15 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
                 add(key, title, _text(root, path, MAX_DOCUMENT_BYTES))
             except (OSError, UnicodeError, ValueError):
                 warnings.append(f"{title[:160]}：无法完整读取，未显示截断内容。")
+        for key, note in notes.items():
+            try:
+                add(
+                    f"keeper-note:{key}",
+                    f"主持笔记 · {note['title']}",
+                    f"笔记ID：{key}\n当前版本：{note['note_revision']}\n类型：{note['category']} · 状态：{note['status']}\n\n{note['summary']}\n\n{note['content']}\n\n出处：{', '.join(note['sources']) or '主持记录（无执行出处）'}",
+                )
+            except (KeyError, ValueError):
+                warnings.append(f"主持笔记 {key}：无法完整载入，请通过主持资料查询接口读取。")
         lore = root / "lorebook.json"
         if lore.exists():
             try:
@@ -102,6 +113,41 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
 
 
 def register_structured_guide_routes(router, deps) -> None:
+    @router.post("/api/worlds/{world_id}/keeper-knowledge")
+    async def keeper_knowledge(world_id: str, request: Request):
+        from src.structured.agent_knowledge import AgentKnowledge
+        from src.structured.errors import StructuredError
+
+        user = request_user(request, deps.database_url())
+        if user is None and (auth_required() or not local_request_trusted(request.headers)):
+            return JSONResponse({"detail": "未登录或本地请求不受信任"}, status_code=401)
+        principal = StructuredGateway(deps.database_url()).connection_principal(
+            world_id, user.id if user else None
+        )
+        if principal is None or principal.kind != "keeper":
+            return JSONResponse({"detail": "资料查询需要主持权限"}, status_code=403)
+        try:
+            query = await request.json()
+            payload = await asyncio.to_thread(
+                AgentKnowledge(
+                    deps.database_url(), module_resolver=deps.module_registry.resolve
+                ).query,
+                world_id,
+                principal,
+                query,
+            )
+        except (StructuredError, ValueError, TypeError, OSError) as exc:
+            return JSONResponse(
+                {
+                    "detail": getattr(exc, "message", "查询无效"),
+                    "code": getattr(exc, "code", "invalid_action"),
+                },
+                status_code=400,
+            )
+        return JSONResponse(
+            payload, headers={"Cache-Control": "private, no-store", "Vary": "Cookie"}
+        )
+
     @router.get("/api/worlds/{world_id}/keeper-guide")
     async def keeper_guide(world_id: str, request: Request):
         user = request_user(request, deps.database_url())

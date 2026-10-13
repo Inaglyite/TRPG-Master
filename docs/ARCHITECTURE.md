@@ -200,6 +200,40 @@ Agent 要知道上下文是局部注入：未提供不等于未发生，缺依�
 
 `src/ai/context/structured_memory.py` 和 `memory_fact_candidates/memory_facts` 是旧 H3 shadow 机制；`src/structured/memories.py` 和 `character_memories` 是新运行路径的角色记忆。二者不是同一接口，测试也分别为 `test_structured_memory.py` 与 `test_structured_character_memory.py`。
 
+### 7.6 主持笔记、资料检索与可恢复压缩
+
+`AgentKnowledge` 为 structured Agent/assisted 提供 `module/notes/history/receipt`
+只读查询；角色 `memory` 查询仍沿用原接口。模组只接受注册表文档ID，不接受
+模型文件路径；安装版本不符时明确拒绝。历史查询覆盖当前世界完整outbox与
+分叉时冻结的 `branch_history_entries`，回执查询读取完整 `game_commands`。
+返回字符页、来源ID、SHA256、是否读完及续读位置，不以截短内容冒充全文。
+
+私有Markdown笔记存于世界JSON的 `keeper_notebook`，使用独立笔记版本CAS。
+索引常驻、正文按需读；已引用的事件冻结到 `keeper_note_sources`，避免分支
+复用事件序号改变旧出处。两者随存档和分支复制，角色记忆与玩家笔记继续独立。
+人类主持从资料库“主持笔记”查看，在“保存主持笔记”表单更正。
+
+近期对白按字符预算保留原文，旧对白转为带事件范围与检索入口的
+`harness_checkpoint`；压缩不删除原始账本，不递归总结旧摘要。待办、交互、
+世界事实始终单独提供，笔记/摘录不构成执行授权。Agent持久化检查点；assisted
+只构造投影，批准草稿之前不改世界JSON。模型是否主动记笔记、选择正确关键词
+仍受模型行为影响；原文持久化与可追溯不等于任何长度的团都绝不会答错。
+
+查询结果必须在下一次决策中消费。成功回执提供完整结果或明确的全文读取
+入口；拒绝反馈包含命令ID、错误码和未执行状态。读档后保留命令幂等账本，
+将废弃时间线标记排除出当前检索；旧ID只返回标记过的缓存，不再执行。请求
+已结束且没有排队工作时停止，不再额外生成运行报告或查询无关备忘。
+
+新存档在行锁内冻结回执成员与事件摘要，内部游标不进入公开存档列表。
+切换多份存档时恢复确切成员，不能只比较可能复用的revision/sequence。
+已从outbox回滚的公开/私有发言可从该存档有效的publish_message回执重读；
+另一时间线的同序号事件不会进入当前历史检索。
+
+设计参考官方 [ZCode记忆实现](https://github.com/zai-org/ZCode/tree/aac4755666d09fdcd70272fcf063c077a639015f/apps/zcode-cli/packages/core/src/memory)
+的索引/正文分离，以及 [DeepSeek Harness压缩实现](https://github.com/deepseek-ai/deepseek-harness/tree/d743267388641bc76f17c45ce8b4c231aed1d32c/packages/compaction)
+的近期保留、检查点与完整工具配对原则；本项目使用世界权限和结构化命令，
+没有赋予跑团Agent通用bash或任意文件编辑能力。
+
 ## 8. 前端、权限与进程边界
 
 React → typed transport → HTTP/WS；Zod/协议校验 → Zustand → 组件。`structured-transport.ts` 统一两类 WS 的发帧、重试和事件处理，`structured-effects.ts` 负责显示投影。新消息使用显式 speaker，骰子动画不决定骰值，场景栏不从叙事猜位置。

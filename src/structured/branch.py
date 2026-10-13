@@ -315,6 +315,7 @@ def create_structured_branch(
                         error_code=command.error_code,
                         cause_id=command.cause_id,
                         revision=int(command.revision),
+                        created_at=command.created_at,
                     )
                 )
             # 当前交互线程：只复制开放线程（终态已是历史，由记忆覆盖）。
@@ -426,6 +427,10 @@ def restore_structured_save(
         raise SaveNotFoundError(slot_id or AUTO_SAVE_SLOT)
     snapshot, _ = migrate_world_state(copy.deepcopy(snapshot))
     restored_revision = max(0, int(snapshot.get("revision", 0)))
+    from .receipt_checkpoint import event_membership, event_signature, receipt_membership
+
+    saved_receipts = receipt_membership(metadata or {}, context.world_id, restored_revision)
+    saved_event_signatures = event_membership(metadata or {})
     cursor = (metadata or {}).get("structured_event_cursor")
     saved_sequence = None
     if cursor is not None:
@@ -504,14 +509,37 @@ def restore_structured_save(
             session.execute(
                 select(EventOutbox).where(
                     EventOutbox.world_id == context.world_id,
-                    future_events,
+                    future_events if saved_event_signatures is None else True,
                 )
             )
             .scalars()
             .all()
         )
+        if saved_event_signatures is not None:
+            late_events = [
+                event
+                for event in late_events
+                if saved_event_signatures.get(str(event.sequence)) != event_signature(event)
+            ]
         for event in late_events:
             session.delete(event)
+        # Keep idempotency records, but never retrieve receipts from a discarded
+        # future after new commands have advanced to the same revision again.
+        discarded_ids = {
+            str(event.payload.get("request_id"))
+            for event in late_events
+            if event.event_type == "action_status" and event.payload.get("request_id")
+        }
+        for command in session.scalars(
+            select(GameCommand).where(GameCommand.world_id == context.world_id)
+        ):
+            if saved_receipts is not None:
+                if command.id not in saved_receipts:
+                    command.error_code = "timeline_discarded"
+                elif command.error_code == "timeline_discarded":
+                    command.error_code = ""
+            elif command.revision > restored_revision or command.command_id in discarded_ids:
+                command.error_code = "timeline_discarded"
         # 交互线程与角色记忆按同一存档点 reconcile（fail-closed，不泄漏未来）：
         # - 存档点之后创建的线程/记忆直接删除（那是被回滚掉的未来）；
         # - 存档点之后被更新过的线程一律 cancel（无法还原中途状态，与请求同契约）；

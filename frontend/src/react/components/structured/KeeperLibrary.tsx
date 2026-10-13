@@ -13,7 +13,8 @@ import {
   CHARACTER_SKILL_LABELS,
 } from "../CharacterDossier";
 
-type Category = "scene" | "npc" | "clue" | "asset" | "guide" | "investigator";
+type Category =
+  "scene" | "npc" | "clue" | "asset" | "guide" | "notes" | "investigator";
 const CATEGORIES: [Category, string][] = [
   ["scene", "场景"],
   ["npc", "人物"],
@@ -21,6 +22,7 @@ const CATEGORIES: [Category, string][] = [
   ["clue", "线索"],
   ["asset", "图片"],
   ["guide", "模组手册"],
+  ["notes", "主持笔记"],
 ];
 
 export function KeeperLibrary({
@@ -84,11 +86,17 @@ export function KeeperLibrary({
               .filter(Boolean)
               .join("\n"),
           }))
-        : category === "guide"
-          ? (guide?.documents ?? []).map((document) => ({
-              ...document,
-              current: false,
-            }))
+        : category === "guide" || category === "notes"
+          ? (guide?.documents ?? [])
+              .filter(
+                (document) =>
+                  document.id.startsWith("keeper-note:") ===
+                  (category === "notes"),
+              )
+              .map((document) => ({
+                ...document,
+                current: false,
+              }))
           : category === "asset"
             ? assets.map((entry) => ({
                 id: entry.id,
@@ -137,7 +145,8 @@ export function KeeperLibrary({
   }, [worldId]);
   useEffect(() => {
     let cancelled = false;
-    if (!expanded || category !== "guide" || !worldId) return;
+    if (!expanded || (category !== "guide" && category !== "notes") || !worldId)
+      return;
     setGuide(null);
     setGuideStatus("正在读取作者资料…");
     void loadKeeperGuide(worldId, local)
@@ -253,27 +262,29 @@ export function KeeperLibrary({
               ))}
             </div>
           </div>
-          {category === "guide" && (
+          {(category === "guide" || category === "notes") && (
             <div className="keeper-guide-note">
               <p className="keeper-note">
-                当前安装模组的作者资料，不是存档内的历史快照。查阅不会改变世界，也不会把秘密发给玩家。
+                {category === "notes"
+                  ? "仅主持可见，随存档与分支保留。更正时在“保存主持笔记”填写当前笔记版本；备忘不改变世界事实。"
+                  : "当前安装模组的作者资料，不是存档内的历史快照。查阅不会改变世界，也不会把秘密发给玩家。"}
               </p>
               {guide && (
                 <p className="keeper-note">
-                  {guide.module_title} · 资料版本 {guide.source_version} ·{" "}
-                  {guide.documents.length} 篇
+                  {category === "notes" ? `共 ${guide.documents.filter((document) => document.id.startsWith("keeper-note:")).length} 条主持笔记` : `${guide.module_title} · 资料版本 ${guide.source_version} · ${guide.documents.filter((document) => !document.id.startsWith("keeper-note:")).length} 篇`}
                 </p>
               )}
               {guideStatus && <p role="status">{guideStatus}</p>}
-              {guideStatus && guideStatus !== "正在读取作者资料…" && (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => setGuideAttempt((value) => value + 1)}
-                >
-                  重新读取资料
-                </button>
-              )}
+              {(guideStatus || category === "notes") &&
+                guideStatus !== "正在读取作者资料…" && (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => setGuideAttempt((value) => value + 1)}
+                  >
+                    {category === "notes" ? "刷新笔记" : "重新读取资料"}
+                  </button>
+                )}
               {guide?.warnings.map((warning, index) => (
                 <p className="keeper-note" role="alert" key={index}>
                   {warning}

@@ -63,6 +63,13 @@ const LEGACY_PLACEHOLDER_ID = "legacy-pc";
 
 // Labels are presentation only. Wire values still follow the frozen schema.
 const CHOICE_LABELS: Record<string, string> = {
+  event: "事件记录",
+  promise: "承诺",
+  open_question: "未解问题",
+  plan: "主持计划",
+  inference: "推测（未确认）",
+  resolved: "已完成",
+  archived: "已归档",
   ...CONDITION_LABELS,
   add: "添加",
   remove: "移除",
@@ -1426,7 +1433,9 @@ function KeeperField({
                     field.name === "speaker_kind" &&
                     value === "keeper"
                   ? "守秘人旁白"
-                  : (CHOICE_LABELS[value] ?? value)}
+                  : spec.kind === "record_keeper_note" && value === "open"
+                    ? "未完成"
+                    : (CHOICE_LABELS[value] ?? value)}
             </option>
           ))}
         </select>

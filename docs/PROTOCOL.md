@@ -270,6 +270,38 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 
 ## 7. 协议变更检查
 
+### 主持笔记与资料查询（2026-10-12，本地实现）
+
+`record_keeper_note` 接受 `note_id/expected_note_revision/title/summary/content/category`，
+可选 `status/sources`。版本0新建；更正必须匹配当前笔记版本。类型为
+`event/promise/open_question/plan/inference`，状态为 `open/resolved/archived`。
+正文为私有Markdown（最多16000字符），最多256条。出处可为 `receipt:命令ID`
+或 `event:序号`；事件引用保存为不可变的 `note-event:SHA256`，已冻结引用可续用。
+授权与控制权在幂等查询前校验，笔记不改变角色知识或游戏规则；辅助草稿仍须
+由人类批准。正式载荷与正例见 `command_request.json` 及其fixtures。
+
+人类主持的只读HTTP入口是 `POST /api/worlds/{id}/keeper-knowledge`。
+请求 `{kind:"module|notes|history|receipt",text?,source_id?,offset?,sha256?,limit?}`；
+只接受当前世界授权keeper，owner/player/viewer不能读取。模组检索按关键词匹配，
+空格分词；正文ID只能来自注册表。`notes` 的ID为笔记ID，`receipt` 为command_id，
+`history` 的事件/分支历史ID由索引返回。读取不执行命令，不接受客户端路径。
+
+列表返回 `items/total_matches/complete/next_offset`；正文返回
+`source_id/sha256/offset/total_chars/content/complete/next_offset`。
+正文offset是字符位置，列表offset是条目位置。续读正文须携带sha256以检测
+资料变化。`complete=false` 不代表原文丢失，也不得当作全文。正文响应只供
+主持判断，不能自动向玩家转发。
+
+Agent在决策 `queries` 使用同一组只读查询及原有 `memory` 查询；默认每运行
+最多8次查询、6次模型调用，正文页8000字符。查询决策不执行同批commands/
+narration，失败与预算拒绝也必须先回喂。当前回执不含读档废弃时间线；永久
+幂等账本仍保留旧结果，缓存重放以 `timeline_discarded=true` 明示未执行当前动作。
+快照和玩家事件不带主持笔记。人工查阅入口为资料库“主持笔记”，不复用玩家笔记。
+
+新存档私有元数据 `structured_receipt_cursor` 保存确切命令成员与事件摘要；
+切回另一存档恢复其合法成员，删除摘要不匹配的旧事件。历史检索的
+`receipt:命令ID` 可恢复有效发言的正文；公开存档列表剥离该内部游标。
+
 同时核对 schema/fixtures、后端校验与领域授权、Agent 可见命令说明、前端 builder、`server-message.ts` 外层白名单、结构化事件解析、实时投影、快照恢复、错误提示。
 
 参考测试：`tests/test_structured_play_protocol.py`、`test_structured_command_catalog.py`、前端 `protocol/m0-fixtures.test.ts` 及真实后端 E2E。详表中的阶段说明不代表最新完成度；完成度只在 [STATUS](STATUS.md) 更新。

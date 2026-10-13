@@ -1,0 +1,18 @@
+{
+  "type": "command_request",
+  "protocol_version": 1,
+  "command_id": "cmd-keeper-note-1",
+  "world_id": "world-fixture-1",
+  "expected_revision": 21,
+  "cause_id": "req-ask-about-doctor",
+  "kind": "record_keeper_note",
+  "payload": {
+    "note_id": "fallon-promise",
+    "expected_note_revision": 0,
+    "title": "法伦的承诺",
+    "summary": "未完成：法伦答应次日带调查员去医学院。",
+    "content": "## 承诺\n法伦答应明日同行；尚未执行，不能作为已抵达的依据。",
+    "category": "promise",
+    "status": "open"
+  }
+}

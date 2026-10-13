@@ -276,6 +276,56 @@ def test_preview_is_read_only_owner_is_not_keeper_and_grants_are_recipient_scope
     assert read_world_asset(deps, context.world_id, "asset_note", "u-keeper") is None
 
 
+def test_keeper_notes_guide_and_paged_http_are_private(library, monkeypatch):
+    context, deps, service = library
+    service.execute_command(
+        world_id=context.world_id,
+        principal=Principal(kind="keeper", user_id="u-keeper"),
+        kind="record_keeper_note",
+        command_id="private-note",
+        expected_revision=None,
+        payload={
+            "note_id": "promise",
+            "expected_note_revision": 0,
+            "title": "未履行的承诺",
+            "summary": "明日再去图书馆",
+            "content": "仅主持记录：蓝铜钟。",
+            "category": "promise",
+        },
+    )
+    guide = read_keeper_guide(deps, context.world_id, "u-keeper")
+    note = next(d for d in guide["documents"] if d["id"] == "keeper-note:promise")
+    assert "当前版本：1" in note["text"]
+    assert "蓝铜钟" in note["text"]
+    monkeypatch.setenv("TRPG_REQUIRE_AUTH", "1")
+    app = FastAPI()
+    router = APIRouter()
+    register_structured_guide_routes(router, deps)
+    app.include_router(router)
+    with TestClient(app) as client:
+        url = f"/api/worlds/{context.world_id}/keeper-knowledge"
+        with patch("src.web.structured_guide_http.request_user", return_value=None):
+            assert client.post(url, json={"kind": "notes"}).status_code == 401
+        for user in ("u-owner", "u-alice", "u-bob"):
+            with patch(
+                "src.web.structured_guide_http.request_user", return_value=SimpleNamespace(id=user)
+            ):
+                response = client.post(url, json={"kind": "notes"})
+                assert response.status_code == 403
+                assert "蓝铜钟" not in response.text
+        with patch(
+            "src.web.structured_guide_http.request_user",
+            return_value=SimpleNamespace(id="u-keeper"),
+        ):
+            response = client.post(url, json={"kind": "receipt", "source_id": "private-note"})
+            assert response.status_code == 200
+            assert response.headers["cache-control"] == "private, no-store"
+            assert "蓝铜钟" in response.json()["content"]
+            assert (
+                client.post(url, json={"kind": "notes", "path": "/etc/passwd"}).status_code == 400
+            )
+
+
 def test_start_and_reconnect_snapshot_contains_only_the_controlled_character(library):
     context, _, service = library
     for key, name in [("inv-alice", "爱丽丝"), ("inv-bob", "鲍勃")]:

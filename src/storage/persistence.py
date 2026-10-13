@@ -474,6 +474,11 @@ def save_game(
                 "revision": int(state_row.revision),
                 "sequence": int(sequence or 0),
             }
+            from src.structured.receipt_checkpoint import capture_receipts
+
+            meta["structured_receipt_cursor"] = capture_receipts(
+                session, context.world_id, int(state_row.revision)
+            )
         row = (
             session.query(SaveSlot)
             .filter_by(world_id=context.world_id, slot_key=slot_id)

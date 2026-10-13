@@ -15,7 +15,7 @@ from .keeper_progress import keeper_progress
 from .rulings import ending_catalog, ruling_projection
 
 POST_GAME_COMMANDS = frozenset(
-    {"publish_message", "control_keeper", "record_memory", "keeper_roll"}
+    {"publish_message", "control_keeper", "record_memory", "keeper_roll", "record_keeper_note"}
 )
 INVENTORY_COMBAT_COMMANDS = frozenset(
     {"combat_start", "combat_action", "combat_decide", "combat_roll"}

@@ -193,4 +193,5 @@ def public_copy(metadata: Mapping[str, Any]) -> dict[str, Any]:
     """返回剥离私有 ``context`` 键的 metadata 副本（公开列表专用）。"""
     result = dict(metadata)
     result.pop(_CONTEXT_KEY, None)
+    result.pop("structured_receipt_cursor", None)
     return result

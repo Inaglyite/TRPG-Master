@@ -11,6 +11,19 @@
     "agent": "被委派的 Agent 运行时：拥有 keeper 命令子集，调用必须携带当前 controller_epoch。"
   },
   "permissions": {
+    "command.record_keeper_note": {
+      "roles": [
+        "keeper",
+        "agent"
+      ],
+      "conditions": [
+        "can_keeper",
+        "agent_requires_current_epoch",
+        "expected_note_revision_matches",
+        "keeper_only",
+        "sources_on_current_timeline"
+      ]
+    },
     "command.keeper_roll": {
       "roles": ["keeper"],
       "conditions": ["can_keeper", "human_controller", "fresh_authority_for_replay", "original_operator_for_replay", "no_investigator_required", "no_game_effects", "no_assisted_draft"]

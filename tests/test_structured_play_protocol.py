@@ -64,6 +64,7 @@ COMMAND_KINDS = {
     "set_npc_presence",
     "record_fact",
     "record_memory",
+    "record_keeper_note",
     "resolve_draft",
 }
 
