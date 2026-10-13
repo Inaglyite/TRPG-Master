@@ -44,6 +44,8 @@ def capture_request_context(
             for r in rows
         ],
         "request_is_executed_fact": False,
+        "audience": {"kind": "keeper"},
+        "is_public_message": False,
     }
 
 

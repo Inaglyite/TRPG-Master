@@ -226,6 +226,8 @@ class CompleteReceiptTests(unittest.TestCase):
         receipt = self.read({"kind": "receipt", "source_id": "close-request"})
         self.assertTrue(receipt["originating_request_context_complete"])
         self.assertFalse(receipt["originating_request_context"]["request_is_executed_fact"])
+        self.assertFalse(receipt["originating_request_context"]["is_public_message"])
+        self.assertEqual({"kind": "keeper"}, receipt["originating_request_context"]["audience"])
         self.assertIn(
             "灰松",
             receipt["originating_request_context"]["requests"][0]["payload"]["action"]["text"],
