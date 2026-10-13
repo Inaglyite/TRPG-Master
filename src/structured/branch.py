@@ -471,6 +471,9 @@ def restore_structured_save(
         if expected_revision is not None and int(row.revision) != int(expected_revision):
             raise StaleRevisionError(expected_revision, int(row.revision))
         snapshot["revision"] = restored_revision
+        snapshot["harness_timeline_generation"] = (
+            int((row.state or {}).get("harness_timeline_generation", 0)) + 1
+        )
         from .combat_flow import invalidate_combat_wait
 
         invalidate_combat_wait(snapshot)

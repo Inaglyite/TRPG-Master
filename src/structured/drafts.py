@@ -39,6 +39,11 @@ def resolve_draft(state: dict, payload: dict, ctx: CommandContext) -> CommandRes
     results: list[dict] = []
     bump = False
     if decision == "approved":
+        generation = stored.get("source_timeline_generation")
+        if generation is not None and generation != int(
+            state.get("harness_timeline_generation", 0)
+        ):
+            raise StructuredError("stale_timeline", "草稿属于另一时间线，请重新生成。")
         revision = stored.get("source_revision")
         if revision is not None and int(revision) != ctx.revision:
             raise StructuredError(

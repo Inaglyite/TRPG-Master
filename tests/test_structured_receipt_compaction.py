@@ -10,7 +10,7 @@ from sqlalchemy import select
 from test_structured_commands import make_structured_world
 
 from src.modules.module_registry import ModuleRegistry
-from src.storage.database import GameCommand, World, WorldState, session_scope
+from src.storage.database import GameCommand, PlayerRequest, World, WorldState, session_scope
 from src.storage.persistence import save_game
 from src.structured.agent import AgentBudget, KeeperAgentRunner
 from src.structured.agent_knowledge import AgentKnowledge
@@ -367,3 +367,119 @@ class ReceiptCompactionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [], self.knowledge.query("sp-world", self.keeper, {"kind": "chapters"})["items"]
         )
+
+    async def test_notebook_capacity_does_not_block_assisted_gameplay_drafts(self):
+        self.history(30)
+        with session_scope(self.db) as session:
+            row = session.get(WorldState, "sp-world")
+            state = copy.deepcopy(row.state)
+            state["keeper_notebook"] = {
+                f"note-{i}": {
+                    "note_id": f"note-{i}",
+                    "note_revision": 1,
+                    "title": "历史事项",
+                    "summary": "已结束",
+                    "content": "旧记录",
+                    "category": "event",
+                    "status": "archived",
+                    "sources": [],
+                    "world_revision": 1,
+                }
+                for i in range(256)
+            }
+            row.state = state
+
+        async def caller(system, user):
+            self.assertNotEqual(COMPACTION_PROMPT, system)
+            self.assertTrue(json.loads(user)["notebook_capacity"]["at_limit"])
+            return json.dumps(
+                {
+                    "commands": [
+                        {"kind": "advance_time", "payload": {"minutes": 0, "reason": "继续主持"}}
+                    ],
+                    "assessment": "正常玩法草稿",
+                }
+            )
+
+        delivered = []
+
+        async def deliver(event):
+            delivered.append(event)
+
+        result = await KeeperAgentRunner(
+            self.db,
+            caller=caller,
+            module_resolver=self.resolver,
+            budget=AgentBudget(compaction_minimum_receipts=1),
+        ).run_assisted(world_id="sp-world", deliver=deliver)
+        self.assertEqual(1, result.model_calls)
+        self.assertEqual("draft_ready", result.stop_reason)
+        draft = next(e for e in delivered if e["type"] == "keeper_draft")
+        self.command(
+            "approve-at-quota",
+            "resolve_draft",
+            {"draft_id": draft["payload"]["draft_id"], "decision": "approved"},
+        )
+
+    async def test_restore_between_query_and_draft_rejects_same_revision_future_memory(self):
+        save_game([], "slot_001", context=self.context)
+        self.command(
+            "future",
+            "publish_message",
+            {
+                "speaker": {"kind": "keeper"},
+                "audience": {"kind": "keeper"},
+                "text": "另一时间线的未来秘密",
+            },
+        )
+        calls = 0
+
+        async def caller(system, user):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return json.dumps({"queries": [{"kind": "receipt", "source_id": "future"}]})
+            self.assertIn("未来秘密", str(json.loads(user)["run_log"]))
+            revision = json.loads(user)["snapshot"]["revision"]
+            restore_structured_save(self.context, "slot_001")
+            with session_scope(self.db) as session:
+                self.assertEqual(revision, session.get(WorldState, "sp-world").revision)
+            return json.dumps({"commands": [], "narration": "另一时间线的未来秘密"})
+
+        result = await KeeperAgentRunner(
+            self.db, caller=caller, module_resolver=self.resolver
+        ).run_assisted(world_id="sp-world")
+        self.assertEqual("paused", result.status)
+        self.assertEqual("draft_unavailable:stale_timeline", result.stop_reason)
+        with session_scope(self.db) as session:
+            self.assertFalse(
+                session.scalars(
+                    select(PlayerRequest).where(PlayerRequest.request_type == "keeper_draft")
+                ).all()
+            )
+
+    def test_human_correcting_assisted_chapter_keeps_reviewed_sources_out_of_recompression(self):
+        self.history(2)
+        prepared = self.prepared()
+        chapter = self.compactor.finish(prepared, self.summary(prepared))
+        note = self.compactor.note_command(chapter)
+        self.command("save-chapter", note["kind"], note["payload"])
+        self.command(
+            "new-evidence",
+            "publish_message",
+            {
+                "speaker": {"kind": "keeper"},
+                "audience": {"kind": "public"},
+                "text": "医生公开改约后日同行",
+            },
+        )
+        corrected = {
+            **note["payload"],
+            "expected_note_revision": 1,
+            "content": "主持更正：后日同行。",
+            "sources": ["receipt:new-evidence"],
+        }
+        outcome = self.command("correct-chapter", "record_keeper_note", corrected)
+        self.assertIn("receipt:talk-0", outcome["result"]["note"]["reviewed_sources"])
+        next_chunk = self.prepared()
+        self.assertNotIn("talk-0", [s["command_id"] for s in next_chunk["sources"]])

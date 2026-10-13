@@ -117,6 +117,12 @@ def record_keeper_note(state: dict, payload: dict, ctx: CommandContext) -> Comma
         "world_revision": ctx.revision + 1,
         "author": ctx.principal.as_dict(),
     }
+    if note_id.startswith(CHAPTER_NOTE_PREFIX) and previous:
+        entry["reviewed_sources"] = list(
+            dict.fromkeys(
+                list(previous.get("reviewed_sources") or []) + list(previous.get("sources") or [])
+            )
+        )
     notes[note_id] = entry
     if len(json.dumps(frozen_events, ensure_ascii=False).encode()) > 2 * 1024 * 1024:
         raise StructuredError("invalid_action", "笔记事件出处归档超过2MiB上限，未删除或截断原文。")

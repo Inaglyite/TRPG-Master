@@ -23,12 +23,12 @@ from dataclasses import dataclass, field
 from openai import APITimeoutError
 from sqlalchemy import select
 
-from src.storage.database import GameCommand, PlayerRequest, session_scope
+from src.storage.database import GameCommand, PlayerRequest, WorldState, session_scope
 
 from .agent_prompts import build_system_prompt
 from .errors import StructuredError
 from .execution import allowed_during_combat_wait
-from .principal import Principal, bind_agent_control, current_control
+from .principal import Principal, bind_agent_control, check_command_authority, current_control
 from .service import StructuredPlayService
 from .validation import validate_command
 
@@ -489,7 +489,10 @@ class KeeperAgentRunner:
         compactor = ReceiptCompactor(self.database_url)
         try:
             prepared = compactor.prepare(
-                world_id, principal, minimum_old=self.budget.compaction_minimum_receipts
+                world_id,
+                principal,
+                minimum_old=self.budget.compaction_minimum_receipts,
+                for_note=not persist,
             )
             if prepared is None:
                 return None, 0
@@ -529,6 +532,27 @@ class KeeperAgentRunner:
                 result.status = "takeover_stopped"
                 result.stop_reason = "controller_epoch_stale"
             return None, locals().get("estimate", 0)
+
+    def _check_timeline(self, world_id: str, generation: int) -> None:
+        with session_scope(self.database_url) as session:
+            row = session.get(WorldState, world_id)
+            if (
+                row is None
+                or int((row.state or {}).get("harness_timeline_generation", 0)) != generation
+            ):
+                raise StructuredError(
+                    "stale_timeline", "查询期间已读档，旧查询结果未用于当前草稿。"
+                )
+
+    def _still_in_control(self, world_id: str, principal: Principal) -> bool:
+        with session_scope(self.database_url) as session:
+            try:
+                check_command_authority(session, world_id, principal)
+            except StructuredError as exc:
+                if exc.code == "controller_epoch_stale":
+                    return False
+                raise
+        return True
 
     async def _execute_commands(
         self,
@@ -972,6 +996,7 @@ class KeeperAgentRunner:
         )
         # 绑定模型实际看到的版本，而不是模型返回后才读取的世界版本。
         source_revision = json.loads(context_text)["snapshot"]["revision"]
+        source_generation = json.loads(context_text)["timeline_generation"]
         try:
             run_log: list[str] = []
             queries_run = 0
@@ -1002,6 +1027,7 @@ class KeeperAgentRunner:
                     compaction_preview=preview,
                 )
                 source_revision = json.loads(context_text)["snapshot"]["revision"]
+                self._check_timeline(world_id, source_generation)
                 if (
                     est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
                     > self.budget.max_est_tokens
@@ -1009,6 +1035,7 @@ class KeeperAgentRunner:
                     raise StructuredError("keeper_unavailable", "助手上下文预算不足，未调用模型。")
                 result.model_calls += 1
                 raw = await self.caller(build_system_prompt(), context_text)
+                self._check_timeline(world_id, source_generation)
                 est_tokens += (len(build_system_prompt()) + len(context_text) + len(raw)) // 3
                 if est_tokens > self.budget.max_est_tokens:
                     raise StructuredError(
@@ -1040,7 +1067,7 @@ class KeeperAgentRunner:
             return result
         except Exception as exc:
             result.status = "paused"
-            result.stop_reason = f"draft_unavailable:{type(exc).__name__}"
+            result.stop_reason = f"draft_unavailable:{getattr(exc, 'code', type(exc).__name__)}"
             await self._pause_assisted(
                 world_id, trigger_request_id, result.stop_reason, deliver, broadcast
             )
@@ -1068,7 +1095,11 @@ class KeeperAgentRunner:
                 payload = self._repair_audience(world_id, payload)
                 validate_command(kind, payload)
                 commands.append({"kind": kind, "payload": payload})
-            if preview is not None and len(commands) < 12:
+            if (
+                preview is not None
+                and len(commands) < 12
+                and not json.loads(context_text)["notebook_capacity"]["at_limit"]
+            ):
                 from .receipt_compaction import ReceiptCompactor
 
                 memory_command = ReceiptCompactor.note_command(preview)
@@ -1085,14 +1116,23 @@ class KeeperAgentRunner:
             return result
         narration = str(decision.get("narration") or "")[: self.budget.max_narration_chars]
         summary = str(decision.get("assessment") or "")[:200] or "守秘人助手建议"
-        draft = self.service.create_keeper_draft(
-            world_id=world_id,
-            summary=summary,
-            proposed_commands=commands,
-            narration=narration,
-            related_request_id=trigger_request_id,
-            source_revision=source_revision,
-        )
+        try:
+            draft = self.service.create_keeper_draft(
+                world_id=world_id,
+                summary=summary,
+                proposed_commands=commands,
+                narration=narration,
+                related_request_id=trigger_request_id,
+                source_revision=source_revision,
+                source_timeline_generation=source_generation,
+            )
+        except StructuredError as exc:
+            result.status = "paused"
+            result.stop_reason = f"draft_unavailable:{exc.code}"
+            await self._pause_assisted(
+                world_id, trigger_request_id, result.stop_reason, deliver, broadcast
+            )
+            return result
         result.decisions.append(summary)
         result.stop_reason = "draft_ready"
         from .service import wire_envelope
@@ -1169,6 +1209,9 @@ class KeeperAgentRunner:
             if result.status == "takeover_stopped":
                 return result
             for _step in range(self.budget.max_model_calls - result.model_calls):
+                if not self._still_in_control(world_id, principal):
+                    result.status, result.stop_reason = "takeover_stopped", "controller_epoch_stale"
+                    return result
                 context_text = self._build_context(world_id, trigger_request_id, run_log)
                 if (
                     est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
@@ -1224,6 +1267,9 @@ class KeeperAgentRunner:
                         trigger_request_id,
                         "守秘人助手暂时不可用（模型调用失败），已提交结果保留，可接管继续。",
                     )
+                    return result
+                if not self._still_in_control(world_id, principal):
+                    result.status, result.stop_reason = "takeover_stopped", "controller_epoch_stale"
                     return result
                 est_tokens += (len(build_system_prompt()) + len(context_text) + len(raw)) // 3
                 try:

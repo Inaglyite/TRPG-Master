@@ -116,8 +116,11 @@ def _current_rows(session, world_id: str, ids: list[str]) -> dict:
 
 def valid_chapters(session, world_id: str, state: dict) -> list[dict]:
     """Restore/fork validity follows exact receipt bodies, not reused revisions."""
-    chapters = [c for c in (state.get("harness_chapters") or {}).values()
-                if isinstance(c, dict) and not c.get("superseded_by")]
+    chapters = [
+        c
+        for c in (state.get("harness_chapters") or {}).values()
+        if isinstance(c, dict) and not c.get("superseded_by")
+    ]
     for note_id, note in (state.get("keeper_notebook") or {}).items():
         if not note_id.startswith(CHAPTER_NOTE_PREFIX):
             continue
@@ -176,12 +179,18 @@ class ReceiptCompactor:
         tail_receipts: int = 12,
         minimum_old: int = 48,
         source_chars: int = 20000,
+        for_note: bool = False,
     ) -> dict | None:
         with session_scope(self.database_url) as session:
             _authorized(session, world_id, principal)
             state = session.get(WorldState, world_id)
             if state is None:
                 raise StructuredError("unknown_world", "世界状态不存在。")
+            if for_note:
+                from .keeper_notebook import MAX_NOTES
+
+                if len((state.state or {}).get("keeper_notebook") or {}) >= MAX_NOTES:
+                    return None  # A journal quota must not block approving gameplay.
             chapters = valid_chapters(session, world_id, state.state or {})
             if len(chapters) >= MAX_CHAPTERS:
                 return None  # Originals remain readable; quota is exposed in context.
@@ -196,7 +205,8 @@ class ReceiptCompactor:
                 if note_id.startswith(CHAPTER_NOTE_PREFIX):
                     covered.update(
                         source.split(":", 1)[1]
-                        for source in note.get("sources", [])
+                        for source in list(note.get("sources", []))
+                        + list(note.get("reviewed_sources", []))
                         if source.startswith("receipt:")
                     )
             active = select(PlayerRequest.request_id).where(

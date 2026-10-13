@@ -44,6 +44,7 @@ LATER_TABLES = {
     # 0017 角色库：玩家可复用角色卡（同样由 upgrade head 建立）
     "character_library_entries",
     "branch_history_entries",  # 0019: immutable branch reading archive
+    "command_event_receipts",  # 0020: immutable emitted command events
 }
 
 # Columns added by later migrations to tables that already exist in the

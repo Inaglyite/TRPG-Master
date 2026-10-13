@@ -597,6 +597,7 @@ class StructuredPlayService:
         narration: str = "",
         related_request_id: str = "",
         source_revision: int | None = None,
+        source_timeline_generation: int | None = None,
     ) -> dict:
         """assisted 草稿：只持久化 + 通知 keeper，不执行任何命令。
 
@@ -616,6 +617,11 @@ class StructuredPlayService:
         )
         with session_scope(self.database_url) as session:
             _world, row, _state = self._locked_world(session, world_id)
+            generation = int(_state.get("harness_timeline_generation", 0))
+            if source_timeline_generation is not None and source_timeline_generation != generation:
+                raise StructuredError(
+                    "stale_timeline", "草稿生成期间已读档，未采用旧时间线的记忆。"
+                )
             from .combat_endings import _open_game
 
             _open_game(_state)
@@ -629,6 +635,7 @@ class StructuredPlayService:
                     submitted_by=None,
                     payload={
                         "related_request_id": related_request_id,
+                        "source_timeline_generation": generation,
                         "source_revision": (
                             int(row.revision) if source_revision is None else int(source_revision)
                         ),

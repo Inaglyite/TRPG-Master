@@ -29,7 +29,7 @@ def test_0018_upgrade_preserves_users_and_creates_archive_idempotently(tmp_path,
             )
             before = conn.execute(text("SELECT * FROM users")).all()
         for _ in range(2):
-            command.upgrade(cfg, "head")
+            command.upgrade(cfg, "20261004_0019")
             with engine.connect() as conn:
                 assert conn.execute(text("SELECT * FROM users")).all() == before
                 assert (

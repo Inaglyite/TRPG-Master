@@ -25,7 +25,7 @@ from src.storage.database import (
 )
 
 from .errors import StructuredError
-from .keeper_notebook import note_index
+from .keeper_notebook import MAX_NOTES, note_index
 from .principal import Principal, check_command_authority, resolve_keeper_principal
 
 MAX_SOURCE_BYTES = 1024 * 1024
@@ -666,7 +666,13 @@ class AgentKnowledge:
                     }
                 )
             return {
+                "timeline_generation": int(state.get("harness_timeline_generation", 0)),
                 "chapter_index": chapter_index,
+                "notebook_capacity": {
+                    "used": len(state.get("keeper_notebook") or {}),
+                    "maximum": MAX_NOTES,
+                    "at_limit": len(state.get("keeper_notebook") or {}) >= MAX_NOTES,
+                },
                 "chapter_capacity": {
                     "used": len(chapters),
                     "maximum": MAX_CHAPTERS,
