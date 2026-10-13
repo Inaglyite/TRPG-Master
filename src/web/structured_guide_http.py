@@ -79,10 +79,12 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
                 warnings.append(f"{title[:160]}：无法完整读取，未显示截断内容。")
         for key, note in notes.items():
             try:
+                from src.structured.receipt_compaction import readable_note
+
                 add(
                     f"keeper-note:{key}",
                     f"主持笔记 · {note['title']}",
-                    f"笔记ID：{key}\n当前版本：{note['note_revision']}\n类型：{note['category']} · 状态：{note['status']}\n\n{note['summary']}\n\n{note['content']}\n\n出处：{', '.join(note['sources']) or '主持记录（无执行出处）'}",
+                    f"笔记ID：{key}\n当前版本：{note['note_revision']}\n类型：{note['category']} · 状态：{note['status']}\n\n{note['summary']}\n\n{readable_note(note['content'])}\n\n出处：{', '.join(note['sources']) or '主持记录（无执行出处）'}",
                 )
             except (KeyError, ValueError):
                 warnings.append(f"主持笔记 {key}：无法完整载入，请通过主持资料查询接口读取。")

@@ -85,6 +85,7 @@ class AgentBudget:
     query_result_chars: int = 8000
     context_memory_chars: int = 800  # 自动注入上下文的记忆区块预算
     context_memory_limit: int = 8
+    compaction_minimum_receipts: int = 48
 
 
 @dataclass
@@ -146,6 +147,7 @@ class KeeperAgentRunner:
         run_log: list[str],
         *,
         persist_checkpoint: bool = True,
+        compaction_preview: dict | None = None,
     ) -> str:
         keeper = Principal(kind="agent", run_id="context-preview")
         snapshot = self.service.session_snapshot(world_id=world_id, principal=keeper)
@@ -271,6 +273,9 @@ class KeeperAgentRunner:
             "run_log": run_log[-12:],  # 本运行的近期命令结果回喂
         }
         context.update(self.knowledge.context(world_id, persist_checkpoint=persist_checkpoint))
+        if compaction_preview is not None:
+            context["compaction_preview"] = compaction_preview
+            context["compaction_preview_requires_human_approval"] = True
         return json.dumps(context, ensure_ascii=False)
 
     def _recent_transcript(self, world_id: str, limit: int = 8) -> list[dict]:
@@ -467,6 +472,63 @@ class KeeperAgentRunner:
     # ------------------------------------------------------------------
     # 命令执行（逐条短事务；失败回喂；epoch 失效即停）
     # ------------------------------------------------------------------
+
+    async def _compact_history(
+        self,
+        world_id: str,
+        principal: Principal,
+        result: AgentRunResult,
+        run_log: list[str],
+        *,
+        persist: bool,
+    ) -> tuple[dict | None, int]:
+        from .receipt_compaction import COMPACTION_PROMPT, ReceiptCompactor
+
+        if self.budget.max_model_calls < 2 or self.budget.compaction_minimum_receipts <= 0:
+            return None, 0
+        compactor = ReceiptCompactor(self.database_url)
+        try:
+            prepared = compactor.prepare(
+                world_id, principal, minimum_old=self.budget.compaction_minimum_receipts
+            )
+            if prepared is None:
+                return None, 0
+            text = json.dumps({"sources": prepared["inputs"]}, ensure_ascii=False)
+            estimate = (len(COMPACTION_PROMPT) + len(text)) // 3
+            if estimate + 2000 > self.budget.max_est_tokens:
+                run_log.append("阶段摘要输入超过本轮预算，原文与历史检索保留。")
+                return None, 0
+            if any(s["complete"] for s in prepared["sources"]):
+                result.model_calls += 1
+                raw = await self.caller(COMPACTION_PROMPT, text)
+                decision = self._parse_decision(raw)
+                estimate += len(raw) // 3
+            else:
+                decision = {
+                    "title": "待回读的长回执",
+                    "summary": "这份原始回执超过摘要输入预算，需按出处读完后判断。",
+                    "keywords": [],
+                    "entries": [],
+                }
+            chapter = compactor.finish(prepared, decision)
+            if persist:
+                compactor.persist(world_id, principal, chapter)
+                run_log.append(
+                    f"阶段记忆已保存：{chapter['chapter_id']}；摘要是历史回忆，原文回执保留。"
+                )
+            else:
+                compactor.verify(world_id, principal, chapter)
+            return chapter, estimate
+        except Exception as exc:
+            # A malformed summary or transient model error never erases history
+            # and never grants gameplay authority. The paid attempt still counts.
+            run_log.append(
+                f"阶段摘要未保存：{getattr(exc, 'code', type(exc).__name__)}；原文检索保留。"
+            )
+            if getattr(exc, "code", "") == "controller_epoch_stale":
+                result.status = "takeover_stopped"
+                result.stop_reason = "controller_epoch_stale"
+            return None, locals().get("estimate", 0)
 
     async def _execute_commands(
         self,
@@ -905,7 +967,6 @@ class KeeperAgentRunner:
         """一次模型调用产出 keeper_draft 草稿；批准/拒绝由 resolve_draft 收尾。"""
         run_id = new_run_id()
         result = AgentRunResult(run_id=run_id)
-        result.model_calls = 1
         context_text = self._build_context(
             world_id, trigger_request_id, [], persist_checkpoint=False
         )
@@ -927,13 +988,32 @@ class KeeperAgentRunner:
                     (m for m in members if m.user_id == control.controller_id), None
                 ) or next(iter(members), None)
                 reader = Principal(kind="keeper", user_id=member.user_id) if member else None
-            for step in range(self.budget.max_model_calls):
-                result.model_calls = step + 1
+            preview, est_tokens = (
+                await self._compact_history(world_id, reader, result, run_log, persist=False)
+                if reader is not None
+                else (None, 0)
+            )
+            for _step in range(self.budget.max_model_calls - result.model_calls):
                 context_text = self._build_context(
-                    world_id, trigger_request_id, run_log, persist_checkpoint=False
+                    world_id,
+                    trigger_request_id,
+                    run_log,
+                    persist_checkpoint=False,
+                    compaction_preview=preview,
                 )
                 source_revision = json.loads(context_text)["snapshot"]["revision"]
+                if (
+                    est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
+                    > self.budget.max_est_tokens
+                ):
+                    raise StructuredError("keeper_unavailable", "助手上下文预算不足，未调用模型。")
+                result.model_calls += 1
                 raw = await self.caller(build_system_prompt(), context_text)
+                est_tokens += (len(build_system_prompt()) + len(context_text) + len(raw)) // 3
+                if est_tokens > self.budget.max_est_tokens:
+                    raise StructuredError(
+                        "keeper_unavailable", "助手上下文预算耗尽，未执行任何命令。"
+                    )
                 decision = self._parse_decision(raw)
                 spent = self._run_queries(
                     world_id=world_id,
@@ -988,6 +1068,12 @@ class KeeperAgentRunner:
                 payload = self._repair_audience(world_id, payload)
                 validate_command(kind, payload)
                 commands.append({"kind": kind, "payload": payload})
+            if preview is not None and len(commands) < 12:
+                from .receipt_compaction import ReceiptCompactor
+
+                memory_command = ReceiptCompactor.note_command(preview)
+                validate_command(memory_command["kind"], memory_command["payload"])
+                commands.insert(0, memory_command)
         except (StructuredError, TypeError, ValueError):
             # Never publish an invalid event which the frontend will silently
             # drop, or echo the model's potentially private malformed payload.
@@ -1077,9 +1163,20 @@ class KeeperAgentRunner:
         est_tokens = 0
         queries_run = 0
         try:
-            for _step in range(self.budget.max_model_calls):
-                result.model_calls += 1
+            _, est_tokens = await self._compact_history(
+                world_id, principal, result, run_log, persist=True
+            )
+            if result.status == "takeover_stopped":
+                return result
+            for _step in range(self.budget.max_model_calls - result.model_calls):
                 context_text = self._build_context(world_id, trigger_request_id, run_log)
+                if (
+                    est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
+                    > self.budget.max_est_tokens
+                ):
+                    result.stop_reason = "token_budget"
+                    break
+                result.model_calls += 1
                 try:
                     raw = await self.caller(build_system_prompt(), context_text)
                 except EmptyModelOutput as exc:

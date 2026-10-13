@@ -154,6 +154,31 @@ class AgentKnowledge:
             if world is None or state_row is None:
                 raise StructuredError("unknown_world", "世界不存在。")
             state = state_row.state or {}
+            if kind == "chapters":
+                from .receipt_compaction import valid_chapters
+
+                chapters = valid_chapters(session, world_id, state)
+                if source_id:
+                    chapter = next((c for c in chapters if c["chapter_id"] == source_id), None)
+                    if chapter is None:
+                        raise StructuredError("unknown_target", "阶段记忆不存在于当前时间线。")
+                    return page(source_id, encoded(chapter), query, budget)
+                return self._hits(
+                    [
+                        {
+                            "source_id": c["chapter_id"],
+                            "title": c["title"],
+                            "summary": c["summary"][:240],
+                            "keywords": c["keywords"],
+                            "through_revision": c["through_revision"],
+                            "requires_read": True,
+                        }
+                        for c in reversed(chapters)
+                        if not text or text.casefold() in encoded(c).casefold()
+                    ],
+                    query,
+                    budget,
+                )
             if kind == "module":
                 docs = self._module_documents(world)
                 if source_id:
@@ -373,7 +398,9 @@ class AgentKnowledge:
                             }
                         )
                 return self._database_hits(hits, query, budget, matched)
-            raise StructuredError("invalid_action", "查询类型须为module、notes、receipt或history。")
+            raise StructuredError(
+                "invalid_action", "查询类型须为module、notes、receipt、history或chapters。"
+            )
 
     @staticmethod
     def _receipt(row: GameCommand) -> dict:
@@ -446,6 +473,23 @@ class AgentKnowledge:
             if row is None:
                 raise StructuredError("unknown_world", "世界状态不存在。")
             state = copy.deepcopy(row.state or {})
+            from .receipt_compaction import MAX_CHAPTERS, valid_chapters
+
+            chapters = valid_chapters(session, world_id, state)
+            chapter_index = self._hits(
+                [
+                    {
+                        "source_id": c["chapter_id"],
+                        "title": c["title"],
+                        "summary": c["summary"][:240],
+                        "keywords": c["keywords"],
+                        "requires_read": True,
+                    }
+                    for c in reversed(chapters)
+                ],
+                {},
+                index_chars,
+            )
             messages = session.scalars(
                 select(EventOutbox)
                 .where(
@@ -542,6 +586,12 @@ class AgentKnowledge:
                     }
                 )
             return {
+                "chapter_index": chapter_index,
+                "chapter_capacity": {
+                    "used": len(chapters),
+                    "maximum": MAX_CHAPTERS,
+                    "at_limit": len(chapters) >= MAX_CHAPTERS,
+                },
                 "keeper_note_index": notes,
                 "memory_checkpoint": checkpoint,
                 "recent_history": list(reversed(tail)),

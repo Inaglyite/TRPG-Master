@@ -30,7 +30,7 @@ def combat_waiting(state: dict) -> bool:
 
 
 def allowed_during_combat_wait(kind: str, payload: dict) -> bool:
-    return kind == "publish_message" or (
+    return kind in {"publish_message", "record_keeper_note"} or (
         kind == "resolve_intent" and payload.get("resolution") == "awaiting_player"
     )
 
