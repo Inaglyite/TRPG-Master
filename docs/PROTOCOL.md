@@ -281,7 +281,7 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 由人类批准。正式载荷与正例见 `command_request.json` 及其fixtures。
 
 人类主持的只读HTTP入口是 `POST /api/worlds/{id}/keeper-knowledge`。
-请求 `{kind:"module|notes|history|receipt",text?,source_id?,offset?,sha256?,limit?}`；
+请求 `{kind:"module|notes|history|receipt|chapters",text?,source_id?,offset?,sha256?,limit?}`；
 只接受当前世界授权keeper，owner/player/viewer不能读取。模组检索按关键词匹配，
 空格分词；正文ID只能来自注册表。`notes` 的ID为笔记ID，`receipt` 为command_id，
 `history` 的事件/分支历史ID由索引返回。读取不执行命令，不接受客户端路径。
@@ -291,6 +291,11 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 正文offset是字符位置，列表offset是条目位置。续读正文须携带sha256以检测
 资料变化。`complete=false` 不代表原文丢失，也不得当作全文。正文响应只供
 主持判断，不能自动向玩家转发。
+
+本地阶段摘要的 `chapters` 正文ID为索引返回的 `chapter:SHA256`；条目包含
+分类记忆、原始command_id与来源hash。它是私有历史回忆，推测和未履行承诺
+不得当当前事实。自动摘要也占默认6次模型调用预算；辅助主持的预览只在批准
+草稿时通过 `record_keeper_note` 保存，待批准前不改变世界JSON。
 
 Agent在决策 `queries` 使用同一组只读查询及原有 `memory` 查询；默认每运行
 最多8次查询、6次模型调用，正文页8000字符。查询决策不执行同批commands/
