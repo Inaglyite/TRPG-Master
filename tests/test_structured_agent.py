@@ -230,6 +230,13 @@ class KeeperAgentTests(unittest.IsolatedAsyncioTestCase):
         result = await runner.run(world_id="sp-world", trigger_request_id="req-1")
         self.assertEqual("done", result.status)
         self.assertEqual(2, len(caller.calls))  # 第一步没停，带驳回理由续跑了一步
+        context = json.loads(caller.calls[1])
+        feedback = context["run_log"]
+        awaiting = next(entry for entry in feedback if entry.startswith("resolve_intent committed:"))
+        receipt = json.loads(awaiting.split("committed: ", 1)[1])
+        self.assertEqual("committed", receipt["status"])
+        self.assertEqual("req-1", receipt["result"]["request_id"])
+        self.assertIn("等待检定", json.dumps(receipt["result"], ensure_ascii=False))
         with session_scope(self.db_url) as session:
             checks = session.execute(
                 select(CheckRequest).where(CheckRequest.world_id == "sp-world")

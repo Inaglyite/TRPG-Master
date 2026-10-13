@@ -321,9 +321,7 @@ it("主持笔记与作者手册分开，只读展示当前版本，刷新重新�
     ],
   });
   openLibrary();
-  fireEvent.click(
-    screen.getByRole("button", { name: "主持笔记", exact: true }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: /^主持笔记$/ }));
   const preview = screen.getByRole("article", { name: "资料预览" });
   await waitFor(() => expect(preview).toHaveTextContent("当前版本：2"));
   expect(preview).toHaveTextContent("仍未执行");

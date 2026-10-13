@@ -599,25 +599,6 @@ class KeeperAgentRunner:
                 event.get("type") in {"combat_decision_required", "combat_roll_required"}
                 for event in outcome.get("events", [])
             )
-            if (
-                kind == "resolve_intent"
-                and str(payload.get("resolution") or "") == "awaiting_player"
-            ):
-                # 主持已用正式命令挂起：本步随后不得再执行任何命令。
-                result.awaiting_parked = True
-                spent.append(f"{kind} committed: awaiting_player")
-                await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
-                if rejected and not combat_wait:
-                    # 同步有命令被拒（例如 request_check 没过 schema）：挂起已生效，
-                    # 但模型还没看到驳回理由；就此结束会让玩家永远等一张不存在
-                    # 的检定卡（2026-09-16 按钮级实测）。本轮不停在 await——让模型
-                    # 下一步带着驳回修正后重新收尾。
-                    spent.append(
-                        f"注意：本步有 {rejected} 条命令被拒（原因见上），但请求已挂起；"
-                        "请先修正被拒命令重新提交，再 resolve_intent 收尾。"
-                    )
-                    return None, rejected
-                return "combat_wait" if combat_wait else "await", rejected
             from .agent_knowledge import encoded
 
             receipt = {key: outcome[key] for key in ("status", "command_id", "revision", "result")}
@@ -637,6 +618,24 @@ class KeeperAgentRunner:
                     )
                 )
             )
+            if (
+                kind == "resolve_intent"
+                and str(payload.get("resolution") or "") == "awaiting_player"
+            ):
+                # 主持已用正式命令挂起：本步随后不得再执行任何命令。
+                result.awaiting_parked = True
+                await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
+                if rejected and not combat_wait:
+                    # 同步有命令被拒（例如 request_check 没过 schema）：挂起已生效，
+                    # 但模型还没看到驳回理由；就此结束会让玩家永远等一张不存在
+                    # 的检定卡（2026-09-16 按钮级实测）。本轮不停在 await——让模型
+                    # 下一步带着驳回修正后重新收尾。
+                    spent.append(
+                        f"注意：本步有 {rejected} 条命令被拒（原因见上），但请求已挂起；"
+                        "请先修正被拒命令重新提交，再 resolve_intent 收尾。"
+                    )
+                    return None, rejected
+                return "combat_wait" if combat_wait else "await", rejected
             await self._publish_events(world_id, outcome, deliver=deliver, broadcast=broadcast)
         return "combat_wait" if combat_wait else None, rejected
 

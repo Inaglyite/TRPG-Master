@@ -271,7 +271,9 @@ export function KeeperLibrary({
               </p>
               {guide && (
                 <p className="keeper-note">
-                  {category === "notes" ? `共 ${guide.documents.filter((document) => document.id.startsWith("keeper-note:")).length} 条主持笔记` : `${guide.module_title} · 资料版本 ${guide.source_version} · ${guide.documents.filter((document) => !document.id.startsWith("keeper-note:")).length} 篇`}
+                  {category === "notes"
+                    ? `共 ${guide.documents.filter((document) => document.id.startsWith("keeper-note:")).length} 条主持笔记`
+                    : `${guide.module_title} · 资料版本 ${guide.source_version} · ${guide.documents.filter((document) => !document.id.startsWith("keeper-note:")).length} 篇`}
                 </p>
               )}
               {guideStatus && <p role="status">{guideStatus}</p>}
