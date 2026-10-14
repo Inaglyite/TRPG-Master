@@ -610,13 +610,35 @@ def _madness_check(world: dict) -> bool:
 
 
 def choose_beat_input(beat: Beat, attempt: int, world: dict) -> str:
-    """Choose a player response to actual danger, never assume combat ended."""
+    """Answer actual departure decisions and danger before continuing a beat."""
     combat = world.get("combat_state") or {}
     if combat.get("active") and beat.key.startswith("B6"):
         ammo = _ammo_count(world)
         hp = (world.get("pc") or {}).get("hp", 10)
         if beat.key != "B6b_fight" or hp <= 4 or (ammo is not None and ammo <= 1):
             return "我放低武器，停止开火，与维克谈判：先叫双方停手。我愿意讨论安全处置文档的条件，但不承诺放弃调查。"
+        opponents = [p for p in combat.get("participants", [])
+                     if p.get("id") != "pc" and p.get("hp", 0) > 0]
+        if opponents:
+            return f"我用左轮手枪朝{opponents[0].get('name') or opponents[0]['id']}开枪自卫，只射击一次，再观察对方反应，下一步由我另行决定。"
+    if beat.key == "B6b_fight" and not combat.get("active") and (world.get("current_scene") or {}).get("id") == "trivial_pursuits":
+        flags = world.get("flags") or {}
+        if not flags.get("deep_basement_found"):
+            return ("仔细检查地下室包装箱后的活板门，打开它，沿阶梯实际进入深层地下室，查看砖井周围。"
+                    if flags.get("wicks_shop_searched") else "检查厨房和店面后方的储藏室，寻找通往地下室的楼梯。")
+    pending = world.get("pending_departure")
+    if isinstance(pending, dict) and not combat.get("active"):
+        origin = str((world.get("current_scene") or {}).get("id") or "")
+        destination = (world.get("scene_catalog") or {}).get(pending.get("destination_scene_id"))
+        if origin and pending.get("origin_scene_id") == origin and isinstance(destination, dict):
+            flags = world.get("flags") or {}
+            if any(flags.get(key) != value for key, value in (destination.get("required_flags") or {}).items()):
+                return "我选择先办妥刚才提到的许可和安排；没办妥前留在这里，不出发。"
+            return (
+                "我已经决定：不需要额外联系、交接或同行安排，我独自现在出发，"
+                f"前往{destination.get('name') or pending['destination_scene_id']}。"
+                "抵达后若有入内手续，我会在现场另行处理。"
+            )
     return beat.inputs[min(attempt, len(beat.inputs) - 1)]
 
 

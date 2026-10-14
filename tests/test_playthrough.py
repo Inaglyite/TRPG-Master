@@ -150,3 +150,47 @@ def test_empty_gun_and_low_hp_change_player_strategy():
     assert "谈判" in choose_beat_input(beats["B6b_fight"], 5, world)
     world["combat_state"]["active"] = False
     assert "取回" in choose_beat_input(beats["B6c_documents"], 1, world)
+
+
+def test_pending_departure_gets_a_player_reply_instead_of_repeated_exam_request():
+    beat = next(b for b in scarlet_beats() if b.key == "B1_morgue")
+    world = _world()
+    world["current_scene"]["id"] = "miskatonic_university"
+    world["scene_catalog"] = {"miskatonic_medical": {"name": "医学院"}}
+    world["pending_departure"] = {"origin_scene_id": "miskatonic_university", "destination_scene_id": "miskatonic_medical", "question": "要先联系医生吗？"}
+    chosen = choose_beat_input(beat, 3, world)
+    assert "我已经决定" in chosen and "前往医学院" in chosen
+    assert "不需要额外联系" in chosen
+    assert world["current_scene"]["id"] == "miskatonic_university"  # Steering is not an execution channel.
+
+
+def test_pending_departure_driver_respects_flags_and_discards_stale_origin():
+    beat = next(b for b in scarlet_beats() if b.key == "B1_morgue")
+    world = _world()
+    world["scene_catalog"] = {"library": {"name": "图书馆", "required_flags": {"permission": True}}}
+    world["pending_departure"] = {"origin_scene_id": "miskatonic_medical", "destination_scene_id": "library"}
+    assert "不出发" in choose_beat_input(beat, 2, world)
+    world["pending_departure"]["origin_scene_id"] = "old-scene"
+    assert choose_beat_input(beat, 2, world) == beat.inputs[2]
+
+
+def test_battle_driver_enters_real_basement_before_assuming_an_enemy():
+    beat = next(b for b in scarlet_beats() if b.key == "B6b_fight")
+    world = _world()
+    world["current_scene"]["id"] = "trivial_pursuits"
+    world["flags"] = {"wicks_shop_searched": True}
+    assert "实际进入深层地下室" in choose_beat_input(beat, 9, world)
+    assert "非人生物" not in choose_beat_input(beat, 9, world)
+    world["flags"]["wicks_shop_searched"] = False
+    assert "储藏室" in choose_beat_input(beat, 9, world)
+
+
+def test_battle_driver_shoots_actual_attacker_once_and_does_not_invent_targets():
+    beat = next(b for b in scarlet_beats() if b.key == "B6b_fight")
+    world = _world()
+    world["combat_state"] = {"active": True, "participants": [
+        {"id": "pc", "hp": 10}, {"id": "fallen", "hp": 0}, {"id": "feldman", "name": "费德曼兄妹", "hp": 14},
+    ]}
+    chosen = choose_beat_input(beat, 9, world)
+    assert "费德曼兄妹" in chosen and "只射击一次" in chosen
+    assert "非人生物" not in chosen and "fallen" not in chosen

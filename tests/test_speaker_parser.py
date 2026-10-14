@@ -76,6 +76,36 @@ class IntroMarkerTests(unittest.TestCase):
 
 
 class SpeakerParserTests(unittest.TestCase):
+    def test_departure_and_arrival_do_not_share_last_named_speaker(self):
+        text = (
+            "苏晚晴边收起剪报边说。\n\n"
+            '"金三爷很精明，您去问他时要留心。"\n\n'
+            "伊芙琳站起身，理了理外套。\n\n"
+            '"我可以跟您一起去，也可以留在这里。"\n\n'
+            "你离开报馆，来到古玩楼。柜台后站着个男人，他抬头看着你。\n\n"
+            '"哟，稀客。看看可以，问价得先让我看看您的诚意。"'
+        )
+        segments, _ = parse_segments(text, speaker_aliases={"苏晚晴": "su", "伊芙琳": "evelyn", "金三爷": "jin"}, present_npc_ids=["jin"])
+        speeches = [(s.npc_id, s.text) for s in segments if s.kind == "speech"]
+        self.assertEqual([owner for owner, _ in speeches], ["su", "evelyn"])
+        self.assertFalse(any(owner == "su" and "稀客" in speech for owner, speech in speeches))
+
+    def test_given_name_alias_is_available_only_when_unambiguous(self):
+        import tempfile
+        from pathlib import Path
+
+        from src.gameplay.npc_speaker_aliases import build_npc_speaker_aliases
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "world.json"
+            path.write_text('{"npcs": []}', encoding="utf-8")
+            state = {"npcs": [{"id": "evelyn", "name": "伊芙琳·奥斯古德"}]}
+            aliases = build_npc_speaker_aliases(state, path, is_valid_npc_id=lambda _: True)
+            self.assertEqual(aliases["伊芙琳"], "evelyn")
+            state["npcs"].append({"id": "other", "name": "伊芙琳·史密斯"})
+            aliases = build_npc_speaker_aliases(state, path, is_valid_npc_id=lambda _: True)
+            self.assertNotIn("伊芙琳", aliases)
+
     def feed_all(self, chunks, is_valid=npc_ok):
         parser = SpeakerStreamParser(is_valid_npc=is_valid)
         pieces = []

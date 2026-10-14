@@ -101,6 +101,16 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         {"role": "system", "content": _REWRITE_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+    structured_dialogue = getattr(engine, "_structured_dialogue", False) is True
+    if structured_dialogue:
+        from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
+
+        messages[0]["content"] = (
+            "你是叙事一致性校对。消除指出的冲突，保留人物归属与已结算事实，不新增行动或线索。\n"
+            + DIALOGUE_INSTRUCTION
+        )
+        payload["current_scene"] = engine.context.world_store.load().get("current_scene", {})
+        messages[1]["content"] = json.dumps(payload, ensure_ascii=False)
     model = model_for_role(engine, "consistency")
     started = time.monotonic()
     try:
@@ -111,11 +121,17 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
                 temperature=0,
                 max_tokens=6000,
                 extra_body={"thinking": {"type": "disabled"}},
+                **({"response_format": {"type": "json_object"}} if structured_dialogue else {}),
             )
         engine.raise_if_turn_cancelled()
         if response.choices[0].finish_reason != "stop":
             raise ValueError("一致性重写未完整结束")
         rewritten = str(response.choices[0].message.content or "").strip()
+        if structured_dialogue:
+            from src.ai.model.dialogue_output import decode_dialogue_output
+            from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
+
+            rewritten = decode_dialogue_output(rewritten, present_npc_ids=current_scene_npc_ids(engine) or set())
     except Exception as exc:
         engine.raise_if_turn_cancelled()
         log_game(f"叙事一致性重写失败 | {type(exc).__name__}: {exc}"[:200])

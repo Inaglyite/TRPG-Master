@@ -41,7 +41,8 @@ def enrich_public_history_record(
                 event["text"] = strip_tool_protocol(str(event.get("text") or ""))
 
     has_speech = any(segment.get("kind") == "speech" for segment in clean_segments)
-    if narrative and not has_speech:
+    structured = public.get("narrative_format", (public.get("diagnostics") or {}).get("narrative_format")) == "dialogue_v1"
+    if narrative and not has_speech and not structured:
         reparsed, _clean = parse_speaker_segments(
             narrative,
             is_valid_npc=engine.is_valid_npc_id,

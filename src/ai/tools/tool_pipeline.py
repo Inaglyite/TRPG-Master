@@ -319,6 +319,7 @@ def record_engine_tool_shadow(engine: Any, comparison: dict) -> None:
 
 _SEMANTIC_TURN_TOOLS = frozenset(
     {
+        "repair_turn_state",
         "state_add_clue",
         "state_add_item",
         "state_remove_item",
@@ -345,6 +346,7 @@ _SEMANTIC_TURN_TOOLS = frozenset(
 )
 _TURN_CACHE_TOOLS = frozenset(
     {
+        "repair_turn_state",
         "state_add_clue",
         "state_add_item",
         "state_remove_item",

@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 顶栏“当前场景”e2e：本地模式真实后端 + 模型桩。
  *
@@ -66,7 +67,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: NARRATIVE },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, NARRATIVE),
+            },
             finish_reason: null,
           },
         ],

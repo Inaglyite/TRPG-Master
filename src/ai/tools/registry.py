@@ -14,6 +14,7 @@ from src.ai.tools.tool_policy import (
 )
 from src.ai.tools.tool_runtime import ToolRuntime, UnknownToolError
 from src.ai.tools.tool_schema_defs import LOAD_SKILL_TOOL, READ_FILE_TOOL
+from src.ai.tools.turn_state_tool_defs import TURN_STATE_TOOLS
 from src.app.runtime import RuntimeContext
 from src.gameplay.combat import (
     CombatError,
@@ -29,6 +30,7 @@ from src.gameplay.percentile import REQUIRED_RANKS, choose_percentile, success_l
 from src.gameplay.resolution import current_resolution, resolution_rng
 from src.gameplay.state_paths import resolve_path as _resolve_state_path
 from src.gameplay.state_paths import set_path as _set_state_path
+from src.gameplay.turn_state_repair import register_engine_bound_tools
 from src.storage.world_store import atomic_write_json
 
 
@@ -38,7 +40,6 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
-
 
 # ---------------------------------------------------------------------------
 # Function Calling Schema
@@ -803,10 +804,9 @@ TOOLS = [
     },
 ]
 
-
 # The provider receives a policy-owned projection of ``TOOLS``.  It is built
 # in a separate module so the large handler/schema registry remains only the
-# source of truth, not a second request authorization implementation.
+TOOLS.extend(TURN_STATE_TOOLS)
 _MODEL_CATALOG = build_model_catalog_helpers(TOOLS)
 TOOL_SCHEMA_BY_NAME = _MODEL_CATALOG.tool_schema_by_name
 MODEL_TOOL_NAMES = _MODEL_CATALOG.model_tool_names
@@ -816,7 +816,6 @@ tool_catalog_for_names = _MODEL_CATALOG.tool_catalog_for_names
 # Compatibility export for callers/tests that need the default static story
 # catalog. Actual requests bind their own frozen Skill allowlist.
 MODEL_TOOLS = model_tools_for("story")
-
 
 # ---------------------------------------------------------------------------
 # 工具分类
@@ -843,6 +842,7 @@ COMPLEX_FUNCTIONS = {
 
 
 TOOL_RUNTIME = ToolRuntime()
+register_engine_bound_tools(TOOL_RUNTIME)
 
 
 def _json_result(value: object) -> str:

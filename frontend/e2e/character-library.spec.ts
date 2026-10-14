@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 角色库本地全流程 E2E（真实后端 + 模型桩，不是替身服务器）：
  * 主菜单进角色库 → 导入 JSON 角色卡 → 预览确认 → 列表可见 → 页面重载仍在
@@ -68,7 +69,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, content),
+            },
             finish_reason: null,
           },
         ],

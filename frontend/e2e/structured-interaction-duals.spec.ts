@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 交互可靠性的本地真实后端 E2E（人类主持，无模型）：
  *
@@ -99,7 +100,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "雨幕笼罩着阿卡姆。" },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, "雨幕笼罩着阿卡姆。"),
+            },
             finish_reason: null,
           },
         ],

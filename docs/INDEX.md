@@ -13,6 +13,14 @@
 
 ## 归档资料
 
+2026-10-14 的结构化发言、出发待决与模型状态修正验收冻结于
+`mid_product/trpg-master/2026-10-14-speaker-transition-attribution/`：最终源码指纹、
+2111项后端/8环境skip、1340前端、完整96 E2E/2门控skip及最终发言专项、
+人类三客户端18/18、最终真实DeepSeek legacy主线33/33与状态修复等专项。
+`README.md`登记版本、范围、共享费用保守计算与原始失败，`SHA256SUMS.txt`校验完整原件。
+旧错误存档未改，场景修复仅覆盖本轮投影；原始私有上下文不随源码推送。
+
+
 Linux桌面GPU启动诊断与后端stderr标签核对位于
 `mid_product/trpg-master/2026-10-14-electron-gpu-startup/`：包含本机Wayland原始
 复现、不同参数的原始诊断、WebGL2渲染与GPU功能状态、隔离Electron/本地后端桩

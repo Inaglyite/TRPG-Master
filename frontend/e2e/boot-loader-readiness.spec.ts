@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 启动覆盖层的针对性验收（真实本地后端、人类主持、零模型）：
  *
@@ -89,7 +90,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "雨幕笼罩着阿卡姆。" },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, "雨幕笼罩着阿卡姆。"),
+            },
             finish_reason: null,
           },
         ],

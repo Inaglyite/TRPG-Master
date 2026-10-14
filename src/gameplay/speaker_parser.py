@@ -672,8 +672,18 @@ def _make_fallback_owner(
             return None
         for back in (1, 2):
             neighbor = line_index - back
-            if neighbor >= 0 and line_speakers[neighbor]:
-                return line_speakers[neighbor]
+            if neighbor >= 0:
+                nearby = _mask_quoted_spans(lines[neighbor]).strip()
+                subjects = {
+                    npc_id for name, npc_id in literal_aliases.items()
+                    if nearby.startswith(name)
+                }
+                if subjects:
+                    # A named character taking over the prose breaks the old
+                    # speaker, even without a verb such as "说".
+                    return next(iter(subjects)) if len(subjects) == 1 else None
+                if line_speakers[neighbor]:
+                    return line_speakers[neighbor]
         ahead = line_index + 1
         if ahead < len(lines) and line_speakers[ahead]:
             return line_speakers[ahead]
@@ -716,16 +726,16 @@ def infer_named_speech(
         content_lines = [line if not _OPTION_LINE.match(line) else "" for line in segment_lines]
         line_speakers = [_line_named_speaker(line, literal_aliases) for line in content_lines]
         cue_owners = {owner for owner in line_speakers if owner}
+        named: set[str] = set()
+        for line in content_lines:
+            masked = _mask_quoted_spans(line)
+            for name, npc_id in literal_aliases.items():
+                if name in masked:
+                    named.add(npc_id)
         interlocutor: str | None = None
-        if len(cue_owners) == 1:
+        if len(cue_owners) == 1 and named <= cue_owners:
             interlocutor = next(iter(cue_owners))
         else:
-            named: set[str] = set()
-            for line in content_lines:
-                masked = _mask_quoted_spans(line)
-                for name, npc_id in literal_aliases.items():
-                    if name in masked:
-                        named.add(npc_id)
             if len(named) == 1:
                 interlocutor = next(iter(named))
             elif present_npc_ids is not None:

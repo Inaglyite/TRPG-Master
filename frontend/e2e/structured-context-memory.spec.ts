@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * M5 上下文与记忆改造：前端适配的真实后端 E2E（人类主持，无模型）。
  *
@@ -62,7 +63,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "雨幕笼罩着阿卡姆。" },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, "雨幕笼罩着阿卡姆。"),
+            },
             finish_reason: null,
           },
         ],

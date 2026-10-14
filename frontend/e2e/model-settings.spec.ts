@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 模型设置 e2e（本地模式真实后端 + 可探测模型桩）。
  *
@@ -97,7 +98,10 @@ async function startModelStub(): Promise<string> {
         "雨幕笼罩着阿卡姆，你在约定的办公室里见到了等待已久的委托人。" +
         "\n\n**你可以——**\n1. 请他说明委托\n2. 观察办公室" +
         "\n3. 检查档案封面\n4. [自由行动] 你决定做什么？";
-      const chunk = narrativeChunk(content, parsed.model || "e2e-model");
+      const chunk = narrativeChunk(
+        modelDialogueContent(body, content),
+        parsed.model || "e2e-model",
+      );
       const terminal = {
         ...chunk,
         choices: [{ index: 0, delta: {}, finish_reason: "stop" }],

@@ -422,6 +422,7 @@ class TurnJournal:
                     "narrative": str(narrative or ""),
                     "choices": _json_safe(choices),
                     "narrative_segments": _json_safe(narrative_segments or []),
+                    "narrative_format": (diagnostics or {}).get("narrative_format", "legacy_text"),
                     "player_followups": _json_safe(player_followups or []),
                     "events": events,
                     "executed_tools": _json_safe(executed_tools or []),
@@ -528,6 +529,7 @@ class TurnJournal:
                     "narrative": record.get("narrative", ""),
                     "choices": copy.deepcopy(record.get("choices", [])),
                     "narrative_segments": copy.deepcopy(record.get("narrative_segments", [])),
+                    "narrative_format": record.get("narrative_format", "legacy_text"),
                     "player_followups": copy.deepcopy(record.get("player_followups", [])),
                     "completed_at": record.get("completed_at"),
                     "world_revision": record.get("world_revision"),
@@ -577,6 +579,7 @@ class TurnJournal:
         model: str,
         diagnostics: list[dict] | None = None,
         narrative_segments: list[dict] | None = None,
+        narrative_format: str = "legacy_text",
     ) -> dict:
         """Select a new prose variant without touching the authoritative snapshot."""
         with self._thread_lock, file_lock(self.lock_path):
@@ -671,6 +674,7 @@ class TurnJournal:
                     "narrative_variants": variants,
                     "selected_variant_id": variant_id,
                     "rewrite_diagnostics": rewrite_diagnostics,
+                    "narrative_format": narrative_format,
                     "narrative_segments": _json_safe(narrative_segments or []),
                     "events": events,
                     "message_count": len(serializable_messages),
@@ -700,6 +704,7 @@ class TurnJournal:
                 "narrative",
                 "choices",
                 "narrative_segments",
+                "narrative_format",
                 "player_followups",
                 "events",
                 "world_revision",

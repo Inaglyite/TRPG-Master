@@ -52,7 +52,11 @@ from src.app.logger import tier_inject as log_tier
 from src.app.runtime import RuntimeContext
 from src.gameplay import investigators as investigator_roster
 from src.gameplay.action_checks import infer_scene_transition
-from src.gameplay.action_resolution import ActionResolution, plan_player_action
+from src.gameplay.action_resolution import (
+    ActionResolution,
+    departure_tool_refusal,
+    plan_player_action,
+)
 from src.gameplay.case_clocks import clock_status
 from src.gameplay.characters import apply_character_to_state, default_character_ref
 from src.gameplay.characters import settle_case as settle_character_case
@@ -110,6 +114,8 @@ _REWRITE_SYSTEM_CONTRACT = """# 已结算回合的叙事改写
 
 def _thinking_type_for_request(model: str, request_role: str) -> str | None:
     """Return an explicit DeepSeek thinking mode only when it is intentional."""
+    if request_role == "combat" and "deepseek.com" in BASE_URL.lower() and model == MODEL_FLASH:
+        return "disabled"
     if request_role != "story" or STORY_THINKING_MODE == "provider":
         return None
     if STORY_THINKING_MODE in {"disabled", "enabled"}:
@@ -163,6 +169,7 @@ class GameEngine:
         self._ensure_model_session().diagnostics = value
 
     def __init__(self, context: RuntimeContext | None = None):
+        self._structured_dialogue = True
         self.context = context or RuntimeContext.local()
         self.client = build_engine_client(
             self.context, api_key=API_KEY, base_url=BASE_URL, timeout=model_timeout_seconds()
@@ -468,6 +475,7 @@ class GameEngine:
                 executed_tools=executed_tools,
                 lore_entry_ids=lore_entry_ids,
                 diagnostics={
+                    "narrative_format": "dialogue_v1" if getattr(self, "_structured_dialogue", False) else "legacy_text",
                     "model_calls": list(self._turn_diagnostics),
                     "lorebook": dict(self._turn_lore_diagnostics),
                     "performance": performance,
@@ -606,7 +614,7 @@ class GameEngine:
             rewritten,
             is_valid_npc=self.is_valid_npc_id,
             on_unknown_npc=self.log_unknown_npc_speaker,
-            speaker_aliases=self.npc_speaker_aliases(),
+            speaker_aliases=None if getattr(self, "_structured_dialogue", False) else self.npc_speaker_aliases(),
         )
         if tool_calls or not rewritten:
             raise RuntimeError("模型没有返回有效的叙事改写")
@@ -637,7 +645,7 @@ class GameEngine:
                 messages=updated_messages,
                 model=self.narrative_model,
                 diagnostics=list(self._turn_diagnostics[diagnostics_start:]),
-                narrative_segments=[s.to_dict() for s in rewrite_segments],
+                narrative_segments=[s.to_dict() for s in rewrite_segments], narrative_format="dialogue_v1" if getattr(self, "_structured_dialogue", False) else "legacy_text",
             )
         except Exception:
             self.messages = previous_messages
@@ -1485,13 +1493,11 @@ class GameEngine:
         *,
         player_action: str = "",
     ) -> str:
-        """Validate model-proposed authored effects before executing them.
+        """Execute issued model capabilities within the settled turn boundary."""
+        from src.gameplay.turn_state_repair import TOOL_NAMES, execute_turn_state_tool
 
-        The story model may classify a free-form action, but an authored clue
-        with discovery rules remains gated by the current scene and the
-        player's actual action.  This keeps model judgement useful without
-        letting it bypass module progression contracts.
-        """
+        if name in TOOL_NAMES:
+            return execute_turn_state_tool(self, name, args)
         from src.gameplay.discovery import disclaims_acquisition
 
         no_take = disclaims_acquisition(player_action)
@@ -1509,6 +1515,8 @@ class GameEngine:
         if name in INCAPACITATED_BLOCKED_TOOLS and pc_incapacitated(self.context.world_store.load()):
             return json.dumps({"ok": False, "error": "pc_incapacitated", "instruction": "调查员已失去行动能力，不能执行身体动作；叙述现状、等待救援或走向结局。"}, ensure_ascii=False)
         action_resolution = getattr(self, "_action_resolution", None)
+        if refusal := departure_tool_refusal(action_resolution, name):
+            return json.dumps(refusal, ensure_ascii=False)
         if action_resolution and action_resolution.adjudication_json:
             # The narrator cannot add a second mechanical plan after the
             # adjudicator's costs, checks and effects have already committed.

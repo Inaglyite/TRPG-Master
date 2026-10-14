@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID, X509Certificate } from "node:crypto";
 import {
@@ -69,7 +70,10 @@ async function startModelStub(): Promise<string> {
           choices: [
             {
               index: 0,
-              delta: { role: "assistant", content },
+              delta: {
+                role: "assistant",
+                content: modelDialogueContent(body, content),
+              },
               finish_reason: null,
             },
           ],

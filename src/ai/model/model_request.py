@@ -102,6 +102,14 @@ def prepare_model_request(
             messages.insert(0, {"role": "system", "content": system_overlay})
 
     request_role = "combat" if system_overlay else "story"
+    if getattr(host, "_structured_dialogue", False) is True:
+        from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
+
+        messages = [dict(message) for message in messages]
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = f"{messages[0].get('content', '')}\n\n{DIALOGUE_INSTRUCTION}"
+        else:
+            messages.insert(0, {"role": "system", "content": DIALOGUE_INSTRUCTION})
     skill_allowlist: tuple[tuple[str, str], ...] = ()
     required_tools: frozenset[str] = frozenset()
     allowed_tools: frozenset[str] | None = None
@@ -118,7 +126,11 @@ def prepare_model_request(
     request_tools = (
         model_tools_for(request_role, skill_allowlist=skill_allowlist) if enable_tools else []
     )
-    if enable_tools and (required_tools or allowed_tools is not None):
+    if enable_tools and getattr(host, "_repair_only_tools", False) is True:
+        request_tools = tool_catalog_for_names(["inspect_turn_state", "repair_turn_state"])
+    elif enable_tools and getattr(host, "_turn_state_checkpoint", None):
+        required_tools |= frozenset({"inspect_turn_state", "repair_turn_state"})
+    if enable_tools and not getattr(host, "_repair_only_tools", False) and (required_tools or allowed_tools is not None):
         request_tools = _apply_skill_tool_policy(
             request_tools,
             required=required_tools,
@@ -247,6 +259,8 @@ def prepare_model_request(
         "max_tokens": max_output_tokens,
         "stream": True,
     }
+    if getattr(host, "_structured_dialogue", False) is True:
+        provider_kwargs["response_format"] = {"type": "json_object"}
     if policy.thinking_type:
         from src.ai.model.provider_adapter import (
             apply_reasoning_passback,
@@ -259,6 +273,10 @@ def prepare_model_request(
             provider_kwargs["messages"] = apply_reasoning_passback(host, messages)
     if enable_tools:
         provider_kwargs.update(tools=request_tools, tool_choice="auto")
+        from src.ai.model.combat_request_policy import needs_combat_tool
+
+        if needs_combat_tool(host, request_role, policy.thinking_type, request_tools):
+            provider_kwargs["tool_choice"] = "required"
     if policy.stream_usage:
         provider_kwargs["stream_options"] = {"include_usage": True}
     if policy.thinking_type:

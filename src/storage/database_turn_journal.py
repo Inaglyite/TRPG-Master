@@ -517,6 +517,7 @@ class DatabaseTurnJournal:
                     "narrative": str(narrative or ""),
                     "choices": _json_safe(choices),
                     "narrative_segments": _json_safe(narrative_segments or []),
+                    "narrative_format": (diagnostics or {}).get("narrative_format", "legacy_text"),
                     "player_followups": _json_safe(player_followups or []),
                     "events": events,
                     "executed_tools": _json_safe(executed_tools or []),
@@ -723,6 +724,7 @@ class DatabaseTurnJournal:
                             "narrative",
                             "choices",
                             "narrative_segments",
+                            "narrative_format",
                             "player_followups",
                             "completed_at",
                             "world_revision",
@@ -815,6 +817,7 @@ class DatabaseTurnJournal:
         model: str,
         diagnostics=None,
         narrative_segments=None,
+        narrative_format="legacy_text",
     ) -> dict:
         if self.latest_completed_id() != turn_id:
             raise TurnJournalError("只能重新叙述当前世界的最后一个完整回合")
@@ -859,6 +862,7 @@ class DatabaseTurnJournal:
                     "narrative_variants": variants,
                     "selected_variant_id": variant["variant_id"],
                     "rewrite_diagnostics": rewrites,
+                    "narrative_format": narrative_format,
                     "narrative_segments": _json_safe(narrative_segments or []),
                     "events": events,
                     "message_count": len(messages),
@@ -887,6 +891,7 @@ class DatabaseTurnJournal:
             "narrative",
             "choices",
             "narrative_segments",
+            "narrative_format",
             "player_followups",
             "events",
             "world_revision",

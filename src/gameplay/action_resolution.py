@@ -44,6 +44,18 @@ INCAPACITATED_BLOCKED_TOOLS = frozenset(
     }
 )
 
+DEPARTURE_BLOCKED_TOOLS = INCAPACITATED_BLOCKED_TOOLS | {
+    "state_set", "npc_reveal", "sanity_event", "sanity_check", "sanity_restore",
+    "apply_damage", "apply_heal", "end_game",
+}
+
+
+def departure_tool_refusal(action: ActionResolution | None, name: str) -> dict | None:
+    if action and action.is_departure_pending and name in DEPARTURE_BLOCKED_TOOLS:
+        return {"ok": False, "error": "departure_pending_effect_not_authorized",
+                "instruction": "尚未出发：只演出当前场景待决事项，等待玩家下一次行动。"}
+    return None
+
 
 def pc_incapacitated(world: dict) -> bool:
     """战斗外的行动资格门：濒死/昏迷/死亡的调查员本人不能再执行身体动作。"""
@@ -58,6 +70,7 @@ def pc_incapacitated(world: dict) -> bool:
 
 
 class ActionPhase(StrEnum):
+    DEPARTURE = "departure"
     ARRIVAL = "arrival"
     INTERACTION = "interaction"
     CONTACT = "contact"
@@ -79,10 +92,16 @@ class ActionResolution:
     discovery_matches: tuple[DiscoveryMatch, ...] = ()
     preferred_skill: str | None = None
     adjudication_json: str = ""
+    pending_destination_scene_id: str | None = None
+    departure_question: str = ""
 
     @property
     def is_arrival(self) -> bool:
         return self.phase is ActionPhase.ARRIVAL
+
+    @property
+    def is_departure_pending(self) -> bool:
+        return self.phase is ActionPhase.DEPARTURE
 
     @property
     def permits_discovery_effects(self) -> bool:
@@ -96,6 +115,8 @@ class ActionResolution:
             "transition_kind": self.transition_kind,
             "route_id": self.route_id,
             "permits_discovery_effects": self.permits_discovery_effects,
+            "pending_destination_scene_id": self.pending_destination_scene_id,
+            "departure_question": self.departure_question,
         }
 
 

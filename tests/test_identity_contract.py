@@ -349,7 +349,7 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(model_log.call_args.kwargs["prompt_profile"], "opening")
         self.assertEqual(model_log.call_args.kwargs["tool_schema_chars"], 2)
 
-    def test_auto_thinking_only_disables_official_deepseek_flash_story(self):
+    def test_auto_thinking_disables_official_deepseek_flash_story_and_combat(self):
         with (
             patch("src.app.engine.STORY_THINKING_MODE", "auto"),
             patch("src.app.engine.BASE_URL", "https://api.deepseek.com"),
@@ -359,7 +359,7 @@ class IdentityContractTests(unittest.TestCase):
                 _thinking_type_for_request("deepseek-flash", "story"),
                 "disabled",
             )
-            self.assertIsNone(_thinking_type_for_request("deepseek-flash", "combat"))
+            self.assertEqual(_thinking_type_for_request("deepseek-flash", "combat"), "disabled")
             self.assertIsNone(_thinking_type_for_request("deepseek-v4-pro", "story"))
 
         with patch("src.app.engine.BASE_URL", "https://example.test/v1"):

@@ -14,6 +14,7 @@ from src.ai.model.model_request import StreamPolicy
 from src.ai.model.model_stream_capacity import prepare_with_capacity
 from src.ai.model.model_stream_diagnostics import record_model_diagnostic
 from src.ai.model.model_stream_helpers import (
+    finish_structured_dialogue,
     flush_speaker_segments,
     make_visible_emitter,
     sanitize_visible_narrative,
@@ -66,6 +67,7 @@ class ModelStreamer:
         _capacity_compaction_attempted: bool = False,
     ) -> tuple[str, list]:
         host = self.host
+        structured_dialogue = getattr(host, "_structured_dialogue", False) is True
         started_at = time.monotonic()
         first_token_at: float | None = None
         prepared, _capacity_compaction_attempted = prepare_with_capacity(
@@ -224,9 +226,9 @@ class ModelStreamer:
                 if first_token_at is None and (delta.content or delta.tool_calls):
                     first_token_at = time.monotonic()
                 if delta.content:
-                    public_content = protocol_filter.feed(delta.content)
+                    public_content = delta.content if structured_dialogue else protocol_filter.feed(delta.content)
                     full_text += public_content
-                    if not buffer_if_tools:
+                    if not buffer_if_tools and not structured_dialogue:
                         if initial_sentence_released:
                             emit_visible(public_content)
                         else:
@@ -304,7 +306,7 @@ class ModelStreamer:
 
         trailing_public = protocol_filter.flush()
         full_text += trailing_public
-        if not buffer_if_tools:
+        if not buffer_if_tools and not structured_dialogue:
             if initial_sentence_released:
                 emit_visible(trailing_public)
             else:
@@ -319,8 +321,9 @@ class ModelStreamer:
         if protocol_filter.malformed:
             self.log_error("已丢弃未闭合或过长的模型文本工具协议")
 
-        full_text = sanitize_visible_narrative(full_text)
-        if not buffer_if_tools:
+        if not structured_dialogue:
+            full_text = sanitize_visible_narrative(full_text)
+        if not buffer_if_tools and not structured_dialogue:
             if pending_visible:
                 emit_visible(pending_visible)
             flush_speaker_segments(host, speaker_parser)
@@ -334,7 +337,9 @@ class ModelStreamer:
             log_error=self.log_error,
             on_error=host.cb.on_error,
         )
-        if buffer_if_tools:
+        if structured_dialogue and tool_calls:
+            full_text = ""
+        elif buffer_if_tools and not structured_dialogue:
             if tool_calls:
                 full_text = ""
             elif full_text:
@@ -395,6 +400,9 @@ class ModelStreamer:
             request_snapshot=request_snapshot.to_dict(),
             request_envelope=request_envelope,
         )
+        if structured_dialogue and full_text and not tool_calls:
+            return finish_structured_dialogue(self, model, full_text, speaker_parser, finish_reason=finish_reason,
+                request_options=dict(required_tool=kwargs.get("tool_choice") == "required", policy=policy, system_overlay=system_overlay, system_prompt_override=system_prompt_override, enable_tools=enable_tools, temperature=temperature, buffer_if_tools=buffer_if_tools, messages_override=messages_override, retry_on_empty=retry_on_empty, _overflow_retried=_overflow_retried, _capacity_compaction_attempted=_capacity_compaction_attempted))
         if not full_text and not tool_calls and retry_on_empty:
             self.log_error("API 返回空响应，正在重试一次")
             note_model_retry(host, "empty_response", "unknown", 400)

@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 模型设置 e2e（云端：账号鉴权 + TLS + BYOK-only）。
  *
@@ -116,7 +117,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, content),
+            },
             finish_reason: null,
           },
         ],

@@ -432,6 +432,9 @@ def _prepare_turn_inner(
                 "resolved_discoveries",
                 {"count": len(resolved_discoveries)},
             )
+        from src.gameplay.turn_state_repair import freeze_turn_state
+
+        freeze_turn_state(engine)
         authority = (
             engine._authoritative_turn_context(check_result, resolved_discoveries)
             if not skip_agent
@@ -476,6 +479,18 @@ def _prepare_turn_inner(
                 "不要套用模组 action_routes/action_advisories/entry_beat 的固定台词，"
                 "不要声称玩家说过原话之外的内容，也不要虚构电话、许可或接待安排。"
                 "本轮只抵达，尚未进行验尸、搜查或取得线索。"
+                "移动已成立：不得再让出发地人物提出尚待玩家回答的同行、许可或交接问题；"
+                "不得代替玩家补作选择。目的地的主动招呼只能由目的地在场 NPC 发出。"
+            )
+        if action_resolution.is_departure_pending and not skip_agent:
+            content += (
+                "\n\n[出发前过渡回合｜移动尚未执行]\n"
+                f"当前仍在 {action_resolution.origin_scene_id}；计划目的地为 "
+                f"{action_resolution.pending_destination_scene_id}。"
+                f"待决事项：{action_resolution.departure_question}。"
+                "本轮只演出原场景人物的回应与待决问题，随后结束并等待玩家下一次输入。"
+                "不得叙述出发、旅行、抵达、目的地人物接洽，不得预扣旅行时间。"
+                "该计划不自动执行；下一回合必须依据玩家新行动重新裁决。"
             )
         if authority:
             content += f"\n\n{authority}"
@@ -494,7 +509,7 @@ def _prepare_turn_inner(
                 + "\n按 description 和 events 展开结果；npc_direction 指导在场 NPC 的行为。"
                 "这些后果已落账，不得再次发放物品、推进时钟或重复检定。" + status_line + time_note
             )
-        content += (
+        output_instruction = (
             "\n\n[输出格式] NPC 直接引语的台词必须用 【npc:<npc_public_state 中的 id>】…"
             "【/npc】 包裹（只包台词；提及、转述、动作神态不加）。"
             "首次向玩家正式介绍某位在场 NPC（自报家门、被引荐、开始直接交互）时，"
@@ -502,6 +517,11 @@ def _prepare_turn_inner(
             "仅被谈论而未登场互动的人物不加；已发放过人物卡的人物不加）。"
             "标记不会展示给玩家，平台据此发放公开人物卡。"
         )
+        if getattr(engine, "_structured_dialogue", False) is True:
+            from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
+
+            output_instruction = "\n\n[输出格式]\n" + DIALOGUE_INSTRUCTION
+        content += output_instruction
         if lore_selection and lore_selection.context:
             content += f"\n\n{lore_selection.context}"
         engine.messages.append({"role": "user", "content": content})
@@ -552,6 +572,7 @@ def _prepare_turn_inner(
 
 def _call_story_agent(state: TurnState) -> dict:
     engine = state["engine"]
+    engine._repair_only_tools = bool(state.get("turn_had_check", False))
     opening_turn = state.get("opening_turn", False)
     _emit_phase(
         engine,
@@ -562,10 +583,8 @@ def _call_story_agent(state: TurnState) -> dict:
         text, tool_calls = engine._stream_llm(
             engine.current_model,
             system_prompt_override=(engine._opening_system_prompt() if opening_turn else None),
-            # A resolved check is an immutable fact for this player action. The
-            # follow-up request may narrate it, but must not roll again or enter a
-            # second tool-planning loop.
-            enable_tools=not opening_turn and not state.get("turn_had_check", False),
+            # Resolved checks expose only the scene inspection/repair catalog.
+            enable_tools=not opening_turn,
             prompt_profile="opening" if opening_turn else None,
             temperature=0.65 if opening_turn else 0.8,
             buffer_if_tools=True,
@@ -575,6 +594,7 @@ def _call_story_agent(state: TurnState) -> dict:
 
 def _call_combat_agent(state: TurnState) -> dict:
     engine = state["engine"]
+    engine._repair_only_tools = False
     sync_skills = getattr(engine, "_detect_content_skill_hint", None)
     if sync_skills:
         # 战斗状态是权威能力：由 resolver 的 combat_active 谓词确定性激活
@@ -811,15 +831,18 @@ def _execute_tools(state: TurnState) -> dict:
     # 工具结果之后会发起一次新的模型调用。此时最靠近模型的是 tool 消息，
     # 首轮玩家消息末尾的发言格式契约容易被长工具输出稀释，因此在合法的
     # tool-response 批次结束后重新锚定协议。它是引擎控制指令，不是玩家台词。
+    tool_instruction = (
+        "[引擎控制指令｜非玩家发言] 基于以上执行回执完成本轮叙述，不能把一次玩家行动扩展为无限攻击。"
+        "所有 NPC 直接引语必须使用 【npc:<npc_public_state 中的 id>】…【/npc】；旁白和动作不加标签。"
+    )
+    if getattr(engine, "_structured_dialogue", False) is True:
+        from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
+
+        tool_instruction = "[引擎控制指令｜非玩家发言] 根据执行回执结束本轮；不追加玩家新行动。\n" + DIALOGUE_INSTRUCTION
     engine.messages.append(
         {
             "role": "user",
-            "content": (
-                "[引擎控制指令｜非玩家发言] 基于以上工具结果继续完成本轮叙述；"
-                "不要复述工具调用过程。所有 NPC 直接引语必须逐段使用 "
-                "【npc:<npc_public_state 中的 id>】…【/npc】 包裹，短句、寒暄和"
-                "同一人物再次开口也不得省略标签；旁白和动作不加标签。"
-            ),
+            "content": tool_instruction,
         }
     )
 
@@ -857,7 +880,7 @@ def _handle_end_game(engine: Any, output: str) -> None:
 def _route_after_tools(state: TurnState) -> str:
     if state.get("tool_round", 0) < MAX_TOOL_ROUNDS:
         return _route_to_agent(state)
-    return "finalize"
+    return "narrate_settled_tools"
 
 
 def _emit_combat_dice(engine: Any, output: str) -> None:
@@ -940,7 +963,7 @@ def _parse_final_narrative(
             narrative[len(prefix) :],
             is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
             on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
-            speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
+            speaker_aliases=None if getattr(engine, "_structured_dialogue", False) is True else (getattr(engine, "npc_speaker_aliases", lambda: {})()),
             player_text=state.get("user_content"),
             present_npc_ids=current_scene_npc_ids(engine),
         )
@@ -953,7 +976,7 @@ def _parse_final_narrative(
         narrative,
         is_valid_npc=getattr(engine, "is_valid_npc_id", None) or (lambda _npc_id: False),
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
-        speaker_aliases=(getattr(engine, "npc_speaker_aliases", lambda: {})()),
+        speaker_aliases=None if getattr(engine, "_structured_dialogue", False) is True else (getattr(engine, "npc_speaker_aliases", lambda: {})()),
         player_text=state.get("user_content"),
         present_npc_ids=current_scene_npc_ids(engine),
     )
@@ -1091,11 +1114,14 @@ def _finalize_turn(state: TurnState) -> dict:
 
 
 def build_turn_graph():
+    from src.app.turn_narration_fallback import narrate_settled_tools
+
     graph = StateGraph(TurnState)
     graph.add_node("prepare_turn", _prepare_turn)
     graph.add_node("call_story_agent", _call_story_agent)
     graph.add_node("call_combat_agent", _call_combat_agent)
     graph.add_node("execute_tools", _execute_tools)
+    graph.add_node("narrate_settled_tools", narrate_settled_tools)
     graph.add_node("finalize", _finalize_turn)
 
     graph.add_edge(START, "prepare_turn")
@@ -1120,8 +1146,9 @@ def build_turn_graph():
         {
             "call_story_agent": "call_story_agent",
             "call_combat_agent": "call_combat_agent",
-            "finalize": "finalize",
+            "narrate_settled_tools": "narrate_settled_tools",
         },
     )
+    graph.add_edge("narrate_settled_tools", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile()

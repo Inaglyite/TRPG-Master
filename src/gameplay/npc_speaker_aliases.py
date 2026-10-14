@@ -30,6 +30,7 @@ def build_npc_speaker_aliases(
 ) -> dict[str, str]:
     """Return every public NPC name that may identify a speaker."""
     aliases: dict[str, str] = {}
+    short_owners: dict[str, set[str]] = {}
 
     def add_aliases(name: str, npc_id: str) -> None:
         name = name.strip()
@@ -38,6 +39,9 @@ def build_npc_speaker_aliases(
         aliases[name] = npc_id
         if "·" not in name:
             return
+        given = name.split("·", 1)[0].strip()
+        if len(given) >= 2:
+            short_owners.setdefault(given, set()).add(npc_id)
         short = name.rsplit("·", 1)[-1].strip()
         if not short:
             return
@@ -76,4 +80,7 @@ def build_npc_speaker_aliases(
         name = str(npc.get("name") or npc.get("display_name") or "").strip()
         if npc_id and name and is_valid_npc_id(npc_id):
             add_aliases(name, npc_id)
+    for short, owners in short_owners.items():
+        if len(owners) == 1 and short not in aliases:
+            aliases[short] = next(iter(owners))
     return aliases

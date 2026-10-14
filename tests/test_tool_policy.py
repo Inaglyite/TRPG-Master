@@ -249,7 +249,7 @@ class ToolPolicyExecutionTests(unittest.TestCase):
                     "engine": SimpleNamespace(_combat_active=lambda: False),
                 }
             ),
-            "finalize",
+            "narrate_settled_tools",
         )
 
     def test_operational_tool_log_redacts_textual_arguments(self):
@@ -313,7 +313,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(
             envelope["context_section_digests"]["tools"],
-            "f80fcbf496b32f3e1077e8dfc33c58a04271d1475755dfbe06aa2b7bc75424e7",
+            "3f305e7e87cb3803b5390bf41fcf79e28884a05fcddcd5bfb8e1bba152ac9ba5",
         )
 
     def test_provider_calls_receive_server_snapshot_and_catalog_digest(self):

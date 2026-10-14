@@ -84,6 +84,28 @@ def make_multiplayer_world(*, active_id: str = "inv-alice") -> dict:
 
 
 class CombatStateMachineTests(unittest.TestCase):
+    def test_preflight_uses_active_hostile_participant_even_if_social_state_is_submissive(self):
+        world = make_world()
+        npc = world["npcs"][0]
+        npc["disposition"] = "submissive"
+        world["combat_state"] = {"active": True, "participants": [{
+            "id": npc["id"], "kind": "npc", "hostile_to_pc": True, "hp": 10,
+        }]}
+        self.assertIsNone(preview_player_escalation(world, f"我朝{npc['name']}开枪自卫。"))
+        self.assertEqual(npc["disposition"], "submissive")
+
+    def test_preflight_keeps_confirmation_for_other_targets_inactive_or_defeated_enemies(self):
+        for mode in ("other_target", "inactive", "defeated"):
+            with self.subTest(mode=mode):
+                world = make_world()
+                npc = world["npcs"][0]
+                npc["disposition"] = "submissive"
+                world["combat_state"] = {"active": mode != "inactive", "participants": [{
+                    "id": "different_enemy" if mode == "other_target" else npc["id"],
+                    "kind": "npc", "hostile_to_pc": True, "hp": 0 if mode == "defeated" else 10,
+                }]}
+                self.assertIsNotNone(preview_player_escalation(world, f"我朝{npc['name']}开枪。"))
+
     def test_preflight_detects_explicit_attack_before_combat_exists(self):
         world = make_world()
         world["pc"]["backstory"] = {"violence_stance": "avoidant"}

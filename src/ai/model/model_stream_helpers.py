@@ -5,9 +5,61 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.ai.model.dialogue_output import decode_dialogue_output
+from src.ai.model.llm_concurrency import ModelResponseError
+from src.ai.model.provider_adapter import note_model_retry
 from src.ai.tools.tool_protocol import strip_tool_protocol
 from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
 from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
+
+
+def emit_structured_dialogue(host, raw, parser, *, finish_reason, log_error, report_error=True) -> str:
+    if finish_reason in {"transport_error", "length", "content_filter"}:
+        raise ModelResponseError(f"模型结构化对话未完成：{finish_reason}")
+    try:
+        text = sanitize_visible_narrative(decode_dialogue_output(raw, present_npc_ids=current_scene_npc_ids(host) or set()))
+        if not text.strip():
+            raise ValueError("对话正文没有有效的公开文本")
+    except ValueError as exc:
+        log_error(f"模型结构化对话无效：{exc}")
+        if report_error:
+            host.cb.on_error("模型对话格式或发言者无效，请重试本轮。")
+        raise ModelResponseError("模型结构化对话未通过校验") from exc
+    # Canonical IDs alone own speech; no prose inference is permitted here.
+    for kind, chunk, npc_id in parser.feed(text) + parser.flush():
+        if kind == "speech_start":
+            host.cb.on_speaker_segment(chunk)
+        elif kind == "text" and chunk:
+            visible = sanitize_visible_narrative(chunk)
+            if visible:
+                if npc_id:
+                    host.cb.on_narrative(visible, npc_id)
+                else:
+                    host.cb.on_narrative(visible)
+    return text
+
+
+def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, request_options):
+    """One bounded protocol repair, after the previous LLM slot is released."""
+    host = streamer.host
+    if request_options.pop("required_tool", False):
+        host.cb.on_error("战斗行动尚未生成执行请求，请重试本轮。")
+        raise ModelResponseError("模型未提交必需的战斗工具请求")
+    repair_allowed = request_options["retry_on_empty"] and finish_reason not in {"transport_error", "length", "content_filter"}
+    try:
+        return emit_structured_dialogue(host, raw, parser, finish_reason=finish_reason, log_error=streamer.log_error, report_error=not repair_allowed), []
+    except ModelResponseError as exc:
+        if not repair_allowed:
+            raise
+        validation_error = str(exc.__cause__ or exc)
+    note_model_retry(host, "invalid_dialogue", "unknown", 0)
+    source = request_options["messages_override"]
+    from src.ai.model.dialogue_repair_context import repair_messages
+
+    messages = repair_messages(host, source if source is not None else host.messages, raw, validation_error)
+    return streamer.stream(model, **(request_options | {"messages_override": messages,
+        "system_overlay": None, "system_prompt_override": None, "enable_tools": False,
+        "temperature": 0.0, "retry_on_empty": False}))
 
 _INTERNAL_NARRATIVE_PATTERNS = (
     re.compile(r"(?:让我|我)?先确认(?:一下)?当前(?:的)?信息边界[。.!！]?\s*"),

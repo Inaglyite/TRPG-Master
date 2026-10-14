@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 调查员侧栏三卡片 e2e：本地模式真实后端 + 模型桩。
  *
@@ -50,7 +51,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, content),
+            },
             finish_reason: null,
           },
         ],

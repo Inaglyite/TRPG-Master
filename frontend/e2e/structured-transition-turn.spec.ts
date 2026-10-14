@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 守秘人主持的叙事型过渡回合：真实本地后端 + 真实前端。
  *
@@ -94,7 +95,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "雨幕笼罩着阿卡姆。" },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, "雨幕笼罩着阿卡姆。"),
+            },
             finish_reason: null,
           },
         ],

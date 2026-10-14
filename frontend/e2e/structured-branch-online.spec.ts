@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 后端缺口 #2 的独立、可重复验收：**云端（账号化单人房间）的结构化世界分支**。
  *
@@ -59,7 +60,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content: "雨幕笼罩着阿卡姆。" },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, "雨幕笼罩着阿卡姆。"),
+            },
             finish_reason: null,
           },
         ],

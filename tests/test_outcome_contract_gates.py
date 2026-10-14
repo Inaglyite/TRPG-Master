@@ -237,7 +237,7 @@ def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path,
             choices=[
                 SimpleNamespace(
                     finish_reason="stop",
-                    message=SimpleNamespace(content="你拨弄锁芯，几分钟里始终留意着走廊。"),
+                    message=SimpleNamespace(content=json.dumps({"segments": [{"kind": "narration", "text": "你拨弄锁芯，几分钟里始终留意着走廊。"}]})),
                 )
             ]
         )

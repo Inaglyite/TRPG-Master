@@ -325,7 +325,8 @@ class StoryStreamingTests(unittest.TestCase):
 
         _call_story_agent({"engine": engine, "turn_had_check": True})
 
-        self.assertFalse(calls[0][1]["enable_tools"])
+        self.assertTrue(calls[0][1]["enable_tools"])
+        self.assertTrue(engine._repair_only_tools)
 
     def test_combat_agent_uses_judgement_model(self):
         calls = []
@@ -1514,7 +1515,7 @@ class ToolExecutionSafetyTests(unittest.TestCase):
         )
         self.assertEqual(engine.messages[1]["tool_call_id"], "call_one")
         self.assertEqual(engine.messages[2]["tool_call_id"], "call_two")
-        self.assertIn("同一人物再次开口", engine.messages[-1]["content"])
+        self.assertIn("【npc:<npc_public_state 中的 id>】", engine.messages[-1]["content"])
 
     def test_sanity_loss_emits_d100_event(self):
         events = []

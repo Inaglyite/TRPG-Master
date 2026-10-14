@@ -375,6 +375,15 @@ def preview_player_escalation(world: dict, content: str) -> dict | None:
         return None
     kind, action_type, action_segment = intent
     target = _preflight_target(world, action_segment)
+    combat = world.get(COMBAT_KEY) or {}
+    if target is not None and combat.get("active") and any(
+        participant.get("id") == target.get("id")
+        and participant.get("kind") == "npc"
+        and participant.get("hostile_to_pc")
+        and participant.get("hp", 0) > 0
+        for participant in combat.get("participants", [])
+    ):
+        return None
     if target is not None and bool(
         target.get("hostile_to_pc") or target.get("disposition") == "hostile"
     ):

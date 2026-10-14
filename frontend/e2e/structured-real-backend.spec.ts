@@ -1,3 +1,4 @@
+import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 真实本地后端的结构化回归（不是替身）。
  *
@@ -50,7 +51,10 @@ async function startModelStub(): Promise<string> {
         choices: [
           {
             index: 0,
-            delta: { role: "assistant", content },
+            delta: {
+              role: "assistant",
+              content: modelDialogueContent(body, content),
+            },
             finish_reason: null,
           },
         ],
