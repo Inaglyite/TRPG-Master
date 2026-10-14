@@ -40,9 +40,9 @@ def _reload_config(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_context_window_defaults_to_65536(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_context_window_defaults_to_262144(monkeypatch: pytest.MonkeyPatch) -> None:
     _reload_config(monkeypatch, {})
-    assert config.context_window_tokens() == 65_536
+    assert config.context_window_tokens() == 262_144
     assert config.context_target_ratio() == 0.78
     assert config.max_output_tokens() == 4096
 
@@ -105,14 +105,14 @@ def test_max_output_keeps_a_compaction_band(monkeypatch: pytest.MonkeyPatch) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_plan_defaults_65536_window_and_78_percent_target(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plan_defaults_262144_window_and_78_percent_target(monkeypatch: pytest.MonkeyPatch) -> None:
     _reload_config(monkeypatch, {})
     plan = build_plan()
-    assert plan.window_tokens == 65_536
+    assert plan.window_tokens == 262_144
     assert plan.target_ratio == 0.78
-    assert plan.target_tokens == int(65_536 * 0.78)
+    assert plan.target_tokens == int(262_144 * 0.78)
     # Hard threshold leaves room for a maximal output (4096).
-    assert plan.hard_tokens == 65_536 - 4096
+    assert plan.hard_tokens == 262_144 - 4096
     assert plan.max_output_tokens == 4096
     assert plan.target_tokens < plan.hard_tokens
 

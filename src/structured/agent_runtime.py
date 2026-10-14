@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from src.storage.database import World, session_scope
@@ -38,30 +39,46 @@ def build_byok_caller(database_url: str, world_id: str):
         # 原先硬顶 4000 会静默忽略用户配置的更大值。
         effective_max_tokens = min(role.max_output_tokens or 8000, 32768)
 
+        from src.ai.context.context_capacity import STATUS_IRREDUCIBLE, evaluate
+        from src.ai.context.lorebook import estimate_text_tokens
+        from src.app.config import context_window_tokens
+
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        wire = json.dumps(
+            {"messages": messages, "response_format": {"type": "json_object"}},
+            ensure_ascii=False,
+        )
+        capacity = evaluate(
+            estimate_text_tokens(wire) + 8,
+            window_tokens=role.window_tokens or context_window_tokens(),
+            max_output_tokens=effective_max_tokens,
+        )
+        if capacity.status == STATUS_IRREDUCIBLE:
+            raise StructuredError(
+                "context_window_exceeded",
+                "当前请求超过所选模型的上下文容量，未发起调用；请主持核对模型窗口配置。",
+            )
+
         # DeepSeek 的 thinking 默认开启：推理 token 会计入 max_tokens 预算，
         # 可能把 JSON 决策正文整个挤没（2026-09-16 真机验收出现 66K 字符
         # reasoning → finish=length、content 为空 → 运行暂停）。结构化决策
         # 调用必须显式关 thinking（与 legacy story 路径同一教训）；其他
         # 服务商不认识该参数，只在确认是 DeepSeek 时发送。
-        thinking_off = role.provider_kind == "deepseek" or "deepseek.com" in (
-            role.base_url_host or ""
-        ).lower()
+        thinking_off = (
+            role.provider_kind == "deepseek" or "deepseek.com" in (role.base_url_host or "").lower()
+        )
 
         def _call() -> str:
             response = role.client.chat.completions.create(
                 model=role.model_id,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.4,
                 max_tokens=effective_max_tokens,
-                **(
-                    {"extra_body": {"thinking": {"type": "disabled"}}}
-                    if thinking_off
-                    else {}
-                ),
+                **({"extra_body": {"thinking": {"type": "disabled"}}} if thinking_off else {}),
             )
             choice = response.choices[0]
             content = str(choice.message.content or "")

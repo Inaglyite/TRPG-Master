@@ -13,6 +13,11 @@
 
 ## 归档资料
 
+2026-10-14 的256K默认窗口与Agent累计预算移除验收位于
+`mid_product/trpg-master/2026-10-14-context-window-256k/`：保留本地后端/前端日志、
+模型设置真实后端E2E、多步大上下文查询及单次小窗口/输出预留测试、源码指纹和
+参考编程Agent的官方资料入口。本轮没有付费模型调用或生产、正式Release发布。
+
 最终业务代码94621558的完整验收冻结于
 `mid_product/trpg-master/2026-10-14-agent-harness-delivery/`：quality38384606990
 全绿原始日志（2033后端/167子测试、1340前端、95 E2E/2门控skip、PostgreSQL0021），

@@ -277,7 +277,7 @@ function RoleCard({
                 value={service.window_tokens}
                 disabled={disabled}
                 inputMode="numeric"
-                placeholder="例如 65536"
+                placeholder="例如 262144（256K）"
                 onChange={(event) =>
                   updateServiceDraft(role, {
                     window_tokens: event.target.value,

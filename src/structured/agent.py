@@ -3,7 +3,8 @@
 判断 → 命令/叙事 → 读已提交结果 → 继续或等待玩家。
 - 模型只产出 JSON 决策（不暴露思维链）；命令经 StructuredPlayService 逐条
   短事务提交，失败作为工具结果回喂，不让半程 JSON 落账。
-- 预算：模型调用数 / 命令数 / 估算 token。超限把触发请求置 paused，
+- 预算：模型调用数 / 命令数 / 查询数；上下文容量按单次模型请求检查。
+  不累计重复发送的上下文来限制整个运行。超限把触发请求置 paused，
   保留已提交结果与待办，不静默兜底执行猜测行动。
 - 接管：命令受理时复核 controller_epoch；人类接管后下一条命令即抛
   controller_epoch_stale，本运行器立即停止（不重试、不写入）。
@@ -77,7 +78,6 @@ class EmptyModelOutput(RuntimeError):
 class AgentBudget:
     max_model_calls: int = 6
     max_commands: int = 12
-    max_est_tokens: int = 60000  # 粗略字符/3 估算；精确计费另由调用方记录
     max_narration_chars: int = 4000  # 单条叙述截断，防止失控输出刷屏
     # 记忆按需查询的预算：普通对话不能每轮无限查；达到上限后查询请求被拒绝
     # 并回喂给模型（停止条件显式，不是静默吞掉）。
@@ -481,11 +481,11 @@ class KeeperAgentRunner:
         run_log: list[str],
         *,
         persist: bool,
-    ) -> tuple[dict | None, int]:
+    ) -> dict | None:
         from .receipt_compaction import COMPACTION_PROMPT, ReceiptCompactor
 
         if self.budget.max_model_calls < 2 or self.budget.compaction_minimum_receipts <= 0:
-            return None, 0
+            return None
         compactor = ReceiptCompactor(self.database_url)
         try:
             prepared = compactor.prepare(
@@ -495,17 +495,12 @@ class KeeperAgentRunner:
                 for_note=not persist,
             )
             if prepared is None:
-                return None, 0
+                return None
             text = json.dumps({"sources": prepared["inputs"]}, ensure_ascii=False)
-            estimate = (len(COMPACTION_PROMPT) + len(text)) // 3
-            if estimate + 2000 > self.budget.max_est_tokens:
-                run_log.append("阶段摘要输入超过本轮预算，原文与历史检索保留。")
-                return None, 0
             if any(s["complete"] for s in prepared["sources"]):
                 result.model_calls += 1
                 raw = await self.caller(COMPACTION_PROMPT, text)
                 decision = self._parse_decision(raw)
-                estimate += len(raw) // 3
             else:
                 decision = {
                     "title": "待回读的长回执",
@@ -521,7 +516,7 @@ class KeeperAgentRunner:
                 )
             else:
                 compactor.verify(world_id, principal, chapter)
-            return chapter, estimate
+            return chapter
         except Exception as exc:
             # A malformed summary or transient model error never erases history
             # and never grants gameplay authority. The paid attempt still counts.
@@ -531,7 +526,7 @@ class KeeperAgentRunner:
             if getattr(exc, "code", "") == "controller_epoch_stale":
                 result.status = "takeover_stopped"
                 result.stop_reason = "controller_epoch_stale"
-            return None, locals().get("estimate", 0)
+            return None
 
     def _check_timeline(self, world_id: str, generation: int) -> None:
         with session_scope(self.database_url) as session:
@@ -1013,10 +1008,10 @@ class KeeperAgentRunner:
                     (m for m in members if m.user_id == control.controller_id), None
                 ) or next(iter(members), None)
                 reader = Principal(kind="keeper", user_id=member.user_id) if member else None
-            preview, est_tokens = (
+            preview = (
                 await self._compact_history(world_id, reader, result, run_log, persist=False)
                 if reader is not None
-                else (None, 0)
+                else None
             )
             for _step in range(self.budget.max_model_calls - result.model_calls):
                 context_text = self._build_context(
@@ -1028,19 +1023,9 @@ class KeeperAgentRunner:
                 )
                 source_revision = json.loads(context_text)["snapshot"]["revision"]
                 self._check_timeline(world_id, source_generation)
-                if (
-                    est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
-                    > self.budget.max_est_tokens
-                ):
-                    raise StructuredError("keeper_unavailable", "助手上下文预算不足，未调用模型。")
                 result.model_calls += 1
                 raw = await self.caller(build_system_prompt(), context_text)
                 self._check_timeline(world_id, source_generation)
-                est_tokens += (len(build_system_prompt()) + len(context_text) + len(raw)) // 3
-                if est_tokens > self.budget.max_est_tokens:
-                    raise StructuredError(
-                        "keeper_unavailable", "助手上下文预算耗尽，未执行任何命令。"
-                    )
                 decision = self._parse_decision(raw)
                 spent = self._run_queries(
                     world_id=world_id,
@@ -1200,12 +1185,9 @@ class KeeperAgentRunner:
         run_log: list[str] = []
         parse_failures = 0
         empty_steps = 0
-        est_tokens = 0
         queries_run = 0
         try:
-            _, est_tokens = await self._compact_history(
-                world_id, principal, result, run_log, persist=True
-            )
+            await self._compact_history(world_id, principal, result, run_log, persist=True)
             if result.status == "takeover_stopped":
                 return result
             for _step in range(self.budget.max_model_calls - result.model_calls):
@@ -1213,12 +1195,6 @@ class KeeperAgentRunner:
                     result.status, result.stop_reason = "takeover_stopped", "controller_epoch_stale"
                     return result
                 context_text = self._build_context(world_id, trigger_request_id, run_log)
-                if (
-                    est_tokens + (len(build_system_prompt()) + len(context_text)) // 3
-                    > self.budget.max_est_tokens
-                ):
-                    result.stop_reason = "token_budget"
-                    break
                 result.model_calls += 1
                 try:
                     raw = await self.caller(build_system_prompt(), context_text)
@@ -1258,6 +1234,11 @@ class KeeperAgentRunner:
                         "守秘人助手模型调用超时，已提交结果保留，可接管继续或稍后重试。",
                     )
                     return result
+                except StructuredError as exc:
+                    result.status = "paused"
+                    result.stop_reason = exc.code
+                    self._pause_trigger(world_id, principal, trigger_request_id, exc.message)
+                    return result
                 except Exception as exc:
                     result.status = "paused"
                     result.stop_reason = f"model_error:{type(exc).__name__}"
@@ -1271,7 +1252,6 @@ class KeeperAgentRunner:
                 if not self._still_in_control(world_id, principal):
                     result.status, result.stop_reason = "takeover_stopped", "controller_epoch_stale"
                     return result
-                est_tokens += (len(build_system_prompt()) + len(context_text) + len(raw)) // 3
                 try:
                     decision = self._parse_decision(raw)
                     parse_failures = 0
@@ -1364,9 +1344,6 @@ class KeeperAgentRunner:
                     result.stop_reason = "wait_player"
                     return result
                 if stop == "budget":
-                    break
-                if est_tokens > self.budget.max_est_tokens:
-                    result.stop_reason = "token_budget"
                     break
                 stop_reason = str(decision.get("stop_reason") or "")
                 waits_for_player = bool(decision.get("wait_for_player")) or stop_reason in {

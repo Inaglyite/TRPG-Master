@@ -201,9 +201,13 @@ def prepare_model_request(
         separators=(",", ":"),
     )
     estimated_input_tokens = estimate_text_tokens(provider_wire) + max(2, 4 * len(messages))
-    max_output_tokens = config.max_output_tokens()
+    from src.ai.model.route_service import route_public_info
+
+    route = route_public_info(host, request_role)
+    max_output_tokens = route.get("reserved_output_tokens") or config.max_output_tokens()
     capacity = evaluate_capacity(
         estimated_input_tokens,
+        window_tokens=route.get("window_tokens"),
         max_output_tokens=max_output_tokens,
     )
     envelope = RequestEnvelope(

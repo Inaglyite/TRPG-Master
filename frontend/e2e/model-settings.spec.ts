@@ -260,7 +260,7 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
     .fill(stubUrl);
   await narrativeCard.getByPlaceholder("sk-…").fill("sk-e2e-local");
   await narrativeCard.getByPlaceholder("deepseek-flash").fill("e2e-model");
-  await narrativeCard.getByPlaceholder("例如 65536").fill("65536");
+  await narrativeCard.getByLabel("上下文窗口（高级，可选）").fill("65536");
 
   // 数据发送确认
   await dialog.getByRole("checkbox").check();

@@ -180,11 +180,11 @@ MAX_TOOL_ROUNDS = 5
 # 只读容量底座：根据估算的输入 token 数给出 target/hard 阈值与状态，绝不
 # 删除任何内容（压缩决策由调用方在 shadow/诊断模式下落地）。
 
-# Provider context window（输入 + 最大输出的总上限）。默认 65536：现有完整
-# COC 规则 spine 约 25k tokens，32k 会在正常开局时就进入不可约区间。实际
+# Provider context window（输入 + 最大输出的总上限）。默认 262144（256K），
+# 为完整规则、历史及多步检索留出空间。实际
 # 网关容量不同，部署者可用 TRPG_CONTEXT_WINDOW_TOKENS 覆盖；越界或非法值
 # 回退到这个保守运行基线。
-CONTEXT_WINDOW_TOKENS_DEFAULT = 65_536
+CONTEXT_WINDOW_TOKENS_DEFAULT = 262_144
 CONTEXT_WINDOW_TOKENS_MIN = 8_192
 CONTEXT_WINDOW_TOKENS_MAX = 1_048_576
 

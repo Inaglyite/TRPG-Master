@@ -241,6 +241,15 @@ Agent 要知道上下文是局部注入：未提供不等于未发生，缺依�
 将废弃时间线标记排除出当前检索；旧ID只返回标记过的缓存，不再执行。请求
 已结束且没有排队工作时停止，不再额外生成运行报告或查询无关备忘。
 
+上下文窗口默认262144 tokens（256K），可由环境或模型服务的显式窗口配置覆盖。
+容量按单次实际请求检查并预留输出，legacy预检与structured BYOK调用都尊重所选
+模型配置；未填写模型窗口时使用全局默认。Agent不再按重复发送的输入/输出累计
+60000估算token来限制整个运行，仍保留每运行6次模型调用、12条命令与8次查询。
+旧历史压缩、阶段记忆与完整原文回读继续工作；增大默认窗口不改变供应商实际容量。
+参考 [Codex配置说明](https://developers.openai.com/codex/config-reference/) 对模型窗口
+和自动压缩阈值的区分，以及 [Claude Code上下文说明](https://code.claude.com/docs/en/how-claude-code-works#the-context-window)
+按当前占用清理旧工具输出、压缩历史的方式；编程Agent没有统一的256K默认值。
+
 新存档在行锁内冻结回执成员与事件摘要，内部游标不进入公开存档列表。
 切换多份存档时恢复确切成员，不能只比较可能复用的revision/sequence。
 `command_event_receipts` 随命令、状态和outbox同事务保存不可变事件；批准草稿
