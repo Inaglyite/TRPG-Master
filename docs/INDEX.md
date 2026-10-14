@@ -13,6 +13,11 @@
 
 ## 归档资料
 
+Linux桌面GPU启动诊断与后端stderr标签核对位于
+`mid_product/trpg-master/2026-10-14-electron-gpu-startup/`：包含本机Wayland原始
+复现、不同参数的原始诊断、WebGL2渲染与GPU功能状态、隔离Electron/本地后端桩
+启动日志及31项Electron测试。GPU诊断仍保留，未宣称修复系统显卡驱动。
+
 2026-10-14 的256K默认窗口与Agent累计预算移除验收位于
 `mid_product/trpg-master/2026-10-14-context-window-256k/`：保留本地后端/前端日志、
 模型设置真实后端E2E、多步大上下文查询及单次小窗口/输出预留测试、源码指纹和

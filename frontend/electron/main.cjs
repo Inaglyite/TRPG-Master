@@ -228,8 +228,10 @@ async function startManagedBackend({
   });
 
   child.stdout?.on("data", (data) => log("[backend]", String(data).trim()));
+  // Alembic/Uvicorn also write ordinary INFO logs to stderr.
+  // Preserve the original severity instead of labelling the entire stream an error.
   child.stderr?.on("data", (data) =>
-    log("[backend:error]", String(data).trim()),
+    log("[backend:stderr]", String(data).trim()),
   );
   child.on("error", (err) => {
     log(`${label}进程错误:`, err.message);

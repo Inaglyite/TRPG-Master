@@ -6,6 +6,10 @@
 
 Python 3.12；CI 使用 Node.js 22，前端依赖以 lockfile 为准。Linux 桌面可运行 `bash start_desktop.sh`。手动开发示例（仓库根目录）：
 
+桌面日志的 `[backend:stderr]` 表示后端标准错误输出流，不是日志严重级别：
+Alembic/Uvicorn正常的INFO也写入该流。Linux上的VA-API初始化及Wayland/Vulkan
+诊断需结合页面加载、后端启动和实际WebGL功能判断，不能仅按ERROR字样判定启动失败。
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
