@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Annotated, Literal
 
@@ -39,9 +40,64 @@ choices 是供玩家选择的后续行动文本数组，或空数组；不得在
 需要游戏工具时先完成工具调用，工具结果返回后再输出最终 JSON；有工具调用的响应不夹带正文。
 怀疑场景或在场人物状态不一致时，先 inspect_turn_state；有冲突再 repair_turn_state 并按执行回执写正文，无冲突则修正叙事。
 所有正文字符串禁止嵌入 【npc:…】、【/npc】、【intro:…】 等协议标签。
+较早历史消息中的叙事已由平台规范为同一 JSON 结构；本轮回复同样必须遵守本契约。
 出发前待决回合只出现原场景旁白与人物；抵达回合只出现已实际抵达场景的在场人物台词，
 用旁白简短交代出行，不在同一回合追加尚待玩家回答的出发前选择。
 """
+
+_SPEECH_TAG = re.compile(r"【npc:([A-Za-z0-9_-]{1,48})】(.*?)【/npc】", re.S)
+_INTRO_TAG = re.compile(r"【intro:([A-Za-z0-9_-]{1,48})】")
+_CHOICES_MENU = re.compile(r"\n?\*\*你可以——\*\*\s*\n((?:\d+\.[^\n]*(?:\n|$))+)\s*$")
+
+
+def narrative_history_to_dialogue_json(text: str) -> str:
+    """把历史上以内部小说体存放的 assistant 叙事规范为 dialogue_v1 JSON 线格式。
+
+    只重组结构、不改事实：带【npc:id】标签的台词保留 speaker_id（标签在落账前
+    已校验，这里不用正则猜测 NPC）；无标签的旧存档正文整体作为 narration；末尾
+    “你可以——”编号菜单移入 choices；【intro:id】点标记移入 introduced_npc_ids。
+    已是 JSON 或空内容原样返回。存档不改写，规范化只发生在请求副本上。
+    """
+    stripped = text.strip()
+    if not stripped or stripped.startswith("{"):
+        return text
+    choices: list[str] = []
+    body = stripped
+    menu = _CHOICES_MENU.search(stripped)
+    if menu:
+        choices = [
+            re.sub(r"^\d+\.\s*", "", line).strip()
+            for line in menu.group(1).splitlines()
+            if line.strip()
+        ]
+        body = stripped[: menu.start()].rstrip()
+    introduced: list[str] = []
+    body = _INTRO_TAG.sub(lambda match: introduced.append(match.group(1)) or "", body)
+    segments: list[dict] = []
+    cursor = 0
+    for match in _SPEECH_TAG.finditer(body):
+        narration = body[cursor : match.start()].strip()
+        if narration:
+            segments.append({"kind": "narration", "text": narration})
+        speech = match.group(2).strip()
+        if speech:
+            segments.append(
+                {"kind": "speech", "speaker_id": match.group(1), "text": speech}
+            )
+        cursor = match.end()
+    tail = body[cursor:].strip()
+    if tail:
+        segments.append({"kind": "narration", "text": tail})
+    if not segments:
+        return text
+    return json.dumps(
+        {
+            "segments": segments,
+            "introduced_npc_ids": list(dict.fromkeys(introduced)),
+            "choices": choices,
+        },
+        ensure_ascii=False,
+    )
 
 _RESERVED_TAG = re.compile(r"(?:【|\[)(?:/?npc|intro)(?::|[】\]])")
 

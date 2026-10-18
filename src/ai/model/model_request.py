@@ -103,13 +103,24 @@ def prepare_model_request(
 
     request_role = "combat" if system_overlay else "story"
     if getattr(host, "_structured_dialogue", False) is True:
-        from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
+        from src.ai.model.dialogue_output import (
+            DIALOGUE_INSTRUCTION,
+            narrative_history_to_dialogue_json,
+        )
 
         messages = [dict(message) for message in messages]
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = f"{messages[0].get('content', '')}\n\n{DIALOGUE_INSTRUCTION}"
         else:
             messages.insert(0, {"role": "system", "content": DIALOGUE_INSTRUCTION})
+        # 存档里的历史 assistant 叙事是内部小说体（标签已剥、选项菜单在正文），
+        # 与 JSON 契约冲突；只在请求副本上规范为同一结构，不改存档。
+        messages = [
+            dict(message, content=narrative_history_to_dialogue_json(message["content"]))
+            if message.get("role") == "assistant" and isinstance(message.get("content"), str)
+            else message
+            for message in messages
+        ]
     skill_allowlist: tuple[tuple[str, str], ...] = ()
     required_tools: frozenset[str] = frozenset()
     allowed_tools: frozenset[str] | None = None

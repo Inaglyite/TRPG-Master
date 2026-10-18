@@ -66,29 +66,25 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
     note_model_retry(host, "invalid_dialogue", "unknown", 0)
     source = request_options["messages_override"]
     from src.ai.model.dialogue_repair_context import (
-        has_substantive_content,
         previous_assistant_narrative,
         repair_messages,
     )
 
     source = source if source is not None else host.messages
     messages = repair_messages(host, source, raw, validation_error)
-    # 原始输出无有效剧情（空白/通用占位尾句）时，修复结果不得整段照搬上一轮
-    # 长篇叙事。守卫挂在 host 上由 emit_structured_dialogue 在解码后、任何
+    # 复读拦截与原草稿是否有内容解耦：任何协议修复都不得在解码后整段复制
+    # 上一轮长篇叙事。守卫挂在 host 上由 emit_structured_dialogue 在任何
     # 玩家可见回调之前判定；try/finally 保证不泄漏到后续请求。修复请求本身
     # enable_tools=False，不会重复执行已结算的工具或检定。
-    guard = None
-    if not has_substantive_content(raw):
-        previous = previous_assistant_narrative(source)
-        if previous:
-            guard = previous
-            host._dialogue_repair_guard = previous
+    guard = previous_assistant_narrative(source)
+    if guard:
+        host._dialogue_repair_guard = guard
     try:
         return streamer.stream(model, **(request_options | {"messages_override": messages,
             "system_overlay": None, "system_prompt_override": None, "enable_tools": False,
             "temperature": 0.0, "retry_on_empty": False}))
     finally:
-        if guard is not None:
+        if guard:
             try:
                 del host._dialogue_repair_guard
             except AttributeError:

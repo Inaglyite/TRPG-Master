@@ -32,12 +32,6 @@ def _compact(text: object) -> str:
     return re.sub(r"\s+", "", _PROTOCOL_TAG.sub("", str(text or "")))
 
 
-def has_substantive_content(raw: str) -> bool:
-    """只有空白或通用自由行动占位尾句的输出视为无有效剧情。"""
-    text = re.sub(r"(?:\[自由行动\])?你决定做什么？[。！？!?:：]*$", "", _compact(raw))
-    return bool(text.replace("[自由行动]", ""))
-
-
 def is_replayed_narrative(repaired: str, previous: str) -> bool:
     """修复结果与上一轮长篇叙事归一化后全文一致即为复读。"""
     new, old = _compact(repaired), _compact(previous)

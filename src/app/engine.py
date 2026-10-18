@@ -1397,7 +1397,7 @@ class GameEngine:
             "玩家所述出行目的不是已经完成的调查动作。不得打开容器、展示或检查尸体、阅读文件，"
             "也不得触发 SAN、线索、NPC 秘密或相关 flag；应把明确调查动作留作抵达后的下一选择。"
             "scene_entry_beat 非空时，必须让其中 npc_id 对应的在场人物参与这次接洽；"
-            "只能使用 public_text 与该 NPC 的公开特征，直接引语仍必须使用对应的 npc 标签。"
+            "只能使用 public_text 与该 NPC 的公开特征，直接引语用 speech 块、speaker_id=该 npc_id。"
             "narrative_fact_scope.mode 为 module_opening 时，module_opening、opening_public_facts、"
             "current_scene.description 与 npc_public_state 是完整的开场权威调查事实；允许即兴"
             "扩写非核心细节，但未被这些字段或 clue_catalog 支持的内容永远只是叙事点缀，"
