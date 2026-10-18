@@ -171,6 +171,7 @@ from src.web.character_library_http import (
 from src.web.editor_api import create_editor_router
 from src.web.frontend_http import FrontendStaticFiles, mount_editor_bundle
 from src.web.frontend_payload import enrich_clues_for_frontend
+from src.web.local_save_restore import register_save_load_handler
 from src.web.module_http import (
     ModuleHttpDependencies,
     create_module_http_router,
@@ -1405,14 +1406,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             target_user_id=data.get("_room_actor_user_id"),
         )
 
-    @router.handler("save_load")
-    async def handle_save_load(data: dict) -> None:
-        await resume_game(
-            str(data.get("slot_id") or ""),
-            announce_loaded=True,
-            investigator_id=data.get("_room_investigator_id"),
-            target_user_id=data.get("_room_actor_user_id"),
-        )
+    register_save_load_handler(
+        router, engine=engine, outbound=outbound, ws=ws, auth_required=auth_required,
+        reserve_turn=reserve_turn, release_turn=release_turn,
+        send_character_state=send_character_state, resume_game=resume_game,
+    )
 
     @router.handler("action")
     async def handle_action(data: dict) -> None:

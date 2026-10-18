@@ -15,6 +15,7 @@ import {
 } from "./protocol/structured";
 import { useAppStore, type ConnectionState } from "./state/app-store";
 import { useMessageStore } from "./state/message-store";
+import { useStartStore } from "./state/start-store";
 import { useStructuredStore } from "./state/structured-store";
 import {
   addMsg,
@@ -476,6 +477,13 @@ export function connect() {
   socket.onmessage = handleMessage;
   socket.onclose = () => {
     if (ws !== socket) return;
+    if (useStartStore.getState().saveLoading) {
+      useStartStore.setState({
+        saveLoading: false,
+        hint: "连接已断开，请重连后重新读取存档。",
+      });
+      consumeResumeAfterSwitch();
+    }
     ws = null;
     const rewriteInterrupted = gmTurnActive && activeTurnKind === "rewrite";
     if (rewriteInterrupted && rewriteSourceTurnId) {
@@ -1030,6 +1038,7 @@ export function handleServerPayload(raw: unknown) {
       // 开局页"继续游戏"：切换完成后立即读取自动存档进入。
       // 标志位必须每次切换都消费，避免游戏中切换残留的待读档状态。
       const resumeAfterSwitch = consumeResumeAfterSwitch();
+      useStartStore.setState({ saveLoading: false });
       if (!getGameStarted() && resumeAfterSwitch) {
         loadSave("slot_000");
       }
@@ -1037,6 +1046,11 @@ export function handleServerPayload(raw: unknown) {
       break;
     }
     case "world_switch_failed":
+      consumeResumeAfterSwitch();
+      useStartStore.setState({
+        saveLoading: false,
+        hint: data.message || "读取失败，请重试。",
+      });
       addMsg("error", data.message || "切换时间线失败。", true);
       safeSend(JSON.stringify({ type: "world_list" }));
       break;
@@ -1070,6 +1084,7 @@ export function handleServerPayload(raw: unknown) {
       onNotesFailure(data);
       break;
     case "turn_rejected":
+      useStartStore.setState({ saveLoading: false });
       resetTurnActionButtons();
       if (
         onStartTurnRejected(
@@ -1092,6 +1107,13 @@ export function handleServerPayload(raw: unknown) {
       }
       break;
     case "error":
+      if (useStartStore.getState().saveLoading) {
+        useStartStore.setState({
+          saveLoading: false,
+          hint: data.message || "读取失败，请重试。",
+        });
+        consumeResumeAfterSwitch();
+      }
       addMsg("error", data.message);
       const startErrorHandled = onStartTurnRejected(
         String(data.message || "新游戏启动失败，请重试。"),
@@ -1185,6 +1207,31 @@ export function handleServerPayload(raw: unknown) {
       onSaveAvailable(data);
       break;
     case "loaded": {
+      useStartStore.setState({ saveLoading: false });
+      if (data.ok && data.restore_only === true) {
+        rememberWorld(data.world_id, data.module_name);
+        clearContextSummary();
+        const latest = renderTurnHistory(data.history || []);
+        useAppStore.setState({
+          latestBranchTurnId: null,
+          ending: null,
+          dialog: null,
+        });
+        useStartStore.setState({
+          gameStarted: true,
+          gameStarting: false,
+          hint: "",
+        });
+        closeSavePanel();
+        onDone(latest?.choices);
+        recoveryPending = false;
+        interruptedTurn = false;
+        interruptedTurnId = null;
+        clearRecoveryPoll();
+        hideConnectionNotice();
+        safeSend(JSON.stringify({ type: "state" }));
+        break;
+      }
       // 结构化世界没有消息历史：读档是 CAS 回滚，存档点之后的聊天内容不再成立，
       // 必须清空聊天区，否则玩家会看到「未来事件」与旧世界的对白。
       const structuredLoad =

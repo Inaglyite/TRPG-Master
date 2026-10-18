@@ -45,6 +45,7 @@ export type ModuleOption = {
 type StartState = {
   gameStarted: boolean;
   gameStarting: boolean;
+  saveLoading: boolean;
   view: "menu" | "characters";
   modules: ModuleOption[];
   activeModule: string;
@@ -65,6 +66,7 @@ type StartState = {
 export const useStartStore = create<StartState>(() => ({
   gameStarted: false,
   gameStarting: false,
+  saveLoading: false,
   view: "menu",
   modules: [],
   activeModule: "",

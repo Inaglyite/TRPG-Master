@@ -85,7 +85,7 @@ export function getGameStarting() {
  * reload 关闭正在使用的 WebSocket。
  */
 export function returnToStartMenu() {
-  if (getGameStarting()) return;
+  if (getGameStarting() || useStartStore.getState().saveLoading) return;
   clearRetry();
   retryAttempt = 0;
   discardLocalCreationRequest();
@@ -160,7 +160,8 @@ export function resetStartButton() {
 
 export function startGame() {
   const state = useStartStore.getState();
-  if (state.gameStarting || !state.selectedCharacterRef) return;
+  if (state.gameStarting || state.saveLoading || !state.selectedCharacterRef)
+    return;
   clearRetry();
   retryAttempt = 0;
   const app = useAppStore.getState();
@@ -297,7 +298,12 @@ export function populateModuleList(modules: ModuleOption[], active: string) {
 }
 export function switchModule(module: string) {
   const state = useStartStore.getState();
-  if (!module || module === state.activeModule || state.moduleSwitchPending)
+  if (
+    !module ||
+    module === state.activeModule ||
+    state.moduleSwitchPending ||
+    state.saveLoading
+  )
     return;
   useStartStore.setState({ moduleSwitchPending: true, hint: "正在切换模组…" });
   safeSend(JSON.stringify({ type: "switch_module", module }));

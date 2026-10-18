@@ -209,6 +209,7 @@ export function resumeTimeline(worldId: string, active: boolean) {
   const target = String(worldId || "");
   if (!target) return;
   const online = useAppStore.getState().mode === "online";
+  if (!online && useStartStore.getState().saveLoading) return;
   if (active) {
     // 当前时间线：直接回到游戏。云端重连后服务端已恢复到最新状态，
     // 本地才需要在开局页补读 slot_000 自动存档。
@@ -218,7 +219,10 @@ export function resumeTimeline(worldId: string, active: boolean) {
   }
   // 云端切换 = 提交指针 + 断开重连，重连后服务端自动恢复最新状态；
   // 本地那套 resumeAfterSwitch/slot_000 逻辑不适用于房间协议。
-  if (!online) resumeAfterSwitch = true;
+  if (!online) {
+    resumeAfterSwitch = true;
+    useStartStore.setState({ saveLoading: true, hint: "正在读取存档…" });
+  }
   switchWorld(target);
 }
 
@@ -296,6 +300,8 @@ export function renameWorld(worldId: string, label: string) {
 }
 
 export function loadSave(slotId: string) {
+  const local = useAppStore.getState().mode === "local";
+  if (local && useStartStore.getState().saveLoading) return;
   if (!roomOwnerOpsAllowed()) {
     denyRoomOwnerOp();
     return;
@@ -305,6 +311,8 @@ export function loadSave(slotId: string) {
     addMsg("system", reason);
     return;
   }
+  if (local)
+    useStartStore.setState({ saveLoading: true, hint: "正在读取存档…" });
   closeSavePanel();
   addMsg("system", "正在读档…");
   if (

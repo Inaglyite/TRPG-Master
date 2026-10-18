@@ -2,6 +2,16 @@
 
 现行入口，整理于 2026-10-10；产品基线 `2b66a582`。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；实际发布与验收范围见[状态](STATUS.md)。
 
+### 本地 legacy 存档恢复
+
+本地 `/ws` 的 `save_load` 只恢复存档，不创建续团回合、不请求模型或历史摘要。
+成功帧为 `loaded {ok: true, restore_only: true, slot_id, world_id, module_name,
+count, history}`；角色状态随恢复下发，客户端收到确认后直接显示历史并开启行动。
+`history` 仅含存档时的公开内容；有来源回合的快照按该回合截止，无来源的旧存档
+只投影已保存的公开对话，排除 system、控制指令、工具回执与工具调用草稿。
+旧存档投影的显示 ID 不用于重新叙述或分支授权。读取期间客户端合并重复点击，
+失败或断线解除等待，允许重试。云端房间及结构化世界沿用各自的恢复协议。
+
 ### AI 对话、出发待决与状态修正
 
 本节描述 `experiment/keeper-platform` 的实现；正式发布状态见 [STATUS.md](STATUS.md)。
