@@ -327,11 +327,7 @@ apply_damage(target="shadow_creature", amount=6, damage_type="火焰")
 
 → apply_damage(target="butler_gregory", amount=1, damage_type="物理")
 
-你可以——
-1. 乘胜追击，继续攻击
-2. 后退一步，观察他的反应
-3. 尝试与他对话："格里高利——你还记得你是谁吗？"
-4. [自由行动] 你决定做什么？
+（随后按引擎输出格式契约给出行动选项：乘胜追击、后退观察、尝试对话等）
 ```
 
 ### 重伤叙事示例

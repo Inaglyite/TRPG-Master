@@ -156,12 +156,17 @@ def validate_destination(
         if destination in named:
             return
         raise DestinationGroundingError("目的地与玩家明确提到的地点不一致；不要擅自改道")
-    # Module-authored routes and clue destinations already have structured evidence.
-    if fallback.destination_scene_id == destination and fallback.transition_kind in {
-        "authored_route",
-        "discovery_target",
-    }:
+    # Module-authored routes have structured evidence.  A clue-target edge is
+    # re-derived from the current deterministic matcher instead of trusted
+    # blindly, so a stale or mis-produced fallback cannot authorize travel.
+    if fallback.destination_scene_id == destination and fallback.transition_kind == "authored_route":
         return
+    if fallback.destination_scene_id == destination and fallback.transition_kind == "discovery_target":
+        from src.gameplay.discovery import infer_discovery_target_destination
+
+        if infer_discovery_target_destination(content, world) == destination:
+            return
+        raise DestinationGroundingError("远程线索目标与当前可导航证据不一致；不得仅凭旧推断改道")
     people = [
         npc
         for npc in known_people(world, dialogue or [])

@@ -6,9 +6,13 @@ that proposal into an ActionResolution; prose is never a second write channel.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +53,54 @@ ARRIVAL_TIME_CAP_MINUTES = 240
 NO_FINDING_CONTRACT = (
     "本次搜查没有结果：这不代表目标不存在、已被取走或已移到别处。"
 )
+
+
+class ProposalValidationError(ValueError):
+    """结构化校验失败：带稳定错误码与合法候选，供有界纠错反馈与诊断记录。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        field: str = "",
+        value: str = "",
+        candidates: list[str] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.field = field
+        self.value = value
+        self.candidates = list(candidates or [])
+
+
+def _record_rejected_proposal(engine: Any, raw_arguments: str, *, attempt: int, error: str) -> None:
+    """失败提案的可观测性：默认只记元数据与 digest。
+
+    提案正文是模型控制内容，可能含守秘人秘密：不进公开诊断，也不进默认
+    运行日志。完整参数仅在显式设置 TRPG_ADJUDICATION_CAPTURE 时写入运行
+    目录下的私有录制（0700 目录 / 0600 文件）。
+    """
+    digest = hashlib.sha256(raw_arguments.encode("utf-8")).hexdigest()[:16]
+    log_game(
+        f"行动裁决提案被拒绝 | attempt={attempt} | chars={len(raw_arguments)} "
+        f"| sha256={digest} | {error[:200]}"
+    )
+    if not raw_arguments or not _enabled_env("TRPG_ADJUDICATION_CAPTURE", False):
+        return
+    try:
+        directory = Path(getattr(engine.context, "runtime_root", "") or "") / "private_diagnostics"
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        path = directory / "adjudication-rejections.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(
+                {"attempt": attempt, "sha256": digest, "proposal": raw_arguments[:8000]},
+                ensure_ascii=False,
+            ) + "\n")
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 class CheckProposal(StrictProposal):
@@ -280,9 +332,20 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
         raise ValueError("超过一小时的行动需明确为等待或旅行")
     if proposal.time_minutes > 60 and not any(word in content for word in ("等", "天", "日", "夜", "小时", "监视", "守候", "旅行")):
         raise ValueError("玩家没有授权长时间行动")
-    skills = {**world.get("pc", {}).get("attributes", {}), **world.get("pc", {}).get("skills", {})}
-    if proposal.check and proposal.check.skill not in skills:
-        raise ValueError("检定技能不在当前角色表中")
+    if proposal.check:
+        from src.gameplay.skill_view import effective_skill_value, effective_skills
+
+        pc_sheet = world.get("pc") or {}
+        if effective_skill_value(pc_sheet, proposal.check.skill) is None:
+            # skill 是模型控制文本：对外只保留受限字符形态，不回放原始提案正文。
+            safe_value = re.sub(r"[^0-9A-Za-z_-]", "", proposal.check.skill)[:80]
+            raise ProposalValidationError(
+                "检定技能不可用：不在角色有效技能集合中",
+                code="unknown_check_skill",
+                field="check.skill",
+                value=safe_value,
+                candidates=sorted(effective_skills(pc_sheet)),
+            )
     check_target = proposal.target_npc_id or (proposal.check.target if proposal.check else "")
     if proposal.check and not proposal.check.push_context_id:
         from src.gameplay.check_context import approach_fingerprint, validate_repeat_check
@@ -496,6 +559,8 @@ time_minutes 必须与玩家授权的时间跨度一致：玩家没说"几天"�
 def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: ActionResolution) -> ActionResolution:
     if not _enabled_env("TRPG_ACTION_ADJUDICATION", True) or not getattr(engine, "client", None):
         return fallback
+    from src.gameplay.check_context import RepeatCheckError
+
     session = getattr(engine, "_resolution_session", None)
     dialogue = recent_dialogue(engine)
     if session is not None and session.plan is not None:
@@ -508,6 +573,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     last_exc: Exception | None = None
     destination_error = ""
     for attempt in range(2):
+        raw_arguments = ""
         try:
             with llm_call_slot(model=model, world_id=str(getattr(engine.context, "world_id", ""))):
                 response = client_for_role(engine, "adjudication").chat.completions.create(
@@ -522,7 +588,8 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
                 raise ValueError("需要一个完整的 adjudicate_action 调用")
             if response.choices[0].finish_reason not in {"stop", "tool_calls"}:
                 raise ValueError("裁决响应未完整结束")
-            proposal = json.loads(calls[0].function.arguments)
+            raw_arguments = str(calls[0].function.arguments or "")
+            proposal = json.loads(raw_arguments)
             resolution = validate_proposal(proposal, content, world, fallback, dialogue)
             if session is not None:
                 session.freeze_plan(json.loads(resolution.adjudication_json))
@@ -537,7 +604,34 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             last_exc = exc
             if isinstance(exc, DestinationGroundingError):
                 destination_error = str(exc)
-            messages.append({"role": "user", "content": f"裁决未通过验证：{last_error[:600]}。请修正提案，不能绕过条件。"})
+            # 可观测性：_turn_diagnostics 会经 diagnostic_report 公开到 WS，
+            # 只留稳定错误码与不敏感的字段/技能 id 等元数据；提案正文只进
+            # 显式启用的私有录制（见 _record_rejected_proposal）。
+            _record_rejected_proposal(engine, raw_arguments, attempt=attempt + 1, error=last_error)
+            if hasattr(engine, "_turn_diagnostics"):
+                proposal_meta: dict = {"chars": len(raw_arguments)}
+                if isinstance(exc, ProposalValidationError):
+                    proposal_meta = {"code": exc.code, "field": exc.field}
+                    if exc.code == "unknown_check_skill":
+                        proposal_meta["value"] = exc.value
+                engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {
+                    "model": model, "role": "adjudication", "status": "rejected",
+                    "attempt": attempt + 1, "error": last_error[:300],
+                    "proposal_meta": proposal_meta,
+                }))
+            # 有针对性纠错反馈：结构化错误带字段与合法候选，让模型按合法值修正。
+            feedback: dict = {"error": str(exc)[:600]}
+            if isinstance(exc, ProposalValidationError):
+                feedback = {"code": exc.code, "field": exc.field, "value": exc.value,
+                            "candidates": exc.candidates, "error": str(exc)[:300]}
+            messages.append({"role": "user", "content": (
+                "裁决未通过验证：" + json.dumps(feedback, ensure_ascii=False)[:1500]
+                + "。请依据合法候选修正提案，不能绕过条件。"
+            )})
+            if isinstance(exc, RepeatCheckError):
+                # 不可重试的业务拒绝：重复检定资格不会因模型重述措辞而改变，
+                # 直接走拒行落账，不再消耗第二次裁决调用。
+                break
     # A later timeout must not erase the earlier grounding refusal. Validate the
     # fallback too: generic scene-noun matching is not a safe travel fallback.
     if fallback.destination_scene_id:
@@ -556,8 +650,6 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             }, ensure_ascii=False),
         )
     # 重复检定拒绝不是模型失败：不得退回可掷骰的确定性流程，按 not_executed 拒行落账。
-    from src.gameplay.check_context import RepeatCheckError
-
     if isinstance(last_exc, RepeatCheckError):
         log_game(f"行动裁决拒绝（重复检定） | {last_error[:300]}")
         if hasattr(engine, "_turn_diagnostics"):

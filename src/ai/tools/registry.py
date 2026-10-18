@@ -28,6 +28,7 @@ from src.gameplay.inventory import InventoryError
 from src.gameplay.inventory import use_item as apply_inventory_use
 from src.gameplay.percentile import REQUIRED_RANKS, choose_percentile, success_level
 from src.gameplay.resolution import current_resolution, resolution_rng
+from src.gameplay.skill_view import effective_skill_value, effective_skills
 from src.gameplay.state_paths import resolve_path as _resolve_state_path
 from src.gameplay.state_paths import set_path as _set_state_path
 from src.gameplay.turn_state_repair import register_engine_bound_tools
@@ -911,10 +912,10 @@ def _roll_check(
     )
 
     state = context.world_store.load()
-    attributes = state.get("pc", {}).get("attributes", {})
-    skills = state.get("pc", {}).get("skills", {})
-    if check_id not in attributes and check_id not in skills:
-        return _json_result({"ok": False, "error": "unknown_skill", "skill": check_id})
+    value = effective_skill_value(state.get("pc") or {}, check_id)
+    if value is None:
+        return _json_result({"ok": False, "error": "unknown_skill", "skill": check_id,
+                             "available_skills": sorted(effective_skills(state.get("pc") or {}))})
     if required_success_level not in REQUIRED_RANKS:
         return _json_result({"ok": False, "error": "invalid_difficulty"})
     previous = None
@@ -931,7 +932,6 @@ def _roll_check(
         except ValueError as exc:
             return _json_result({"ok": False, "error": str(exc)})
         required_success_level = previous["required_success_level"]
-    value = int(attributes.get(check_id, skills.get(check_id)))
     rng = resolution_rng("check", [check_id, push_context_id])
     tens = rng.randint(0, 9)
     ones = rng.randint(0, 9)

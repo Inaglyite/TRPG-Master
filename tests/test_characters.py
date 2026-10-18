@@ -101,7 +101,7 @@ class CharacterListTests(unittest.TestCase):
                 engine.messages[-1]["content"],
             )
             self.assertIn(
-                "以“**你可以——**”开头",
+                "按输出格式契约给出 3 个编号行动选项和第 4 个自由行动",
                 engine.messages[-1]["content"],
             )
 

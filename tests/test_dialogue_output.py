@@ -209,3 +209,86 @@ def test_provider_cannot_replace_a_required_combat_call_with_fictitious_dialogue
         streamer.stream("test-model", policy=replace(host.policy, thinking_type="disabled"), system_overlay="战斗指令")
     assert captured[0]["tool_choice"] == "required"
     assert len(captured) == 1 and host.speech == []
+
+
+def replay_host(previous: str, repaired_raw: str):
+    """主输出只有空白+通用占位尾句，修复请求整段返回 previous 的场景。"""
+    from src.ai.model.model_streamer import ModelStreamer
+
+    host, _ = make_host("")
+    host.messages = [
+        {"role": "system", "content": "s"},
+        {"role": "assistant", "content": previous},
+        {"role": "user", "content": "[玩家行动] 追问店主失踪者的下落。"},
+    ]
+    host.client = ReplayClient([
+        [{"content": "   [自由行动] 你决定做什么？"}, {"finish_reason": "stop"}],
+        [{"content": repaired_raw}, {"finish_reason": "stop"}],
+    ])
+    streamer = ModelStreamer(host, log_error=lambda _: None, log_model_call=lambda *_a, **_k: None, sleep=lambda _: None)
+    return host, streamer
+
+
+def test_repair_replaying_previous_long_narrative_is_rejected_before_any_emit():
+    long_text = "店主拨着算盘，抬眼把你从头到尾打量了一遍。" * 8  # 长篇（>120 字）
+    previous = f"{long_text}\n\n**你可以——**\n1. 追问\n2. [自由行动] 你决定做什么？"
+    replayed = json.dumps({
+        "segments": [{"kind": "narration", "text": long_text}],
+        "introduced_npc_ids": [],
+        "choices": ["追问", "[自由行动] 你决定做什么？"],
+    }, ensure_ascii=False)
+    host, streamer = replay_host(previous, replayed)
+    with pytest.raises(ModelResponseError):
+        streamer.stream("test-model", policy=host.policy)
+    assert host.client.calls == 2
+    # pre-emit：任何玩家可见回调之前拦截，旧回复一个字都不展示
+    assert host.speech == [] and host.narratives == []
+    assert any("修复结果与上一轮相同" in error for error in host.errors)
+    assert not hasattr(host, "_dialogue_repair_guard")  # 守卫不泄漏到后续请求
+
+
+def test_repair_with_fresh_content_passes_while_guard_active():
+    previous = "旧回合的长篇叙事。" * 30
+    host, streamer = replay_host(previous, json.dumps(dialogue(), ensure_ascii=False))
+    text, calls = streamer.stream("test-model", policy=host.policy)
+    assert "【npc:evelyn】" in text and calls == []
+    assert not hasattr(host, "_dialogue_repair_guard")
+
+
+def test_repair_replay_with_speech_blocks_is_caught_after_tag_stripping():
+    """历史里的上一轮叙事已剥发言标签；修复侧解码后带标签。两侧必须按同一
+    公开文本形式比较，否则含台词的真实复读拦不住。"""
+    narration = "店主拨着算盘，抬眼把你从头到尾打量了一遍。" * 6
+    speech = "这事我无可奉告，您请回吧。" * 4
+    previous_public = f"{narration}\n\n{speech}\n\n**你可以——**\n1. 追问\n2. [自由行动] 你决定做什么？"
+    replayed = json.dumps({
+        "segments": [
+            {"kind": "narration", "text": narration},
+            {"kind": "speech", "speaker_id": "su", "text": speech},
+        ],
+        "introduced_npc_ids": [],
+        "choices": ["追问", "[自由行动] 你决定做什么？"],
+    }, ensure_ascii=False)
+    host, streamer = replay_host(previous_public, replayed)
+    with pytest.raises(ModelResponseError):
+        streamer.stream("test-model", policy=host.policy)
+    assert host.client.calls == 2
+    assert host.speech == [] and host.narratives == []
+    assert not hasattr(host, "_dialogue_repair_guard")
+
+
+def test_replay_guard_thresholds():
+    from src.ai.model.dialogue_repair_context import (
+        has_substantive_content,
+        is_replayed_narrative,
+    )
+
+    assert not has_substantive_content("   [自由行动] 你决定做什么？")
+    assert not has_substantive_content("   ")
+    assert has_substantive_content('{"segments": [{"kind": "narration", "text": "x"}]}')
+
+    long_text = "a" * 200
+    assert is_replayed_narrative(long_text, f"  {long_text} ")  # 归一化空白后一致
+    assert not is_replayed_narrative("店主点点头。", "店主点点头。")  # 短句合理重复不拦
+    assert not is_replayed_narrative("b" * 200, long_text)
+    assert not is_replayed_narrative("", long_text)

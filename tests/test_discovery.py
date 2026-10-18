@@ -1345,3 +1345,63 @@ class NegationGuardTests(unittest.TestCase):
         world = antique_shop_world()
         self.assertEqual(match_discovery_rules("先不要检查隔断", world), [])
         self.assertEqual(match_discovery_rules("我没有搜查隔断", world), [])
+
+
+class RemoteTalkRuleTests(unittest.TestCase):
+    """现场交涉话题（talk 规则）不是物理目标：问失踪者下落不得生成跨场景移动。
+
+    真机故障的脱敏最小复现：玩家在藏宝楼向店主追问失踪者下落，命中了
+    百乐门线索的 talk 规则（目标恰满 4 字门槛），被误造成 discovery_target
+    移动；talk 规则的 targets 是"向谁打听什么"，不能制造移动边。
+    """
+
+    def world(self) -> dict:
+        return {
+            "pc": {"hp": 10, "skills": {}},
+            "current_scene": {"id": "curio_shop", "name": "藏宝楼", "npcs_present": ["shopkeeper"]},
+            "npcs": [{"id": "shopkeeper", "name": "店主"}],
+            "scene_catalog": {
+                "curio_shop": {"id": "curio_shop", "name": "藏宝楼"},
+                "ballroom": {"id": "ballroom", "name": "百乐门舞厅"},
+                "clinic": {"id": "clinic", "name": "诊所"},
+            },
+            "clue_catalog": {
+                "dancer_testimony": {
+                    "id": "dancer_testimony",
+                    "type": "obvious",
+                    "source": "ballroom",
+                    "related_scenes": ["ballroom"],
+                    "discovery_rules": [
+                        {"intent": "talk", "targets": ["失踪者甲"], "requires_success": False}
+                    ],
+                },
+                "body_clue": {
+                    "id": "body_clue",
+                    "type": "obvious",
+                    "source": "clinic",
+                    "related_scenes": ["clinic"],
+                    "discovery_rules": [
+                        {"intent": "examine", "targets": ["莱特遗体"], "requires_success": False}
+                    ],
+                },
+            },
+            "clues_found": {},
+            "flags": {},
+        }
+
+    def test_onsite_interrogation_never_manufactures_ballroom_trip(self):
+        world = self.world()
+        for content in (
+            "我又怎能不问失踪者甲的下落",
+            "失踪者甲现如今不知去向，我受其家人所托调查，又怎可能不问，请店主说明白",
+        ):
+            resolution = plan_player_action(content, world)
+            self.assertNotEqual(resolution.phase, ActionPhase.ARRIVAL)
+            self.assertIsNone(resolution.destination_scene_id)
+
+    def test_physical_discovery_target_still_routes_remote_navigation(self):
+        world = self.world()
+        resolution = plan_player_action("我想看看莱特遗体", world)
+        self.assertEqual(resolution.phase, ActionPhase.ARRIVAL)
+        self.assertEqual(resolution.destination_scene_id, "clinic")
+        self.assertEqual(resolution.transition_kind, "discovery_target")

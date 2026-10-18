@@ -1365,6 +1365,36 @@ class FinalizeTurnTests(unittest.TestCase):
 
 
 class ToolExecutionSafetyTests(unittest.TestCase):
+    def test_denied_tool_gets_paired_correction_receipt_without_executing(self):
+        """工具策略拒绝：不执行工具、不丢配对回执，模型可据回执修正后续调用。"""
+        executed = []
+        engine = SimpleNamespace(
+            messages=[],
+            cb=SimpleNamespace(on_tension=lambda *_args: None),
+            _execute_tool=lambda name, args: executed.append((name, args)) or "{}",
+            _maybe_hint_optional_skill=lambda _name: None,
+        )
+
+        with patch("src.app.agent_graph.glm_quick_summary", return_value=None):
+            _execute_tools(
+                {
+                    "engine": engine,
+                    "tool_round": 0,
+                    # read_file 不在本次冻结目录中：策略必须拒绝而非执行。
+                    "tool_calls": model_tool_calls(
+                        engine,
+                        [("call_read", "read_file", '{"path": "secret.md"}')],
+                        issued_names=["dice_roll"],
+                    ),
+                }
+            )
+
+        self.assertEqual(executed, [])
+        tool_message = engine.messages[-2]
+        self.assertEqual(tool_message["role"], "tool")
+        self.assertEqual(tool_message["tool_call_id"], "call_read")
+        self.assertEqual(json.loads(tool_message["content"])["error"], "tool_policy_denied")
+
     def test_complex_tool_switches_followup_to_judgement_model(self):
         engine = SimpleNamespace(
             messages=[],

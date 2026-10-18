@@ -5,12 +5,17 @@ from __future__ import annotations
 import copy
 
 from src.gameplay.action_resolution import pc_incapacitated
+from src.gameplay.skill_view import effective_skills
 
 
 def constrain_adjudication_schema(schema: dict, world: dict, *, candidate_ids: list[str], items: dict[str, str]) -> dict:
     properties = schema["properties"]
     properties["intent"]["description"] = "move 实际抵达；prepare_move 出发前待决；wait 包括持续一小时以上的等待、蹲守或监视；interact 是现场短行动；clarify 不执行行动"
     properties["destination_scene_id"]["enum"] = ["", *(world.get("scene_catalog") or {})]
+    check_skill = schema["$defs"]["CheckProposal"]["properties"]["skill"]
+    # 与掷骰层共用同一有效技能视图：规则表基础值可补卡上缺项，虚构技能没有枚举位。
+    check_skill["enum"] = sorted(effective_skills(world.get("pc") or {}))
+    check_skill["description"] = "只能从此枚举选择；卡上未列出的规则技能按规则表基础值结算"
     if candidate_ids:
         properties["discovery_refs"]["items"]["enum"] = candidate_ids
     else:

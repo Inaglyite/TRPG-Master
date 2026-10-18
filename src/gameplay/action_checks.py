@@ -125,15 +125,17 @@ _LOCATION_NOUNS = (
 def infer_action_check(content: str, world: dict) -> ActionCheck | None:
     """Infer one authoritative check from an explicit player action.
 
-    The character must actually have the inferred skill. This avoids silently
-    applying the CLI helper's compatibility default to malformed character data.
+    技能取值用与掷骰层一致的有效视图（skill_view）：规则表基础值可补卡上
+    缺项，虚构技能仍不可用。不复活旧 CLI 的兼容性默认值。
     """
     text = " ".join(str(content).strip().split())
     if not text or _NEGATED_ACTION.search(text) or _DISCUSSED_ACTION.search(text):
         return None
 
-    skills = world.get("pc", {}).get("skills", {})
-    if not isinstance(skills, dict):
+    from src.gameplay.skill_view import effective_skills
+
+    skills = effective_skills(world.get("pc") or {})
+    if not skills:
         return None
 
     for skill, reason, patterns in _CHECK_PATTERNS:

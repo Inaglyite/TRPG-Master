@@ -73,14 +73,15 @@ def _skill_value(state: dict, investigator_id: str, skill: str) -> int:
         sheet = state["pc"]
     if not isinstance(sheet, dict):
         raise StructuredError("object_not_found", f"调查员不存在：{investigator_id}")
-    skills = sheet.get("skills", {})
-    if not isinstance(skills, dict) or skill not in skills:
-        # 不存在的技能不得按默认 50 落账（旧默认 50 是已修复的漏洞）。
+    from src.gameplay.skill_view import effective_skill_value
+
+    # 结构化协议只认技能键（技能通道）：属性检定不经过 request_check。
+    value = effective_skill_value(sheet, skill, include_attributes=False)
+    if value is None:
+        # 不存在的技能不得按默认 50 落账（旧默认 50 是已修复的漏洞）；
+        # 规则表明确存在的技能按基础值可用，卡上显式值优先。
         raise StructuredError("invalid_action", f"该调查员没有技能：{skill}")
-    try:
-        return int(skills[skill])
-    except (TypeError, ValueError) as exc:
-        raise StructuredError("invalid_action", f"技能值不可用：{skill}") from exc
+    return value
 
 
 def _conditions_snapshot(state: dict, investigator_id: str, target: Any) -> dict:

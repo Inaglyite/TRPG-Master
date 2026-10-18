@@ -124,14 +124,14 @@ def test_unique_generic_shop_name_allowed_but_wrong_destination_blocked(state):
         validate_proposal(move(content, "shop"), content, state, fallback)
 
 
-@pytest.mark.parametrize("kind", ["authored_route", "discovery_target"])
-def test_structured_module_route_preserved(state, kind):
+def test_structured_module_route_preserved(state):
     content = "去约好的地方"
-    fallback = ActionResolution(content, ActionPhase.ARRIVAL, "medical", "history", kind)
+    fallback = ActionResolution(content, ActionPhase.ARRIVAL, "medical", "history", "authored_route")
     assert (
         validate_proposal(move(content, "history"), content, state, fallback).destination_scene_id
         == "history"
     )
+    # discovery_target 回退必须与当前确定性匹配一致才被采信（见下方两个专项用例）。
 
 
 @pytest.mark.parametrize("second_error", [False, True])
@@ -203,3 +203,47 @@ def test_recent_dialogue_bounded_and_excludes_tools_and_images():
     result = recent_dialogue(engine)
     assert sum(len(item["content"]) for item in result) <= 6000
     assert "private" not in str(result) and "secret" not in str(result)
+
+
+def test_discovery_target_fallback_is_rederived_not_blindly_trusted(state):
+    """discovery_target 回退不再被无条件信任：与当前确定性匹配结果不一致即拒绝。"""
+    from src.gameplay.action_resolution import ActionResolution
+    from src.gameplay.destination_grounding import validate_destination
+
+    content = "我又怎能不问失踪者甲的下落"
+    fallback = ActionResolution(
+        player_input=content,
+        phase=ActionPhase.ARRIVAL,
+        origin_scene_id="medical",
+        destination_scene_id="office",
+        transition_kind="discovery_target",
+    )
+    with pytest.raises(DestinationGroundingError):
+        validate_destination("office", content, state, fallback)
+
+
+def test_discovery_target_fallback_passes_when_matcher_agrees(state):
+    from src.gameplay.action_resolution import ActionResolution
+    from src.gameplay.destination_grounding import validate_destination
+
+    state["clue_catalog"] = {
+        "private_notes": {
+            "id": "private_notes",
+            "type": "obvious",
+            "source": "office",
+            "related_scenes": ["office"],
+            "discovery_rules": [
+                {"intent": "examine", "targets": ["私人笔记"], "requires_success": False}
+            ],
+        }
+    }
+    state["clues_found"] = {}
+    content = "我想查看那本私人笔记"
+    fallback = ActionResolution(
+        player_input=content,
+        phase=ActionPhase.ARRIVAL,
+        origin_scene_id="medical",
+        destination_scene_id="office",
+        transition_kind="discovery_target",
+    )
+    validate_destination("office", content, state, fallback)

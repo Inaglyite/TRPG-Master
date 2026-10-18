@@ -149,6 +149,74 @@ def _module_prompt_content(content: str) -> str:
 
 _PROMPT_SPINE_MARKER = "trpg-master:prompt-role=spine"
 
+# 旧式正文格式契约（【npc:…】发言标签、正文选项菜单）来自结构化对话
+# （dialogue_v1）之前的模组文本。装配边界统一中和，覆盖仍在使用旧模板的
+# 已安装模组包；模组事实与扮演内容保持原样。
+_LEGACY_MENU_BLOCK_CONTRACT = re.compile(
+    r"必须另起一个以[\\“”\"']*\*{0,2}你可以——\*{0,2}[\\“”\"']*开头的正文块[，,；;]?"
+)
+# 旧 pin/旧模组里的菜单模板整块：可选的“选项格式：”引导行 + 以“你可以——”
+# 开头的围栏代码块（core skill 旧版本与各模组示例共用此形）。
+_LEGACY_MENU_TEMPLATE = re.compile(
+    r"(?:选项格式[：:]\s*\n)?```\s*\n你可以——\n(?:[^\n]*\n)*?[^\n]*```\n?"
+)
+_LEGACY_NPC_TAG_OPEN = re.compile(r"【npc:([A-Za-z0-9_-]+)】")
+
+
+# 旧发言标签契约段的残留说明固定句式（词共现太宽，会误删“货物标签”之类剧情事实）。
+_CONTRACT_REMNANT_PHRASES = (
+    "标签内只放台词",
+    "台词分别包裹",
+    "必须取自权威状态",
+    "提及、回忆、转述",
+    "不加标签",
+    "动作神态写在标签外",
+)
+
+
+def _is_legacy_contract_paragraph(paragraph: str) -> bool:
+    """整段删除仅限明确的旧输出格式契约段落，不误伤剧情事实。
+
+    “钥匙必须用红布包裹”“货物标签上的买家”这类剧情句不含固定格式指令
+    句式，不得命中。
+    """
+    if "发言标记" in paragraph and "输出格式契约" in paragraph:
+        return True
+    if re.search(r"(?:台词|发言|直接引语).{0,40}(?:必须|务必|一律).{0,40}(?:标签|【npc)", paragraph, re.S):
+        return True
+    if re.search(r"(?:必须|务必|一律).{0,16}标签.{0,16}(?:台词|发言|引语)", paragraph, re.S):
+        return True
+    # 契约段被删后的残留说明（“标签内只放台词”“各自台词分别包裹”等固定句式）。
+    return any(phrase in paragraph for phrase in _CONTRACT_REMNANT_PHRASES)
+
+
+def neutralize_legacy_format_contract(content: str) -> str:
+    """移除模组自带文本中与 dialogue_v1 互斥的旧正文格式契约。
+
+    处理三类来源：明确的旧格式契约段落（发言标记契约、台词标签指令及其
+    残留说明）整段移除；示例台词里的旧标签只剥标签、保留台词文本（那是
+    扮演样本，不是格式指令）；正文选项菜单的强制写法与整块菜单模板降级为
+    “按输出契约给出选项”。疑似结构化数据块（JSON/围栏块）不做整段删除，
+    只做安全的最小替换。
+    """
+    content = _LEGACY_MENU_BLOCK_CONTRACT.sub("按当前输出格式契约给出", content)
+    content = _LEGACY_MENU_TEMPLATE.sub("行动选项按引擎输出格式契约给出（含自由行动）。", content)
+    paragraphs = re.split(r"\n{2,}", content)
+    kept: list[str] = []
+    for paragraph in paragraphs:
+        # 独立的标签占位示例（旧 pin 里的围栏块）整块移除。
+        if paragraph.lstrip().startswith("```") and "<npc_id>" in paragraph:
+            continue
+        # 含围栏块/以 { 起头的段落按数据处理：不整段删除，只做安全的最小替换。
+        data_block = "```" in paragraph or paragraph.lstrip().startswith("{")
+        if not data_block and _is_legacy_contract_paragraph(paragraph):
+            continue
+        stripped = _LEGACY_NPC_TAG_OPEN.sub(r"\1：", paragraph).replace("【/npc】", "")
+        if not stripped.strip().strip("`").strip():
+            continue
+        kept.append(stripped)
+    return "\n\n".join(kept)
+
 
 def _read_disk_skill(path: Path) -> str:
     """Disk fallback for core prompt building (fail-open; diagnosed by caller)."""
@@ -332,7 +400,7 @@ def load_system_prompt(
                 content = _read_disk_skill(mod_skill)
                 if content:
                     mod_skill_contents.append(content)
-    parts = list(official_parts)
+    parts = [neutralize_legacy_format_contract(part) for part in official_parts]
     # 结构化开场的公开剧情由本轮权威快照提供。这里不加载 module.md、
     # 模组 skill 或无关规则，避免私有时间线泄露并缩短首轮输入。
     if profile == "opening":
@@ -347,9 +415,12 @@ def load_system_prompt(
     if module_md.exists() and not use_spine:
         content = _module_prompt_content(module_md.read_text(encoding="utf-8")).strip()
         if content:
-            parts.append(content)
+            parts.append(neutralize_legacy_format_contract(content))
     # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
-    parts.extend(spine_parts if use_spine else mod_skill_contents)
+    parts.extend(
+        neutralize_legacy_format_contract(content)
+        for content in (spine_parts if use_spine else mod_skill_contents)
+    )
     on_demand_section = _on_demand_catalog_section(catalog, context)
     if on_demand_section:
         parts.append(on_demand_section)

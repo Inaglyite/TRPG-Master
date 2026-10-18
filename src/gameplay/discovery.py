@@ -45,6 +45,11 @@ def disclaims_acquisition(text: str) -> bool:
     return bool(_NO_TAKE.search(" ".join(str(text).strip().split())))
 _REMOTE_TARGET_MIN_CHARS = 4
 
+# 远程导航只认物理目标类规则：talk 规则的 targets 是"向谁打听什么"，
+# 命中它只说明玩家在谈论某人某事（且该 NPC 往往就在当前场景），
+# 不能据此制造跨场景移动。要找远处的人，走显式移动/已知人物位置通道。
+_REMOTE_NAVIGATION_INTENTS = frozenset({"examine", "search", "read", "take", "use", "enter"})
+
 
 def _known_clue_ids(world: dict) -> set[str]:
     known: set[str] = set()
@@ -188,6 +193,7 @@ def infer_discovery_target_destination(content: str, world: dict) -> str | None:
         rules = clue.get("discovery_rules", [])
         if not isinstance(rules, list) or not any(
             isinstance(rule, dict)
+            and str(rule.get("intent") or "") in _REMOTE_NAVIGATION_INTENTS
             and _rule_flags_met(rule, world)
             # Discovery rules may contain convenient short aliases such as
             # "副本" or "墨迹".  They are safe inside the current scene, but
@@ -220,8 +226,9 @@ def preferred_check_skill(matches: list[DiscoveryMatch], world: dict) -> str | N
     if len(skills) != 1:
         return None
     skill = skills.pop()
-    pc_skills = (world.get("pc") or {}).get("skills", {})
-    return skill if isinstance(pc_skills, dict) and skill in pc_skills else None
+    from src.gameplay.skill_view import effective_skill_value
+
+    return skill if effective_skill_value(world.get("pc") or {}, skill) is not None else None
 
 
 def preferred_luck_difficulty(matches: list[DiscoveryMatch]) -> str | None:
