@@ -13,6 +13,17 @@
 
 ## 归档资料
 
+2026-10-20 的对话复读与裁决纠错验收冻结于
+`mid_product/trpg-master-dialogue-recovery/2026-10-20-dialogue-recovery/`：
+业务版本 f43b71ed、最终真实五回合专项、34 回合猩红 legacy 主线 33/33、
+单次时钟结算人工复核、全量 2142 通过/8 跳过/19 既有失败、代码评审与本地集成回执。
+`README.md` 登记范围与两次安全回退，`SHA256SUMS.txt` 校验原件；首轮 32/33、
+第二轮自动通过但人工发现重复时钟的报告均保留。私有上下文不随源码提交或推送。
+
+2026-10-18 的无模型本地读档验收位于
+`mid_product/trpg-master/2026-10-18-local-save-restore/`：f7e3ef40 的真实后端读档
+点击流程、零模型调用记录、前后端检查和源码指纹。
+
 2026-10-14 的结构化发言、出发待决与模型状态修正验收冻结于
 `mid_product/trpg-master/2026-10-14-speaker-transition-attribution/`：最终源码指纹、
 2111项后端/8环境skip、1340前端、完整96 E2E/2门控skip及最终发言专项、

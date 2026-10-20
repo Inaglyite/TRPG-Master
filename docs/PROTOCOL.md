@@ -14,7 +14,7 @@ count, history}`；角色状态随恢复下发，客户端收到确认后直接�
 
 ### AI 对话、出发待决与状态修正
 
-本节描述 `experiment/keeper-platform` 的实现；正式发布状态见 [STATUS.md](STATUS.md)。
+本节描述 legacy GameEngine 的实现；发布与本地验收记录见 [STATUS.md](STATUS.md)。
 
 GameEngine（legacy 运行路径）的 AI 叙事模型输出 `dialogue_v1` JSON：`segments` 中旁白为
 `{kind: narration, text}`，直接台词为 `{kind: speech, speaker_id, text}`；
@@ -30,11 +30,23 @@ GameEngine（legacy 运行路径）的 AI 叙事模型输出 `dialogue_v1` JSON�
 历史 assistant 叙事从存档用的内部小说体规范为同一 dialogue_v1 结构（旁白/台词块、
 choices 数组），存档本身不改写。
 
+骰前裁决与实际掷骰共用有效技能视图：角色卡缺项时使用规则表声明的基础值，
+卡上的显式值优先；虚构技能拒绝并回传合法候选。裁决最多尝试两次，字段错误
+回填给模型修正；重复检定等不可重试的业务拒绝直接拒行。公开诊断与普通日志只留
+错误类型、错误码和受限字段位置，提案及完整错误需显式开启
+`TRPG_ADJUDICATION_CAPTURE=1` 才写私有录制。
+
+`wait` 回合实际经过时间、且某时钟的 `time_advance` 规则适用于等待时，该时钟
+由引擎结算；提案的两个结果分支都不能再对其提交 `clock_advance`。重复提案收到
+`time_settled_clock` 反馈后可修正重提；语义时钟和本轮不适用的时间规则按原规则校验。
+
 骰前裁决 `prepare_move` 表示出发前仍有待决事项，必须携带目的地和
 `departure_question`。此时写入 `pending_departure`，原场景、在场人物和旅行时间
 保持不变；本轮结束后等待玩家输入，再重新裁决。普通追问不会自动执行计划。
 没有真实待决事项则可直接 `move`；抵达回合不再补问出发地的同行或许可问题。
 `prepare_move` 不允许夹带检定、时间或执行效果；叙事工具也不能越过该边界。
+远程 talk 线索的检索目标不用于推导移动目的地；`discovery_target` 移动候选必须
+重新通过确定性目的地校验，现场交涉不会因提及远处人物而自动出发。
 
 模型怀疑场景状态不一致时可调用 `inspect_turn_state`。它返回当前投影、
 本轮结算后冻结的场景、在场人物 ID/姓名、待决事项、已执行移动依据、冲突字段
