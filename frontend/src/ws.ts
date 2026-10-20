@@ -1094,7 +1094,10 @@ export function handleServerPayload(raw: unknown) {
       onNotesFailure(data);
       break;
     case "turn_rejected":
-      failSaveLoad("turn_rejected");
+      failSaveLoad(
+        "turn_rejected",
+        data.message || "上一回合尚未结束，请稍候。",
+      );
       consumeResumeAfterSwitch();
       resetTurnActionButtons();
       if (

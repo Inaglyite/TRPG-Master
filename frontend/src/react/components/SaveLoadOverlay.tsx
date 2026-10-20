@@ -48,7 +48,8 @@ export function SaveLoadOverlay() {
       }
       frame = requestAnimationFrame(() => {
         const metrics = finishSaveLoad(progress.requestId);
-        if (metrics)
+        // Older local servers restore successfully but have no timing handler.
+        if (metrics && metrics.server_ms !== undefined)
           safeSend(JSON.stringify({ type: "save_load_timing", ...metrics }));
         document.querySelector<HTMLTextAreaElement>("#user-input")?.focus();
       });

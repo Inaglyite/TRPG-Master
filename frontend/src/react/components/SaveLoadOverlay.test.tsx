@@ -100,6 +100,7 @@ it.each(["error", "world_switch_failed", "turn_rejected"])(
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(useStartStore.getState().saveLoading).toBe(false);
+    expect(useStartStore.getState().hint).toBe("读取失败");
     act(() => loadSave("slot_001"));
     expect(screen.getByRole("dialog")).toBeVisible();
   },
@@ -119,4 +120,30 @@ it("旧请求的阶段和完成回执不能结束本次读取", () => {
   );
   expect(useStartStore.getState().gameStarted).toBe(false);
   expect(screen.getByRole("status")).toHaveTextContent("正在恢复存档进度");
+});
+
+it("旧服务端仍能完成读取，不向其发送不支持的计时回执", () => {
+  render(<SaveLoadOverlay />);
+  act(() => loadSave("slot_001"));
+  act(() =>
+    handleServerPayload({
+      type: "loaded",
+      ok: true,
+      restore_only: true,
+      history: [],
+    }),
+  );
+  act(() => frames.shift()?.(performance.now()));
+  act(() => frames.shift()?.(performance.now()));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(
+    send.mock.calls.map(([value]) => JSON.parse(value).type),
+  ).not.toContain("save_load_timing");
+});
+
+it("没有 randomUUID 的浏览器也能发起读取", () => {
+  vi.stubGlobal("crypto", {});
+  act(() => loadSave("slot_001"));
+  expect(useSaveLoadStore.getState().progress?.requestId).toMatch(/^save-req-/);
+  expect(send).toHaveBeenCalledTimes(1);
 });

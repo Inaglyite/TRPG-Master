@@ -13,6 +13,12 @@
 
 ## 归档资料
 
+2026-10-20 的读档加载反馈与玩家发言边界验收冻结于
+`mid_product/trpg-master/2026-10-20-save-load-feedback/`：01a3761d 后端版本的真实
+五回合专项和 33 回合猩红 legacy 主线 33/33、前端兼容修正、1352 项前端与 57 项
+后端检查、三个宽度的慢读档截图及完整耗时日志。`work/save-load-feedback-20261020/ACCEPTANCE.md`
+登记版本、模拟延迟范围与原存档未改动边界，`SHA256SUMS.txt` 校验原件。
+
 2026-10-20 的对话复读与裁决纠错验收冻结于
 `mid_product/trpg-master-dialogue-recovery/2026-10-20-dialogue-recovery/`：
 业务版本 f43b71ed、最终真实五回合专项、34 回合猩红 legacy 主线 33/33、

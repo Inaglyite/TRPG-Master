@@ -7,6 +7,16 @@
 本地 `/ws` 的 `save_load` 只恢复存档，不创建续团回合、不请求模型或历史摘要。
 成功帧为 `loaded {ok: true, restore_only: true, slot_id, world_id, module_name,
 count, history}`；角色状态随恢复下发，客户端收到确认后直接显示历史并开启行动。
+客户端可附带 `request_id`（`save-` 前缀的受限关联标识）；服务端回传
+`save_load_progress {request_id, phase}`，阶段为 `restoring/history/character`。
+`loaded` 同时携带 `request_id` 和 `timings {restore_ms, history_ms,
+character_ms, server_ms}`。客户端从发起读取起展示加载页和等待秒数，切换时间线
+与读取自动存档共用一次计时；历史渲染及开局页退场完成后才结束等待。
+支持计时的服务端可接收一次 `save_load_timing {request_id, total_ms,
+response_ms, presentation_ms, server_ms}`；只记录关联 ID 与受限数值，不改变游戏状态。
+本地日志中的 `SAVE_LOAD started/restored/client_ready` 可关联完整过程；
+`total_ms` 覆盖发起读取到游戏画面可见，`response_ms` 包含跨时间线切换和等待响应。
+旧服务端没有计时字段时仍能读取，不向其发送新计时消息。
 `history` 仅含存档时的公开内容；有来源回合的快照按该回合截止，无来源的旧存档
 只投影已保存的公开对话，排除 system、控制指令、工具回执与工具调用草稿。
 旧存档投影的显示 ID 不用于重新叙述或分支授权。读取期间客户端合并重复点击，
@@ -15,6 +25,10 @@ count, history}`；角色状态随恢复下发，客户端收到确认后直接�
 ### AI 对话、出发待决与状态修正
 
 本节描述 legacy GameEngine 的实现；发布与本地验收记录见 [STATUS.md](STATUS.md)。
+
+发现规则的 `approach_text` 是接近过程示例，不是已发生事实。命中目标或由模型
+选择发现规则，均不授权替玩家补出台词和动作；引擎不再把这些示例直接播作骰前
+前置叙事。裁决与叙述以本轮玩家输入、实际对话和结算回执为准，检定与线索规则不变。
 
 GameEngine（legacy 运行路径）的 AI 叙事模型输出 `dialogue_v1` JSON：`segments` 中旁白为
 `{kind: narration, text}`，直接台词为 `{kind: speech, speaker_id, text}`；

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useStartStore } from "./start-store";
+import { newRequestId } from "../protocol/structured";
 
 export type SaveLoadPhase =
   "switching" | "restoring" | "history" | "character" | "presenting";
@@ -22,7 +23,7 @@ export function beginSaveLoad(phase: SaveLoadPhase): string {
   const progress = previous
     ? { ...previous, phase }
     : {
-        requestId: `save-${crypto.randomUUID()}`,
+        requestId: `save-${newRequestId()}`,
         phase,
         startedAt: performance.now(),
       };
@@ -75,7 +76,7 @@ export function finishSaveLoad(requestId: string) {
   return metrics;
 }
 
-export function failSaveLoad(reason: string): void {
+export function failSaveLoad(reason: string, hint = ""): void {
   const progress = useSaveLoadStore.getState().progress;
   if (progress)
     console.info("[save-load] failed", {
@@ -85,5 +86,5 @@ export function failSaveLoad(reason: string): void {
       reason,
     });
   useSaveLoadStore.setState({ progress: null });
-  useStartStore.setState({ saveLoading: false });
+  useStartStore.setState({ saveLoading: false, hint });
 }
