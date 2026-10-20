@@ -100,6 +100,11 @@ import {
 } from "./structured-transport";
 import { useOnlineStore, timelineCapabilities } from "./state/online-store";
 import { useSceneStore } from "./state/scene-store";
+import {
+  advanceSaveLoad,
+  failSaveLoad,
+  useSaveLoadStore,
+} from "./state/save-load-store";
 
 // ---- 后端地址 ----
 const WS_BASE_URL = backendWebSocketUrl();
@@ -478,6 +483,7 @@ export function connect() {
   socket.onclose = () => {
     if (ws !== socket) return;
     if (useStartStore.getState().saveLoading) {
+      failSaveLoad("disconnected");
       useStartStore.setState({
         saveLoading: false,
         hint: "连接已断开，请重连后重新读取存档。",
@@ -1041,12 +1047,16 @@ export function handleServerPayload(raw: unknown) {
       useStartStore.setState({ saveLoading: false });
       if (!getGameStarted() && resumeAfterSwitch) {
         loadSave("slot_000");
+      } else if (resumeAfterSwitch) {
+        useStartStore.setState({ saveLoading: true });
+        advanceSaveLoad("presenting");
       }
       safeSend(JSON.stringify({ type: "state" }));
       break;
     }
     case "world_switch_failed":
       consumeResumeAfterSwitch();
+      failSaveLoad("world_switch_failed");
       useStartStore.setState({
         saveLoading: false,
         hint: data.message || "读取失败，请重试。",
@@ -1084,7 +1094,8 @@ export function handleServerPayload(raw: unknown) {
       onNotesFailure(data);
       break;
     case "turn_rejected":
-      useStartStore.setState({ saveLoading: false });
+      failSaveLoad("turn_rejected");
+      consumeResumeAfterSwitch();
       resetTurnActionButtons();
       if (
         onStartTurnRejected(
@@ -1108,6 +1119,7 @@ export function handleServerPayload(raw: unknown) {
       break;
     case "error":
       if (useStartStore.getState().saveLoading) {
+        failSaveLoad("server_error");
         useStartStore.setState({
           saveLoading: false,
           hint: data.message || "读取失败，请重试。",
@@ -1206,9 +1218,16 @@ export function handleServerPayload(raw: unknown) {
     case "save_available":
       onSaveAvailable(data);
       break;
+    case "save_load_progress":
+      if (["restoring", "history", "character"].includes(data.phase))
+        advanceSaveLoad(data.phase, data.request_id);
+      break;
     case "loaded": {
-      useStartStore.setState({ saveLoading: false });
+      const pending = useSaveLoadStore.getState().progress;
+      if (pending && data.request_id && pending.requestId !== data.request_id)
+        break;
       if (data.ok && data.restore_only === true) {
+        advanceSaveLoad("presenting", data.request_id, data.timings?.server_ms);
         rememberWorld(data.world_id, data.module_name);
         clearContextSummary();
         const latest = renderTurnHistory(data.history || []);
@@ -1232,6 +1251,7 @@ export function handleServerPayload(raw: unknown) {
         safeSend(JSON.stringify({ type: "state" }));
         break;
       }
+      failSaveLoad(data.ok ? "legacy_resume" : "not_found");
       // 结构化世界没有消息历史：读档是 CAS 回滚，存档点之后的聊天内容不再成立，
       // 必须清空聊天区，否则玩家会看到「未来事件」与旧世界的对白。
       const structuredLoad =

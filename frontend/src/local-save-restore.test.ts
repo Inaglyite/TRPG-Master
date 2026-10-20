@@ -4,11 +4,13 @@ import { returnToStartMenu, switchModule } from "./start";
 import { useAppStore } from "./state/app-store";
 import { useMessageStore } from "./state/message-store";
 import { useStartStore } from "./state/start-store";
+import { failSaveLoad, useSaveLoadStore } from "./state/save-load-store";
 import { handleServerPayload, setActiveTransport } from "./ws";
 
 describe("本地存档直接恢复", () => {
   const send = vi.fn();
   beforeEach(() => {
+    failSaveLoad("test_reset");
     send.mockClear();
     setActiveTransport({ send });
     useAppStore.setState({
@@ -27,7 +29,7 @@ describe("本地存档直接恢复", () => {
     useMessageStore.getState().replaceMessages([]);
   });
   afterEach(() => {
-    useStartStore.setState({ saveLoading: false });
+    failSaveLoad("test_cleanup");
     setActiveTransport(null);
   });
 
@@ -58,9 +60,10 @@ describe("本地存档直接恢复", () => {
       ],
     });
     expect(useStartStore.getState()).toMatchObject({
-      saveLoading: false,
+      saveLoading: true,
       gameStarted: true,
     });
+    expect(useSaveLoadStore.getState().progress?.phase).toBe("presenting");
     expect(
       useMessageStore
         .getState()
@@ -73,6 +76,8 @@ describe("本地存档直接恢复", () => {
       inputEnabled: true,
       choices: [{ label: "检查书桌", isFree: false }],
     });
+    // The overlay releases this lock once React has painted the saved game.
+    failSaveLoad("test_presented");
     returnToStartMenu();
     switchModule("other");
     expect(JSON.parse(send.mock.calls.at(-1)![0]).type).toBe("switch_module");
@@ -80,6 +85,7 @@ describe("本地存档直接恢复", () => {
 
   it("跨时间线读取只切换一次，收到确认后才读自动存档", () => {
     resumeTimeline("saved", false);
+    const requestId = useSaveLoadStore.getState().progress?.requestId;
     resumeTimeline("saved", false);
     expect(send).toHaveBeenCalledTimes(1);
     handleServerPayload({
@@ -94,6 +100,7 @@ describe("本地存档直接恢复", () => {
       "state",
     ]);
     expect(useStartStore.getState().saveLoading).toBe(true);
+    expect(useSaveLoadStore.getState().progress?.requestId).toBe(requestId);
   });
 
   it.each(["world_switch_failed", "error", "turn_rejected"])(

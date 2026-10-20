@@ -132,8 +132,11 @@ describe("读取存档的运行方式边界", () => {
       capabilities: { ...s.capabilities, structuredSoloRestore: false },
     }));
     loadSave("slot_001");
-    expect(safeSend).toHaveBeenCalledExactlyOnceWith(
-      JSON.stringify({ type: "save_load", slot_id: "slot_001" }),
-    );
+    expect(safeSend).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(vi.mocked(safeSend).mock.calls[0][0])).toEqual({
+      type: "save_load",
+      slot_id: "slot_001",
+      request_id: expect.stringMatching(/^save-/),
+    });
   });
 });

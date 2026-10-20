@@ -16,13 +16,20 @@ import {
 import { CharacterLibraryPanel } from "./components/CharacterLibraryPanel";
 import { StartScreen } from "./components/StartScreen";
 import { UtilityPanel } from "./components/UtilityPanel";
+import { SaveLoadOverlay } from "./components/SaveLoadOverlay";
+import { useSaveLoadStore } from "../state/save-load-store";
 
 export function GameShell() {
   const mode = useAppStore((state) => state.mode);
+  const loading = useSaveLoadStore((state) => state.progress !== null);
 
   return (
     <>
-      <div id="app">
+      <div
+        id="app"
+        inert={loading || undefined}
+        aria-busy={loading || undefined}
+      >
         <header id="header">
           <AppHeader />
         </header>
@@ -46,6 +53,7 @@ export function GameShell() {
       <CharacterLibraryPanel />
       {mode === "select" && <ModeSelectScreen />}
       {mode === "online" && <OnlineShell />}
+      <SaveLoadOverlay />
     </>
   );
 }

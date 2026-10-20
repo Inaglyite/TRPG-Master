@@ -1,6 +1,8 @@
+import asyncio
 import copy
 import json
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -53,8 +55,12 @@ def test_local_slot_restores_state_and_dialogue_without_model_or_resume_turn(tmp
         client.websocket_connect("/ws") as ws,
     ):
         receive_until(ws, "save_list")
-        ws.send_json({"type": "save_load", "slot_id": "slot_001"})
+        ws.send_json({"type": "save_load", "slot_id": "slot_001", "request_id": "save-test-1"})
         loaded, seen = receive_until(ws, "loaded")
+        assert loaded["request_id"] == "save-test-1"
+        assert all(value >= 0 for value in loaded["timings"].values())
+        assert [p["phase"] for p in seen if p["type"] == "save_load_progress"] == ["restoring", "history", "character"]
+        ws.send_json({"type": "save_load_timing", "request_id": "save-test-1", "total_ms": 100, "response_ms": 60, "presentation_ms": 40})
         assert loaded["restore_only"] is True
         assert len(loaded["history"]) == 1
         assert loaded["history"][0]["player_input"] == "检查大门"
@@ -73,6 +79,33 @@ def test_local_slot_restores_state_and_dialogue_without_model_or_resume_turn(tmp
         ws.send_json({"type": "switch_module", "module": "mansion_of_madness"})
         assert receive_until(ws, "module_list")[0]["active"] == "mansion_of_madness"
         model_turn.assert_not_called()
+
+
+def test_timing_labels_reject_free_text_and_unbounded_data():
+    from src.web.local_save_restore import timing_request_id
+
+    assert timing_request_id("save-123-abc") == "save-123-abc"
+    assert timing_request_id("save-\nPRIVATE_CONTEXT") == ""
+    assert timing_request_id("save-" + "x" * 65) == ""
+    assert timing_request_id({"request_id": "save-example"}) == ""
+
+
+def test_restore_exception_finishes_waiting_without_exposing_private_error():
+    from src.web.local_save_restore import restore_local_save
+
+    outbound = SimpleNamespace(send=AsyncMock())
+    release = Mock()
+    engine = SimpleNamespace(load=Mock(side_effect=RuntimeError("PRIVATE_CONTEXT")))
+    asyncio.run(restore_local_save(
+        engine, outbound, "slot_001", request_id="save-error",
+        reserve_turn=AsyncMock(return_value=True), release_turn=release,
+        send_character_state=AsyncMock(),
+    ))
+    release.assert_called_once()
+    payloads = [call.args[0] for call in outbound.send.call_args_list]
+    assert payloads[-1]["type"] == "error"
+    assert payloads[-1]["terminal"] is True
+    assert "PRIVATE_CONTEXT" not in json.dumps(payloads)
 
 
 def test_journal_save_uses_saved_turn_boundary_instead_of_future_history(tmp_path):

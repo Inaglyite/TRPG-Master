@@ -326,7 +326,6 @@ def _prepare_turn_inner(
                 preview_world,
                 action_resolution,
                 transition_id,
-                discovery_matches,
             )
         )
 
@@ -379,14 +378,6 @@ def _prepare_turn_inner(
                 else:
                     prelude_parts.append(entry_text)
                     engine.cb.on_narrative(f"{entry_text}\n\n")
-        elif transition_prelude:
-            # 无移动的回合：过渡 prelude 只可能带 discovery 的接近提示。
-            if preview_material:
-                travel_material.append(transition_prelude)
-            else:
-                prelude_parts.append(transition_prelude)
-                engine.cb.on_narrative(f"{transition_prelude}\n\n")
-
         prelude = "\n\n".join(part for part in prelude_parts if part)
 
         # An authored unconditional discovery is itself the authority for this

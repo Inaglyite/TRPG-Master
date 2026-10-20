@@ -46,6 +46,7 @@ test.beforeAll(async () => {
     TRPG_AUTH_REQUIRED: "0",
     TRPG_ALLOWED_ORIGINS: baseUrl,
     TRPG_WRITE_COMPAT_EXPORTS: "0",
+    TRPG_LOG_DIR: join(runtime, "logs"),
     OPENAI_API_KEY: "offline-fixture",
     OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
     GLM_API_KEY: "",
@@ -73,7 +74,20 @@ for world, module, text in [
   if (seed.status !== 0) throw Error(seed.stderr);
   backend = spawn(
     python,
-    ["-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8823"],
+    [
+      "-c",
+      `
+import time, uvicorn
+import server
+original_load = server.GameEngine.load
+def slow_local_load(self, *args, **kwargs):
+    # Only this isolated test server simulates a slow disk. No model call.
+    time.sleep(2.6)
+    return original_load(self, *args, **kwargs)
+server.GameEngine.load = slow_local_load
+uvicorn.run(server.app, host='127.0.0.1', port=8823)
+`,
+    ],
     { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] },
   );
   backend.stdout?.on("data", (chunk) => {
@@ -111,62 +125,122 @@ test.afterAll(async () => {
   if (trap) await new Promise<void>((done) => trap.close(() => done()));
 });
 
-test("本地游戏→从存档开始→读取→进入游戏；返回后换模组再读取，零模型调用", async ({
-  page,
-}) => {
-  const frames: any[] = [];
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  page.on("websocket", (socket) =>
-    socket.on("framereceived", (frame) => {
-      try {
-        frames.push(JSON.parse(String(frame.payload)));
-      } catch {
-        /* binary */
-      }
-    }),
-  );
-  await page.addInitScript(() => {
-    localStorage.setItem("trpg-active-world-id", "save-first");
-    localStorage.setItem("trpg-active-world-module", "mansion_of_madness");
+for (const width of [1280, 939, 640]) {
+  test(`本地慢读档 ${width}px：立即反馈→进入游戏→换模组再读取，零模型调用`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const frames: any[] = [];
+    const sent: any[] = [];
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("websocket", (socket) => {
+      socket.on("framesent", (frame) => {
+        try {
+          sent.push(JSON.parse(String(frame.payload)));
+        } catch {
+          /* binary */
+        }
+      });
+      socket.on("framereceived", (frame) => {
+        try {
+          frames.push(JSON.parse(String(frame.payload)));
+        } catch {
+          /* binary */
+        }
+      });
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("trpg-active-world-id", "save-first");
+      localStorage.setItem("trpg-active-world-module", "mansion_of_madness");
+      // Measure the user's DOM click, excluding Playwright's wait for the card
+      // animation to stop before it can deliver that click.
+      document.addEventListener(
+        "click",
+        (event) => {
+          const button = (event.target as Element)?.closest("button");
+          if (button?.textContent?.trim() === "读取") {
+            performance.clearMarks("save-read-click");
+            performance.clearMarks("save-read-visible");
+            performance.mark("save-read-click");
+          }
+        },
+        true,
+      );
+      new MutationObserver(() => {
+        if (
+          document.querySelector(".save-load-overlay") &&
+          performance.getEntriesByName("save-read-click").length &&
+          !performance.getEntriesByName("save-read-visible").length
+        )
+          performance.mark("save-read-visible");
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+    await page.locator("#btn-continue").click();
+    await page
+      .locator('[data-adventure="save-first"]')
+      .getByRole("button", { name: "读取", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "正在读取存档" }),
+    ).toBeVisible();
+    const feedbackMs = await page.evaluate(
+      () =>
+        performance.getEntriesByName("save-read-visible")[0].startTime -
+        performance.getEntriesByName("save-read-click")[0].startTime,
+    );
+    expect(feedbackMs).toBeLessThan(1000);
+    await expect(page.locator("#app")).toHaveAttribute("inert", "");
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: join(runtime, `loading-${width}.png`) });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+    ).toBe(false);
+    await expect(page.locator(".save-load-overlay")).toBeHidden();
+    await expect(page.locator("#user-input")).toBeEnabled({ timeout: 10_000 });
+    await expect(page.locator("#start-overlay")).toBeHidden();
+    await expect(page.locator("#messages")).toContainText(
+      "读档验收：你停在保存时的大厅。",
+    );
+    await expect(page.locator("#messages")).not.toContainText(
+      "PRIVATE_KEEPER_PROMPT",
+    );
+    await page.screenshot({ path: join(runtime, `restored-${width}.png`) });
+    await page.locator("#btn-new").click();
+    await page.locator(".module-select-trigger").click();
+    await page.getByRole("option", { name: /猩红文档/ }).click();
+    await expect(page.locator(".module-select-trigger")).toContainText(
+      "猩红文档",
+    );
+    await page.locator("#btn-continue").click();
+    await page
+      .locator('[data-adventure="save-second"]')
+      .getByRole("button", { name: "读取", exact: true })
+      .click();
+    await expect(page.locator(".save-load-overlay")).toBeVisible();
+    await expect(page.locator(".save-load-overlay")).toBeHidden();
+    await expect(page.locator("#user-input")).toBeEnabled();
+    await expect(page.locator("#messages")).toContainText(
+      "另一份存档：你站在大学办公室。",
+    );
+    await expect(page.locator("#messages")).not.toContainText("读档验收");
+    expect(
+      frames.filter((frame) => frame.type === "loaded" && frame.restore_only),
+    ).toHaveLength(2);
+    expect(
+      frames.filter((frame) => frame.type === "gm_turn_start"),
+    ).toHaveLength(0);
+    expect(modelRequests).toBe(0);
+    expect(errors).toEqual([]);
+    const timings = sent.filter((frame) => frame.type === "save_load_timing");
+    expect(timings).toHaveLength(2);
+    expect(timings.every((frame) => frame.total_ms >= 2600)).toBe(true);
+    writeFileSync(
+      join(runtime, `timing-${width}.json`),
+      JSON.stringify({ feedbackMs, timings, modelRequests, errors }, null, 2),
+    );
   });
-  await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
-  await page.locator("#btn-continue").click();
-  await page
-    .locator('[data-adventure="save-first"]')
-    .getByRole("button", { name: "读取", exact: true })
-    .click();
-  await expect(page.locator("#user-input")).toBeEnabled({ timeout: 10_000 });
-  await expect(page.locator("#start-overlay")).toBeHidden();
-  await expect(page.locator("#messages")).toContainText(
-    "读档验收：你停在保存时的大厅。",
-  );
-  await expect(page.locator("#messages")).not.toContainText(
-    "PRIVATE_KEEPER_PROMPT",
-  );
-  await page.screenshot({ path: join(runtime, "restored.png") });
-  await page.locator("#btn-new").click();
-  await page.locator(".module-select-trigger").click();
-  await page.getByRole("option", { name: /猩红文档/ }).click();
-  await expect(page.locator(".module-select-trigger")).toContainText(
-    "猩红文档",
-  );
-  await page.locator("#btn-continue").click();
-  await page
-    .locator('[data-adventure="save-second"]')
-    .getByRole("button", { name: "读取", exact: true })
-    .click();
-  await expect(page.locator("#user-input")).toBeEnabled();
-  await expect(page.locator("#messages")).toContainText(
-    "另一份存档：你站在大学办公室。",
-  );
-  await expect(page.locator("#messages")).not.toContainText("读档验收");
-  expect(
-    frames.filter((frame) => frame.type === "loaded" && frame.restore_only),
-  ).toHaveLength(2);
-  expect(frames.filter((frame) => frame.type === "gm_turn_start")).toHaveLength(
-    0,
-  );
-  expect(modelRequests).toBe(0);
-  expect(errors).toEqual([]);
-});
+}

@@ -62,6 +62,7 @@ export const serverMessageTypes = [
   "save_list",
   "save_available",
   "loaded",
+  "save_load_progress",
   "case_settled",
   "character_state",
   "state_data",

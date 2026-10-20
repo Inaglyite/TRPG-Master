@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import math
+import re
+from time import perf_counter
 
 from src.ai.context.history_compactor import AUTHORITY_MARKER
 from src.ai.context.narrative_history import enrich_public_history
 from src.ai.tools.tool_protocol import strip_tool_protocol
+from src.app.logger import get as get_logger
 from src.gameplay.choices import extract_action_choices
 from src.gameplay.speaker_parser import parse_segments
 from src.storage.database import SaveSlot, Snapshot, session_scope
@@ -19,13 +24,21 @@ def register_save_load_handler(
     router, *, engine, outbound, ws, auth_required, reserve_turn, release_turn,
     send_character_state, resume_game,
 ) -> None:
+    pending_timings: set[str] = set()
+
     @router.handler("save_load")
     async def handle_save_load(data: dict) -> None:
         if not auth_required() and getattr(ws, "room", None) is None:
+            request_id = timing_request_id(data.get("request_id"))
+            if request_id:
+                # Bound outstanding acknowledgements on this connection.
+                pending_timings.clear()
+                pending_timings.add(request_id)
             await restore_local_save(
                 engine, outbound, str(data.get("slot_id") or ""),
                 reserve_turn=reserve_turn, release_turn=release_turn,
                 send_character_state=send_character_state,
+                request_id=request_id,
             )
             return
         await resume_game(
@@ -33,6 +46,26 @@ def register_save_load_handler(
             investigator_id=data.get("_room_investigator_id"),
             target_user_id=data.get("_room_actor_user_id"),
         )
+
+    @router.handler("save_load_timing")
+    async def handle_save_load_timing(data: dict) -> None:
+        if auth_required() or getattr(ws, "room", None) is not None:
+            return
+        request_id = timing_request_id(data.get("request_id"))
+        if not request_id or request_id not in pending_timings:
+            return
+        pending_timings.discard(request_id)
+        metrics = {}
+        for key in ("total_ms", "response_ms", "presentation_ms", "server_ms"):
+            value = data.get(key)
+            if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 86_400_000:
+                metrics[key] = round(value)
+        get_logger().info("SAVE_LOAD client_ready %s", json.dumps({"request_id": request_id, **metrics}))
+
+
+def timing_request_id(value) -> str:
+    """Correlation labels only; never accept arbitrary log text from a client."""
+    return value if isinstance(value, str) and re.fullmatch(r"save-[a-zA-Z0-9_-]{1,64}", value) else ""
 
 
 def saved_public_history(engine, slot_id: str) -> list[dict]:
@@ -81,29 +114,56 @@ def saved_public_history(engine, slot_id: str) -> list[dict]:
 
 async def restore_local_save(
     engine, outbound, slot_id, *, reserve_turn, release_turn, send_character_state,
+    request_id="",
 ) -> None:
+    started = perf_counter()
+    timings = {}
+
+    async def progress(phase):
+        if request_id:
+            await outbound.send({"type": "save_load_progress", "request_id": request_id, "phase": phase})
+
+    get_logger().info("SAVE_LOAD started request_id=%s", request_id or "legacy")
     if not await reserve_turn():
         return
     try:
+        await progress("restoring")
+        phase_start = perf_counter()
         count = await asyncio.to_thread(engine.load, slot_id)
+        timings["restore_ms"] = round((perf_counter() - phase_start) * 1000)
         if count is None:
             await outbound.send({
                 "type": "error", "operation": "save_load",
                 "message": "未找到存档。", "terminal": True,
             })
             return
+        await progress("history")
+        phase_start = perf_counter()
         history = await asyncio.to_thread(saved_public_history, engine, slot_id)
+        timings["history_ms"] = round((perf_counter() - phase_start) * 1000)
+        await progress("character")
+        phase_start = perf_counter()
         await send_character_state()
+        timings["character_ms"] = round((perf_counter() - phase_start) * 1000)
+        timings["server_ms"] = round((perf_counter() - started) * 1000)
         await outbound.send({
             "type": "loaded", "ok": True, "slot_id": slot_id,
             "count": count, "restore_only": True,
             "world_id": engine.context.world_id,
             "module_name": engine.context.module_name, "history": history,
+            "request_id": request_id, "timings": timings,
         })
+        get_logger().info("SAVE_LOAD restored %s", json.dumps({"request_id": request_id, **timings}))
     except StaleRevisionError as exc:
         await outbound.send({
             "type": "error", "operation": "save_load",
             "message": str(exc), "terminal": True,
+        })
+    except Exception as exc:
+        get_logger().error("SAVE_LOAD failed request_id=%s error_type=%s", request_id, type(exc).__name__)
+        await outbound.send({
+            "type": "error", "operation": "save_load",
+            "message": "读取存档失败，请重试。", "terminal": True,
         })
     finally:
         release_turn()

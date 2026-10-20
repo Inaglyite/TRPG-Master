@@ -22,6 +22,7 @@ import { escapeHtml } from "./text";
 import { getGameStarted } from "./start";
 import { safeSend } from "./ws";
 import { saveReadBlockReason } from "./save-read-boundary";
+import { beginSaveLoad } from "./state/save-load-store";
 
 const clueCategories = ["investigation", "event", "task", "npc"] as const;
 let knownClueKeys: Set<string> | null = null;
@@ -221,7 +222,7 @@ export function resumeTimeline(worldId: string, active: boolean) {
   // 本地那套 resumeAfterSwitch/slot_000 逻辑不适用于房间协议。
   if (!online) {
     resumeAfterSwitch = true;
-    useStartStore.setState({ saveLoading: true, hint: "正在读取存档…" });
+    beginSaveLoad("switching");
   }
   switchWorld(target);
 }
@@ -311,8 +312,7 @@ export function loadSave(slotId: string) {
     addMsg("system", reason);
     return;
   }
-  if (local)
-    useStartStore.setState({ saveLoading: true, hint: "正在读取存档…" });
+  const requestId = local ? beginSaveLoad("restoring") : undefined;
   closeSavePanel();
   addMsg("system", "正在读档…");
   if (
@@ -330,7 +330,13 @@ export function loadSave(slotId: string) {
     );
     return;
   }
-  safeSend(JSON.stringify({ type: "save_load", slot_id: slotId }));
+  safeSend(
+    JSON.stringify({
+      type: "save_load",
+      slot_id: slotId,
+      request_id: requestId,
+    }),
+  );
 }
 
 export function deleteSave(slotId: string) {

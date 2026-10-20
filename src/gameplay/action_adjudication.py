@@ -576,8 +576,9 @@ discovery_refs 只能选候选键，需玩家本轮实际接触对应目标且�
 玩家的搜查/取得动作若与候选线索的目标语义对应（如"锡盒"对应"锁箱"），必须用 discovery_refs 落账；
 候选线索自带 flag 与物品效果，禁止改用 take_item 凭空发放来源不存在的物品。
 候选的 grants_item/sets_flags 是取得后果；玩家明确说"只看、不带走、不拿"时不得选择这类候选。
-discovery_candidates 已通过当前场景与模组前置条件筛选；authored_outcome 是作者规定的
-本次行动能发生的接近/取得过程。玩家明确要执行对应行为时，必须按该规则选择 discovery_refs。
+discovery_candidates 已通过当前场景与模组前置条件筛选；authored_outcome 是作者给的
+接近/取得过程示例，不是玩家已说或已做的事实。不得据此替玩家补出台词、泄露未知信息或扩大行动。
+具体行为以 player_input 和 recent_dialogue 为准；玩家明确要执行对应行为时，按该规则选择 discovery_refs。
 requires_success=false 的候选不依赖社交或侦查检定：不要额外发明护士许可、永久拒绝、
 NPC 情绪或新门禁来阻断它，也不要用可选的安抚/交谈检定把核心发现封死。
 若本轮只是泛泛询问、尚未接触目标，仍不得发放；模组要求的 requires_success=true、

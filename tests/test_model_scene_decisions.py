@@ -13,7 +13,8 @@ from src.gameplay.action_adjudication import (
     adjudication_context,
     validate_proposal,
 )
-from src.gameplay.action_resolution import plan_player_action
+from src.gameplay.action_resolution import ActionPhase, ActionResolution, plan_player_action
+from src.gameplay.discovery import DiscoveryMatch
 from tests import test_discovery
 
 
@@ -102,3 +103,32 @@ def test_timeout_cannot_promote_legacy_body_match_to_travel(context, monkeypatch
     assert not result.destination_scene_id
     assert not result.discovery_matches
     assert json.loads(result.adjudication_json)["intent"] == "clarify"
+
+
+@pytest.mark.parametrize("adjudicated", [False, True])
+def test_discovery_example_cannot_invent_player_speech_or_precheck_facts(context, adjudicated):
+    text = "我是其侄女请来负责调查的，请还是说明白。"
+    example = '你把"战国编钟"四个字说出口，金三爷拇指上的扳指停住了。'
+    world = context.world_store.load()
+    clue = {"id": "trade", "text": "机密交易内容", "source": world["current_scene"]["id"],
+            "type": "obvious", "category": "npc"}
+    rule = {"intent": "talk", "targets": ["编钟"], "approach_text": example,
+            "skill": "persuade", "requires_success": True}
+    events = []
+    engine = test_discovery.DiscoveryResolutionTests._preview_engine(context, events)
+    engine._preplanned_action_resolution = ActionResolution(
+        player_input=text, phase=ActionPhase.CONTACT,
+        origin_scene_id=world["current_scene"]["id"],
+        discovery_matches=(DiscoveryMatch("trade", clue, rule),),
+        preferred_skill="persuade",
+        adjudication_json=json.dumps({"intent": "interact", "input_quote": text, "approach": text}) if adjudicated else "",
+    )
+    checks = []
+    engine._resolve_action_check = lambda content, skill: checks.append((content, skill)) or {"success": False}
+    result = _prepare_turn({"engine": engine, "user_content": text})
+    # Semantic selection of a discovery never authorizes its sample wording.
+    assert checks == [(text, "persuade")]
+    assert not [event for event in events if event[0] == "narrative"]
+    assert "战国编钟" not in result["narrative"]
+    assert example not in engine.messages[-1]["content"]
+    assert context.world_store.load()["clues_found"] == world["clues_found"]

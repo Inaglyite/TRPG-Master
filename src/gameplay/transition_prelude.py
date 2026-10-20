@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable
-from typing import Any
 
 from src.gameplay.action_resolution import ActionResolution
 
@@ -13,9 +11,13 @@ def build_transition_prelude(
     world: dict,
     action: ActionResolution,
     scene_id: str | None,
-    discovery_matches: Iterable[Any],
 ) -> str:
-    """Order departure, travel, arrival, entry, then local approach beats."""
+    """Describe committed travel, never promote discovery examples to facts.
+
+    A discovery's approach_text illustrates one possible approach. Matching its
+    target does not authorize the player's quoted speech or physical actions
+    in that example. The narrator grounds those details in the actual input.
+    """
     parts: list[str] = []
     if scene_id:
         scenes = world.get("scene_catalog", {})
@@ -37,10 +39,6 @@ def build_transition_prelude(
         if legacy_entry:
             parts.append(legacy_entry)
 
-    for match in discovery_matches:
-        approach = str(match.rule.get("approach_text") or "").strip()
-        if approach and approach not in parts:
-            parts.append(approach)
     return "\n\n".join(parts)
 
 
