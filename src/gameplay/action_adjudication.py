@@ -23,6 +23,7 @@ from src.app.config import _enabled_env
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 from src.gameplay.action_resolution import ActionPhase, ActionResolution, pc_incapacitated
+from src.gameplay.case_clock_time import time_rule_applies
 from src.gameplay.destination_grounding import (
     DestinationGroundingError,
     known_people,
@@ -470,6 +471,23 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
         if effect.kind == "clock_advance":
             if effect.target not in (world.get("case_clocks") or {}) or effect.target not in (world.get("case_clock_definitions") or {}):
                 raise ValueError("时钟必须由模组声明")
+            if (
+                proposal.intent == "wait"
+                and proposal.time_minutes > 0
+                and time_rule_applies(
+                    (world.get("case_clock_definitions") or {}).get(effect.target), "wait"
+                )
+            ):
+                # 双重结算防线：wait 回合该时钟由引擎按 time_minutes 的时间规则
+                # 结算，模型再提交 clock_advance 会重复记账；结构化拒绝并让
+                # 模型移除后重试（真实故障：4320 分钟 wait 被结算 0→2）。
+                # 只限 wait：interact 等行动可能既有语义事件又经过时间，不禁。
+                raise ProposalValidationError(
+                    "该时钟由引擎按 time_minutes 的时间规则结算，不能重复提交 clock_advance",
+                    code="time_settled_clock",
+                    field="clock_advance",
+                    value=re.sub(r"[^0-9A-Za-z_-]", "", effect.target)[:80],
+                )
         elif effect.kind == "npc_reaction":
             if effect.target not in present or effect.value not in {"cooperative", "guarded", "nervous", "submissive", "unknown"}:
                 raise ValueError("NPC 反应必须限于在场人物的社交态度")
@@ -551,6 +569,9 @@ completion_flags 是模组声明的场景/任务完成标记（如 cottage_searc
 泛泛提及、未抵达、尚未执行或检定失败的调查仍不可标为完成。
 所有 effect.evidence_quote 与 input_quote 必须逐字引用 player_input；source_id 只能用 available_items 的键。
 时钟每次最多推进一级，并必须符合对应 advance_when 或行动时间/后果，不能仅为制造戏剧性推进。
+提出多日等待/监视这类带时间的 wait 行动时，声明了 time_advance 且适用于等待的时钟由引擎
+按 time_minutes 自动结算：这些时钟本轮不得再提交 clock_advance，重复记账会被拒绝；
+其他时钟（语义时钟、时间规则不适用于本回合活动的时钟）仍按原有规则根据证据提出。
 discovery_refs 只能选候选键，需玩家本轮实际接触对应目标且行为符合 intent；提到某物不等于发现。
 玩家的搜查/取得动作若与候选线索的目标语义对应（如"锡盒"对应"锁箱"），必须用 discovery_refs 落账；
 候选线索自带 flag 与物品效果，禁止改用 take_item 凭空发放来源不存在的物品。

@@ -11,6 +11,7 @@ import pytest
 from src.gameplay.action_adjudication import (
     ARRIVAL_TIME_CAP_MINUTES,
     NO_FINDING_CONTRACT,
+    ProposalValidationError,
     apply_adjudicated_effects,
     validate_proposal,
 )
@@ -303,3 +304,80 @@ def test_non_search_action_is_not_forced_into_a_check():
     }
     result = validate_proposal(raw, content, state, plan_player_action(content, state))
     assert result.adjudication_json
+
+
+# ---------------------------------------------------------------- 时间型时钟双重结算防线
+
+
+def _shop_wait_proposal(minutes: int = 4320):
+    state = clock_world()
+    state["current_scene"] = {"id": "shop", "name": "轻率琐事古董店", "npcs_present": []}
+    content = "接下来几天，我在古董店对面的咖啡馆监视进出的人，晚上回旅馆休息"
+    return state, content, wait_proposal(content, minutes)
+
+
+@pytest.mark.parametrize("branch", ["on_success", "on_failure"])
+@pytest.mark.parametrize("clock_id", ["doom", "doom_default"])
+def test_time_settled_clock_rejects_duplicate_clock_advance(branch, clock_id):
+    state, content, proposal = _shop_wait_proposal()
+    state["case_clocks"]["doom_default"] = 0
+    # 未声明 activity 的 time_advance 按现机制只对 wait 适用，同样在防线内
+    state["case_clock_definitions"]["doom_default"] = {"max": 6, "time_advance": {"every_minutes": 2880}}
+    proposal[branch] = [
+        {"kind": "clock_advance", "target": clock_id, "evidence_quote": "监视", "reason": "监视持续了几天"}
+    ]
+    with pytest.raises(ProposalValidationError) as raised:
+        validate_proposal(proposal, content, state, plan_player_action(content, state))
+    assert raised.value.code == "time_settled_clock"
+    assert raised.value.field == "clock_advance"
+
+
+def test_removing_duplicate_passes_and_time_settles_clock_exactly_once():
+    state, content, proposal = _shop_wait_proposal()
+    resolution = validate_proposal(proposal, content, state, plan_player_action(content, state))
+    engine = SimpleNamespace(context=SimpleNamespace(world_store=MemoryStore(state)))
+    result = apply_adjudicated_effects(engine, resolution, None)
+    clocks = engine.context.world_store.load()["case_clocks"]
+    # 4320 分钟 wait：doom 只按时间规则 0→1，没有任何重复记账
+    assert clocks["doom"] == 1
+    assert clocks["pressure"] == 0
+    assert sum(1 for event in result["events"] if event.get("target") == "doom") == 1
+
+
+def test_semantic_clock_without_time_rule_still_model_proposable():
+    state, content, proposal = _shop_wait_proposal()
+    proposal["on_success"] = [
+        {"kind": "clock_advance", "target": "pressure", "evidence_quote": "监视", "reason": "可疑活动持续积累"}
+    ]
+    resolution = validate_proposal(proposal, content, state, plan_player_action(content, state))
+    assert json.loads(resolution.adjudication_json)["on_success"][0]["target"] == "pressure"
+
+
+def test_time_rule_for_other_activity_not_blocked_during_wait():
+    state, content, proposal = _shop_wait_proposal()
+    state["case_clocks"]["combat_driven"] = 0
+    state["case_clock_definitions"]["combat_driven"] = {
+        "max": 3, "time_advance": {"every_minutes": 60, "activity": ["combat"]},
+    }
+    # wait 回合引擎不会结算该时钟：模型仍可语义提出，不误禁
+    proposal["on_success"] = [
+        {"kind": "clock_advance", "target": "combat_driven", "evidence_quote": "监视", "reason": "监视中发生的冲突升级"}
+    ]
+    assert validate_proposal(proposal, content, state, plan_player_action(content, state)).adjudication_json
+
+
+def test_interact_with_elapsed_time_does_not_block_time_rule_clock():
+    # 防线只限 wait：interact 可能既有语义事件又经过时间，引擎不按 wait
+    # 规则结算这段时间，模型仍可对该时钟提交 clock_advance。
+    state, content, _proposal = _shop_wait_proposal()
+    content = "我在古董店继续观察进出的人，留意可疑访客"
+    proposal = {
+        "intent": "interact",
+        "input_quote": "观察进出的人",
+        "approach": content,
+        "time_minutes": 60,
+        "on_success": [
+            {"kind": "clock_advance", "target": "doom", "evidence_quote": "观察进出的人", "reason": "可疑活动持续积累"}
+        ],
+    }
+    assert validate_proposal(proposal, content, state, plan_player_action(content, state)).adjudication_json

@@ -47,6 +47,22 @@ def _activity_allowed(rule: dict, activity: str) -> bool:
     return activity in {str(item) for item in allowed}
 
 
+def time_rule_applies(definition: object, activity: str) -> bool:
+    """该时钟定义的时间规则是否对本结算类型适用。
+
+    裁决层据此划分所有权：适用的时间型时钟由引擎按 time_minutes 结算，
+    模型提案不得再对同一时钟提交 clock_advance（否则双重记账）。
+    """
+    if not isinstance(definition, dict):
+        return False
+    rule = definition.get("time_advance")
+    if not isinstance(rule, dict):
+        return False
+    if _int_or(rule.get("every_minutes"), 0) <= 0:
+        return False
+    return _activity_allowed(rule, activity)
+
+
 def settle_time_clocks(
     world: dict, *, activity: str = "", new_time_start: int | None = None
 ) -> list[dict]:
