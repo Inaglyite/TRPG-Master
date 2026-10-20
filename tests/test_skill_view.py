@@ -7,6 +7,7 @@ persuade 的旧卡”构造回归（失败提案原文未留存，不断言模�
 显式值优先，虚构技能一律拒绝；被拒绝的提案有结构化错误码与合法候选。
 """
 
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -169,13 +170,25 @@ def test_adjudication_schema_constrains_check_skill_to_effective_view():
     assert "invented" not in skill_schema["enum"]
 
 
+def raw_response(arguments: str):
+    """工具参数原样下发（不经 json.dumps），用于构造非法 JSON 等线上形态。"""
+    return SimpleNamespace(choices=[SimpleNamespace(finish_reason="tool_calls", message=SimpleNamespace(tool_calls=[
+        SimpleNamespace(function=SimpleNamespace(name="adjudicate_action", arguments=arguments))
+    ]))])
+
+
 def make_engine(state, payloads):
     captured = []
     queue = list(payloads)
 
     def create(**kwargs):
         captured.append(kwargs)
-        return response(queue.pop(0))
+        item = queue.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, str):
+            return raw_response(item)
+        return response(item)
 
     engine = SimpleNamespace(
         context=SimpleNamespace(world_store=MemoryStore(state)),
@@ -211,10 +224,13 @@ def test_rejected_proposal_gets_structured_feedback_and_metadata_only_diagnostic
     assert rejected[0]["proposal_meta"] == {
         "code": "unknown_check_skill",
         "field": "check.skill",
-        "value": "invented",
+        "value_chars": len("invented"),
+        "value_sha256": hashlib.sha256(b"invented").hexdigest()[:16],
     }
-    # 公开诊断（diagnostic_report 的来源）绝不携带提案正文
-    assert '"intent"' not in json.dumps(engine._turn_diagnostics, ensure_ascii=False)
+    # 公开诊断（diagnostic_report 的来源）绝不携带提案正文或技能原值
+    public = json.dumps(engine._turn_diagnostics, ensure_ascii=False)
+    assert '"intent"' not in public
+    assert "invented" not in public
 
 
 def test_failed_proposal_body_only_recorded_with_explicit_capture(tmp_path, monkeypatch):
@@ -260,3 +276,75 @@ def test_repeat_check_refusal_is_not_retried_with_a_second_model_call(monkeypatc
     # 不可重试的业务拒绝：直接拒行落账，不消耗第二次裁决调用
     assert len(captured) == 1
     assert json.loads(resolution.adjudication_json)["intent"] == "decline"
+
+
+CANARY = "PRIVATE_CANARY_FOR_REVIEW"
+
+
+def _collected_log(monkeypatch) -> list[str]:
+    lines: list[str] = []
+    monkeypatch.setattr("src.gameplay.action_adjudication.log_game", lines.append)
+    return lines
+
+
+def _public_text(engine, log_lines: list[str]) -> str:
+    # diagnostic_report 的公开来源 + 默认运行日志：两处都不得含 canary。
+    return json.dumps(engine._turn_diagnostics, ensure_ascii=False) + "\n".join(log_lines)
+
+
+def test_pydantic_extra_field_value_not_leaked_to_public_surfaces(monkeypatch):
+    """Pydantic 校验失败的 input_value/模型自造字段名不得进公开诊断与默认日志。"""
+    monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
+    log_lines = _collected_log(monkeypatch)
+    state = world()
+    bad = persuade_proposal()
+    bad["check"]["reason_note"] = CANARY  # 模型自造字段的值：input_value 通道
+    bad["check"][CANARY] = "x"  # 模型自造字段名本身也是泄密通道（loc 通道）
+    engine, captured = make_engine(state, [bad, persuade_proposal()])
+    resolution = adjudicate_player_action(engine, CONTENT, state, plan_player_action(CONTENT, state))
+    assert resolution.preferred_skill == "persuade"
+
+    public = _public_text(engine, log_lines)
+    assert CANARY not in public
+    assert "reason_note" not in public  # loc 中的模型自造键名也只留占位
+    rejected = [entry for entry in engine._turn_diagnostics if entry["status"] == "rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["error"] == "ValidationError[extra_forbidden@check.<extra>;extra_forbidden@check.<extra>]"
+
+    # 模型侧内部纠错反馈保留具体细节（模型自己的内容回传给模型），不丢恢复能力
+    assert CANARY in retry_feedback(captured)["error"]
+
+
+def test_malformed_json_arguments_not_leaked_to_public_surfaces(monkeypatch):
+    """工具参数不是合法 JSON 时，解析错误摘要不回显被解析文本。"""
+    monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
+    log_lines = _collected_log(monkeypatch)
+    state = world()
+    raw_bad = '{"intent": "interact", "input_quote": "' + CANARY  # 截断的非法 JSON
+    engine, captured = make_engine(state, [raw_bad, persuade_proposal()])
+    resolution = adjudicate_player_action(engine, CONTENT, state, plan_player_action(CONTENT, state))
+    assert resolution.preferred_skill == "persuade"
+    assert len(captured) == 2
+
+    assert CANARY not in _public_text(engine, log_lines)
+    rejected = [entry for entry in engine._turn_diagnostics if entry["status"] == "rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["error"].startswith("JSONDecodeError:")
+
+
+@pytest.mark.parametrize("exc_type", [RuntimeError, ValueError])
+def test_provider_exception_and_final_fallback_not_leaked_to_public_surfaces(monkeypatch, exc_type):
+    """generic 异常（含普通 ValueError）与最终 fallback 路径同样只留稳定元数据。"""
+    monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
+    log_lines = _collected_log(monkeypatch)
+    state = world()
+    engine, captured = make_engine(
+        state, [exc_type(f"provider echoed {CANARY}"), exc_type(f"provider echoed {CANARY}")]
+    )
+    adjudicate_player_action(engine, CONTENT, state, plan_player_action(CONTENT, state))
+    assert len(captured) == 2  # 两次尝试都失败，进入最终回退
+
+    assert CANARY not in _public_text(engine, log_lines)
+    statuses = [entry["status"] for entry in engine._turn_diagnostics]
+    assert statuses == ["rejected", "rejected", "fallback"]
+    assert all(entry["error"] == exc_type.__name__ for entry in engine._turn_diagnostics)

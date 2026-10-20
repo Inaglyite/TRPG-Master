@@ -15,7 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
@@ -65,21 +65,27 @@ class ProposalValidationError(ValueError):
         code: str,
         field: str = "",
         value: str = "",
+        value_chars: int = 0,
+        value_sha256: str = "",
         candidates: list[str] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.field = field
         self.value = value
+        self.value_chars = value_chars
+        self.value_sha256 = value_sha256
         self.candidates = list(candidates or [])
 
 
-def _record_rejected_proposal(engine: Any, raw_arguments: str, *, attempt: int, error: str) -> None:
+def _record_rejected_proposal(
+    engine: Any, raw_arguments: str, *, attempt: int, error: str, detail: str = ""
+) -> None:
     """失败提案的可观测性：默认只记元数据与 digest。
 
-    提案正文是模型控制内容，可能含守秘人秘密：不进公开诊断，也不进默认
-    运行日志。完整参数仅在显式设置 TRPG_ADJUDICATION_CAPTURE 时写入运行
-    目录下的私有录制（0700 目录 / 0600 文件）。
+    提案正文与完整错误文本是模型控制内容，可能含守秘人秘密：不进公开诊断，
+    也不进默认运行日志。完整参数仅在显式设置 TRPG_ADJUDICATION_CAPTURE 时
+    写入运行目录下的私有录制（0700 目录 / 0600 文件）。
     """
     digest = hashlib.sha256(raw_arguments.encode("utf-8")).hexdigest()[:16]
     log_game(
@@ -95,7 +101,8 @@ def _record_rejected_proposal(engine: Any, raw_arguments: str, *, attempt: int, 
         path = directory / "adjudication-rejections.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(
-                {"attempt": attempt, "sha256": digest, "proposal": raw_arguments[:8000]},
+                {"attempt": attempt, "sha256": digest, "proposal": raw_arguments[:8000],
+                 "error": detail[:1200]},
                 ensure_ascii=False,
             ) + "\n")
         os.chmod(path, 0o600)
@@ -141,6 +148,48 @@ class ActionProposal(StrictProposal):
     npc_direction: str = Field(default="", max_length=600)
     sanity_source_id: str = Field(default="", max_length=100)
     sanity_severity: Literal["", "trivial", "minor", "moderate", "major", "catastrophic"] = ""
+
+
+_KNOWN_PROPOSAL_FIELDS = frozenset(
+    set(ActionProposal.model_fields)
+    | set(CheckProposal.model_fields)
+    | set(EffectProposal.model_fields)
+)
+
+
+def public_error_summary(exc: Exception) -> str:
+    """公开诊断与默认日志的错误摘要：稳定类型/错误码/受限位置。
+
+    模型控制的提案内容（Pydantic input_value、模型自造的额外字段名、异常
+    正文里的回显）不得进入 _turn_diagnostics（经 diagnostic_report 公开）
+    或默认运行日志；完整错误文本只随原始提案进入显式私有录制，或原样
+    回传给模型自身纠错。
+    """
+    if isinstance(exc, ProposalValidationError):
+        summary = f"ProposalValidationError:{exc.code}"
+        if exc.field:
+            summary += f"@{exc.field}"
+        return summary
+    if isinstance(exc, ValidationError):
+        # loc 也可能含模型自造的额外字段名：只保留提案模型的已知字段，
+        # 未知键一律占位，避免键名本身成为泄密通道。
+        parts = []
+        for error in exc.errors(include_input=False, include_context=False, include_url=False)[:6]:
+            loc = ".".join(
+                str(part)
+                if isinstance(part, int)
+                else (part if part in _KNOWN_PROPOSAL_FIELDS else "<extra>")
+                for part in error.get("loc", ())
+            )
+            parts.append(f"{error.get('type', 'unknown')}@{loc}" if loc else str(error.get("type", "unknown")))
+        return f"ValidationError[{';'.join(parts)}]"
+    if isinstance(exc, json.JSONDecodeError):
+        # msg/pos 是稳定的解析位置信息，不回显被解析文本。
+        return f"JSONDecodeError:{exc.msg}@{exc.pos}"
+    # generic 异常（含普通 ValueError）一律不信任 str(exc)：即使当前业务
+    # 校验器多为固定文案，公开面也只留稳定类型名；详细业务原因只进模型
+    # 内部纠错反馈与显式私有录制。
+    return type(exc).__name__
 
 
 def adjudication_schema(world: dict | None = None) -> dict:
@@ -337,13 +386,17 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
 
         pc_sheet = world.get("pc") or {}
         if effective_skill_value(pc_sheet, proposal.check.skill) is None:
-            # skill 是模型控制文本：对外只保留受限字符形态，不回放原始提案正文。
-            safe_value = re.sub(r"[^0-9A-Za-z_-]", "", proposal.check.skill)[:80]
+            # skill 是模型控制文本：内部纠错反馈只带受限字符形态，公开面
+            # 进一步降级为长度与 digest，不回放原值。
+            raw_skill = proposal.check.skill
+            safe_value = re.sub(r"[^0-9A-Za-z_-]", "", raw_skill)[:80]
             raise ProposalValidationError(
                 "检定技能不可用：不在角色有效技能集合中",
                 code="unknown_check_skill",
                 field="check.skill",
                 value=safe_value,
+                value_chars=len(raw_skill),
+                value_sha256=hashlib.sha256(raw_skill.encode("utf-8", "replace")).hexdigest()[:16],
                 candidates=sorted(effective_skills(pc_sheet)),
             )
     check_target = proposal.target_npc_id or (proposal.check.target if proposal.check else "")
@@ -570,6 +623,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     model = model_for_role(engine, "adjudication")
     started = time.monotonic()
     last_error = ""
+    last_detail = ""
     last_exc: Exception | None = None
     destination_error = ""
     for attempt in range(2):
@@ -600,20 +654,24 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             return resolution
         except Exception as exc:
             engine.raise_if_turn_cancelled()
-            last_error = f"{type(exc).__name__}: {exc}"
+            # last_error 只进公开面（诊断/默认日志），必须是不含模型控制内容
+            # 的稳定摘要；完整错误文本 last_detail 只进显式私有录制与模型自反馈。
+            last_error = public_error_summary(exc)
+            last_detail = f"{type(exc).__name__}: {exc}"
             last_exc = exc
             if isinstance(exc, DestinationGroundingError):
                 destination_error = str(exc)
             # 可观测性：_turn_diagnostics 会经 diagnostic_report 公开到 WS，
             # 只留稳定错误码与不敏感的字段/技能 id 等元数据；提案正文只进
             # 显式启用的私有录制（见 _record_rejected_proposal）。
-            _record_rejected_proposal(engine, raw_arguments, attempt=attempt + 1, error=last_error)
+            _record_rejected_proposal(engine, raw_arguments, attempt=attempt + 1, error=last_error, detail=last_detail)
             if hasattr(engine, "_turn_diagnostics"):
                 proposal_meta: dict = {"chars": len(raw_arguments)}
                 if isinstance(exc, ProposalValidationError):
                     proposal_meta = {"code": exc.code, "field": exc.field}
                     if exc.code == "unknown_check_skill":
-                        proposal_meta["value"] = exc.value
+                        proposal_meta["value_chars"] = exc.value_chars
+                        proposal_meta["value_sha256"] = exc.value_sha256
                 engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {
                     "model": model, "role": "adjudication", "status": "rejected",
                     "attempt": attempt + 1, "error": last_error[:300],
@@ -640,7 +698,8 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         except DestinationGroundingError as exc:
             destination_error = str(exc)
     if destination_error:
-        log_game(f"行动裁决目的地待确认 | {destination_error[:300]}")
+        # 公开日志只留稳定类型名；具体业务原因已随纠错反馈进入模型内部通道。
+        log_game("行动裁决目的地待确认 | DestinationGroundingError")
         return ActionResolution(
             player_input=content, phase=ActionPhase.INTERACTION,
             origin_scene_id=fallback.origin_scene_id,
@@ -657,7 +716,8 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         refusal = {
             "intent": "decline",
             "input_quote": content[:80],
-            "approach": f"重复检定未执行：{last_error[:200]}",
+            # approach 只面向叙事模型（内部纠错通道），保留具体业务原因。
+            "approach": f"重复检定未执行：{last_detail[:200]}",
         }
         return replace(
             fallback,
