@@ -194,3 +194,32 @@ def test_battle_driver_shoots_actual_attacker_once_and_does_not_invent_targets()
     chosen = choose_beat_input(beat, 9, world)
     assert "费德曼兄妹" in chosen and "只射击一次" in chosen
     assert "非人生物" not in chosen and "fallen" not in chosen
+
+
+def test_b5b_clock_gives_real_wait_after_arrival_regardless_of_attempt():
+    """B5b 真实失败形态：出发交涉/prepare_move 吃掉 attempt 后，抵达回合
+    不得跳到“汇总未发生事实”的尾输入；在店时每回合都给可结算的多日等待。"""
+    beat = next(b for b in scarlet_beats() if b.key == "B5b_clock")
+    world = _world()
+    world["current_scene"]["id"] = "miskatonic_lodge_office"
+    world["scene_catalog"] = {"trivial_pursuits": {"name": "轻率琐事古董店"}}
+
+    # 人不在古董店：先真实出发，而不是给可结算的等待或“汇总”输入
+    chosen = choose_beat_input(beat, 0, world)
+    assert "前往轻率琐事古董店" in chosen
+    assert "连续三天" not in chosen and "汇总" not in chosen
+
+    # pending_departure 保留优先级：先回答出发决定
+    world["pending_departure"] = {
+        "origin_scene_id": "miskatonic_lodge_office",
+        "destination_scene_id": "trivial_pursuits",
+        "question": "要先和洛奇交接吗？",
+    }
+    assert "我已经决定" in choose_beat_input(beat, 1, world)
+
+    # 抵达古董店时 attempt 已被消耗到 3：仍给真实多日等待，不跳到汇总
+    world.pop("pending_departure")
+    world["current_scene"]["id"] = "trivial_pursuits"
+    chosen = choose_beat_input(beat, 3, world)
+    assert "连续三天" in chosen and "等待" in chosen
+    assert "汇总" not in chosen

@@ -639,6 +639,18 @@ def choose_beat_input(beat: Beat, attempt: int, world: dict) -> str:
                 f"前往{destination.get('name') or pending['destination_scene_id']}。"
                 "抵达后若有入内手续，我会在现场另行处理。"
             )
+    if beat.key == "B5b_clock":
+        scene = str((world.get("current_scene") or {}).get("id") or "")
+        if scene != "trivial_pursuits":
+            # 监视必须人在古董店：先真实出发，不把监视输入消耗在别的场景
+            # （pending_departure 待决时上面的通用分支已优先应答）。
+            return "我现在独自前往轻率琐事古董店，到了以后在店对面的咖啡馆开始监视。"
+        # 真实可结算的多日等待：授权明确、被动观察，不汇总未发生的事实；
+        # 时钟推进后 goal 达成，外层自动结束 beat。
+        return (
+            "我暂不搜查或交涉，连续三天被动观察并等待：白天在古董店对面的咖啡馆"
+            "记录进出的人，晚上回旅馆休息，三天结束后停下。"
+        )
     return beat.inputs[min(attempt, len(beat.inputs) - 1)]
 
 
