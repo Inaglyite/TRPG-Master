@@ -82,6 +82,42 @@ test.beforeAll(async () => {
         "雨幕笼罩着阿卡姆。你在办公室里准备开始调查。",
       );
       const systemPrompt = String(wire.messages?.[0]?.content || "");
+      if (systemPrompt.includes("你是对话归属复核员")) {
+        // 归属复核（非流式）：确认有直接台词并给出保真的重新分段
+        attributionRepairCalls += 1;
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "review",
+            choices: [
+              {
+                finish_reason: "stop",
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    contains_direct_speech: true,
+                    segments: [
+                      { kind: "narration", text: "苏晚晴叹了口气。" },
+                      {
+                        kind: "speech",
+                        speaker_id: "su",
+                        text: "侦探也好，巡捕也罢，洋先生的事我担不起。",
+                      },
+                      { kind: "narration", text: "她把钢笔放下。" },
+                      {
+                        kind: "speech",
+                        speaker_id: "su",
+                        text: "您要真想知道，去问洋人自己的圈子。",
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+        );
+        return;
+      }
       if (systemPrompt.includes("你负责修复本轮对话")) {
         // 归属修复请求：按允许人物给出正确的 speech 结构
         attributionRepairCalls += 1;

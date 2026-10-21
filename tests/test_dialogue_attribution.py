@@ -47,11 +47,14 @@ def wire(segments, *, choices=None, introduced=None, guests=None):
     return json.dumps(payload, ensure_ascii=False)
 
 
-JIN_REFUSAL = wire([
-    {"kind": "narration", "text": "金三爷拨着算盘，眼皮都没抬。"},
-    {"kind": "speech", "speaker_id": "jin", "text": "侦探也好，巡捕也罢，洋先生的事我担不起。"},
-    {"kind": "speech", "speaker_id": "jin", "text": "您要真想知道，去问洋人自己的圈子。"},
-], choices=["换个话题。", "[自由行动] 你决定做什么？"])
+JIN_REFUSAL = wire(
+    [
+        {"kind": "narration", "text": "金三爷拨着算盘，眼皮都没抬。"},
+        {"kind": "speech", "speaker_id": "jin", "text": "侦探也好，巡捕也罢，洋先生的事我担不起。"},
+        {"kind": "speech", "speaker_id": "jin", "text": "您要真想知道，去问洋人自己的圈子。"},
+    ],
+    choices=["换个话题。", "[自由行动] 你决定做什么？"],
+)
 
 
 def make_host(raw, *, present=("jin", "su"), valid=None, world=None, finish_reason="stop"):
@@ -114,28 +117,47 @@ def test_finalized_history_keeps_speaker_structure_for_next_request():
         {"role": "assistant", "content": content},
     ]
     followups = [
-        wire([{"kind": "narration", "text": "苏晚晴放下钢笔。"},
-              {"kind": "speech", "speaker_id": "su", "text": "金三爷做生意三十年，您先想好怎么问。"}]),
-        wire([{"kind": "narration", "text": "伊芙琳站起身。"},
-              {"kind": "speech", "speaker_id": "evelyn", "text": "我可以跟您一起去。"}]),
+        wire(
+            [
+                {"kind": "narration", "text": "苏晚晴放下钢笔。"},
+                {
+                    "kind": "speech",
+                    "speaker_id": "su",
+                    "text": "金三爷做生意三十年，您先想好怎么问。",
+                },
+            ]
+        ),
+        wire(
+            [
+                {"kind": "narration", "text": "伊芙琳站起身。"},
+                {"kind": "speech", "speaker_id": "evelyn", "text": "我可以跟您一起去。"},
+            ]
+        ),
     ]
     prepared_histories = []
     for index, followup in enumerate(followups):
         host = make_host(followup, present=("jin", "su", "evelyn"))
         host.messages = list(history) + [{"role": "user", "content": f"[玩家行动] 第{index + 2}轮"}]
         prepared = prepare_model_request(
-            host, "test-model", policy=host.policy, system_overlay=None,
-            system_prompt_override=None, enable_tools=False, temperature=0.8,
+            host,
+            "test-model",
+            policy=host.policy,
+            system_overlay=None,
+            system_prompt_override=None,
+            enable_tools=False,
+            temperature=0.8,
             messages_override=None,
         )
         prepared_histories.append(prepared.provider_kwargs["messages"])
         text, _ = run(host)
         _segs, clean = parse_segments(text)
         history.append({"role": "user", "content": f"[玩家行动] 第{index + 2}轮"})
-        history.append({
-            "role": "assistant",
-            "content": finalized_history_content(text, clean, structured=True),
-        })
+        history.append(
+            {
+                "role": "assistant",
+                "content": finalized_history_content(text, clean, structured=True),
+            }
+        )
 
     first = json.loads(prepared_histories[0][-2]["content"])
     assert [b["kind"] for b in first["segments"]] == ["narration", "speech", "speech"]
@@ -149,7 +171,9 @@ def test_finalized_history_keeps_speaker_structure_for_next_request():
 
 def test_legacy_unowned_history_stays_plain_narration():
     """旧存档没有权威归属：历史转换不臆造身份，整体作为旁白。"""
-    content = finalized_history_content("旧存档正文，没有任何标签。", "旧存档正文，没有任何标签。", structured=True)
+    content = finalized_history_content(
+        "旧存档正文，没有任何标签。", "旧存档正文，没有任何标签。", structured=True
+    )
     assert "【" not in content
     host = make_host(JIN_REFUSAL)
     host.messages = [
@@ -158,53 +182,268 @@ def test_legacy_unowned_history_stays_plain_narration():
         {"role": "user", "content": "[玩家行动] 继续"},
     ]
     prepared = prepare_model_request(
-        host, "test-model", policy=host.policy, system_overlay=None,
-        system_prompt_override=None, enable_tools=False, temperature=0.8,
+        host,
+        "test-model",
+        policy=host.policy,
+        system_overlay=None,
+        system_prompt_override=None,
+        enable_tools=False,
+        temperature=0.8,
         messages_override=None,
     )
     parsed = parse_dialogue_output(prepared.provider_kwargs["messages"][1]["content"])
     assert [block.kind for block in parsed.segments] == ["narration"]
 
 
-# ---- B. 归属校验与有界修复（F1/F8，矩阵 7/8） --------------------------------
+# ---- B. 归属校验与有界语义复核（F1/F8，矩阵 7/8） -----------------------------
 
-ALL_NARRATION_QUOTED = wire([
-    {"kind": "narration", "text": "金三爷拨着算盘。“侦探也好，巡捕也罢，洋先生的事我担不起。”他叹了口气。“您要真想知道，去问洋人自己的圈子。”"},
-])
+ALL_NARRATION_QUOTED = wire(
+    [
+        {
+            "kind": "narration",
+            "text": "金三爷拨着算盘。“侦探也好，巡捕也罢，洋先生的事我担不起。”他叹了口气。“您要真想知道，去问洋人自己的圈子。”",
+        },
+    ]
+)
 
-
-def test_quoted_dialogue_stuffed_in_narration_triggers_one_bounded_repair():
-    good = wire([
+GOOD_JIN = wire(
+    [
         {"kind": "narration", "text": "金三爷拨着算盘。"},
         {"kind": "speech", "speaker_id": "jin", "text": "侦探也好，巡捕也罢，洋先生的事我担不起。"},
-    ])
+    ]
+)
+
+
+def review_client(story_raw, review_payload):
+    """第一次流式 story 调用 + 一次非流式归属复核调用。"""
+    calls = {"n": 0}
+
+    def create(**kwargs):
+        calls["n"] += 1
+        if kwargs.get("stream"):
+            return iter(
+                [build_chunk({"content": story_raw}), build_chunk({"finish_reason": "stop"})]
+            )
+        return NS(choices=[NS(finish_reason="stop", message=NS(content=review_payload))])
+
+    return NS(chat=NS(completions=NS(create=create))), calls
+
+
+FIXED_JIN_VERDICT = json.dumps(
+    {
+        "contains_direct_speech": True,
+        "segments": [
+            {"kind": "narration", "text": "金三爷拨着算盘。"},
+            {
+                "kind": "speech",
+                "speaker_id": "jin",
+                "text": "侦探也好，巡捕也罢，洋先生的事我担不起。",
+            },
+            {"kind": "narration", "text": "他叹了口气。"},
+            {"kind": "speech", "speaker_id": "jin", "text": "您要真想知道，去问洋人自己的圈子。"},
+        ],
+    },
+    ensure_ascii=False,
+)
+
+CLEAN_NARRATION_VERDICT = json.dumps({"contains_direct_speech": False})
+
+
+def test_suspect_narration_gets_one_bounded_semantic_review():
     host = make_host("")
-    host.client = ReplayClient([
-        [{"content": ALL_NARRATION_QUOTED}, {"finish_reason": "stop"}],
-        [{"content": good}, {"finish_reason": "stop"}],
-    ])
+    host.client, calls = review_client(ALL_NARRATION_QUOTED, FIXED_JIN_VERDICT)
     text, _ = run(host)
-    assert host.client.calls == 2
+    assert calls["n"] == 2  # 一次故事 + 一次复核，有界
     assert "【npc:jin】" in text
-    # 修复名额用尽时 fail-open：接受原文并落账，不错误轰炸玩家
-    host2 = make_host(ALL_NARRATION_QUOTED)
-    text2, _ = run(host2, retry_on_empty=False)
-    assert "金三爷拨着算盘" in text2
+    assert [(t, npc) for t, npc in host.speech if npc] == [
+        ("侦探也好，巡捕也罢，洋先生的事我担不起。", "jin"),
+        ("您要真想知道，去问洋人自己的圈子。", "jin"),
+    ]
 
 
-def test_repair_may_legitimately_keep_narration_without_looping():
+def test_review_confirmed_pure_narration_is_accepted():
+    """语义确认纯旁白：放行原稿（与“复核失效”严格区分）。"""
     host = make_host("")
-    host.client = ReplayClient([
-        [{"content": ALL_NARRATION_QUOTED}, {"finish_reason": "stop"}],
-        [{"content": ALL_NARRATION_QUOTED}, {"finish_reason": "stop"}],
-    ])
+    host.client, calls = review_client(ALL_NARRATION_QUOTED, CLEAN_NARRATION_VERDICT)
     text, _ = run(host)
-    assert host.client.calls == 2  # 有界：最多一次归属修复
-    assert "金三爷拨着算盘" in text
-    assert any("洋先生的事" in t for t, npc in host.speech if npc is None)
+    assert calls["n"] == 2
+    assert "洋先生的事" in text
+    assert all(npc is None for _t, npc in host.speech)
 
 
-def test_quoted_short_note_does_not_trigger_repair():
+def test_failed_review_never_publishes_suspect_draft():
+    """复核调用失败或修正稿非法：不播出、不提交可疑草稿（可恢复失败）。"""
+    host = make_host("")
+    host.client, calls = review_client(ALL_NARRATION_QUOTED, "not-a-verdict")
+    with pytest.raises(ModelResponseError):
+        run(host)
+    assert calls["n"] == 2
+    assert host.speech == []
+    assert any("归属" in error for error in host.errors)
+
+    # 复核声称有台词但修正稿原样照搬：同样拒绝
+    host2 = make_host("")
+    unchanged = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {
+                    "kind": "narration",
+                    "text": json.loads(ALL_NARRATION_QUOTED)["segments"][0]["text"],
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    host2.client, calls2 = review_client(ALL_NARRATION_QUOTED, unchanged)
+    with pytest.raises(ModelResponseError):
+        run(host2)
+    assert calls2["n"] == 2 and host2.speech == []
+
+    # 复核修正稿改写文字：文本保全拒绝
+    host3 = make_host("")
+    tampered = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {"kind": "narration", "text": "金三爷拨着算盘。"},
+                {"kind": "speech", "speaker_id": "jin", "text": "这事与我无关。"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    host3.client, _ = review_client(ALL_NARRATION_QUOTED, tampered)
+    with pytest.raises(ModelResponseError):
+        run(host3)
+    assert host3.speech == []
+
+
+def test_mixed_output_with_unattributed_quote_still_reviews():
+    """已有一段正确 speech 不再豁免其它 narration 的归属复核。"""
+    mixed = wire(
+        [
+            {"kind": "speech", "speaker_id": "jin", "text": "我去门口招呼客人。"},
+            {"kind": "narration", "text": "伙计擦着盘子。“二位随便看，这盘子是正经货。”"},
+        ]
+    )
+    verdict = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {"kind": "speech", "speaker_id": "jin", "text": "我去门口招呼客人。"},
+                {"kind": "narration", "text": "伙计擦着盘子。"},
+            ],
+            "guest_speakers": [{"speaker_id": "guest_clerk_1", "display_name": "伙计"}],
+        },
+        ensure_ascii=False,
+    )
+    # 修正稿丢了引语文字 → 文本保全拒绝
+    host = make_host("")
+    host.client, _ = review_client(mixed, verdict)
+    with pytest.raises(ModelResponseError):
+        run(host)
+
+    verdict_ok = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {"kind": "speech", "speaker_id": "jin", "text": "我去门口招呼客人。"},
+                {"kind": "narration", "text": "伙计擦着盘子。"},
+                {
+                    "kind": "speech",
+                    "speaker_id": "guest_clerk_1",
+                    "text": "二位随便看，这盘子是正经货。",
+                },
+            ],
+            "guest_speakers": [{"speaker_id": "guest_clerk_1", "display_name": "伙计"}],
+        },
+        ensure_ascii=False,
+    )
+    host2 = make_host("")
+    host2.client, calls = review_client(mixed, verdict_ok)
+    text, _ = run(host2)
+    assert calls["n"] == 2
+    assert "【npc:guest_clerk_1】" in text
+    assert host2._turn_guest_speaker_decls == [
+        {"speaker_id": "guest_clerk_1", "display_name": "伙计"}
+    ]
+
+
+def test_guest_only_scene_is_reviewed():
+    """纯临时人物场景同样触发归属复核。"""
+    raw = wire(
+        [{"kind": "narration", "text": "伙计擦着盘子。“二位随便看，这盘子是正经货。”"}],
+        guests=[{"speaker_id": "guest_clerk_1", "display_name": "伙计"}],
+    )
+    verdict = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {"kind": "narration", "text": "伙计擦着盘子。"},
+                {
+                    "kind": "speech",
+                    "speaker_id": "guest_clerk_1",
+                    "text": "二位随便看，这盘子是正经货。",
+                },
+            ],
+        },
+        ensure_ascii=False,
+    )
+    host = make_host("", present=(), valid=())
+    host.client, calls = review_client(raw, verdict)
+    text, _ = run(host)
+    assert calls["n"] == 2
+    assert "【npc:guest_clerk_1】" in text
+
+
+def test_actual_incident_unquoted_dialogue_is_reviewed():
+    """本次事故原文（无引号双人物台词）：必须触发复核而不是一次通过。"""
+    narrative = (
+        "你把盘子接在手里，随口夸了两句釉色，话锋一转，问那道帘子后头是什么去处。"
+        "伙计的笑容僵了一下，把盘子往你手里一塞，退到帘前站定。\n\n"
+        "后头是账房，客人不便。您看这盘子边口，一点磕碰都没有——\n\n"
+        "他没再说下去，眼睛却不再离开你，脚下钉在原地。门口那边，金三爷朝这边瞥了一眼，笑意未变，缓步踱了过来。\n\n"
+        "先生看上盘子了？这盘子我给您个实在价，伙计，还不快请这位先生上楼看看，三楼有几件新到的瓷。"
+    )
+    raw = wire([{"kind": "narration", "text": narrative}])
+    verdict = json.dumps(
+        {
+            "contains_direct_speech": True,
+            "segments": [
+                {
+                    "kind": "narration",
+                    "text": "你把盘子接在手里，随口夸了两句釉色，话锋一转，问那道帘子后头是什么去处。伙计的笑容僵了一下，把盘子往你手里一塞，退到帘前站定。",
+                },
+                {
+                    "kind": "speech",
+                    "speaker_id": "guest_clerk_1",
+                    "text": "后头是账房，客人不便。您看这盘子边口，一点磕碰都没有——",
+                },
+                {
+                    "kind": "narration",
+                    "text": "他没再说下去，眼睛却不再离开你，脚下钉在原地。门口那边，金三爷朝这边瞥了一眼，笑意未变，缓步踱了过来。",
+                },
+                {
+                    "kind": "speech",
+                    "speaker_id": "jin",
+                    "text": "先生看上盘子了？这盘子我给您个实在价，伙计，还不快请这位先生上楼看看，三楼有几件新到的瓷。",
+                },
+            ],
+            "guest_speakers": [{"speaker_id": "guest_clerk_1", "display_name": "伙计"}],
+        },
+        ensure_ascii=False,
+    )
+    host = make_host("")
+    host.client, calls = review_client(raw, verdict)
+    text, _ = run(host)
+    assert calls["n"] == 2
+    assert "【npc:guest_clerk_1】" in text and "【npc:jin】" in text
+    spoken = [(t, npc) for t, npc in host.speech if npc]
+    assert spoken[0][0].startswith("后头是账房") and spoken[0][1] == "guest_clerk_1"
+    assert spoken[1][0].startswith("先生看上盘子了") and spoken[1][1] == "jin"
+
+
+def test_quoted_short_note_does_not_trigger_review():
     note = wire([{"kind": "narration", "text": "纸上写着：“别让它出声。”"}])
     host = make_host(note)
     text, _ = run(host)
@@ -222,10 +461,15 @@ def test_present_but_unresolvable_speaker_id_is_repaired_not_demoted():
     """在场名单与身份表不一致（悬空 id）：修复而不是静默降级为旁白。"""
     raw = wire([{"kind": "speech", "speaker_id": "jin", "text": "这话不该由我来说。"}])
     host = make_host(raw, valid=())  # present 有 jin，但身份表解析不了
-    host.client = ReplayClient([
-        [{"content": raw}, {"finish_reason": "stop"}],
-        [{"content": wire([{"kind": "narration", "text": "店里一阵沉默。"}])}, {"finish_reason": "stop"}],
-    ])
+    host.client = ReplayClient(
+        [
+            [{"content": raw}, {"finish_reason": "stop"}],
+            [
+                {"content": wire([{"kind": "narration", "text": "店里一阵沉默。"}])},
+                {"finish_reason": "stop"},
+            ],
+        ]
+    )
     text, _ = run(host)
     assert host.client.calls == 2
     assert text == "店里一阵沉默。"
@@ -235,10 +479,12 @@ def test_present_but_unresolvable_speaker_id_is_repaired_not_demoted():
 def test_stubborn_unresolvable_speaker_fails_closed_without_emitting():
     raw = wire([{"kind": "speech", "speaker_id": "jin", "text": "这话不该由我来说。"}])
     host = make_host(raw, valid=())
-    host.client = ReplayClient([
-        [{"content": raw}, {"finish_reason": "stop"}],
-        [{"content": raw}, {"finish_reason": "stop"}],
-    ])
+    host.client = ReplayClient(
+        [
+            [{"content": raw}, {"finish_reason": "stop"}],
+            [{"content": raw}, {"finish_reason": "stop"}],
+        ]
+    )
     with pytest.raises(ModelResponseError):
         run(host)
     assert host.speech == []
@@ -298,9 +544,12 @@ def test_guest_declaration_rules():
     assert guest_registry(world)["guest_a"]["display_name"] == "伙计"
     assert guest_registry(world)["guest_a"]["scene_id"] == "shop"
     # 幂等：同 id 同称呼重复声明不重复落账
-    assert register_guest_declarations(
-        engine, [{"speaker_id": "guest_a", "display_name": "伙计"}], world=world
-    ) == []
+    assert (
+        register_guest_declarations(
+            engine, [{"speaker_id": "guest_a", "display_name": "伙计"}], world=world
+        )
+        == []
+    )
     # 同名不串人：第二个“伙计”是独立身份
     accepted = register_guest_declarations(
         engine, [{"speaker_id": "guest_b", "display_name": "伙计"}], world=world
@@ -416,7 +665,10 @@ def test_narration_time_span_still_violates_with_tagged_speech():
 
 def _structured_consistency_engine(reply, *, present=("jin",)):
     engine = consistency_engine(
-        {"status": "executed_success", "events": [{"type": "time_advanced", "before": 0, "after": 5}]},
+        {
+            "status": "executed_success",
+            "events": [{"type": "time_advanced", "before": 0, "after": 5}],
+        },
         reply=reply,
     )
     engine._structured_dialogue = True
@@ -433,20 +685,24 @@ def test_consistency_rewrite_dropping_speakers_keeps_original():
 
 def test_consistency_rewrite_swapping_speaker_keeps_original():
     original = "你等了三天。【npc:jin】这事我担不起。【/npc】"
-    swapped = wire([
-        {"kind": "narration", "text": "你稍等。"},
-        {"kind": "speech", "speaker_id": "su", "text": "这事他担不起。"},
-    ])
+    swapped = wire(
+        [
+            {"kind": "narration", "text": "你稍等。"},
+            {"kind": "speech", "speaker_id": "su", "text": "这事他担不起。"},
+        ]
+    )
     engine = _structured_consistency_engine(swapped, present=("jin", "su"))
     assert apply_narrative_consistency(engine, original) == original
 
 
 def test_consistency_rewrite_preserving_speakers_is_accepted():
     original = "你等了三天。【npc:jin】这事我担不起。【/npc】"
-    good = wire([
-        {"kind": "narration", "text": "你等了一会儿。"},
-        {"kind": "speech", "speaker_id": "jin", "text": "这事我担不起。"},
-    ])
+    good = wire(
+        [
+            {"kind": "narration", "text": "你等了一会儿。"},
+            {"kind": "speech", "speaker_id": "jin", "text": "这事我担不起。"},
+        ]
+    )
     engine = _structured_consistency_engine(good)
     rewritten = apply_narrative_consistency(engine, original)
     assert "【npc:jin】" in rewritten and "你等了一会儿" in rewritten

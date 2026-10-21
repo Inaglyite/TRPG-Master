@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
 from src.ai.model.dialogue_output import (
+    AttributionSuspicion,
     SpeechBlock,
     decode_dialogue_output,
-    has_unattributed_quoted_dialogue,
+    narration_attribution_suspicion,
     parse_dialogue_output,
 )
 from src.ai.model.llm_concurrency import ModelResponseError
@@ -47,15 +49,21 @@ def _guest_context(host, parsed) -> tuple[set[str], set[str], str]:
     return registered | declared, declared, scene_id
 
 
-def emit_structured_dialogue(host, raw, parser, *, finish_reason, log_error, report_error=True, allow_suspicion_repair=True) -> str:
+def emit_structured_dialogue(
+    host, raw, parser, *, finish_reason, log_error, report_error=True
+) -> str:
     if finish_reason in {"transport_error", "length", "content_filter"}:
         raise ModelResponseError(f"模型结构化对话未完成：{finish_reason}")
     try:
         parsed = parse_dialogue_output(raw)
         guest_ids, declared_guest_ids, _scene_id = _guest_context(host, parsed)
-        text = sanitize_visible_narrative(decode_dialogue_output(
-            raw, present_npc_ids=current_scene_npc_ids(host) or set(), guest_speaker_ids=guest_ids
-        ))
+        text = sanitize_visible_narrative(
+            decode_dialogue_output(
+                raw,
+                present_npc_ids=current_scene_npc_ids(host) or set(),
+                guest_speaker_ids=guest_ids,
+            )
+        )
         if not text.strip():
             raise ValueError("对话正文没有有效的公开文本")
         # 校验边界统一：在场（decode 已验）还必须身份可解析，不得下游静默降级。
@@ -64,17 +72,15 @@ def emit_structured_dialogue(host, raw, parser, *, finish_reason, log_error, rep
             if isinstance(block, SpeechBlock) and block.speaker_id not in guest_ids:
                 if not is_valid_npc(block.speaker_id):
                     raise ValueError(f"发言者身份无法解析：{block.speaker_id}")
-        # 归属疑点：含成段直接台词却零 speech。只触发一次有界修复，不播出草稿；
-        # 修复名额用尽时接受原文（fail-open），由定稿结构落账。
+        # 归属疑点：任何 narration 块含成段直接台词（含无引号直呼）。先抛给
+        # finish 做一次有界语义复核，复核确认纯旁白才放行，复核修不了就
+        # fail-closed；不播出未验证归属的草稿。复核预算独立于格式修复。
         if (
-            allow_suspicion_repair
-            and (current_scene_npc_ids(host) or set())
-            and has_unattributed_quoted_dialogue(parsed)
+            not getattr(host, "_attribution_review_used", False)
+            and ((current_scene_npc_ids(host) or set()) or guest_ids)
+            and narration_attribution_suspicion(parsed)
         ):
-            raise ValueError(
-                "疑似把人物直接台词写进了 narration；请将 NPC 台词拆入 speech 块并给出"
-                " speaker_id（纸条文字、回忆引文、转述可保留 narration）"
-            )
+            raise AttributionSuspicion(parsed)
         # 修复回合的 pre-emit 复读拦截：必须在任何 on_narrative/on_speaker_segment
         # 回调之前判定，事后 raise 拦不住已经展示给玩家的旧回复。
         replay_guard = getattr(host, "_dialogue_repair_guard", None)
@@ -85,9 +91,11 @@ def emit_structured_dialogue(host, raw, parser, *, finish_reason, log_error, rep
                 raise ValueError("修复结果整段复用上一轮叙事")
     except ValueError as exc:
         log_error(f"模型结构化对话无效：{exc}")
-        if report_error:
+        if report_error and not isinstance(exc, AttributionSuspicion):
             if "复用上一轮叙事" in str(exc):
-                host.cb.on_error("本轮叙述修复失败：修复结果与上一轮相同，未提交任何内容；请重试本轮。")
+                host.cb.on_error(
+                    "本轮叙述修复失败：修复结果与上一轮相同，未提交任何内容；请重试本轮。"
+                )
             else:
                 host.cb.on_error("模型对话格式或发言者无效，请重试本轮。")
         raise ModelResponseError("模型结构化对话未通过校验") from exc
@@ -114,16 +122,103 @@ def emit_structured_dialogue(host, raw, parser, *, finish_reason, log_error, rep
     return text
 
 
+def _allowed_speaker_briefs(host, output, present: set[str], guest_ids: set[str]) -> list[dict]:
+    """复核请求里的合法发言者名单：在场正式 NPC + 已登记/本轮声明的临时身份。"""
+    try:
+        world = host.context.world_store.load()
+    except Exception:
+        world = {}
+    briefs = [
+        {"id": npc.get("id"), "name": npc.get("name")}
+        for npc in world.get("npcs", []) or []
+        if isinstance(npc, dict) and npc.get("id") in present
+    ]
+    from src.gameplay.guest_speakers import guest_registry
+
+    registry = guest_registry(world)
+    declared = {guest.speaker_id: guest.display_name for guest in output.guest_speakers}
+    for guest_id in sorted(guest_ids):
+        name = (
+            declared.get(guest_id) or (registry.get(guest_id) or {}).get("display_name") or guest_id
+        )
+        briefs.append({"id": guest_id, "name": name})
+    return briefs
+
+
+def _run_attribution_review(
+    streamer, model, raw, parser, *, finish_reason, suspicion, report_error
+) -> str:
+    """一次有界归属复核：确认纯旁白则放行原稿，给出合法修正则播出修正稿。
+
+    复核失败/修正稿不过校验：fail-closed，不播出也不提交可疑草稿。
+    """
+    host = streamer.host
+    host._attribution_review_used = True
+    from src.ai.model.dialogue_attribution import (
+        AttributionReviewError,
+        run_attribution_review,
+    )
+
+    present = current_scene_npc_ids(host) or set()
+    guest_ids, _declared, _scene_id = _guest_context(host, suspicion.output)
+    try:
+        fixed = run_attribution_review(
+            host,
+            model,
+            suspicion.output,
+            present_npc_ids=present,
+            guest_speaker_ids=guest_ids,
+            allowed_speakers=_allowed_speaker_briefs(host, suspicion.output, present, guest_ids),
+            log_error=streamer.log_error,
+        )
+    except AttributionReviewError as exc:
+        host.cb.on_error("本轮叙述的人物归属确认失败，请重试本轮。")
+        raise ModelResponseError("对话归属复核未能给出合法修正") from exc
+    candidate = (
+        raw if fixed is None else json.dumps(fixed.model_dump(mode="json"), ensure_ascii=False)
+    )
+    return emit_structured_dialogue(
+        host,
+        candidate,
+        parser,
+        finish_reason=finish_reason,
+        log_error=streamer.log_error,
+        report_error=report_error,
+    )
+
+
 def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, request_options):
     """One bounded protocol repair, after the previous LLM slot is released."""
     host = streamer.host
     if request_options.pop("required_tool", False):
         host.cb.on_error("战斗行动尚未生成执行请求，请重试本轮。")
         raise ModelResponseError("模型未提交必需的战斗工具请求")
-    repair_allowed = request_options["retry_on_empty"] and finish_reason not in {"transport_error", "length", "content_filter"}
+    repair_allowed = request_options["retry_on_empty"] and finish_reason not in {
+        "transport_error",
+        "length",
+        "content_filter",
+    }
     try:
-        return emit_structured_dialogue(host, raw, parser, finish_reason=finish_reason, log_error=streamer.log_error, report_error=not repair_allowed, allow_suspicion_repair=repair_allowed), []
+        return emit_structured_dialogue(
+            host,
+            raw,
+            parser,
+            finish_reason=finish_reason,
+            log_error=streamer.log_error,
+            report_error=not repair_allowed,
+        ), []
     except ModelResponseError as exc:
+        suspicion = exc.__cause__ if isinstance(exc.__cause__, AttributionSuspicion) else None
+        if suspicion is not None and not getattr(host, "_attribution_review_used", False):
+            return _run_attribution_review(
+                streamer,
+                model,
+                raw,
+                parser,
+                finish_reason=finish_reason,
+                suspicion=suspicion,
+                report_error=not repair_allowed,
+            ), []
         if not repair_allowed:
             raise
         validation_error = str(exc.__cause__ or exc)
@@ -144,15 +239,27 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
     if guard:
         host._dialogue_repair_guard = guard
     try:
-        return streamer.stream(model, **(request_options | {"messages_override": messages,
-            "system_overlay": None, "system_prompt_override": None, "enable_tools": False,
-            "temperature": 0.0, "retry_on_empty": False}))
+        return streamer.stream(
+            model,
+            **(
+                request_options
+                | {
+                    "messages_override": messages,
+                    "system_overlay": None,
+                    "system_prompt_override": None,
+                    "enable_tools": False,
+                    "temperature": 0.0,
+                    "retry_on_empty": False,
+                }
+            ),
+        )
     finally:
         if guard:
             try:
                 del host._dialogue_repair_guard
             except AttributeError:
                 pass
+
 
 _INTERNAL_NARRATIVE_PATTERNS = (
     re.compile(r"(?:让我|我)?先确认(?:一下)?当前(?:的)?信息边界[。.!！]?\s*"),

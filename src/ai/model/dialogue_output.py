@@ -37,18 +37,23 @@ class GuestSpeakerBlock(BaseModel):
 
 class DialogueOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    segments: list[Annotated[NarrationBlock | SpeechBlock, Field(discriminator="kind")]] = Field(min_length=1, max_length=100)
+    segments: list[Annotated[NarrationBlock | SpeechBlock, Field(discriminator="kind")]] = Field(
+        min_length=1, max_length=100
+    )
     introduced_npc_ids: list[str] = Field(default_factory=list, max_length=30)
     choices: list[str] = Field(default_factory=list, max_length=8)
     guest_speakers: list[GuestSpeakerBlock] = Field(default_factory=list, max_length=4)
 
 
 DIALOGUE_INSTRUCTION = """本请求正文必须是 JSON 对象，不输出小说体纯文本、Markdown 代码围栏或发言标签。
-格式：{"segments":[{"kind":"narration","text":"旁白"},{"kind":"speech","speaker_id":"在场 NPC 的稳定 id","text":"该人物的直接台词"}],"introduced_npc_ids":[],"choices":[],"guest_speakers":[]}
+格式：{"segments":[{"kind":"narration","text":"他放下茶杯。"},{"kind":"speech","speaker_id":"在场 NPC 的稳定 id","text":"“这件事，请您另问别人。”"}],"introduced_npc_ids":[],"choices":[],"guest_speakers":[]}
 旁白块禁止 speaker_id；台词块必须给出 speaker_id，只能来自当前场景在场人物或已声明的临时人物。
 人物说出的直接台词一律放进 speech 块；只有转述、纸条/文件文字、回忆引文、玩家自己的话才留在 narration。
 每次换说话人必须新建 speech 块；姓名、头像和资源由平台按 id 匹配，不要自行输出资源。
-台词正文不需要外围引号；动作神态放 narration 块，不能塞入别人的 speech 块。
+所有当场说出的直接台词都必须保留成对中文双引号“……”（标点属于 text 字符串内容），即使已有 speech 身份和人物气泡也不能省略。
+每个 speech 块只放该人物带引号的台词，动作神态另放 narration 块；换人或穿插动作后重新分块，台词引号在各块内闭合。
+引号用于保证玩家阅读原文时仍能区分台词与旁白；speaker_id 用于人物气泡，两者必须同时提供，不能互相替代。
+修复、重新分段和重新叙述时保留已有台词引号；旧历史缺少引号不代表本轮可以省略，不能把直接台词改成无引号旁白或转述来规避人物归属。
 introduced_npc_ids 只填本轮实际首次介绍的在场人物；只是谈及的人物不填。
 choices 是供玩家选择的后续行动文本数组，或空数组；不得在 narration 中另写选项菜单。
 guest_speakers 只用于本轮首次开口的未登记人物（伙计、路人等未报姓名者）：
@@ -99,9 +104,7 @@ def narrative_history_to_dialogue_json(text: str) -> str:
             segments.append({"kind": "narration", "text": narration})
         speech = match.group(2).strip()
         if speech:
-            segments.append(
-                {"kind": "speech", "speaker_id": match.group(1), "text": speech}
-            )
+            segments.append({"kind": "speech", "speaker_id": match.group(1), "text": speech})
         cursor = match.end()
     tail = body[cursor:].strip()
     if tail:
@@ -116,6 +119,7 @@ def narrative_history_to_dialogue_json(text: str) -> str:
         },
         ensure_ascii=False,
     )
+
 
 _RESERVED_TAG = re.compile(r"(?:【|\[)(?:/?npc|intro)(?::|[】\]])")
 
@@ -157,7 +161,11 @@ def decode_dialogue_output(
         if isinstance(block, SpeechBlock):
             if block.speaker_id not in allowed_speakers:
                 raise ValueError(f"发言者不在当前场景：{block.speaker_id}")
-            parts.extend(f"【npc:{block.speaker_id}】{paragraph}【/npc】" for paragraph in block.text.split("\n\n") if paragraph.strip())
+            parts.extend(
+                f"【npc:{block.speaker_id}】{paragraph}【/npc】"
+                for paragraph in block.text.split("\n\n")
+                if paragraph.strip()
+            )
         else:
             parts.append(block.text)
     for npc_id in dict.fromkeys(output.introduced_npc_ids):
@@ -168,23 +176,56 @@ def decode_dialogue_output(
         if any(not choice.strip() or _RESERVED_TAG.search(choice) for choice in output.choices):
             raise ValueError("行动选项为空或包含保留协议标签")
         choices = [re.sub(r"\s+", " ", choice).strip() for choice in output.choices]
-        parts.append("**你可以——**\n" + "\n".join(f"{index}. {choice}" for index, choice in enumerate(choices, 1)))
+        parts.append(
+            "**你可以——**\n"
+            + "\n".join(f"{index}. {choice}" for index, choice in enumerate(choices, 1))
+        )
     return "\n\n".join(parts)
 
 
-# 归属疑点只触发一次有界的模型分段修复，规则自身永不指派说话人：
-# 明显成对的成段引语完全可能是纸条文字或回忆引文，由模型按本轮事实判断。
+# 归属疑点只触发一次有界的语义复核（dialogue_attribution），规则自身永不指派
+# 说话人：成对引语与无引号的第二人称直呼段落都只是“疑点”，归属由复核模型给出、
+# 平台按文本保全与身份表校验。
 _SUSPICION_MIN_QUOTE_CHARS = 12
+_SECOND_PERSON = re.compile(r"[您你](?!们?的)")
+_DIRECT_ENDING = re.compile(r"[？！]\s*$|—+\s*$")
+_VOCATIVE_START = re.compile(
+    r"^(?:这位|那位)?(?:先生|女士|小姐|夫人|伙计|朋友|老板|各位|诸位|两位)"
+)
 
 
-def has_unattributed_quoted_dialogue(output: DialogueOutput) -> bool:
-    """输出零 speech 且 narration 含成段成对引语时视为归属可疑。"""
+def _paragraph_sounds_like_direct_speech(paragraph: str) -> bool:
+    """无引号直接台词疑点：独立段落里的第二人称直呼/呼语提问。
+
+    只用于触发复核，不构成归属；纯叙述（“你推开门”“他看向你”）不命中。
+    """
+    text = paragraph.strip()
+    if len(text) < 6:
+        return False
+    if _SECOND_PERSON.search(text) and _DIRECT_ENDING.search(text):
+        return True
+    return bool(_VOCATIVE_START.match(text) and re.search(r"[？！]", text))
+
+
+class AttributionSuspicion(ValueError):
+    """narration 疑似混入直接台词；携带解析结果供归属复核使用。"""
+
+    def __init__(self, output: DialogueOutput):
+        super().__init__("疑似把人物直接台词写进了 narration，需要归属复核")
+        self.output = output
+
+
+def narration_attribution_suspicion(output: DialogueOutput) -> bool:
+    """任何 narration 块含成段引语或无引号直呼段落（即使已有别的 speech）。"""
     from src.gameplay.speaker_parser import _paired_quoted_speech
 
-    if any(isinstance(block, SpeechBlock) for block in output.segments):
-        return False
     for block in output.segments:
+        if isinstance(block, SpeechBlock):
+            continue
         for quote in _paired_quoted_speech(block.text):
             if len(quote.body.strip()) >= _SUSPICION_MIN_QUOTE_CHARS:
+                return True
+        for paragraph in re.split(r"\n\s*\n", block.text):
+            if _paragraph_sounds_like_direct_speech(paragraph):
                 return True
     return False

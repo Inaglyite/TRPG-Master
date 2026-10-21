@@ -44,9 +44,7 @@ def guest_allowed(world: dict, guest_id: str, scene_id: str | None) -> bool:
 
 def registered_guest_ids(world: dict, scene_id: str | None) -> set[str]:
     return {
-        guest_id
-        for guest_id in guest_registry(world)
-        if guest_allowed(world, guest_id, scene_id)
+        guest_id for guest_id in guest_registry(world) if guest_allowed(world, guest_id, scene_id)
     }
 
 

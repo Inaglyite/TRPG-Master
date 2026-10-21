@@ -224,6 +224,8 @@ def _prepare_turn_inner(
     engine.__dict__["_capacity_rejected_turn"] = False
     # 供流式发言归属（model_stream_helpers）做玩家台词守卫。
     engine.__dict__["_turn_user_content"] = user_content
+    # 归属复核预算按回合重置（复核独立于格式修复名额）。
+    engine.__dict__.pop("_attribution_review_used", None)
     if user_content:
         original_user_content = user_content
         engine._player_turn_count += 1
