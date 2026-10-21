@@ -38,7 +38,8 @@ def npc_lookup(world: dict, npc_id: str, *, catalog: dict | None = None) -> dict
     """按 id 查 NPC 的展示信息：{id, name, avatar_file}；名称以权威 NPC 表为准。
 
     模组声明了 display_name（公开称呼/艺名）时，玩家可见的名字一律使用它，
-    真名不进入任何玩家可见载荷。
+    真名不进入任何玩家可见载荷。临时展示身份（guest_speakers）只有公开称呼，
+    永远没有头像。
     """
     if not npc_id:
         return None
@@ -53,6 +54,13 @@ def npc_lookup(world: dict, npc_id: str, *, catalog: dict | None = None) -> dict
     if name is None:
         name = str(asset_entry.get("label") or "") or None
     if name is None:
+        from src.gameplay.guest_speakers import guest_registry
+
+        guest = guest_registry(world).get(npc_id)
+        if guest is not None:
+            name = str(guest.get("display_name") or "") or None
+            asset_entry = {}
+    if name is None:
         return None
     return {
         "id": npc_id,
@@ -62,27 +70,38 @@ def npc_lookup(world: dict, npc_id: str, *, catalog: dict | None = None) -> dict
 
 
 def npc_id_known(world: dict, npc_id: str) -> bool:
-    """⟦npc:id⟧ 发言标签校验：id 必须存在于权威 NPC 表或 asset_map。"""
+    """⟦npc:id⟧ 发言标签校验：id 必须存在于权威 NPC 表、asset_map 或临时身份表。"""
     if not npc_id:
         return False
     for npc in world.get("npcs", []) or []:
         if str(npc.get("id") or "") == npc_id:
             return True
-    return npc_id in ((world.get("asset_map") or {}).get("npcs") or {})
+    if npc_id in ((world.get("asset_map") or {}).get("npcs") or {}):
+        return True
+    from src.gameplay.guest_speakers import guest_registry
+
+    return npc_id in guest_registry(world)
 
 
 def speaker_payload(npc_id: str, engine) -> dict | None:
-    """构建出场身份；它不读取或修改 seen_handouts，不受人物线索解锁约束。"""
+    """构建出场身份；它不读取或修改 seen_handouts，不受人物线索解锁约束。
+
+    世界身份读取与可选初始资源清单解析分开容错：清单损坏只意味着少一份
+    资产候选，绝不能连世界状态里完整的姓名一起抹掉。
+    """
     if engine is None or not npc_id:
         return None
     try:
         world = engine.context.world_store.load()
-        catalog = {}
-        initial = engine.context.initial_state_file
-        if initial.is_file():
-            catalog = json.loads(initial.read_text(encoding="utf-8"))
     except Exception:
         return None
+    catalog = {}
+    try:
+        initial = engine.context.initial_state_file
+        if initial is not None and initial.is_file():
+            catalog = json.loads(initial.read_text(encoding="utf-8"))
+    except Exception:
+        catalog = {}
     profile = npc_lookup(world, npc_id, catalog=catalog)
     if not profile:
         return None

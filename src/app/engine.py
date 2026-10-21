@@ -50,6 +50,12 @@ from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 from src.app.logger import tier_inject as log_tier
 from src.app.runtime import RuntimeContext
+from src.app.turn_rewrite import (
+    assert_same_speaker_sequence,
+    build_rewrite_payload,
+    normalize_narrative_for_match,
+    rewrite_contract,
+)
 from src.gameplay import investigators as investigator_roster
 from src.gameplay.action_checks import infer_scene_transition
 from src.gameplay.action_resolution import (
@@ -65,6 +71,7 @@ from src.gameplay.discovery import DiscoveryMatch, match_discovery_rules, prefer
 from src.gameplay.encounters import SceneEncounterResolution, resolve_scene_encounters
 from src.gameplay.endings import eligible_endings
 from src.gameplay.escalation_preflight import resolve_player_escalation
+from src.gameplay.guest_speakers import commit_guest_declarations
 from src.gameplay.handouts import matching_handouts
 from src.gameplay.npc_conversations import commit_npc_conversations
 from src.gameplay.npc_speaker_aliases import build_npc_speaker_aliases
@@ -556,38 +563,10 @@ class GameEngine:
             raise ValueError("该回合没有可改写的叙事正文")
 
         stored_messages, _snapshot = self.turn_journal.load_artifacts(turn_id)
-
-        def clip(value: object, limit: int) -> str:
-            text = str(value or "")
-            return text if len(text) <= limit else text[: limit - 3] + "..."
-
-        recent_context = []
-        for message in stored_messages[:-1]:
-            role = message.get("role")
-            if role not in {"user", "assistant"}:
-                continue
-            recent_context.append({"role": role, "content": clip(message.get("content"), 1200)})
-        fixed_outcomes = [
-            {
-                "tool": item.get("name"),
-                "result": clip(item.get("output"), 1400),
-            }
-            for item in record.get("executed_tools", [])
-            if isinstance(item, dict) and item.get("name")
-        ]
-        rewrite_payload = {
-            "player_input": record.get("player_input"),
-            "recent_context": recent_context[-6:],
-            "fixed_outcomes": fixed_outcomes,
-            "original_narrative": clip(original_body, 18000),
-            "fixed_choices_not_to_output": [
-                item.get("label")
-                for item in record.get("choices", [])
-                if isinstance(item, dict) and item.get("label")
-            ],
-        }
+        rewrite_payload = build_rewrite_payload(record, stored_messages, original_body)
+        structured = getattr(self, "_structured_dialogue", False) is True
         rewrite_messages = [
-            {"role": "system", "content": _REWRITE_SYSTEM_CONTRACT},
+            {"role": "system", "content": rewrite_contract(_REWRITE_SYSTEM_CONTRACT, structured=structured)},
             {
                 "role": "user",
                 "content": json.dumps(
@@ -609,17 +588,28 @@ class GameEngine:
             temperature=0.85,
             messages_override=rewrite_messages,
         )
-        rewritten = narrative_body(sanitize_visible_narrative(rewritten)).strip()
+        rewritten_tagged = narrative_body(sanitize_visible_narrative(rewritten)).strip()
+        # 改写里声明的临时展示身份：先用声明集合放行解析，等世界版本校验过后再落账，
+        # 避免登记本身推高 revision 被误判成“改写期间世界状态变化”。
+        guest_decls = self.__dict__.pop("_turn_guest_speaker_decls", None) or []
+        declared_guest_ids = {str(d.get("speaker_id") or "") for d in guest_decls}
+        def rewrite_is_valid(npc_id: str) -> bool:
+            return npc_id in declared_guest_ids or self.is_valid_npc_id(npc_id)
         rewrite_segments, rewritten = parse_speaker_segments(
-            rewritten,
-            is_valid_npc=self.is_valid_npc_id,
+            rewritten_tagged,
+            is_valid_npc=rewrite_is_valid,
             on_unknown_npc=self.log_unknown_npc_speaker,
             speaker_aliases=None if getattr(self, "_structured_dialogue", False) else self.npc_speaker_aliases(),
         )
         if tool_calls or not rewritten:
             raise RuntimeError("模型没有返回有效的叙事改写")
+        # 改写不得丢失/串换人物归属：发言者 id 序列必须与已提交的回合一致。
+        assert_same_speaker_sequence(record, rewrite_segments)
         if self.context.world_store.revision != expected_revision:
             raise ValueError("改写期间世界状态发生变化，结果已丢弃")
+
+        # 改写里声明的临时展示身份落账（呈现元数据，与回合定稿同一通道）。
+        commit_guest_declarations(self, guest_decls)
 
         previous_messages = self.messages
         updated_messages = copy.deepcopy(self.messages)
@@ -627,9 +617,14 @@ class GameEngine:
         for message in reversed(updated_messages):
             if (
                 message.get("role") == "assistant"
-                and str(message.get("content") or "").strip() == original_narrative
+                and normalize_narrative_for_match(str(message.get("content") or ""))
+                == normalize_narrative_for_match(original_narrative)
             ):
-                message["content"] = rewritten
+                message["content"] = (
+                    rewritten_tagged
+                    if getattr(self, "_structured_dialogue", False) is True
+                    else rewritten
+                )
                 replaced = True
                 break
         if not replaced:

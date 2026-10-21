@@ -38,11 +38,20 @@ _HOUR_SPAN = re.compile(
 # （deepseek-flash）会把弯引号归一成 ASCII "，只认弯引号会让改写后的文本
 # 再次误触闸门。
 _QUOTED_DIALOGUE = re.compile(r'“[^”]*”|"[^"]*"|「[^」]*」|『[^』]*』|‘[^’]*’')
+# dialogue_v1 的结构化台词：speech 正文没有外围引号，必须按标签结构整段
+# 剔除——台词里的回忆/病程（“我三天前就告诉过他了”）不是本回合时间推进。
+_TAGGED_SPEECH = re.compile(r"【npc:[A-Za-z0-9_-]{1,48}】.*?【/npc】", re.S)
+_TAGGED_SPEECH_ID = re.compile(r"【npc:([A-Za-z0-9_-]{1,48})】")
 
 
 def _narration_text(narrative: str) -> str:
-    """剔除成对引号内的对白，只保留叙述层文本。"""
-    return _QUOTED_DIALOGUE.sub("", narrative)
+    """剔除结构化台词与成对引号对白，只保留叙述层文本。"""
+    return _QUOTED_DIALOGUE.sub("", _TAGGED_SPEECH.sub("", narrative))
+
+
+def _speech_id_sequence(text: str) -> list[str]:
+    """内部标签形式的发言者序列（定稿前已校验，这里不做任何猜测）。"""
+    return _TAGGED_SPEECH_ID.findall(text)
 
 _REWRITE_PROMPT = """你是叙事一致性校对。给出的守秘人叙事与本回合实际结算存在冲突。
 只做消除冲突的最小修改：
@@ -107,6 +116,7 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
 
         messages[0]["content"] = (
             "你是叙事一致性校对。消除指出的冲突，保留人物归属与已结算事实，不新增行动或线索。\n"
+            "每个发言段的 speaker_id 归属与先后顺序必须与原文完全一致。\n"
             + DIALOGUE_INSTRUCTION
         )
         payload["current_scene"] = engine.context.world_store.load().get("current_scene", {})
@@ -154,6 +164,10 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         )
     if not rewritten or len(rewritten) < len(narrative) * 0.3:
         log_game("叙事一致性重写结果过短，保留原文")
+        return narrative
+    if structured_dialogue and _speech_id_sequence(rewritten) != _speech_id_sequence(narrative):
+        # 校对不得丢失/串换人物归属：归属变化的重写一律保留原文。
+        log_game("叙事一致性重写改变了发言归属，保留原文")
         return narrative
     remaining = consistency_violations(rewritten, settled_minutes=settled)
     if remaining == violations:

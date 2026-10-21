@@ -1016,9 +1016,18 @@ def _finalize_turn(state: TurnState) -> dict:
         with _performance_span(engine, "narrative_consistency"):
             narrative = apply_narrative_consistency(engine, narrative)
 
-    # 【npc:id⟧ 发言标签权威解析：干净文本入消息历史与记录，
-    # 段结构（含发言者）持久化并推送给前端做发言单元渲染。
+    # 本轮声明的临时展示身份（伙计/路人）先落账再解析：定稿 parse 的
+    # is_valid_npc 校验以世界身份表为准，guest 必须先能被解析。
+    guest_decls = engine.__dict__.pop("_turn_guest_speaker_decls", None) or []
+    if guest_decls:
+        from src.gameplay.guest_speakers import commit_guest_declarations
+
+        commit_guest_declarations(engine, guest_decls)
+    # 【npc:id⟧ 发言标签权威解析：干净文本入回合记录，段结构（含发言者）
+    # 持久化并推送给前端做发言单元渲染；引擎消息历史在结构化模式下保留
+    # 标签正本（见 finalized_history_content），下一轮模型请求才能还原 speech。
     # 同一次解析顺带收集 【intro:id】 人物介绍标记（点标记，不进文本）。
+    tagged_narrative = narrative
     narrative_segments, narrative, intro_ids = _parse_final_narrative(engine, state, narrative)
     segment_dicts = [s.to_dict() for s in narrative_segments]
     if state.get("opening_turn") and not narrative.strip():
@@ -1029,7 +1038,18 @@ def _finalize_turn(state: TurnState) -> dict:
         commit_memory(segment_dicts)
 
     if narrative.strip():
-        engine.messages.append({"role": "assistant", "content": narrative.strip()})
+        from src.ai.model.dialogue_output import finalized_history_content
+
+        engine.messages.append(
+            {
+                "role": "assistant",
+                "content": finalized_history_content(
+                    tagged_narrative.strip(),
+                    narrative.strip(),
+                    structured=getattr(engine, "_structured_dialogue", False) is True,
+                ),
+            }
+        )
     else:
         log_error("空回合：模型未生成任何叙述或工具调用")
         engine.cb.on_error("守秘人陷入了沉思……")

@@ -65,13 +65,27 @@ def repair_messages(host, source: list[dict], raw: str, error: str) -> list[dict
     except AttributeError:
         world = {}
     present = set(current_scene_npc_ids(host) or set())
+    allowed_speakers = [{"id": npc["id"], "name": npc.get("name"), "visible_tags": npc.get("visible_tags", [])}
+                        for npc in world.get("npcs", []) if npc.get("id") in present]
+    # 已登记的临时展示身份（伙计/路人）同样是合法发言者。
+    from src.gameplay.guest_speakers import guest_allowed, guest_registry
+
+    scene_id = str((world.get("current_scene") or {}).get("id") or "")
+    guest_ids = {
+        guest_id
+        for guest_id in guest_registry(world)
+        if guest_allowed(world, guest_id, scene_id)
+    }
+    allowed_speakers += [
+        {"id": guest_id, "name": guest_registry(world)[guest_id].get("display_name"), "visible_tags": []}
+        for guest_id in sorted(guest_ids)
+    ]
     return [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps({
         "turn_facts_and_receipts": facts,
         "previous_narrative": previous,
         "current_scene": {key: value for key, value in (world.get("current_scene") or {}).items()
                           if key in {"id", "name", "description", "npcs_present"}},
-        "allowed_speakers": [{"id": npc["id"], "name": npc.get("name"), "visible_tags": npc.get("visible_tags", [])}
-                             for npc in world.get("npcs", []) if npc.get("id") in present],
-        "allowed_speaker_ids": sorted(present),
+        "allowed_speakers": allowed_speakers,
+        "allowed_speaker_ids": sorted(present | guest_ids),
         "invalid_output": raw, "validation_error": error[:1200],
     }, ensure_ascii=False)}]

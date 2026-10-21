@@ -18,6 +18,7 @@ let runtimeRoot = "";
 let backend: ChildProcess | null = null;
 let provider: Server | null = null;
 let serverLog = "";
+let attributionRepairCalls = 0;
 
 test.beforeAll(async () => {
   runtimeRoot = mkdtempSync(join(tmpdir(), "trpg-dialogue-e2e-"));
@@ -80,7 +81,67 @@ test.beforeAll(async () => {
         body,
         "雨幕笼罩着阿卡姆。你在办公室里准备开始调查。",
       );
-      if (latest.includes("[出发前过渡回合")) {
+      const systemPrompt = String(wire.messages?.[0]?.content || "");
+      if (systemPrompt.includes("你负责修复本轮对话")) {
+        // 归属修复请求：按允许人物给出正确的 speech 结构
+        attributionRepairCalls += 1;
+        content = JSON.stringify({
+          segments: [
+            { kind: "narration", text: "苏晚晴叹了口气，把钢笔放下。" },
+            {
+              kind: "speech",
+              speaker_id: "su",
+              text: "侦探也好，巡捕也罢，洋先生的事我担不起。",
+            },
+          ],
+          introduced_npc_ids: [],
+          choices: [],
+        });
+      } else if (
+        latest.includes("追问失踪者的下落") ||
+        body.includes("追问失踪者的下落")
+      ) {
+        // 故意的缺陷输出：成段直接台词全部塞进 narration
+        content = JSON.stringify({
+          segments: [
+            {
+              kind: "narration",
+              text: "苏晚晴叹了口气。“侦探也好，巡捕也罢，洋先生的事我担不起。”她把钢笔放下。“您要真想知道，去问洋人自己的圈子。”",
+            },
+          ],
+          introduced_npc_ids: [],
+          choices: [],
+        });
+      } else if (body.includes("再喝一杯")) {
+        // 已登记的临时人物：不再声明，直接复用稳定 id
+        content = JSON.stringify({
+          segments: [
+            {
+              kind: "speech",
+              speaker_id: "guest_clerk_1",
+              text: "稍等，这就来。",
+            },
+          ],
+          introduced_npc_ids: [],
+          choices: [],
+        });
+      } else if (body.includes("问伙计这盘子多少钱")) {
+        content = JSON.stringify({
+          segments: [
+            { kind: "narration", text: "柜台后的伙计擦着盘子。" },
+            {
+              kind: "speech",
+              speaker_id: "guest_clerk_1",
+              text: "二位看点什么？这盘子是正经货。",
+            },
+          ],
+          introduced_npc_ids: [],
+          choices: [],
+          guest_speakers: [
+            { speaker_id: "guest_clerk_1", display_name: "伙计" },
+          ],
+        });
+      } else if (latest.includes("[出发前过渡回合")) {
         content = JSON.stringify({
           segments: [
             { kind: "narration", text: "你仍在报馆，伊芙琳等待你安排。" },
@@ -280,4 +341,106 @@ test("真实后端：过渡与抵达分两回合，三位人物姓名/头像正�
     { timeout: 30000 },
   );
   await expect(page.locator(".header-scene-name")).toHaveText("豫园藏宝楼");
+});
+
+async function startDialogueWorld(page: import("@playwright/test").Page) {
+  await page.goto(`${baseUrl}/?mode=local`);
+  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30000 });
+  await page.locator(".module-select-trigger").click();
+  await page.getByRole("option", { name: /猩红文档/ }).click();
+  await page.locator("#btn-start").click();
+  await page.locator("#btn-character-confirm").click();
+  await expect(page.getByText("雨幕笼罩着阿卡姆").first()).toBeVisible({
+    timeout: 60000,
+  });
+  await expect(page.locator("#user-input")).toBeEnabled();
+  const worldId = await page.evaluate(
+    () => localStorage.getItem("trpg-active-world-id") || "",
+  );
+  prepareDialogueWorld(worldId);
+}
+
+async function reloadFromSave(page: import("@playwright/test").Page) {
+  await page.reload();
+  await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30000 });
+  const continueButton = page.locator("#btn-continue");
+  await expect(continueButton).toBeVisible({ timeout: 30000 });
+  await continueButton.click();
+  await page
+    .getByRole("dialog", { name: "从存档开始" })
+    .getByRole("button", { name: "读取", exact: true })
+    .first()
+    .click();
+}
+
+test("真实后端：临时伙计有气泡与徽章，读档与分支后身份保持", async ({
+  page,
+}) => {
+  test.setTimeout(120000);
+  await startDialogueWorld(page);
+  await page.locator("#user-input").fill("问伙计这盘子多少钱");
+  await page.locator("#user-input").press("Enter");
+  const clerk = page
+    .locator(".speech-unit")
+    .filter({ hasText: "这盘子是正经货" })
+    .last();
+  await expect(clerk.locator(".speech-name")).toHaveText("伙计");
+  // 未登记人物没有头像：姓名首字徽章，气泡仍在
+  await expect(clerk.locator(".avatar-fallback")).toHaveText("伙");
+  await expect(clerk.locator("img")).toHaveCount(0);
+  await expect(page.locator("#user-input")).toBeEnabled();
+
+  await page.locator("#user-input").fill("再喝一杯");
+  await page.locator("#user-input").press("Enter");
+  const clerkAgain = page
+    .locator(".speech-unit")
+    .filter({ hasText: "稍等，这就来" })
+    .last();
+  await expect(clerkAgain.locator(".speech-name")).toHaveText("伙计");
+  await expect(page.locator("#user-input")).toBeEnabled();
+
+  // 读档：临时身份随世界状态持久化，读取不需要任何模型调用
+  await reloadFromSave(page);
+  await expect(
+    page
+      .locator(".speech-unit")
+      .filter({ hasText: "稍等，这就来" })
+      .last()
+      .locator(".speech-name"),
+  ).toHaveText("伙计", { timeout: 30000 });
+  await expect(
+    page
+      .locator(".speech-unit")
+      .filter({ hasText: "这盘子是正经货" })
+      .last()
+      .locator(".speech-name"),
+  ).toHaveText("伙计");
+
+  // 时间线分支：guest 身份随世界状态复制，分支里仍然是同一位伙计
+  const branchButton = page.locator(".turn-branch-button").last();
+  await expect(branchButton).toBeVisible();
+  await branchButton.click();
+  await expect(
+    page
+      .locator(".speech-unit")
+      .filter({ hasText: "这盘子是正经货" })
+      .last()
+      .locator(".speech-name"),
+  ).toHaveText("伙计", { timeout: 30000 });
+});
+
+test("真实后端：台词塞进旁白触发一次有界归属修复", async ({ page }) => {
+  test.setTimeout(120000);
+  attributionRepairCalls = 0;
+  await startDialogueWorld(page);
+  await page.locator("#user-input").fill("追问失踪者的下落");
+  await page.locator("#user-input").press("Enter");
+  // 修复后的权威结构：台词归属苏晚晴，不再是整段守秘人旁白
+  const su = page
+    .locator(".speech-unit")
+    .filter({ hasText: "洋先生的事我担不起" })
+    .last();
+  await expect(su.locator(".speech-name")).toHaveText("苏晚晴");
+  await expect(page.locator("#user-input")).toBeEnabled();
+  expect(attributionRepairCalls).toBe(1);
 });

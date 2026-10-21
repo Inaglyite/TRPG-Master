@@ -498,6 +498,74 @@ class TurnJournalTests(unittest.TestCase):
             engine.rewrite_turn(turn_id)
             self.assertIs(narrative_client, engine.client)
 
+    def test_structured_rewrite_preserves_speakers_and_tagged_history(self):
+        """结构化模式：历史正本带发言标签；改写载荷携带原 segments，归属不变才落账。"""
+        with tempfile.TemporaryDirectory() as temp:
+            engine = self.make_engine(Path(temp))
+            engine._structured_dialogue = True
+            engine.context.world_store.update(lambda world: world.update(
+                npcs=[{"id": "jin", "name": "金三爷"}],
+                current_scene={"id": "study", "name": "书房", "npcs_present": ["jin"]},
+            ))
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "书房安静。【npc:jin】这事我担不起。【/npc】\n\n**你可以——**\n1. 追问",
+                [],
+            )
+            engine.handle_action("询问金三爷")
+            turn_id = engine.turn_journal.latest_completed_id()
+            assert turn_id is not None
+            self.assertIn("【npc:jin】", engine.messages[-1]["content"])
+            record = engine.turn_journal.read(turn_id)
+            self.assertEqual(
+                ["jin"],
+                [s["npc_id"] for s in record["narrative_segments"] if s["kind"] == "speech"],
+            )
+
+            captured: dict = {}
+
+            def rewrite_stream(*args, **kwargs):
+                captured.update(kwargs)
+                return ("钟摆轻响。【npc:jin】这件事我担不起。【/npc】", [])
+
+            engine._stream_llm = rewrite_stream
+            result = engine.rewrite_turn(turn_id)
+            payload = json.loads(captured["messages_override"][1]["content"])
+            self.assertEqual("jin", payload["original_segments"][1]["npc_id"])
+            self.assertIn("【npc:jin】", engine.messages[-1]["content"])
+            self.assertIn("这件事我担不起", result["narrative"])
+            variant = engine.turn_journal.read(turn_id)
+            self.assertEqual(
+                ["jin"],
+                [s["npc_id"] for s in variant["narrative_segments"] if s["kind"] == "speech"],
+            )
+
+    def test_structured_rewrite_changing_speaker_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine = self.make_engine(Path(temp))
+            engine._structured_dialogue = True
+            engine.context.world_store.update(lambda world: world.update(
+                npcs=[{"id": "jin", "name": "金三爷"}, {"id": "su", "name": "苏晚晴"}],
+                current_scene={"id": "study", "name": "书房", "npcs_present": ["jin", "su"]},
+            ))
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "书房安静。【npc:jin】这事我担不起。【/npc】",
+                [],
+            )
+            engine.handle_action("询问金三爷")
+            turn_id = engine.turn_journal.latest_completed_id()
+            assert turn_id is not None
+            messages_before = list(engine.messages)
+
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "书房安静。【npc:su】这事他担不起。【/npc】",
+                [],
+            )
+            with self.assertRaisesRegex(RuntimeError, "发言归属"):
+                engine.rewrite_turn(turn_id)
+            self.assertEqual(messages_before, engine.messages)
+            record = engine.turn_journal.read(turn_id)
+            self.assertEqual(0, len(record.get("narrative_variants", [])))
+
     def test_rewrite_rejects_turn_after_world_has_advanced(self):
         with tempfile.TemporaryDirectory() as temp:
             engine = self.make_engine(Path(temp))
