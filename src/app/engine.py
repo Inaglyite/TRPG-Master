@@ -18,6 +18,7 @@ from src.ai.context.lorebook import (
     record_lore_usage,
     select_lore,
 )
+from src.ai.context.narrative_history import restore_tagged_speakers
 from src.ai.model.model_session import ModelSession
 from src.ai.model.model_settings import ModelSettings
 from src.ai.model.model_streamer import (
@@ -334,6 +335,9 @@ class GameEngine:
         history = (
             normalized[1:] if normalized and normalized[0].get("role") == "system" else normalized
         )
+        # 旧存档的 assistant 正文只有剥标签的干净文本；用回合记录里已验证的
+        # narrative_segments 还原发言标签正本（不匹配的旧内容保持原样）。
+        history = restore_tagged_speakers(history, getattr(self, "turn_journal", None))
         self.messages = [system_msg, *history]
         self._round_count = 0
         self._player_turn_count = 0
@@ -792,9 +796,9 @@ class GameEngine:
                 expected_revision=expected_revision,
             )
             self._emit_unseen_discovered_handouts()
-        # 保留当前 system prompt，恢复对话历史
+        # 保留当前 system prompt，恢复对话历史（旧存档用回合记录还原发言标签）
         system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
-        self.messages = [system_msg] + messages[1:]
+        self.messages = [system_msg] + restore_tagged_speakers(messages[1:], getattr(self, "turn_journal", None))
         # 重置记忆管理状态
         self._round_count = 0
         self._player_turn_count = 0

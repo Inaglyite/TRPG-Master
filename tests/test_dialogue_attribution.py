@@ -195,6 +195,54 @@ def test_legacy_unowned_history_stays_plain_narration():
     assert [block.kind for block in parsed.segments] == ["narration"]
 
 
+def test_restore_tagged_speakers_rebuilds_old_clean_save_history():
+    """旧存档只存干净正文：载入时用回合记录的 narrative_segments 精确回填标签。"""
+    from src.ai.context.narrative_history import restore_tagged_speakers
+
+    clean = "金三爷摇头。\n\n侦探也好，巡捕也罢，洋先生的事我担不起。"
+    segments = [
+        {"kind": "narration", "text": "金三爷摇头。"},
+        {"kind": "speech", "npc_id": "jin", "text": "侦探也好，巡捕也罢，洋先生的事我担不起。"},
+    ]
+    journal = NS(
+        list_completed=lambda limit=100: [
+            {"narrative": clean, "narrative_segments": segments},
+            {"narrative": "旧纯文本回合", "narrative_segments": []},
+        ]
+    )
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "assistant", "content": clean},
+        {"role": "assistant", "content": "旧纯文本回合"},
+        {"role": "assistant", "content": "对不上任何记录的内容"},
+    ]
+    out = restore_tagged_speakers(messages, journal)
+    assert "【npc:jin】" in out[1]["content"]
+    assert out[2]["content"] == "旧纯文本回合"  # 无 speech 的记录不动
+    assert out[3]["content"] == "对不上任何记录的内容"  # 匹配不上不臆造
+
+    # journal 故障：原样返回，不阻断载入
+    broken = NS(list_completed=lambda limit=100: (_ for _ in ()).throw(OSError("db down")))
+    assert restore_tagged_speakers(messages, broken) is messages
+
+    # 回填后的历史在请求线上还原为 speech 结构
+    host = make_host(JIN_REFUSAL)
+    host.messages = [out[0], out[1], {"role": "user", "content": "[玩家行动] 继续"}]
+    prepared = prepare_model_request(
+        host,
+        "test-model",
+        policy=host.policy,
+        system_overlay=None,
+        system_prompt_override=None,
+        enable_tools=False,
+        temperature=0.8,
+        messages_override=None,
+    )
+    restored = parse_dialogue_output(prepared.provider_kwargs["messages"][1]["content"])
+    assert [b.kind for b in restored.segments] == ["narration", "speech"]
+    assert restored.segments[1].speaker_id == "jin"
+
+
 # ---- B. 归属校验与有界语义复核（F1/F8，矩阵 7/8） -----------------------------
 
 ALL_NARRATION_QUOTED = wire(

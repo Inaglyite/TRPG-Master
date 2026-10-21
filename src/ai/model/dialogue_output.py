@@ -183,6 +183,23 @@ def decode_dialogue_output(
     return "\n\n".join(parts)
 
 
+def segments_to_tagged_text(segments: list[dict]) -> str:
+    """把已验证的段结构还原为内部标签正本（载入路径专用，不做任何猜测）。"""
+    parts: list[str] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text") or "")
+        if not text.strip():
+            continue
+        npc_id = str(segment.get("npc_id") or "")
+        if segment.get("kind") == "speech" and npc_id:
+            parts.append(f"【npc:{npc_id}】{text}【/npc】")
+        else:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
 # 归属疑点只触发一次有界的语义复核（dialogue_attribution），规则自身永不指派
 # 说话人：成对引语与无引号的第二人称直呼段落都只是“疑点”，归属由复核模型给出、
 # 平台按文本保全与身份表校验。

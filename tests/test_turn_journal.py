@@ -29,27 +29,30 @@ class TurnJournalTests(unittest.TestCase):
         module_dir.mkdir(parents=True, exist_ok=True)
         (module_dir / "module.md").write_text("# Test", encoding="utf-8")
         (module_dir / "world_state_initial.json").write_text(
-            json.dumps({
-                "module": "test-module",
-                "pc": {
-                    "name": "调查员",
-                    "hp": 10,
-                    "max_hp": 10,
-                    "san": 50,
-                    "max_san": 50,
-                    "inventory": [],
+            json.dumps(
+                {
+                    "module": "test-module",
+                    "pc": {
+                        "name": "调查员",
+                        "hp": 10,
+                        "max_hp": 10,
+                        "san": 50,
+                        "max_san": 50,
+                        "inventory": [],
+                    },
+                    "current_scene": {"id": "study", "name": "书房"},
+                    "scene_catalog": {},
+                    "npcs": [],
+                    "clues_found": {
+                        "investigation": [],
+                        "event": [],
+                        "task": [],
+                        "npc": [],
+                    },
+                    "combat_state": {"active": False},
                 },
-                "current_scene": {"id": "study", "name": "书房"},
-                "scene_catalog": {},
-                "npcs": [],
-                "clues_found": {
-                    "investigation": [],
-                    "event": [],
-                    "task": [],
-                    "npc": [],
-                },
-                "combat_state": {"active": False},
-            }, ensure_ascii=False),
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         context = RuntimeContext.create(
@@ -67,26 +70,38 @@ class TurnJournalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             journal = self.make_journal(Path(temp))
             turn_id = journal.begin(kind="action", player_input="检查书桌")
-            journal.append_event(turn_id, {
-                "type": "narrative_chunk",
-                "text": "你拉开",
-                "turn_id": "transient",
-                "seq": 3,
-            })
-            journal.append_event(turn_id, {
-                "type": "narrative_chunk",
-                "text": "抽屉。",
-            })
-            journal.append_event(turn_id, {
-                "type": "dice_result",
-                "summary": "侦查成功",
-                "roll_data": {"rolls": [12]},
-            })
-            journal.append_event(turn_id, {
-                "type": "handout",
-                "file": "desk.png",
-                "asset_data_uri": "data:image/png;base64,large-payload",
-            })
+            journal.append_event(
+                turn_id,
+                {
+                    "type": "narrative_chunk",
+                    "text": "你拉开",
+                    "turn_id": "transient",
+                    "seq": 3,
+                },
+            )
+            journal.append_event(
+                turn_id,
+                {
+                    "type": "narrative_chunk",
+                    "text": "抽屉。",
+                },
+            )
+            journal.append_event(
+                turn_id,
+                {
+                    "type": "dice_result",
+                    "summary": "侦查成功",
+                    "roll_data": {"rolls": [12]},
+                },
+            )
+            journal.append_event(
+                turn_id,
+                {
+                    "type": "handout",
+                    "file": "desk.png",
+                    "asset_data_uri": "data:image/png;base64,large-payload",
+                },
+            )
 
             record = journal.complete(
                 turn_id,
@@ -100,11 +115,13 @@ class TurnJournalTests(unittest.TestCase):
                 executed_tools=[{"name": "skill_check", "output": "private"}],
                 lore_entry_ids=["study-dust"],
                 diagnostics={
-                    "model_calls": [{
-                        "model": "story-model",
-                        "first_token_ms": 120,
-                        "elapsed_ms": 450,
-                    }],
+                    "model_calls": [
+                        {
+                            "model": "story-model",
+                            "first_token_ms": 120,
+                            "elapsed_ms": 450,
+                        }
+                    ],
                     "lorebook": {
                         "selected": [{"entry_id": "study-dust"}],
                         "token_estimate": 18,
@@ -503,10 +520,12 @@ class TurnJournalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             engine = self.make_engine(Path(temp))
             engine._structured_dialogue = True
-            engine.context.world_store.update(lambda world: world.update(
-                npcs=[{"id": "jin", "name": "金三爷"}],
-                current_scene={"id": "study", "name": "书房", "npcs_present": ["jin"]},
-            ))
+            engine.context.world_store.update(
+                lambda world: world.update(
+                    npcs=[{"id": "jin", "name": "金三爷"}],
+                    current_scene={"id": "study", "name": "书房", "npcs_present": ["jin"]},
+                )
+            )
             engine._stream_llm = lambda *_args, **_kwargs: (
                 "书房安静。【npc:jin】这事我担不起。【/npc】\n\n**你可以——**\n1. 追问",
                 [],
@@ -543,10 +562,12 @@ class TurnJournalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             engine = self.make_engine(Path(temp))
             engine._structured_dialogue = True
-            engine.context.world_store.update(lambda world: world.update(
-                npcs=[{"id": "jin", "name": "金三爷"}, {"id": "su", "name": "苏晚晴"}],
-                current_scene={"id": "study", "name": "书房", "npcs_present": ["jin", "su"]},
-            ))
+            engine.context.world_store.update(
+                lambda world: world.update(
+                    npcs=[{"id": "jin", "name": "金三爷"}, {"id": "su", "name": "苏晚晴"}],
+                    current_scene={"id": "study", "name": "书房", "npcs_present": ["jin", "su"]},
+                )
+            )
             engine._stream_llm = lambda *_args, **_kwargs: (
                 "书房安静。【npc:jin】这事我担不起。【/npc】",
                 [],
@@ -565,6 +586,40 @@ class TurnJournalTests(unittest.TestCase):
             self.assertEqual(messages_before, engine.messages)
             record = engine.turn_journal.read(turn_id)
             self.assertEqual(0, len(record.get("narrative_variants", [])))
+
+    def test_load_retags_old_save_history_from_journal(self):
+        """旧存档 messages 只存干净正文：读档时用回合记录的 narrative_segments 回填标签。"""
+        with tempfile.TemporaryDirectory() as temp:
+            engine = self.make_engine(Path(temp))
+            engine._structured_dialogue = True
+            engine.context.world_store.update(
+                lambda world: world.update(
+                    npcs=[{"id": "jin", "name": "金三爷"}],
+                    current_scene={"id": "study", "name": "书房", "npcs_present": ["jin"]},
+                )
+            )
+            engine._stream_llm = lambda *_args, **_kwargs: (
+                "书房安静。【npc:jin】这事我担不起。【/npc】\n\n**你可以——**\n1. 追问",
+                [],
+            )
+            engine.handle_action("询问金三爷")
+            engine.save("slot_000")
+            # 模拟旧存档：存档里的 assistant 正文只有剥掉标签的干净文本
+            messages_file = engine.context.saves_dir / "slot_000" / "messages.json"
+            saved = json.loads(messages_file.read_text(encoding="utf-8"))
+            for message in saved:
+                if message.get("role") == "assistant":
+                    message["content"] = (
+                        str(message["content"]).replace("【npc:jin】", "").replace("【/npc】", "")
+                    )
+            messages_file.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+
+            engine2 = self.make_engine(Path(temp))
+            engine2._structured_dialogue = True
+            engine2.prepare_session()
+            self.assertIsNotNone(engine2.load("slot_000"))
+            assistant = [m for m in engine2.messages if m.get("role") == "assistant"]
+            self.assertIn("【npc:jin】", assistant[-1]["content"])
 
     def test_rewrite_rejects_turn_after_world_has_advanced(self):
         with tempfile.TemporaryDirectory() as temp:

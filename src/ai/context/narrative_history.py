@@ -68,3 +68,50 @@ def enrich_public_history(records: Iterable[dict], engine: Any) -> list[dict]:
         for record in records
         if isinstance(record, dict)
     ]
+
+
+def restore_tagged_speakers(messages: list[dict], journal: Any) -> list[dict]:
+    """载入/恢复路径专用：用回合记录里已验证的 narrative_segments 还原
+    assistant 正文的发言标签正本。
+
+    旧存档的 messages 只存了剥标签的干净正文，直接喂给模型会把历史教成
+    “全是旁白”。回合 record 里的 narrative_segments 是定稿时已验证的结构，
+    按正文归一化精确匹配回填；匹配不上（摘要、压缩、旧纯文本）保持原样，
+    不臆造身份，不写回存档，不发起任何模型调用。
+    """
+    if journal is None:
+        return messages
+    try:
+        records = journal.list_completed(limit=10000)
+    except Exception:
+        return messages
+    from src.ai.model.dialogue_output import segments_to_tagged_text
+    from src.app.turn_rewrite import normalize_narrative_for_match
+
+    tagged_by_text: dict[str, str] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        segments = record.get("narrative_segments") or []
+        if not any(
+            isinstance(segment, dict)
+            and segment.get("kind") == "speech"
+            and segment.get("npc_id")
+            for segment in segments
+        ):
+            continue
+        key = normalize_narrative_for_match(str(record.get("narrative") or ""))
+        if key:
+            tagged_by_text[key] = segments_to_tagged_text(segments)
+    if not tagged_by_text:
+        return messages
+    restored: list[dict] = []
+    for message in messages:
+        if message.get("role") == "assistant":
+            tagged = tagged_by_text.get(
+                normalize_narrative_for_match(str(message.get("content") or ""))
+            )
+            if tagged:
+                message = dict(message, content=tagged)
+        restored.append(message)
+    return restored
