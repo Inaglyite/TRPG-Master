@@ -13,6 +13,11 @@
 
 ## 归档资料
 
+2026-10-21 的读档后分支按钮恢复验收冻结于
+`mid_product/trpg-master/2026-10-21-restore-turn-branches/`：前端1355项、后端相关61项，
+三个宽度的真实本地读档、创建分支并重读流程，零模型调用及按钮截图。
+`work/restore-turn-branches-20261020/ACCEPTANCE.md` 登记版本和纯文本旧存档的能力边界。
+
 2026-10-20 的读档加载反馈与玩家发言边界验收冻结于
 `mid_product/trpg-master/2026-10-20-save-load-feedback/`：01a3761d 后端版本的真实
 五回合专项和 33 回合猩红 legacy 主线 33/33、前端兼容修正、1352 项前端与 57 项

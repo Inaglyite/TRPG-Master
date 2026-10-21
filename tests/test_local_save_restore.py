@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from src.app.config import PROJECT_ROOT
 from src.app.runtime import RuntimeContext
-from src.storage.database import SaveSlot, new_id, session_scope
+from src.storage.database import SaveSlot, Snapshot, new_id, session_scope
 from src.storage.database_turn_journal import DatabaseTurnJournal
 from src.storage.persistence import save_game
 from src.storage.world_branches import WorldBranchService
@@ -62,6 +62,7 @@ def test_local_slot_restores_state_and_dialogue_without_model_or_resume_turn(tmp
         assert [p["phase"] for p in seen if p["type"] == "save_load_progress"] == ["restoring", "history", "character"]
         ws.send_json({"type": "save_load_timing", "request_id": "save-test-1", "total_ms": 100, "response_ms": 60, "presentation_ms": 40})
         assert loaded["restore_only"] is True
+        assert loaded["history_source"] == "saved_messages"
         assert len(loaded["history"]) == 1
         assert loaded["history"][0]["player_input"] == "检查大门"
         assert loaded["history"][0]["choices"][0]["label"] == "敲门"
@@ -110,7 +111,7 @@ def test_restore_exception_finishes_waiting_without_exposing_private_error():
 
 def test_journal_save_uses_saved_turn_boundary_instead_of_future_history(tmp_path):
     from src.app.engine import GameEngine
-    from src.web.local_save_restore import saved_public_history
+    from src.web.local_save_restore import _saved_history_projection, restore_local_save
 
     context = RuntimeContext.create("restore-boundary", "mansion_of_madness", project_root=PROJECT_ROOT, runtime_root=tmp_path)
     journal = DatabaseTurnJournal(context.world_dir, world_id=context.world_id, module_name=context.module_name)
@@ -128,6 +129,57 @@ def test_journal_save_uses_saved_turn_boundary_instead_of_future_history(tmp_pat
         engine = GameEngine(context)
     engine.prepare_session()
     engine.load("slot_002")
-    restored = saved_public_history(engine, "slot_002")
+    restored, source = _saved_history_projection(engine, "slot_002")
+    assert source == "turn_journal"
     assert [turn["turn_id"] for turn in restored] == [first]
     assert "存档之后" not in json.dumps(restored, ensure_ascii=False)
+    outbound = SimpleNamespace(send=AsyncMock())
+    asyncio.run(restore_local_save(
+        engine, outbound, "slot_002", reserve_turn=AsyncMock(return_value=True),
+        release_turn=Mock(), send_character_state=AsyncMock(),
+    ))
+    loaded = outbound.send.call_args.args[0]
+    assert loaded["history_source"] == "turn_journal"
+    assert [turn["turn_id"] for turn in loaded["history"]] == [first]
+
+
+def test_manual_and_branch_saves_keep_exact_journal_boundary_including_legacy_slots(tmp_path):
+    from src.ai.context.context_checkpoint import ContextCheckpoint
+    from src.app.engine import GameEngine
+    from src.web.local_save_restore import _saved_history_projection
+
+    context = RuntimeContext.create("branch-restoration", "mansion_of_madness", project_root=PROJECT_ROOT, runtime_root=tmp_path)
+    journal = DatabaseTurnJournal(context.world_dir, world_id=context.world_id, module_name=context.module_name)
+    messages = [{"role": "system", "content": "PRIVATE"}, {"role": "assistant", "content": "最初的书房。"}]
+    first = journal.begin(kind="action", player_input="查看书房")
+    journal.complete(first, messages=messages, world_state=context.world_store.load(), narrative="最初的书房。", choices=[])
+    checkpoint = ContextCheckpoint(session_id="private-session", session_epoch=1, sequence=0, surface_digest="0" * 64, source_turn_id=first)
+    save_game(messages, "slot_002", context=context, checkpoint=checkpoint)
+    with session_scope(context.database_url) as session:
+        slot = session.query(SaveSlot).filter_by(world_id=context.world_id, slot_key="slot_002").one()
+        snapshot = session.get(Snapshot, slot.snapshot_id)
+        assert snapshot.source_turn_id == first
+        snapshot.source_turn_id = None  # Manual saves produced before the fix.
+    with patch("src.app.engine.API_KEY", "offline-test"):
+        engine = GameEngine(context)
+    engine.prepare_session()
+    assert _saved_history_projection(engine, "slot_002")[1] == "turn_journal"
+
+    branch = WorldBranchService(PROJECT_ROOT, tmp_path).create(context, journal, first)
+    with patch("src.app.engine.API_KEY", "offline-test"):
+        branch_engine = GameEngine(branch.context)
+    branch_engine.prepare_session()
+    branch_engine.load("slot_000")
+    restored, source = _saved_history_projection(branch_engine, "slot_000")
+    assert source == "turn_journal"
+    assert [turn["turn_id"] for turn in restored] == [first]
+    with session_scope(branch.context.database_url) as session:
+        slot = session.query(SaveSlot).filter_by(world_id=branch.context.world_id, slot_key="slot_000").one()
+        snapshot = session.get(Snapshot, slot.snapshot_id)
+        assert snapshot.source_turn_id == first
+        snapshot.source_turn_id = None  # Initial branch saves from older builds.
+    assert _saved_history_projection(branch_engine, "slot_000")[1] == "turn_journal"
+    # A later text-only save must not be mistaken for the branch's root turn.
+    save_game(messages + [{"role": "assistant", "content": "之后未记入回合的文字。"}], "slot_003", context=branch.context)
+    branch_engine.load("slot_003")
+    assert _saved_history_projection(branch_engine, "slot_003")[1] == "saved_messages"

@@ -486,6 +486,7 @@ def save_game(
     *,
     context: RuntimeContext | None = None,
     checkpoint: ContextCheckpoint | Mapping[str, Any] | None = None,
+    source_turn_id: str | None = None,
 ) -> str:
     """保存游戏到指定槽位（默认自动存档）。返回槽位 ID。
 
@@ -558,6 +559,7 @@ def save_game(
         snapshot_row = Snapshot(
             id=new_id("snapshot"),
             world_id=context.world_id,
+            source_turn_id=source_turn_id or (checkpoint.source_turn_id if checkpoint else None),
             kind="save",
             revision=int(world_state.get("revision", 0)),
             state=world_state,

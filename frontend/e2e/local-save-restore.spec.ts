@@ -57,6 +57,7 @@ test.beforeAll(async () => {
       "-c",
       `
 from src.app.runtime import RuntimeContext
+from src.storage.database_turn_journal import DatabaseTurnJournal
 from src.storage.persistence import save_game
 for world, module, text in [
     ('save-first', 'mansion_of_madness', '读档验收：你停在保存时的大厅。'),
@@ -67,6 +68,14 @@ for world, module, text in [
         {'role': 'system', 'content': 'PRIVATE_KEEPER_PROMPT'},
         {'role': 'assistant', 'content': text + '\\n\\n**你可以——**\\n1. 查看四周\\n2. [自由行动] 你决定做什么？'},
     ], 'slot_000', context=context)
+    if world == 'save-first':
+        journal = DatabaseTurnJournal(context.world_dir, world_id=world, module_name=module)
+        messages = [{'role': 'system', 'content': 'PRIVATE_KEEPER_PROMPT'}, {'role': 'assistant', 'content': text}]
+        first = journal.begin(kind='opening', player_input=None)
+        journal.complete(first, messages=messages, world_state=context.world_store.load(), narrative=text, choices=[])
+        second = journal.begin(kind='action', player_input='检查书桌')
+        messages += [{'role': 'user', 'content': '[玩家行动] 检查书桌'}, {'role': 'assistant', 'content': '读档验收：你已检查书桌。'}]
+        journal.complete(second, messages=messages, world_state=context.world_store.load(), narrative='读档验收：你已检查书桌。', choices=[])
 `,
     ],
     { cwd: root, env, encoding: "utf8" },
@@ -126,7 +135,7 @@ test.afterAll(async () => {
 });
 
 for (const width of [1280, 939, 640]) {
-  test(`本地慢读档 ${width}px：立即反馈→进入游戏→换模组再读取，零模型调用`, async ({
+  test(`本地慢读档 ${width}px：恢复分支按钮→创建并重读分支→换模组，零模型调用`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -208,7 +217,46 @@ for (const width of [1280, 939, 640]) {
     await expect(page.locator("#messages")).not.toContainText(
       "PRIVATE_KEEPER_PROMPT",
     );
+    const branches = page.getByRole("button", {
+      name: "回到本次行动前并创建独立时间线分支",
+    });
+    await expect(branches).toHaveCount(2);
+    await page.locator("#messages .msg.gm").last().hover();
+    await expect(
+      page.locator("#messages .msg.gm").last().locator(".turn-message-actions"),
+    ).toHaveCSS("opacity", "1");
+    await page.waitForTimeout(1000);
     await page.screenshot({ path: join(runtime, `restored-${width}.png`) });
+    await branches.last().click();
+    await expect(page.locator("#messages")).not.toContainText("你已检查书桌");
+    await expect(branches).toHaveCount(1);
+    const initial = frames.find(
+      (frame) => frame.type === "loaded" && frame.world_id === "save-first",
+    );
+    const branched = frames.find((frame) => frame.type === "turn_branched");
+    expect(initial.history_source).toBe("turn_journal");
+    expect(branched.source_turn_id).toBe(initial.history[0].turn_id);
+    expect(branched.world_id).not.toBe("save-first");
+    // Return through the real start page and read the branch's automatic save.
+    // Its journal provenance and message-level buttons must survive again.
+    await page.locator("#btn-new").click();
+    await page.locator("#btn-continue").click();
+    await page
+      .locator('[data-adventure="save-first"]')
+      .getByRole("button", { name: "读取", exact: true })
+      .click();
+    await expect(page.locator(".save-load-overlay")).toBeVisible();
+    await expect(page.locator(".save-load-overlay")).toBeHidden();
+    await expect(branches).toHaveCount(1);
+    await expect(page.locator("#messages")).not.toContainText("你已检查书桌");
+    await page.locator("#messages .msg.gm").last().hover();
+    await expect(
+      page.locator("#messages .msg.gm").last().locator(".turn-message-actions"),
+    ).toHaveCSS("opacity", "1");
+    await page.waitForTimeout(1000);
+    await page.screenshot({
+      path: join(runtime, `branch-restored-${width}.png`),
+    });
     await page.locator("#btn-new").click();
     await page.locator(".module-select-trigger").click();
     await page.getByRole("option", { name: /猩红文档/ }).click();
@@ -227,16 +275,17 @@ for (const width of [1280, 939, 640]) {
       "另一份存档：你站在大学办公室。",
     );
     await expect(page.locator("#messages")).not.toContainText("读档验收");
+    await expect(branches).toHaveCount(0);
     expect(
       frames.filter((frame) => frame.type === "loaded" && frame.restore_only),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(
       frames.filter((frame) => frame.type === "gm_turn_start"),
     ).toHaveLength(0);
     expect(modelRequests).toBe(0);
     expect(errors).toEqual([]);
     const timings = sent.filter((frame) => frame.type === "save_load_timing");
-    expect(timings).toHaveLength(2);
+    expect(timings).toHaveLength(3);
     expect(timings.every((frame) => frame.total_ms >= 2600)).toBe(true);
     writeFileSync(
       join(runtime, `timing-${width}.json`),

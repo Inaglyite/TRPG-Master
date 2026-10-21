@@ -7,6 +7,12 @@
 本地 `/ws` 的 `save_load` 只恢复存档，不创建续团回合、不请求模型或历史摘要。
 成功帧为 `loaded {ok: true, restore_only: true, slot_id, world_id, module_name,
 count, history}`；角色状态随恢复下发，客户端收到确认后直接显示历史并开启行动。
+`history_source` 区分 `turn_journal` 与 `saved_messages`：前者保留真实回合 ID，
+客户端恢复每轮回复的分支按钮，仍从该行动的父回合创建独立时间线；纯文本投影
+使用显示 ID，不挂分支或重写按钮。读旧存档不自动获得重写当前最新回合的权限。
+手动存档保留上下文检查点的来源回合，新建分支的自动存档明确记录分叉回合。
+兼容旧手动存档的私有检查点；旧分支初始存档只有在保存消息与分叉回合逐项一致时
+才恢复该边界，不用最新回合或相似文本推断来源。
 客户端可附带 `request_id`（`save-` 前缀的受限关联标识）；服务端回传
 `save_load_progress {request_id, phase}`，阶段为 `restoring/history/character`。
 `loaded` 同时携带 `request_id` 和 `timings {restore_ms, history_ms,

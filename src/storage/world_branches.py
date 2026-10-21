@@ -225,7 +225,7 @@ class WorldBranchService:
                 module_name=source_context.module_name,
             )
             source_journal.clone_lineage_to(target_journal, turn_id)
-            save_game(messages, "slot_000", context=target_context)
+            save_game(messages, "slot_000", context=target_context, source_turn_id=turn_id)
             # 分支继承源世界的 Skill pin：源已有 pin 时直接复制（不读活
             # catalog）；源目录不可读、pin 失效或复制失败都必须让创建失败并
             # 进入下方清理。不能生成一个之后会按新磁盘独立 pin 的分支。

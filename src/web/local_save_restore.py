@@ -8,13 +8,14 @@ import math
 import re
 from time import perf_counter
 
+from src.ai.context.context_checkpoint import ContextCheckpoint
 from src.ai.context.history_compactor import AUTHORITY_MARKER
 from src.ai.context.narrative_history import enrich_public_history
 from src.ai.tools.tool_protocol import strip_tool_protocol
 from src.app.logger import get as get_logger
 from src.gameplay.choices import extract_action_choices
 from src.gameplay.speaker_parser import parse_segments
-from src.storage.database import SaveSlot, Snapshot, session_scope
+from src.storage.database import SaveSlot, Snapshot, World, session_scope
 from src.storage.database_store import StaleRevisionError
 from src.storage.turn_journal import TurnJournalError
 from src.web.asset_payload import SpeakerPayloadResolver, enrich_narrative_segments
@@ -69,11 +70,15 @@ def timing_request_id(value) -> str:
 
 
 def saved_public_history(engine, slot_id: str) -> list[dict]:
+    return _saved_history_projection(engine, slot_id)[0]
+
+
+def _saved_history_projection(engine, slot_id: str) -> tuple[list[dict], str]:
     """Project only public dialogue from the loaded slot, never future turns.
 
     Slots can predate the turn journal. Assistant prose is already public;
     system/control/tool messages and tool-call drafts must never reach the UI.
-    These display IDs deliberately confer no rewrite/branch authority.
+    Fallback text-only display IDs confer no rewrite/branch authority.
     """
     with session_scope(engine.context.database_url) as session:
         slot = session.query(SaveSlot).filter_by(
@@ -81,9 +86,32 @@ def saved_public_history(engine, slot_id: str) -> list[dict]:
         ).one_or_none()
         snapshot = session.get(Snapshot, slot.snapshot_id) if slot else None
         source_turn_id = snapshot.source_turn_id if snapshot else None
+        if not source_turn_id and slot and (slot.metadata_json or {}).get("context"):
+            try:
+                source_turn_id = ContextCheckpoint.from_mapping(slot.metadata_json["context"]).source_turn_id
+            except (TypeError, ValueError):
+                pass  # Invalid private metadata cannot grant branch authority.
+        branch_source = None
+        if not source_turn_id and slot:
+            world = session.get(World, engine.context.world_id)
+            branch_source = ((world.metadata_json or {}).get("branch") or {}).get("source_turn_id") if world else None
+            saved_messages = slot.messages or []
+    if not source_turn_id and branch_source:
+        try:
+            # Older branch auto-saves predate snapshot source pointers. Its
+            # branch root is usable only if the saved message history matches
+            # that exact committed turn; never substitute the latest turn.
+            branch_messages, _ = engine.turn_journal.load_artifacts(branch_source)
+            if saved_messages[1:] == branch_messages[1:]:
+                source_turn_id = branch_source
+        except TurnJournalError:
+            pass
     if source_turn_id:
         try:
-            return enrich_public_history(engine.turn_journal.public_history(source_turn_id), engine)
+            return (
+                enrich_public_history(engine.turn_journal.public_history(source_turn_id), engine),
+                "turn_journal",
+            )
         except TurnJournalError:
             pass  # Pre-journal/imported slots can only restore their saved prose.
     history = []
@@ -109,7 +137,7 @@ def saved_public_history(engine, slot_id: str) -> list[dict]:
             "choices": extract_action_choices(text),
         })
         player_input = None
-    return history
+    return history, "saved_messages"
 
 
 async def restore_local_save(
@@ -139,7 +167,7 @@ async def restore_local_save(
             return
         await progress("history")
         phase_start = perf_counter()
-        history = await asyncio.to_thread(saved_public_history, engine, slot_id)
+        history, history_source = await asyncio.to_thread(_saved_history_projection, engine, slot_id)
         timings["history_ms"] = round((perf_counter() - phase_start) * 1000)
         await progress("character")
         phase_start = perf_counter()
@@ -151,6 +179,7 @@ async def restore_local_save(
             "count": count, "restore_only": True,
             "world_id": engine.context.world_id,
             "module_name": engine.context.module_name, "history": history,
+            "history_source": history_source,
             "request_id": request_id, "timings": timings,
         })
         get_logger().info("SAVE_LOAD restored %s", json.dumps({"request_id": request_id, **timings}))

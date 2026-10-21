@@ -389,7 +389,10 @@ function requestTurnBranch(turnId: string) {
   safeSend(JSON.stringify({ type: "turn_branch_create", turn_id: turnId }));
 }
 
-function attachTurnActions(history: TurnHistoryItem[]) {
+function attachTurnActions(
+  history: TurnHistoryItem[],
+  allowRewriteLatest = true,
+) {
   history.forEach((turn) => {
     const turnId = String(turn.turn_id || "");
     const sourceTurnId = branchSourceTurnId(turn);
@@ -404,7 +407,7 @@ function attachTurnActions(history: TurnHistoryItem[]) {
       latestBranchTurnId: branchSourceTurnId(latestTurn) || null,
     });
   }
-  if (latestTurnId) {
+  if (latestTurnId && allowRewriteLatest) {
     attachTurnRewriteAction(latestTurnId, () =>
       requestTurnRewrite(latestTurnId),
     );
@@ -1233,12 +1236,19 @@ export function handleServerPayload(raw: unknown) {
         advanceSaveLoad("presenting", data.request_id, data.timings?.server_ms);
         rememberWorld(data.world_id, data.module_name);
         clearContextSummary();
-        const latest = renderTurnHistory(data.history || []);
         useAppStore.setState({
           latestBranchTurnId: null,
           ending: null,
           dialog: null,
         });
+        const history = Array.isArray(data.history) ? data.history : [];
+        const latest = renderTurnHistory(history);
+        // Only journal-backed history has durable branch points. Plain saved
+        // prose uses display IDs; it must never acquire snapshot authority.
+        // Restoring an older slot also does not authorize rewriting the latest
+        // journal turn, which may belong to progress after this saved boundary.
+        if (data.history_source === "turn_journal")
+          attachTurnActions(history, false);
         useStartStore.setState({
           gameStarted: true,
           gameStarting: false,
