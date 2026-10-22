@@ -1,34 +1,59 @@
 # TRPG Master
 
-中文跑团平台：玩家提交行动，守秘人决定如何主持，服务端负责权限、检定和状态落账。守秘人可以是人类，也可以是通过工具工作的 Agent。
+[简体中文](README.md) · [English](README.en.md)
 
-当前仓库同时保留 legacy AI 回合模式和 structured_v1 平台模式。`2b66a582` 已发布到正式环境和 Pi staging；**人类主持验收不能替代 structured Agent 的真实模型完整主线验收。** 当前确认状态见[项目状态](docs/STATUS.md)。
+**以模组驱动的中文线上跑团平台，让 AI 或人类担任守秘人。**
 
-<p align="center">
-  <img src="docs/screenshots/menu.png" alt="模组选择" width="48%"/>
-  <img src="docs/screenshots/character-select.png" alt="调查员选择" width="48%"/>
-  <img src="docs/screenshots/gameplay.png" alt="守秘人叙事回合" width="48%"/>
-  <img src="docs/screenshots/character-panel.png" alt="调查员面板" width="48%"/>
-</p>
+选择模组与调查员，用自然语言决定下一步。场景、人物对白、线索、道具、检定与存档在同一处呈现；AI 通过受限工具主持，服务端负责掷骰、权限和状态结算。当前主要围绕《克苏鲁的呼唤》（CoC）的调查玩法开发。
 
-截图用于展示界面，不作为当前版本验收证据。
+[下载 Windows 客户端](https://github.com/Inaglyite/TRPG-Master/releases/latest) · [浏览器入口](https://trpggame.xyz) · [上手与开发](docs/DEVELOPMENT.md) · [制作模组](docs/MODULE_FORMAT.md)
 
-## 能做什么
+![守秘人与人物分别发言，玩家可以选择建议或自由输入行动](docs/screenshots/gameplay.png)
 
-- 本地 Electron、浏览器云端单人和多人房间；内置「疯狂宅邸」「猩红文档」模组。
-- 结构化平台：出示线索、使用道具、请求移动与检定；人类/辅助/Agent 主持共用命令和权限边界。
-- 正常叙事中的过渡与等待：记录交互线程，允许玩家追问或改意；待办本身不授权移动。
-- 角色记忆与主持查询：按身份和当前上下文提供材料；它与 legacy 的影子记忆机制不同。
-- 世界、素材、存档与分支；legacy 从历史回合分叉，结构化单人从当前已提交版本分叉。
-- 模组包、Schema 校验、编译诊断和素材工具链。
+## 从一场调查开始
 
-结构化平台已接通人类主持的战斗、发现、实物取得、结案和角色保存；两种模式的上下文与主持方式仍不完全等价，不能将旧模式的主线通过当作新 Agent 的验收。详细边界见[架构](docs/ARCHITECTURE.md)。
+1. **选择模组与调查员。** 仓库附带「疯狂宅邸」「猩红文档」，也支持导入 `.trpgmod` 模组包；可以使用预设调查员或管理自己的角色。
+2. **决定谁来主持。** 经典 AI 叙事适合直接开始个人调查；结构化模式提供人类主持、AI 辅助主持和 AI 主持入口。人类主持无需模型 Key。
+3. **用自己的方式行动。** 选项只是建议，你也可以自由提问、搜查、交涉或提出其他做法。过程中查阅人物、线索和调查笔记，保存进度，或创建分支尝试不同选择。
 
-## 快速开始
+### 主要功能
 
-开发基线：Python 3.12、Node.js 22；本地 SQLite，云端部署配置见运维文档。
+| 能力 | 使用方式 |
+| --- | --- |
+| 模组与创作 | 场景、NPC、线索、发现条件与结局随模组组织；模组工坊编辑、导出，游戏内导入试玩 |
+| 人物对话 | 旁白与人物台词分开显示，按身份匹配姓名、头像与气泡；临时人物也可使用公开称呼发言 |
+| CoC 调查 | 技能检定、奖励/惩罚骰、SAN、战斗、物品与案件时间由对应规则和执行回执结算 |
+| 调查员与资料 | 角色档案、属性技能、物品、已获线索、调查笔记与资料图片 |
+| 存档与时间线 | 自动/手动存档、读取反馈、历史回顾与分支；具体分叉范围随运行模式不同 |
+| 多种客户端 | Electron 本地桌面、浏览器云端单人，以及多人房间 |
+| 主持工具 | 人类主持工作台，以及供 Agent 查询的模组资料、私有笔记、历史和执行回执 |
 
-### Linux 桌面
+经典 AI 回合与结构化主持使用不同执行路径，功能和验收覆盖仍有差异。当前开发、正式发布和待完善项目分别记录在[项目状态](docs/STATUS.md)，不将一种模式的通过结果等同于全部模式完成。
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/menu.png" alt="模组选择与模组工坊入口"/><br/><sub>选择模组、继续冒险或进入模组工坊</sub></td>
+    <td width="50%"><img src="docs/screenshots/character-select.png" alt="调查员选择与完整角色档案"/><br/><sub>选择调查员，查看档案并设置游玩方式</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/character-panel.png" alt="游戏中的调查员属性、线索与物品面板"/><br/><sub>在游戏中查阅属性、线索和物品</sub></td>
+    <td width="50%"><img src="docs/screenshots/module-workshop.png" alt="模组工坊编辑界面"/><br/><sub>在模组工坊中组织自己的故事</sub></td>
+  </tr>
+</table>
+
+截图更新于 **2026-10-22**，来自本地开发版和独立演示数据，不包含玩家存档；界面为中文，已发布安装包可能与当前源码有所不同。
+
+## 安装与启动
+
+### Windows：直接使用安装包
+
+到 [GitHub Releases](https://github.com/Inaglyite/TRPG-Master/releases/latest) 下载 `trpg-game-setup-…-x64.exe` 安装版，或 `trpg-game-portable-…-x64.exe` 便携版。首次启动后选择本地或云端游戏，并按所选主持方式配置模型。
+
+### Linux：从源码启动桌面版
+
+准备 **Python 3.12+、Node.js 22 和 npm**，然后执行：
 
 ```bash
 git clone https://github.com/Inaglyite/TRPG-Master.git
@@ -36,44 +61,34 @@ cd TRPG-Master
 bash start_desktop.sh
 ```
 
-### Windows 构建
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1 -UseChinaMirrors
-```
-
-构建产物位于 `frontend/release/`。本地配置和运行数据不要纳入安装包或版本库。
+启动器检查依赖并构建前端；选择本地游戏后启动本地后端。源码开发、浏览器本地运行、数据库迁移及 Windows 打包见[开发说明](docs/DEVELOPMENT.md)。
 
 ### 模型与账号
 
-人类主持的结构化游戏无需模型 Key；Agent 主持需要有效模型配置。云端使用 BYOK 授权与绑定，不能假定服务器提供免费额度，玩家加入房间也不等于获得主持密钥访问权。
+通过界面的模型设置配置服务地址、模型和 Key；也可使用 `python3 start.py --config` 配置本地模型。人类主持不调用模型；AI 主持和辅助功能需要可用的模型配置及服务额度。
 
-通过界面配置模型；本地命令行配置入口为：
+云端需要账号，并使用对应账号/世界的 BYOK 绑定。加入房间不等于获得主持人的密钥；费用归属取决于实际使用的模型绑定。`.env.json`、API Key、数据库和真实存档不要提交到版本库。
 
-```bash
-python3 start.py --config
-```
+## 创作自己的模组
 
-`.env.json`、API Key、数据库与真实存档不提交。手动安装、启动和测试步骤见[开发说明](docs/DEVELOPMENT.md)。
+在开局页点击 **「模组工坊」**，编辑场景、人物、线索与主持资料，导出 `.trpgmod` 后导入游戏，在独立世界试玩。也可以从 [module-template](examples/module-template/) 开始，用命令行编译、打包和校验。
 
-## 文档入口
+支持独立更新机制的桌面版本，可在工坊提示后选择更新编辑器；「文件 → 检查编辑器更新」也可主动检查。兼容的编辑器网页更新无需每次重发整个游戏安装包。格式、素材和运行边界见[模组作者入口](docs/MODULE_FORMAT.md)。
 
-日常只需从下面几份文档开始，避免把历史交付报告当作现行规格。
+## 文档与参与开发
 
-| 文档 | 用途 |
+| 文档 | 内容 |
 | --- | --- |
-| [架构](docs/ARCHITECTURE.md) | 模块边界、两条运行路径、权威状态、上下文与记忆 |
-| [协议](docs/PROTOCOL.md) | 请求/命令/事件、权限、恢复语义与 Schema 正本 |
-| [开发](docs/DEVELOPMENT.md) | 环境、门禁、协作分工、文档维护规则 |
-| [运维](docs/OPERATIONS.md) | 环境隔离、BYOK、备份、发布与回滚 |
-| [模组](docs/MODULE_FORMAT.md) | 模组作者入口、格式与迁移边界 |
-| [状态](docs/STATUS.md) | 已验收范围、发布门槛、未完成项与限制 |
+| [开发与上手](docs/DEVELOPMENT.md) | 环境准备、浏览器/桌面启动、测试与协作 |
+| [模组作者入口](docs/MODULE_FORMAT.md) | 工坊、模板、格式、导入与验收 |
+| [架构](docs/ARCHITECTURE.md) | 两种执行路径、状态、上下文与记忆 |
+| [协议](docs/PROTOCOL.md) | 请求、命令、事件、权限与恢复 |
+| [运维](docs/OPERATIONS.md) | 配置、备份、环境隔离与发布 |
+| [项目状态](docs/STATUS.md) | 已发布范围、开发进展和已知限制 |
+| [English documentation](docs/en/README.md) | English setup, play modes and module authoring guide |
 
-完整目录与归档说明见[文档入口](docs/INDEX.md)。详细参考、旧引擎说明、设计稿、过程报告和原始证据已原样迁往同级 `mid_product`，不再混在源码仓库里；机器可读契约仍以仓库内 schema、fixtures 和实现为准。
+完整入口见[文档索引](docs/INDEX.md)。欢迎通过 [Issues](https://github.com/Inaglyite/TRPG-Master/issues) 提交问题：附上版本、主持方式、复现步骤和脱敏日志，会更容易定位。
 
-## 协作与发布
+开发测试在本地进行，正式服务不用于测试。玩法或协议修改应同步对应文档与测试；完整开发和发布规则见上述文档。
 
-- 日常测试只在本地；预发布优先使用 Pi staging。
-- 正式环境不是测试环境。生产发布必须明确授权，按运维流程执行。
-- 修改协议先同步 Schema/fixtures，再由前后端共同验收；测试通过要注明版本、环境和跳过项。
-- 本机 `AGENTS.md` 属于私有协作约定，不提交；共享开发、归档及环境保护规则由 `docs/DEVELOPMENT.md`、`docs/OPERATIONS.md` 维护。
+项目源码采用 [MIT License](LICENSE)。

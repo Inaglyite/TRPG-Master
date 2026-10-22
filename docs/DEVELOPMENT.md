@@ -4,11 +4,13 @@
 
 ## 1. 本地环境
 
-Python 3.12；CI 使用 Node.js 22，前端依赖以 lockfile 为准。Linux 桌面可运行 `bash start_desktop.sh`。手动开发示例（仓库根目录）：
+使用 Python 3.12+；CI 使用 Node.js 22，前端依赖以 lockfile 为准。
+Windows 用户可从 [Releases](https://github.com/Inaglyite/TRPG-Master/releases/latest)
+下载安装版或便携版；Linux 桌面在仓库根目录运行 `bash start_desktop.sh`。
+启动器检查依赖与前端构建，选择本地游戏后才启动源码后端。
+英文操作入口见 [English guide](en/README.md)。
 
-桌面日志的 `[backend:stderr]` 表示后端标准错误输出流，不是日志严重级别：
-Alembic/Uvicorn正常的INFO也写入该流。Linux上的VA-API初始化及Wayland/Vulkan
-诊断需结合页面加载、后端启动和实际WebGL功能判断，不能仅按ERROR字样判定启动失败。
+手动准备后端环境（仓库根目录，`python3` 应为 3.12+）：
 
 ```bash
 python3 -m venv .venv
@@ -16,7 +18,35 @@ source .venv/bin/activate
 pip install -r requirements-dev.txt
 ```
 
-前端另一个终端执行 `cd frontend`、`npm ci`、`npm run dev`；后端执行 `python server.py`。确保运行数据库与正式环境隔离；不要继承生产数据库 URL 跑测试。模型配置按设置页/BYOK 路由准备，不把真实配置提交到 Git。
+构建前端，再执行数据库迁移并启动本地浏览器服务：
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+python -m alembic upgrade head
+python server.py
+```
+
+浏览器打开 `http://127.0.0.1:8765/?mode=local`。首次运行可选择模组、调查员，
+再在选角页的“游玩方式”切换经典 AI 叙事、人类、AI 辅助或 AI 主持。
+人类主持不需要模型 Key；AI 功能按模型设置页/BYOK 路由配置。
+经典 AI 和结构化模式的能力与验收覆盖分别见 [STATUS](STATUS.md)。
+
+前端热更新可另开终端运行 `cd frontend && npm run dev`，访问 Vite 输出的地址并加
+`?mode=local`；后端保持在 8765。需要其他后端地址时设置
+`VITE_TRPG_BACKEND_ORIGIN`，并同步核对后端允许的来源。
+手动启动不替代桌面启动器的一次性旧文件世界导入；迁移已有数据前先备份。
+
+独立开发或测试时，在迁移和启动前为 `TRPG_RUNTIME_ROOT`、`TRPG_DATABASE_URL`
+设置对应的隔离目录与数据库，不继承正式环境 URL，也不使用真实玩家存档。
+`.env.json`、Key 和运行数据不提交、不写进截图。模型请求仍需连接相应服务；
+本地运行不表示 AI 可以离线推理。
+
+桌面日志的 `[backend:stderr]` 表示后端标准错误输出流，不是日志严重级别：
+Alembic/Uvicorn 正常的 INFO 也写入该流。Linux 上的 VA-API 初始化及 Wayland/Vulkan
+诊断需结合页面加载、后端启动和实际 WebGL 功能判断，不能仅按 ERROR 字样判定启动失败。
 
 ## 2. 本地门禁
 
@@ -96,3 +126,15 @@ npm run test:e2e
 隔离验收可用 `TRPG_EDITOR_UPDATE_TEST_TAG=editor-web-test-<标识>` 指向具体测试包。
 内置快照仍由 `bash tools/sync_editor_bundle.sh ../TRPG_Mod_Editor` 同步。
 旧游戏客户端需先升级一次以获得该机制，此后兼容的编辑器网页更新无需重发游戏安装包。
+
+## 7. 中英文入口与展示截图
+
+根 `README.md` 以中文为主，`README.en.md` 提供英文介绍；英文上手、主持方式和
+创作操作集中在 `docs/en/README.md`。六份中文现行文档继续作为详细规格入口，
+行为变化同步更新英文操作说明，避免维护一套过期的英文协议副本。
+
+README 实际引用的公开截图保留在 `docs/screenshots/`，来源与用途见该目录的
+`README.md`。重拍时先把源码构建、脚本、原图、日志放仓库外的任务目录，
+使用隔离运行目录和演示世界，确认不含真实存档、密钥或未公开剧情后，
+只复制最终选用的图片到文档目录。标注日期、开发版/发布版和演示数据范围，
+实际打开中英文页面检查图片、说明及链接；截图不替代功能验收。

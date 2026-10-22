@@ -8,7 +8,21 @@
 
 玩家的当前场景、物品、属性与进度保存在运行数据库，不写回模组包。模组结构支持某个字段，不代表新旧每条运行路径都已接入其效果，验收须写明 execution_profile。
 
-## 2. 从模板开始
+## 2. 用模组工坊或模板开始
+
+### 可视化创作
+
+在游戏开局页点击“模组工坊”。桌面客户端通过本地后端打开浏览器编辑器，
+源码服务地址为 `/editor/`；云端编辑接口仍受账号/管理员权限限制。
+在编辑器中组织场景、NPC、线索和主持资料，导出 `.trpgmod` 后回到游戏导入，
+选择该模组并在新的独立世界试玩。工程是作者数据，游戏进度不会写回工程。
+
+支持组件更新的桌面版本会提示编辑器新版本，也可在“文件 → 检查编辑器更新”
+主动检查。用户选择下载、校验并激活后，下次打开使用新资源；兼容的编辑器更新
+不必重发整个游戏安装包。旧客户端需先升级一次取得该能力，云端仍走部署流程。
+具体边界见[开发说明](DEVELOPMENT.md#6-模组工坊独立更新)。
+
+### 模板与命令行
 
 在仓库根目录，激活开发虚拟环境后：
 
@@ -20,6 +34,8 @@ python tools/module_packager.py validate dist/my-module.trpgmod
 ```
 
 先修改 `manifest.json`、`module.json` 和 `keeper.md`，再编译、打包、预检导入，在独立世界试玩。模板见 [examples/module-template](../examples/module-template/manifest.json)，schema 见 [schemas/trpgmod](../schemas/trpgmod/)。
+
+英文步骤见 [Module authoring](en/README.md#module-authoring)。
 
 ## 3. 应查哪份资料
 
