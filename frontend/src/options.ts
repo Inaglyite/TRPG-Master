@@ -35,13 +35,24 @@ let pendingOptimisticAction: {
   inputPlaceholder: string;
 } | null = null;
 
-export type ActionChoice = {
-  label: string;
-  isFree: boolean;
-  description?: string;
-  decisionId?: string;
-  decisionOptionId?: string;
-};
+export type { ActionChoice, ChoiceSkillHint } from "./state/app-store";
+
+import type { ActionChoice, ChoiceSkillHint } from "./state/app-store";
+
+/** 损坏的技能提示元数据降级为无注解，绝不影响选项本身。 */
+export function normalizeSkillHint(raw: any): ChoiceSkillHint | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  const value = Number(raw.value);
+  if (!name || !Number.isFinite(value) || value < 0 || value > 100) {
+    return undefined;
+  }
+  return {
+    name,
+    value: Math.round(value),
+    skillId: typeof raw.skillId === "string" ? raw.skillId : undefined,
+  };
+}
 
 // ---- 建议检定弹窗 ----
 export function onSuggest(data: any) {
@@ -92,10 +103,15 @@ export function onDone(structuredChoices?: ActionChoice[]) {
 function completePresentedTurn(structuredChoices?: ActionChoice[]) {
   // 解析选项：从最近的 GM 消息中提取（跳过骰子、摘要等非叙事消息）
   const opts: ActionChoice[] = Array.isArray(structuredChoices)
-    ? structuredChoices.filter(
-        (choice) =>
-          choice && typeof choice.label === "string" && choice.label.trim(),
-      )
+    ? structuredChoices
+        .filter(
+          (choice) =>
+            choice && typeof choice.label === "string" && choice.label.trim(),
+        )
+        .map((choice) => ({
+          ...choice,
+          skillHint: normalizeSkillHint(choice.skillHint),
+        }))
     : [];
   if (opts.length === 0) {
     const messages = useMessageStore.getState().messages;

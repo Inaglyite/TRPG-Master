@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { buildCommandRequest } from "./structured";
 
 import {
   KEEPER_COMMANDS,
@@ -17,6 +18,34 @@ function fill(kind: string, values: FieldValues): FieldValues {
 }
 
 describe("主持命令字段表（对照 M0 command_request.json）", () => {
+  it("结局表单保留准备时的来源凭证，手填旧表单仍兼容", () => {
+    const spec = findKeeperCommand("end_game")!;
+    const source = "a".repeat(64);
+    const payload = buildKeeperPayload(
+      spec,
+      fill("end_game", { ending_id: "seal", source_token: source }),
+    );
+    expect(payload).toMatchObject({ source_token: source });
+    const request = buildCommandRequest("end_game", payload, {
+      worldId: "world-ending",
+      expectedRevision: 3,
+    });
+    expect(request.ok).toBe(true);
+    if (request.ok) expect(request.request.payload.source_token).toBe(source);
+    expect(
+      buildCommandRequest(
+        "end_game",
+        { ...payload, source_token: "bad" },
+        {
+          worldId: "world-ending",
+          expectedRevision: 3,
+        },
+      ).ok,
+    ).toBe(false);
+    expect(
+      buildKeeperPayload(spec, fill("end_game", { ending_id: "seal" })),
+    ).not.toHaveProperty("source_token");
+  });
   it("主持笔记完整传递Markdown、版本0和出处，超长正文被拒绝", () => {
     const spec = findKeeperCommand("record_keeper_note")!;
     const values = {

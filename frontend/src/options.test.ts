@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   acknowledgePendingAction,
+  normalizeSkillHint,
   onDecision,
+  onDone,
   renderOptions,
   rollbackPendingAction,
   sendAction,
@@ -238,5 +240,70 @@ describe("行动乐观 UI", () => {
     expect(safeSend).not.toHaveBeenCalled();
     expect(useMessageStore.getState().messages).toEqual([]);
     expect(useOnlineStore.getState().roomError).toBe("还没有轮到你行动");
+  });
+});
+
+describe("选项“可能检定”注解", () => {
+  it("合法提示归一化后进入选项；损坏提示按条降级", () => {
+    expect(
+      normalizeSkillHint({ skillId: "history", name: "历史", value: 40 }),
+    ).toEqual({ skillId: "history", name: "历史", value: 40 });
+    expect(normalizeSkillHint(undefined)).toBeUndefined();
+    expect(normalizeSkillHint(null)).toBeUndefined();
+    expect(normalizeSkillHint("历史 40%")).toBeUndefined();
+    expect(normalizeSkillHint({ name: "", value: 40 })).toBeUndefined();
+    expect(normalizeSkillHint({ name: "历史" })).toBeUndefined();
+    expect(normalizeSkillHint({ name: "历史", value: "很多" })).toBeUndefined();
+    expect(normalizeSkillHint({ name: "历史", value: -1 })).toBeUndefined();
+    expect(normalizeSkillHint({ name: "历史", value: 101 })).toBeUndefined();
+  });
+
+  it("onDone 后结构化选项带注解；损坏元数据不拖垮选项", () => {
+    onDone([
+      {
+        label: "研究古文字摹本",
+        isFree: false,
+        skillHint: { skillId: "history", name: "历史", value: 40 },
+      },
+      {
+        label: "离开书房",
+        isFree: false,
+        skillHint: { name: "", value: Number.NaN } as any,
+      },
+      { label: "[自由行动] 你决定做什么？", isFree: true },
+    ]);
+
+    const choices = useAppStore.getState().choices;
+    expect(choices[0].skillHint).toEqual({
+      skillId: "history",
+      name: "历史",
+      value: 40,
+    });
+    expect(choices[1].skillHint).toBeUndefined();
+    expect(choices[1].label).toBe("离开书房");
+    expect(choices[2].skillHint).toBeUndefined();
+  });
+
+  it("旧字符串解析路径不产生注解（旧存档兼容）", () => {
+    useMessageStore.setState({
+      messages: [
+        {
+          id: "m1",
+          kind: "gm",
+          text: "书房里静得可怕。\n\n**你可以——**\n1. 敲门\n2. [自由行动] 你决定做什么？",
+          streaming: false,
+        } as any,
+      ],
+    });
+    onDone();
+
+    const choices = useAppStore.getState().choices;
+    expect(choices.map((choice) => choice.label)).toEqual([
+      "敲门",
+      "[自由行动] 你决定做什么？",
+    ]);
+    expect(choices.every((choice) => choice.skillHint === undefined)).toBe(
+      true,
+    );
   });
 });

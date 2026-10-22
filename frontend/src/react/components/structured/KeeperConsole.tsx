@@ -944,9 +944,15 @@ export function KeeperConsole() {
                         keeperCommandBlockReason("end_game") ||
                         (combat?.active ? "请先结算或明确结束当前战斗。" : null)
                       }
-                      onPrepare={(id) =>
-                        prepareCommand("end_game", { ending_id: id })
-                      }
+                      onPrepare={(id) => {
+                        const source = keeperRulings.ending_catalog?.find(
+                          (entry) => entry.id === id,
+                        )?.source_token;
+                        prepareCommand("end_game", {
+                          ending_id: id,
+                          ...(source ? { source_token: source } : {}),
+                        });
+                      }}
                     />
                     <ol>
                       {keeperRulings.recent

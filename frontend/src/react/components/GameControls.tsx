@@ -5,6 +5,7 @@ import {
   sendDecisionReply,
   sendPlayerText,
   sendSuggestReply,
+  normalizeSkillHint,
 } from "../../options";
 import { confirmEnding } from "../../panels";
 import { interactionPath } from "../../protocol/structured";
@@ -143,27 +144,36 @@ export function GameControls() {
             </button>
           </>
         ) : (
-          choices.map((choice, index) => (
-            <button
-              key={`${choice.label}-${index}`}
-              className={`opt-btn${choice.isFree ? " free" : ""}`}
-              disabled={!choicesEnabled}
-              title={choice.description || undefined}
-              onClick={() => {
-                if (choice.decisionId && choice.decisionOptionId) {
-                  void sendDecisionReply(
-                    choice.decisionId,
-                    choice.decisionOptionId,
-                    choice.label,
-                  );
-                } else {
-                  void sendAction(choice.label);
-                }
-              }}
-            >
-              {index + 1}. {choice.label}
-            </button>
-          ))
+          choices.map((choice, index) => {
+            // 注解仅作展示；损坏元数据降级为无注解。提交文本永远是原行动文本。
+            const skillHint = normalizeSkillHint(choice.skillHint);
+            return (
+              <button
+                key={`${choice.label}-${index}`}
+                className={`opt-btn${choice.isFree ? " free" : ""}`}
+                disabled={!choicesEnabled}
+                title={choice.description || undefined}
+                onClick={() => {
+                  if (choice.decisionId && choice.decisionOptionId) {
+                    void sendDecisionReply(
+                      choice.decisionId,
+                      choice.decisionOptionId,
+                      choice.label,
+                    );
+                  } else {
+                    void sendAction(choice.label);
+                  }
+                }}
+              >
+                {index + 1}. {choice.label}
+                {skillHint && (
+                  <span className="opt-skill-hint">
+                    可能检定：{skillHint.name} {skillHint.value}%
+                  </span>
+                )}
+              </button>
+            );
+          })
         )}
       </div>
       <div id="context-summary-row">

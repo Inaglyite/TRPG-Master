@@ -10,6 +10,11 @@ export const endingCatalogSchema = z.array(
       trigger: z.string(),
       eligible: z.boolean(),
       can_prepare: z.boolean(),
+      source_token: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
+      source_revision: z.number().int().nullable().optional(),
       blocked_reason: z.string(),
       conditions: z.array(
         z

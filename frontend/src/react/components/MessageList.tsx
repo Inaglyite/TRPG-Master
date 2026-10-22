@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -141,7 +142,7 @@ function DiceMessage({ message }: { message: ChatMessage }) {
     if (isDice3DEligible(dice) && !isDice3DBusy()) {
       // 3D 物理骰表演（覆盖层），定格/超时/跳过后落定
       used3D = true;
-      rollDice3D(dice)
+      rollDice3D(dice, message.id)
         .catch(() => undefined)
         .finally(() => {
           if (!cancelled) setSettled(true);
@@ -231,7 +232,9 @@ function SpeechUnit({ segment }: { segment: NarrativeSegment }) {
   );
 }
 
-function Message({
+// memo 化：流式播放每拍都会更新 messages 数组，历史消息的 props 引用不变，
+// 直接跳过重渲染，避免每个字都重跑整棵消息树（含 markdown 组件与头像）。
+const Message = memo(function Message({
   message,
   actionReset,
   sameTurn,
@@ -383,7 +386,7 @@ function Message({
         )}
     </div>
   );
-}
+});
 
 export function MessageList() {
   const messages = useMessageStore((state) => state.messages);

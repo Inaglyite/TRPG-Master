@@ -177,17 +177,33 @@ describe("React message renderer adapter", () => {
     }
   });
 
-  it("keeps a fixed per-tick pace regardless of provider backlog", () => {
+  it("catches up with multi-char ticks while the provider is far ahead", () => {
     vi.useFakeTimers();
     try {
       setDisplayTurnId("turn-catch-up");
       onNarrativeChunk("字".repeat(600));
-      // 大缓存不再触发每拍多字：与短缓存同一档位节奏一致
+      // 大积压触发每拍 3 字追平；积压回落后恢复每拍 1 字
       vi.advanceTimersByTime(36);
+      expect(useMessageStore.getState().messages[0].text).toBe("字字字");
+      vi.advanceTimersByTime(36);
+      expect(useMessageStore.getState().messages[0].text).toBe("字字字字字字");
+    } finally {
+      flushNarrativeStream();
+      finishNarrativeStream();
+      vi.useRealTimers();
+    }
+  });
 
-      expect(useMessageStore.getState().messages[0].text).toBe("字");
+  it("uses two chars per tick at moderate backlog and settles back to one", () => {
+    vi.useFakeTimers();
+    try {
+      setDisplayTurnId("turn-mid-backlog");
+      onNarrativeChunk("字".repeat(200));
+      // 161–500 字积压：每拍 2 字
       vi.advanceTimersByTime(36);
       expect(useMessageStore.getState().messages[0].text).toBe("字字");
+      vi.advanceTimersByTime(36);
+      expect(useMessageStore.getState().messages[0].text).toBe("字字字字");
     } finally {
       flushNarrativeStream();
       finishNarrativeStream();

@@ -55,6 +55,16 @@
 .opt-btn.free:focus-visible {
   opacity: 1;
 }
+/* “可能检定”注解：副行浅色小字，与行动文本视觉分离，不参与提交文本。 */
+.opt-skill-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.68;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+}
 
 /* ---- 输入栏 ---- */
 #input-bar {

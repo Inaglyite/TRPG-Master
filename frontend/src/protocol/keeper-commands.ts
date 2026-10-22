@@ -1479,6 +1479,12 @@ export function buildKeeperPayload(
       id: String(values.to_investigator_id ?? ""),
     };
   }
+  if (
+    spec.kind === "end_game" &&
+    /^[0-9a-f]{64}$/.test(String(values.source_token || ""))
+  ) {
+    payload.source_token = values.source_token;
+  }
   return payload;
 }
 

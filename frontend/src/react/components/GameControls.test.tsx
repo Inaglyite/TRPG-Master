@@ -99,6 +99,53 @@ describe("game interaction components", () => {
     expect(screen.getByRole("button", { name: "1. 仍然前往" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "⏎" })).toBeDisabled();
   });
+
+  it("选项渲染“可能检定”注解，点击提交的仍是原行动文本", () => {
+    const send = vi.spyOn(options, "sendAction").mockReturnValue(true);
+    useAppStore.setState({ mode: "local", inputEnabled: true });
+    render(<GameControls />);
+    act(() => {
+      useAppStore.getState().setChoices([
+        {
+          label: "研究古文字摹本",
+          isFree: false,
+          skillHint: { skillId: "history", name: "历史", value: 40 },
+        },
+        { label: "[自由行动] 你决定做什么？", isFree: true },
+      ]);
+    });
+
+    const button = screen.getByRole("button", {
+      name: /1\. 研究古文字摹本/,
+    });
+    expect(button).toHaveTextContent("可能检定：历史 40%");
+    expect(
+      screen.getByRole("button", { name: /自由行动/ }),
+    ).not.toHaveTextContent("可能检定");
+
+    fireEvent.click(button);
+    expect(send).toHaveBeenCalledWith("研究古文字摹本");
+  });
+
+  it("旧数据无注解正常渲染，损坏元数据降级为无注解", () => {
+    useAppStore.setState({ mode: "local", inputEnabled: true });
+    render(<GameControls />);
+    act(() => {
+      useAppStore.getState().setChoices([
+        { label: "敲门", isFree: false },
+        {
+          label: "翻找抽屉",
+          isFree: false,
+          skillHint: { name: "", value: Number.NaN } as any,
+        },
+      ]);
+    });
+
+    expect(screen.getByRole("button", { name: "1. 敲门" })).toBeInTheDocument();
+    const degraded = screen.getByRole("button", { name: "2. 翻找抽屉" });
+    expect(degraded).toBeInTheDocument();
+    expect(screen.queryByText(/可能检定/)).not.toBeInTheDocument();
+  });
 });
 
 describe("GameControls 多人行动门禁", () => {

@@ -37,8 +37,8 @@ type PlaybackPiece = { chars: string[]; npcId: string | null };
 const playbackQueue: PlaybackPiece[] = [];
 const liveSpeakers = new Map<string, Speaker>();
 
-// 播放节奏只由用户档位决定（见 narration-speed.ts）；
-// 不再根据 API 返回速度、缓存长度或选项标记自动变化。
+// 播放节奏由用户档位决定基础节拍；网络快于播放形成积压时，
+// 每拍多播几个字追平进度，回到低积压后恢复单字节拍。
 const COMMA_PAUSE_MS = 72;
 const SENTENCE_PAUSE_MS = 185;
 const SPEAKER_PAUSE_MS = 240;
@@ -55,6 +55,7 @@ export type TurnHistoryItem = {
   narrative_segments?: NarrativeSegment[];
   chat_events?: NarrativeSegment[];
   choices?: Array<{ label: string; isFree: boolean }>;
+  current_choices?: Array<{ label: string; isFree: boolean }>;
   player_followups?: Array<{
     text: string;
     after_narrative_segment?: number;
@@ -644,9 +645,21 @@ function boostFactor() {
   return narrationBoost ? LONG_PRESS_BOOST : 1;
 }
 
-/** 用户档位的单字节拍；同一档位内每拍固定 1 字，不受缓存长度影响。 */
+/** 用户档位的单字节拍；同一档位内低积压时每拍 1 字。 */
 function baseTickMs() {
   return narrationTickMs(getNarrationSpeed());
+}
+
+function queuedCharacterCount() {
+  return playbackQueue.reduce((total, piece) => total + piece.chars.length, 0);
+}
+
+/** 积压越多每拍播得越多；追平网络进度后回落到每拍 1 字。 */
+function charactersPerTick() {
+  const backlog = queuedCharacterCount();
+  if (backlog > 500) return 3;
+  if (backlog > 160) return 2;
+  return 1;
 }
 
 function playbackDelay(lastChar: string, speakerChanged: boolean) {
@@ -673,8 +686,9 @@ function playbackStep() {
     if (networkStreamFinished) finalizePresentedStream();
     return;
   }
-  // 每拍固定 1 字：短缓存与大缓存在同一档位下呈现节奏一致。
-  const text = piece.chars.splice(0, 1).join("");
+  // 积压自适应：网络快于播放时每拍多播几字追平；低积压回到每拍 1 字，
+  // 与用户档位的单字节拍保持一致。
+  const text = piece.chars.splice(0, charactersPerTick()).join("");
   renderPlaybackText(text, piece.npcId);
   if (!piece.chars.length) playbackQueue.shift();
   const speakerChanged =

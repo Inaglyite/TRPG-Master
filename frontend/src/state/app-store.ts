@@ -40,6 +40,11 @@ export type ClueItem = {
 };
 
 export type ClueState = Record<string, ClueItem[]>;
+export type ChoiceSkillHint = {
+  skillId?: string;
+  name: string;
+  value: number;
+};
 export type ActionChoice = {
   label: string;
   isFree: boolean;
@@ -47,6 +52,8 @@ export type ActionChoice = {
   /** Chat-style action previews reply to a frozen server plan, not a new action. */
   decisionId?: string;
   decisionOptionId?: string;
+  /** 平台解析后的“可能检定”注解（仅展示）；损坏或缺失时不渲染。 */
+  skillHint?: ChoiceSkillHint;
 };
 export type SuggestDialog = {
   kind: "suggest";

@@ -9,10 +9,39 @@ import {
   restoreNarrativeHistory,
 } from "../../structured-history";
 
+const dice3DMock = vi.hoisted(() => ({
+  eligible: vi.fn<(dice: unknown) => boolean>(),
+  busy: vi.fn<() => boolean>(),
+  roll: vi.fn<(dice: unknown, messageId?: string) => Promise<void>>(),
+  cancel: vi.fn(),
+}));
+
+vi.mock("../../dice3d/controller", () => ({
+  isDice3DEligible: dice3DMock.eligible,
+  isDice3DBusy: dice3DMock.busy,
+  rollDice3D: dice3DMock.roll,
+  cancelDice3D: dice3DMock.cancel,
+}));
+
+const D100_MESSAGE = {
+  id: "dice-1",
+  kind: "dice",
+  text: "🎲 【侦查】d100=32 vs 70 → ◆ 困难成功",
+  turnId: "turn-3",
+  dice: [
+    { min: 0, max: 9, final: 3, label: "十位", formatter: "tens" as const },
+    { min: 0, max: 9, final: 2, label: "个位" },
+  ],
+};
+
 describe("MessageList", () => {
   beforeEach(() => {
     useMessageStore.setState({ messages: [], actionReset: 0 });
     useAppStore.setState({ mode: "local", character: null });
+    dice3DMock.eligible.mockReset().mockReturnValue(false);
+    dice3DMock.busy.mockReset().mockReturnValue(false);
+    dice3DMock.roll.mockReset().mockResolvedValue(undefined);
+    dice3DMock.cancel.mockReset();
   });
 
   it("restores a full action declaration with authoritative attribution, not an execution claim", () => {
@@ -140,21 +169,111 @@ describe("MessageList", () => {
     try {
       render(<MessageList />);
       act(() => {
-        useMessageStore.getState().replaceMessages([
-          {
-            id: "dice-1",
-            kind: "dice",
-            text: "🎲 【侦查】d100=32 vs 70 → ◆ 困难成功",
-            turnId: "turn-3",
-            dice: [
-              { min: 0, max: 9, final: 3, label: "十位", formatter: "tens" },
-              { min: 0, max: 9, final: 2, label: "个位" },
-            ],
-          },
-        ]);
+        useMessageStore.getState().replaceMessages([D100_MESSAGE]);
       });
       expect(screen.getByText("命运之骰翻滚")).toBeInTheDocument();
       expect(screen.getByText(/d100=32/)).toHaveClass("hidden");
+      act(() => {
+        vi.advanceTimersByTime(1200);
+      });
+      expect(screen.getByText("命运之骰落定")).toBeInTheDocument();
+      expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the authoritative result immediately under reduced motion without starting 3D", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      // 即使控制器认为 3D 可用，减少动态效果时也不得启动动画
+      dice3DMock.eligible.mockReturnValue(true);
+      render(<MessageList />);
+      act(() => {
+        useMessageStore.getState().replaceMessages([D100_MESSAGE]);
+      });
+      expect(screen.getByText("命运之骰落定")).toBeInTheDocument();
+      expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
+      expect(dice3DMock.roll).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("settles the authoritative text once the 3D roll promise lands", async () => {
+    dice3DMock.eligible.mockReturnValue(true);
+    let land!: () => void;
+    dice3DMock.roll.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([D100_MESSAGE]);
+    });
+    expect(screen.getByText("命运之骰翻滚")).toBeInTheDocument();
+    expect(screen.getByText(/d100=32/)).toHaveClass("hidden");
+    // 控制器日志需要关联消息 ID
+    expect(dice3DMock.roll).toHaveBeenCalledWith(D100_MESSAGE.dice, "dice-1");
+
+    await act(async () => {
+      land();
+    });
+    expect(screen.getByText("命运之骰落定")).toBeInTheDocument();
+    expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
+  });
+
+  it("settles the authoritative text when the 3D roll fails", async () => {
+    dice3DMock.eligible.mockReturnValue(true);
+    dice3DMock.roll.mockRejectedValue(new Error("dice3d init failed"));
+    render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([D100_MESSAGE]);
+    });
+    await act(async () => {});
+    expect(screen.getByText("命运之骰落定")).toBeInTheDocument();
+    expect(screen.getByText(/d100=32/)).not.toHaveClass("hidden");
+  });
+
+  it("cancels the 3D roll on unmount and the late result has no side effects", async () => {
+    dice3DMock.eligible.mockReturnValue(true);
+    let land!: () => void;
+    dice3DMock.roll.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const { unmount } = render(<MessageList />);
+    act(() => {
+      useMessageStore.getState().replaceMessages([D100_MESSAGE]);
+    });
+    expect(dice3DMock.roll).toHaveBeenCalled();
+
+    unmount();
+    expect(dice3DMock.cancel).toHaveBeenCalled();
+    // 迟到的投掷结果不复活任何状态（组件已卸载，不得 setState）
+    land();
+  });
+
+  it("uses the timed fallback while the 3D controller is busy", () => {
+    dice3DMock.eligible.mockReturnValue(true);
+    dice3DMock.busy.mockReturnValue(true);
+    vi.useFakeTimers();
+    try {
+      render(<MessageList />);
+      act(() => {
+        useMessageStore.getState().replaceMessages([D100_MESSAGE]);
+      });
+      expect(dice3DMock.roll).not.toHaveBeenCalled();
+      expect(screen.getByText("命运之骰翻滚")).toBeInTheDocument();
       act(() => {
         vi.advanceTimersByTime(1200);
       });

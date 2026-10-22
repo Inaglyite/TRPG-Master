@@ -420,7 +420,7 @@ export function displayWorldHistory(rawHistory: unknown) {
     ? (rawHistory as TurnHistoryItem[])
     : [];
   const latest = renderTurnHistory(history);
-  onDone(latest?.choices);
+  onDone(latest?.current_choices ?? latest?.choices);
   attachTurnActions(history);
 }
 
@@ -1255,7 +1255,7 @@ export function handleServerPayload(raw: unknown) {
           hint: "",
         });
         closeSavePanel();
-        onDone(latest?.choices);
+        onDone(latest?.current_choices ?? latest?.choices);
         recoveryPending = false;
         interruptedTurn = false;
         interruptedTurnId = null;

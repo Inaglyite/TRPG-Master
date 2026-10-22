@@ -196,6 +196,10 @@ export const combatCommandPayloads: Record<string, z.ZodType> = {
   combat_end: z.object({ reason: z.string().min(1).max(4000) }).strict(),
   end_game: z
     .object({
+      source_token: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
       ending_id: id.optional(),
       ending_type: z.enum(["good", "secret", "neutral", "bad"]).optional(),
       title: z.string().min(1).max(4000).optional(),
