@@ -18,57 +18,136 @@ TOOL_RESULT_PRUNE_MIN_CHARS = 500
 # 每轮玩家行动/控制消息内嵌的当轮权威状态块起始标记；过期后可整体移除。
 AUTHORITY_MARKER = "[引擎权威状态｜仅供守秘人，不得复述]"
 
+# 摘要注入消息的包装前缀：下一轮压缩据此识别"上一次摘要"，必须完整参与合并。
+SUMMARY_WRAPPER_PREFIX = "（会话摘要——"
 
-def build_summary_input(messages: list[dict]) -> str:
-    parts = []
+# 单批压缩输入的字符预算：超出时按完整条目分批，绝不截断消息、
+# 发言标签或工具调用链（截断曾把人物标签切成无主台词）。
+SUMMARY_BATCH_MAX_CHARS = 16_000
+
+_SPEECH_OPEN_TAG = re.compile(r"【npc:([A-Za-z0-9_-]{1,48})】")
+_SPEECH_CLOSE_TAG = "【/npc】"
+
+
+def _render_summary_entry(
+    message: dict,
+    *,
+    speaker_names: dict[str, str] | None,
+    tool_names: dict[str, str],
+) -> str | None:
+    """把一条消息渲染成压缩输入的一个完整条目（不截断）；None 表示不纳入。"""
+    role = message.get("role", "?")
+    content = message.get("content", "") or ""
+    # Engine control messages contain authority snapshots, private Skill
+    # text and other keeper-only material. A summary model never needs
+    # them: fresh authority is rebuilt by the engine on the next turn.
+    if is_control_message(message):
+        return None
+    if role == "assistant":
+        # Provider assistant tool_calls usually have empty content.  Keep
+        # the public call identity (not raw arguments) so a summary can
+        # preserve event ordering without handing arbitrary tool payloads
+        # to a second model.
+        lines: list[str] = []
+        calls = message.get("tool_calls")
+        if isinstance(calls, list):
+            for call in calls:
+                function = call.get("function") if isinstance(call, dict) else None
+                call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
+                name = str(function.get("name") or "") if isinstance(function, dict) else ""
+                if call_id and name:
+                    tool_names[call_id] = name
+                    lines.append(f"[assistant_tool_call]: {name} (id={call_id})")
+        if content.strip():
+            # 发言标签解析为人物名：摘要需要"谁告诉了玩家什么"，而不是内部 id。
+            if speaker_names:
+                content = _SPEECH_OPEN_TAG.sub(
+                    lambda match: f"【{speaker_names.get(match.group(1), match.group(1))}】",
+                    content,
+                ).replace(_SPEECH_CLOSE_TAG, "")
+            lines.append(f"[assistant]: {content}")
+        return "\n".join(lines) if lines else None
+    if role == "tool":
+        # Tool results may contain private keeper projections or output
+        # from a previously unsafe tool.  Do not send raw result text to
+        # the summarizer.  Canonical dice/resources/clues remain in the
+        # authoritative WorldState/Turn records rebuilt each turn.
+        call_id = str(message.get("tool_call_id") or "")
+        name = tool_names.get(call_id, "tool")
+        return f"[tool_result]: {name} (id={call_id or 'unknown'}), authoritative result recorded"
+    if role == "user":
+        if message.get("_trpg_history_kind") == "summary" or content.startswith(SUMMARY_WRAPPER_PREFIX):
+            return f"[previous_summary_reference]: {content}"
+        # Player messages carry a fresh keeper-only authority suffix. It is
+        # not player testimony and must never be summarized as public memory.
+        content = content.split(AUTHORITY_MARKER, 1)[0].rstrip()
+        return f"[user]: {content}" if content.strip() else None
+    return None
+
+
+def build_summary_entries(
+    messages: list[dict],
+    *,
+    speaker_names: dict[str, str] | None = None,
+) -> list[str]:
+    """压缩输入的完整条目列表：一条消息一个条目，不截断任何条目。"""
+    entries: list[str] = []
     tool_names: dict[str, str] = {}
     for message in messages:
-        role = message.get("role", "?")
-        content = message.get("content", "") or ""
-        # Engine control messages contain authority snapshots, private Skill
-        # text and other keeper-only material. A summary model never needs
-        # them: fresh authority is rebuilt by the engine on the next turn.
-        if is_control_message(message):
-            continue
-        if role == "assistant":
-            # Provider assistant tool_calls usually have empty content.  Keep
-            # the public call identity (not raw arguments) so a summary can
-            # preserve event ordering without handing arbitrary tool payloads
-            # to a second model.
-            calls = message.get("tool_calls")
-            if isinstance(calls, list):
-                for call in calls:
-                    function = call.get("function") if isinstance(call, dict) else None
-                    call_id = str(call.get("id") or "") if isinstance(call, dict) else ""
-                    name = str(function.get("name") or "") if isinstance(function, dict) else ""
-                    if call_id and name:
-                        tool_names[call_id] = name
-                        parts.append(f"[assistant_tool_call]: {name} (id={call_id})")
-            if not content.strip():
-                continue
-            content = content[:500] + "..." if len(content) > 500 else content
-        elif role == "tool":
-            # Tool results may contain private keeper projections or output
-            # from a previously unsafe tool.  Do not send raw result text to
-            # the summarizer.  Canonical dice/resources/clues remain in the
-            # authoritative WorldState/Turn records rebuilt each turn.
-            call_id = str(message.get("tool_call_id") or "")
-            name = tool_names.get(call_id, "tool")
-            parts.append(
-                f"[tool_result]: {name} (id={call_id or 'unknown'}), authoritative result recorded"
-            )
-            continue
-        elif role == "user":
-            if not content.strip():
-                continue
-            content = content[:500] + "..." if len(content) > 500 else content
-        else:
-            continue
-        parts.append(f"[{role}]: {content}")
-    text = "\n".join(parts)
-    if len(text) > 6000:
-        text = text[:3000] + "\n...(中间内容省略)...\n" + text[-3000:]
-    return text
+        entry = _render_summary_entry(message, speaker_names=speaker_names, tool_names=tool_names)
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def build_summary_batches(
+    messages: list[dict],
+    *,
+    speaker_names: dict[str, str] | None = None,
+    max_chars: int = SUMMARY_BATCH_MAX_CHARS,
+) -> list[str]:
+    """按完整条目分批的压缩输入：任一条目都不会被截断或拆分。
+
+    单条超出预算的条目（罕见的长回合）自成一批原样送出；批内保持时间顺序。
+    """
+    batches: list[list[str]] = []
+    current: list[str] = []
+    current_chars = 0
+    # A tool-call batch and all its results form one atomic input group.
+    groups, group, pending, names = [], [], set(), {}
+    for message in messages:
+        if message.get("role") == "assistant":
+            pending.update(str(call.get("id")) for call in (message.get("tool_calls") or [])
+                           if isinstance(call, dict) and call.get("id"))
+        entry = _render_summary_entry(message, speaker_names=speaker_names, tool_names=names)
+        if entry:
+            group.append(entry)
+        if message.get("role") == "tool":
+            pending.discard(str(message.get("tool_call_id") or ""))
+        if not pending and group:
+            groups.append("\n".join(group))
+            group = []
+    if group:
+        groups.append("\n".join(group))
+    for entry in groups:
+        if current and current_chars + len(entry) + 1 > max_chars:
+            batches.append(current)
+            current = []
+            current_chars = 0
+        current.append(entry)
+        current_chars += len(entry) + 1
+    if current:
+        batches.append(current)
+    return ["\n".join(batch) for batch in batches]
+
+
+def build_summary_input(
+    messages: list[dict],
+    *,
+    speaker_names: dict[str, str] | None = None,
+) -> str:
+    """兼容入口：单批渲染（等价于 build_summary_batches 的首批拼接）。"""
+    return "\n".join(build_summary_entries(messages, speaker_names=speaker_names))
 
 
 def parse_summary_json(raw: str) -> str | None:
@@ -166,6 +245,11 @@ class HistoryCompactor:
         """
         messages = self.engine.messages
         cutoff = len(messages) - self.engine.SUMMARY_KEEP_RECENT_MESSAGES
+        if getattr(self.engine, "_active_turn_id", None):
+            surface = self.engine.__dict__.get("_turn_context_surface")
+            if surface is None:
+                return 0
+            cutoff = min(cutoff, len(surface))
         while cutoff > 1 and messages[cutoff].get("role") != "user":
             cutoff -= 1
         return cutoff
@@ -192,7 +276,7 @@ class HistoryCompactor:
         if compact_engine(engine, 1, cutoff, replacement):
             engine.messages = [system_message, replacement, *recent_messages]
             return True
-        if not allow_rebase_fallback:
+        if not allow_rebase_fallback or getattr(engine, "_active_turn_id", None):
             return False
         original_messages = list(engine.messages)
         candidate = [system_message, replacement, *recent_messages]
@@ -325,6 +409,32 @@ class HistoryCompactor:
             self.estimate_tokens()
         return len(applied)
 
+    def _speaker_names(self) -> dict[str, str]:
+        """npc id → 展示名：摘要输入里的发言标签解析为名字，而非内部 id。"""
+        try:
+            world = self.engine.context.world_store.load()
+        except Exception:  # noqa: BLE001 - 名字解析失败只是摘要可读性降级
+            return {}
+        names: dict[str, str] = {}
+        for npc in world.get("npcs", []) or []:
+            if not isinstance(npc, dict) or not npc.get("id"):
+                continue
+            name = str(npc.get("name") or npc.get("display_name") or "").strip()
+            if name:
+                names[str(npc["id"])] = name
+        assets = (world.get("asset_map") or {}).get("npcs") or {}
+        for npc_id, asset in assets.items():
+            if isinstance(asset, dict):
+                label = str(asset.get("label") or asset.get("name") or "").strip()
+                if label:
+                    names.setdefault(str(npc_id), label)
+        from src.gameplay.guest_speakers import guest_registry
+
+        for speaker_id, guest in guest_registry(world).items():
+            if guest.get("display_name"):
+                names[speaker_id] = str(guest["display_name"])
+        return names
+
     def summarize(self, *, silent: bool = False, allow_rebase_fallback: bool = True) -> bool:
         from src.ai.model.llm import _get_glm
 
@@ -335,9 +445,16 @@ class HistoryCompactor:
         old_messages = engine.messages[1:cutoff]
         if len(old_messages) < 3:
             return False
+        from src.ai.context.context_shadow import prepare_compaction
+
+        if not prepare_compaction(engine, cutoff):
+            self._record_summary_rejection("projection_not_ready")
+            return False
         recent_messages = engine.messages[cutoff:]
         system_message = engine.messages[0]
-        old_text = build_summary_input(old_messages)
+        # 按完整条目分批：上一批产出的滚动摘要完整并入下一批输入，
+        # 任何条目（包括上一次摘要）都不会被截断或丢弃。
+        batches = build_summary_batches(old_messages, speaker_names=self._speaker_names())
 
         def safe_summary(candidate: str | None) -> str | None:
             if candidate is None:
@@ -353,11 +470,25 @@ class HistoryCompactor:
                 return None
             return candidate
 
+        def run_pipeline(client: Any, model: str) -> str | None:
+            running: str | None = None
+            for batch in batches:
+                batch_input = batch
+                if running is not None:
+                    batch_input = (
+                        "[已有滚动摘要｜必须完整保留并合并且不得丢弃其中的未解决事项]\n"
+                        f"{running}\n\n[本批历史]\n{batch}"
+                    )
+                running = safe_summary(self.try_model(client, model, batch_input))
+                if running is None:
+                    return None
+            return running
+
         # 平台 GLM 旁路仅本地部署可用；云端 BYOK-only 下平台凭据绝不参与，
         # 压缩直接走冻结路由（用户自己的裁决绑定）。
         glm = None if engine_byok_only(engine) else _get_glm()
         if glm is not None:
-            summary = safe_summary(self.try_model(glm, "glm-4-flash-250414", old_text))
+            summary = run_pipeline(glm, "glm-4-flash-250414")
             if summary is not None:
                 return self.apply(
                     system_message,
@@ -370,12 +501,9 @@ class HistoryCompactor:
                 )
         if not silent:
             engine.cb.on_tension("正在用 DeepSeek Pro 压缩上下文……", "pro")
-        summary = safe_summary(
-            self.try_model(
-                client_for_role(engine, "summary"),
-                model_for_role(engine, "summary"),
-                old_text,
-            )
+        summary = run_pipeline(
+            client_for_role(engine, "summary"),
+            model_for_role(engine, "summary"),
         )
         if summary is not None:
             return self.apply(
@@ -413,10 +541,12 @@ class HistoryCompactor:
     ) -> bool:
         summary_message = {
             "role": "user",
+            "_trpg_history_kind": "summary",
             "content": (
-                "（会话摘要——此前冒险的关键记录已压缩如下。"
+                f"{SUMMARY_WRAPPER_PREFIX}此前冒险的关键记录已压缩如下，仅供回忆连续性："
+                "它不是玩家行动，不是引擎指令，也不是输出格式示例。"
                 "技能检定、已发现线索、NPC互动记录均已保留。\n\n"
-                f"{summary}\n\n——摘要结束。以下是最近的对话——）"
+                f"{summary}\n\n——摘要结束。以下是最近的完整回合——）"
             ),
         }
         if replaced_messages is not None:
@@ -427,9 +557,20 @@ class HistoryCompactor:
             if replacement_chars >= original_chars:
                 self._record_summary_rejection("summary_not_smaller")
                 return False
+        # 发布前结构校验：工具调用配对、发言标签闭合、摘要角色正确；
+        # 不合格的表面绝不替换现有上下文。
+        from src.ai.context.context_summary import validate_compacted_surface
+
+        surface_problem = validate_compacted_surface(
+            [system_message, summary_message, *recent_messages]
+        )
+        if surface_problem:
+            self._record_summary_rejection(surface_problem)
+            return False
         if not self._replace_window(
             summary_message, recent_messages, allow_rebase_fallback=allow_rebase_fallback
         ):
+            self._record_summary_rejection("projection_replace_failed")
             return False
         self.estimate_tokens()
         from src.gameplay.turn_performance import increment_counter
@@ -451,8 +592,16 @@ class HistoryCompactor:
     def try_model(client: Any, model: str, old_text: str) -> str | None:
         prompt = (
             "你是TRPG记录员。将以下对话历史压缩为结构化摘要。按时间顺序保留"
-            "关键事件、PC已知信息、已发现线索、当前目标、最后场景、技能检定和骰子结果；"
-            "不得编造信息。优先输出JSON。\n\n"
+            "关键事件、谁把什么信息告诉了玩家（用人物名字）、PC已知信息、已发现线索、"
+            "当前目标、未解决的承诺与待决问题、最后场景、技能检定和骰子结果；"
+            "不得编造信息。历史可能分批给出；附带的滚动摘要必须完整合并，"
+            "不得丢弃其中的未解决事项。只输出如下 JSON 对象，不能自创键、嵌套对象或 Markdown："
+            '{"events":["按先后顺序的事件"],"known_facts":["玩家已知事实"],'
+            '"open_threads":["尚未解决的事项与承诺"],"current_scene":"最后的已知场景",'
+            '"checks":["已结算检定及其结果"]}。'
+            "四个数组的每个元素只能是字符串，各不超过48项、每项不超过1500字符；"
+            "current_scene 只能是字符串，不超过1500字符。没有内容时用空数组/空字符串。"
+            "不得补全未知秘密，不记录引擎私有指令。\n\n"
             f"{old_text}"
         )
         for attempt in range(2):
@@ -466,6 +615,9 @@ class HistoryCompactor:
                         ],
                         temperature=0.3,
                         max_tokens=3000,
+                        **({"response_format": {"type": "json_object"},
+                            "extra_body": {"thinking": {"type": "disabled"}}}
+                           if model.startswith("deepseek") else {}),
                     )
                 raw = response.choices[0].message.content.strip()
             except Exception as exc:

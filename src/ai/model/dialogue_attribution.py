@@ -9,7 +9,8 @@
 - verdict=false → 语义确认纯旁白，原样放行；
 - verdict=true → 必须给出至少一个 speech 块；原有 speech（id+文本）按序原样
   保留；全部块文本归一化拼接与原文逐字一致（兼容引号标点差异）；
-  choices 原样照抄；speaker_id 只能来自在场人物或已声明/登记的临时身份。
+  choices 原样照抄（choice_skill_hints 由平台随之原样保留，索引不串选项）；
+  speaker_id 只能来自在场人物或已声明/登记的临时身份。
 """
 
 from __future__ import annotations
@@ -104,6 +105,11 @@ def validate_review_fix(
             "segments": verdict.segments,
             "introduced_npc_ids": list(original.introduced_npc_ids),
             "choices": list(original.choices),
+            "choice_targets": [target.model_dump(mode="json") for target in original.choice_targets],
+            # 选项技能提示按索引跟随 choices：choices 原样照抄，提示也原样保留。
+            "choice_skill_hints": [
+                hint.model_dump(mode="json") for hint in original.choice_skill_hints
+            ],
             "guest_speakers": [
                 *original.guest_speakers,
                 *verdict.guest_speakers,

@@ -86,7 +86,15 @@ class ModuleV2Tests(unittest.TestCase):
         engine.context = SimpleNamespace(
             world_store=SimpleNamespace(load=lambda: clock_world)
         )
-        engine._execute_tool = lambda name, args: calls.append((name, args)) or "{}"
+
+        def execute_tool(name, args):
+            calls.append((name, args))
+            # 引擎现在校验兜底代价真实落账：stub 必须像真工具一样提交 state_set。
+            if name == "state_set" and args.get("path") == "case_clocks.danger":
+                clock_world["case_clocks"]["danger"] = int(json.loads(args["value"]))
+            return "{}"
+
+        engine._execute_tool = execute_tool
         match = DiscoveryMatch(
             "essential",
             {"text": "关键事实", "category": "task", "type": "obvious"},

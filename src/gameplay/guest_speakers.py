@@ -38,6 +38,10 @@ def guest_allowed(world: dict, guest_id: str, scene_id: str | None) -> bool:
     entry = guest_registry(world).get(guest_id)
     if entry is None:
         return False
+    from src.gameplay.scene_speaker_presence import departed_speakers
+
+    if guest_id in departed_speakers(world, scene_id):
+        return False
     bound = str(entry.get("scene_id") or "")
     return not bound or not scene_id or bound == scene_id
 
@@ -46,6 +50,18 @@ def registered_guest_ids(world: dict, scene_id: str | None) -> set[str]:
     return {
         guest_id for guest_id in guest_registry(world) if guest_allowed(world, guest_id, scene_id)
     }
+
+
+def turn_allowed_guest_ids(engine: Any, world: dict, scene_id: str | None) -> set[str]:
+    """本回合可发言的临时身份：登记且在场 ∪ 本回合刚离场者（仅一句告别）。
+
+    主叙述与协议修复共用同一集合，避免两条路径对“本回合离场者能否告别”漂移。
+    """
+    from src.gameplay.scene_speaker_presence import departure_ids_this_turn
+
+    return registered_guest_ids(world, scene_id) | (
+        departure_ids_this_turn(engine) & set(guest_registry(world))
+    )
 
 
 def register_guest_declarations(

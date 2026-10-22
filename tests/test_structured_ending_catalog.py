@@ -139,3 +139,20 @@ def test_ruling_already_contains_catalogue_without_duplicate_refresh(ruling_worl
     )
     assert [e["type"] for e in outcome["events"] if e["type"] != "action_status"] == ["ruling_recorded"]
     assert outcome["events"][0]["payload"] == ruling_projection(snapshot()[0])
+
+
+def test_prepared_ending_source_is_rechecked_before_commit(ruling_world):
+    from src.gameplay.endings import ending_readiness
+    from src.structured.errors import StructuredError
+
+    _, _, _, execute, snapshot, _ = ruling_world
+    old = ending_readiness(snapshot()[0])["source_token"]
+    execute("record_ruling", {"flag_id": "sealed", "value": True, "expected_before": False, "basis": "主持核验封印"})
+    before = snapshot()
+    with pytest.raises(StructuredError, match="结案依据已经变化"):
+        execute("end_game", {"ending_id": "seal", "source_token": old})
+    assert snapshot() == before
+    source = ending_readiness(snapshot()[0])["source_token"]
+    result = execute("end_game", {"ending_id": "seal", "source_token": source})
+    assert result["status"] == "committed"
+    assert snapshot()[0]["case_closure_source"]["source_token"] == source

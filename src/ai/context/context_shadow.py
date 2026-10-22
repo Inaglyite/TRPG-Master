@@ -776,6 +776,28 @@ def rollback_turn_surface(engine: Any) -> None:
         engine.messages = previous
 
 
+def prepare_compaction(engine: Any, end_index: int) -> bool:
+    """Verify an in-turn window before pruning or paying for a summary.
+
+    Capacity preflight precedes request recording, so current player/tool
+    messages may still be absent from the shadow. Bind only the captured
+    pre-turn seed; append the delta under its turn id so failure hides it.
+    Never rebase an in-flight turn or include its delta in a durable replace.
+    """
+    active_turn_id = getattr(engine, "_active_turn_id", None)
+    if not active_turn_id:
+        return True
+    shadow = for_engine(engine)
+    surface = engine.__dict__.get("_turn_context_surface")
+    if shadow is None or surface is None or end_index > len(surface):
+        return False
+    try:
+        return shadow.sync_turn(list(engine.messages), str(active_turn_id), surface)
+    except Exception as exc:  # noqa: BLE001 - compaction must never break play
+        _remember_outer_failure(engine, "prepare_compaction", exc)
+        return False
+
+
 def compact_engine(
     engine: Any,
     start_index: int,
@@ -798,6 +820,8 @@ def compact_engine(
     active_turn_id = getattr(engine, "_active_turn_id", None)
     if active_turn_id and surface is None:
         # No captured pre-turn surface: cannot bound an in-turn window.
+        return False
+    if not prepare_compaction(engine, end_index):
         return False
     max_ref_index = len(surface) if active_turn_id else None
     try:
@@ -839,6 +863,8 @@ def prune_engine(engine: Any, replacements: dict[int, dict]) -> list[int]:
             if index < len(surface)
         }
         if not replacements:
+            return []
+        if not prepare_compaction(engine, len(surface)):
             return []
     try:
         applied = shadow.prune_messages(

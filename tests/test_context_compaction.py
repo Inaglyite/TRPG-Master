@@ -23,6 +23,8 @@ from src.ai.context.context_shadow import ContextShadowCoordinator
 from src.ai.context.history_compactor import (
     TOOL_RESULT_PRUNE_MIN_CHARS,
     HistoryCompactor,
+    build_summary_batches,
+    build_summary_input,
 )
 from src.ai.model.model_request import StreamPolicy
 from src.ai.model.model_streamer import ModelResponseError, ModelStreamer, _is_context_overflow
@@ -268,12 +270,8 @@ def test_compaction_resume_from_autosave_after_reload(tmp_path: Path) -> None:
 def _begin_turn_with_delta(engine: GameEngine, action: str) -> str:
     turn_id = engine.begin_turn_record(kind="action", player_input=action)
     engine.messages.append({"role": "user", "content": action})
-    shadow = shadow_adapter.for_engine(engine)
-    assert shadow.sync_turn(
-        list(engine.messages),
-        turn_id,
-        engine.__dict__.get("_turn_context_surface"),
-    )
+    # Capacity preflight runs before record_prepared_request: the active
+    # user/control/tool delta has not yet been synced to the shadow store.
     return turn_id
 
 
@@ -322,6 +320,71 @@ def test_in_turn_compaction_refused_when_window_crosses_surface(tmp_path: Path) 
         is False
     )
     assert _checkpoint_events(shadow.store, session["id"]) == []
+
+
+@pytest.mark.parametrize("seed_first", [False, True])
+def test_preflight_pruning_syncs_delta_without_making_it_durable(
+    tmp_path: Path, seed_first: bool,
+) -> None:
+    engine = _game_engine(tmp_path)
+    engine.messages = _pair_history(15)
+    if seed_first:
+        engine.save("slot_000")
+    previous = copy.deepcopy(engine.messages)
+    turn_id = _begin_turn_with_delta(engine, "尚未完成的玩家行动")
+    engine.messages.extend([
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "pending-call", "type": "function",
+            "function": {"name": "inspect_turn_state", "arguments": "{}"},
+        }]},
+        {"role": "tool", "tool_call_id": "pending-call", "content": "本轮临时结果"},
+    ])
+    replacement = {"role": "assistant", "content": "旧回合缩写"}
+    assert shadow_adapter.prune_engine(engine, {2: replacement, 32: replacement}) == [2]
+    engine.messages[2] = replacement
+    shadow = shadow_adapter.for_engine(engine)
+    session = shadow.store.session_for_world(engine.context.world_id)
+    assert shadow.store.project(session["id"], include_turn_id=turn_id) == engine.messages
+    expected = previous[:]
+    expected[2] = replacement
+    assert shadow.store.project(session["id"]) == expected
+    engine.finish_turn_record(status="failed", error="simulated failure")
+    assert engine.messages == expected
+    assert shadow.store.project(session["id"]) == expected
+    assert shadow.diagnostics == []
+
+
+def test_summary_preflight_rejects_mismatch_before_provider_call(tmp_path: Path) -> None:
+    engine = _game_engine(tmp_path)
+    engine.messages = _pair_history(15)
+    engine.save("slot_000")
+    _begin_turn_with_delta(engine, "当前行动")
+    engine.messages[2]["content"] = "无法同步的历史改写"
+    before = copy.deepcopy(engine.messages)
+    with patch.object(HistoryCompactor, "try_model") as call:
+        assert HistoryCompactor(engine).summarize(silent=True) is False
+    call.assert_not_called()
+    assert engine.messages == before
+    assert any(d.get("reason") == "projection_not_ready" for d in engine._turn_diagnostics)
+    engine.finish_turn_record(status="failed", error="simulated failure")
+
+
+def test_long_active_turn_summary_only_replaces_pre_turn_history(tmp_path: Path) -> None:
+    engine = _game_engine(tmp_path)
+    engine.messages = _pair_history(15)
+    engine.save("slot_000")
+    _begin_turn_with_delta(engine, "当前行动")
+    active = _pair_history(20)[1:]
+    engine.messages.extend(active)
+    assert _summarize_once(engine) is True
+    assert engine.messages[-len(active):] == active
+    assert engine.messages[-len(active) - 1]["content"] == "当前行动"
+    shadow = shadow_adapter.for_engine(engine)
+    session = shadow.store.session_for_world(engine.context.world_id)
+    engine.finish_turn_record(status="failed", error="simulated failure")
+    assert len(engine.messages) == 2
+    assert engine.messages[1]["_trpg_history_kind"] == "summary"
+    assert shadow.store.project(session["id"]) == engine.messages
 
 
 # ---------------------------------------------------------------------------
@@ -971,3 +1034,166 @@ def test_second_overflow_after_safe_retry_is_not_retried_again() -> None:
         _streamer(host).stream("test-model", policy=_POLICY, enable_tools=False)
     assert client.calls == 2
     assert len(host.summarize_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# 压缩输入的结构保全：不截断、说话人留名、按完整条目分批、连续压缩合并
+# ---------------------------------------------------------------------------
+
+
+def test_summary_input_never_truncates_long_turns_or_speaker_tags() -> None:
+    speech = "台词" * 300
+    tagged = f"雨声。{'细节' * 400}\n\n【npc:su】{speech}【/npc】"
+    text = build_summary_input(
+        [
+            {"role": "user", "content": "我听她讲完。"},
+            {"role": "assistant", "content": tagged},
+        ],
+        speaker_names={"su": "苏晚晴"},
+    )
+    assert "【npc:" not in text and "【/npc】" not in text
+    assert "【苏晚晴】" in text
+    assert speech in text  # 不再被 500 字截断
+    assert "...(中间内容省略)..." not in text
+
+
+def test_summary_batches_split_on_whole_entries_without_loss() -> None:
+    messages = []
+    for index in range(30):
+        messages.append({"role": "user", "content": f"行动{index}" + "往" * 300})
+        messages.append({"role": "assistant", "content": f"结果{index}" + "雨" * 300})
+    batches = build_summary_batches(messages, max_chars=2000)
+    assert len(batches) > 1
+    joined = "\n".join(batches)
+    for index in range(30):
+        assert f"行动{index}" in joined and f"结果{index}" in joined
+    assert joined.count("[user]: 行动") == 30
+    # 条目完整（约 620 字符/条），没有批次超预算
+    assert all(len(batch) <= 2000 for batch in batches)
+
+
+def test_compacted_surface_validation_rejects_split_pairs_and_broken_tags() -> None:
+    from src.ai.context.context_summary import validate_compacted_surface
+
+    ok = [
+        {"role": "assistant", "content": "文本", "tool_calls": [{"id": "c1", "function": {"name": "x"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "结果"},
+        {"role": "user", "content": "继续"},
+    ]
+    assert validate_compacted_surface(ok) is None
+
+    split = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "x"}}]},
+        {"role": "user", "content": "继续"},
+    ]
+    assert validate_compacted_surface(split) == "tool_pairing_split"
+
+    broken = [{"role": "assistant", "content": "【npc:su】被截断的台词"}]
+    assert validate_compacted_surface(broken) == "unterminated_speaker_tag"
+
+
+def test_second_compaction_merges_previous_summary_untruncated(tmp_path: Path) -> None:
+    engine = _game_engine(tmp_path)
+    engine.messages = _pair_history(15)
+    engine.save("slot_000")
+    captured: list[str] = []
+    with (
+        patch("src.ai.model.llm._get_glm", return_value=None),
+        patch.object(
+            HistoryCompactor,
+            "try_model",
+            staticmethod(
+                lambda _c, _m, text: captured.append(text)
+                or '{"events":["旧事件"],"open_threads":["未解决：怀表还没找到"]}'
+            ),
+        ),
+    ):
+        assert HistoryCompactor(engine).summarize(silent=True) is True
+
+        summary_message = engine.messages[1]
+        assert summary_message["role"] == "user"
+        assert "未解决：怀表还没找到" in summary_message["content"]
+        # 摘要明确标记为回忆材料，不冒充玩家行动或输出示例
+        assert "不是输出格式示例" in summary_message["content"]
+
+        # 再玩若干轮触发第二次压缩：上一次摘要必须完整进入压缩输入
+        for index in range(15, 26):
+            engine.messages.append({"role": "user", "content": f"行动 {index}"})
+            engine.messages.append({"role": "assistant", "content": f"结果 {index}"})
+        engine.save("slot_000")
+        assert HistoryCompactor(engine).summarize(silent=True) is True
+
+    assert any("未解决：怀表还没找到" in text for text in captured[1:])
+
+
+def test_consecutive_compaction_survives_save_load_branch_and_continue(tmp_path: Path) -> None:
+    """验收链：连续两次压缩 → 存档 → 读档 → 创建分支 → 继续对话。
+
+    人物归属（最近回合的发言标签）、摘要中的未解决事项与最新行动全程存活。
+    """
+    from src.storage.world_branches import WorldBranchService
+
+    engine = _game_engine(tmp_path)
+    tagged = "你推开门。\n\n【npc:guard】站住，出示证件。【/npc】"
+    messages = [{"role": "system", "content": "keeper"}]
+    for index in range(15):
+        messages.append({"role": "user", "content": f"[玩家行动] 行动{index}"})
+        messages.append({"role": "assistant", "content": f"{tagged}（第{index}轮）"})
+    engine.messages = messages
+    engine.save("slot_000")
+
+    summaries = iter([
+        '{"events":["第一段事件"],"open_threads":["未解决：怀表还没找到"]}',
+        '{"events":["第一段事件","第二段事件"],"open_threads":["未解决：怀表还没找到"]}',
+    ])
+    with (
+        patch("src.ai.model.llm._get_glm", return_value=None),
+        patch.object(
+            HistoryCompactor,
+            "try_model",
+            staticmethod(lambda _c, _m, _t: next(summaries)),
+        ),
+    ):
+        assert HistoryCompactor(engine).summarize(silent=True) is True
+        for index in range(15, 26):
+            engine.messages.append({"role": "user", "content": f"[玩家行动] 行动{index}"})
+            engine.messages.append({"role": "assistant", "content": f"{tagged}（第{index}轮）"})
+        engine.save("slot_000")
+        assert HistoryCompactor(engine).summarize(silent=True) is True
+
+    surface = copy.deepcopy(engine.messages)
+    assert any("未解决：怀表还没找到" in str(m.get("content")) for m in surface)
+    # 最近完整回合保留发言结构（未因压缩退化成纯旁白）
+    assert any("【npc:guard】" in str(m.get("content")) for m in surface)
+    engine.save("slot_000")
+
+    # 读档：表面与影子投影一致
+    assert engine.load("slot_000") == len(surface) - 1
+    assert engine.messages == surface
+    shadow = shadow_adapter.for_engine(engine)
+    session = shadow.store.session_for_world(engine.context.world_id)
+    assert shadow.store.project(session["id"]) == engine.messages
+
+    # 继续对话：产生一个真实完成回合
+    engine._stream_llm = lambda *_a, **_k: ("压完继续。\n\n**你可以——**\n1. 继续", [])
+    engine.handle_action("继续调查")
+    turn_id = engine.turn_journal.latest_completed_id()
+    assert turn_id
+
+    # 创建分支：分支表面来自回合正本，摘要与未解决事项随行
+    branch = WorldBranchService(PROJECT_ROOT, tmp_path).create(
+        engine.context, engine.turn_journal, turn_id
+    )
+    with patch("src.structured.engine_gate.OpenAI", return_value=object()):
+        branch_engine = GameEngine(branch.context)
+    branch_engine.prepare_session()
+    branch_engine.adopt_message_history(branch.messages)
+    assert any(
+        "未解决：怀表还没找到" in str(m.get("content")) for m in branch_engine.messages
+    )
+    assert any("【npc:guard】" in str(m.get("content")) for m in branch_engine.messages)
+
+    # 分支里继续对话
+    branch_engine._stream_llm = lambda *_a, **_k: ("分支里的新回合。", [])
+    branch_engine.handle_action("在分支里继续")
+    assert branch_engine.turn_journal.latest_completed_id() != turn_id

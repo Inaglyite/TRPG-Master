@@ -163,6 +163,56 @@ def test_checkpoint_from_previous_turn_is_unusable():
     assert call(host)["error"] == "no_settled_turn_checkpoint"
 
 
+def test_checkpoint_is_bound_to_world_and_rejected_after_branch_or_restore():
+    """读档/分支后，旧世界冻结的检查点不能在新世界查询或修正（迟到的旧请求被拒）。"""
+    host = engine()
+    view = call(host)
+    host.context.world_id = "branched-world"
+    assert call(host)["error"] == "checkpoint_world_mismatch"
+    repaired = call(host, "repair_turn_state", snapshot_token=view["snapshot_token"], reason="旧世界迟到的修正")
+    assert repaired["error"] == "checkpoint_world_mismatch"
+    assert host.context.world_store.load()["current_scene"]["id"] == "office"
+
+
+def test_repair_removes_resurrected_speaker_instead_of_keeping_them():
+    """修复只能回到已结算事实：已离场人物被写回在场名单时，修正是把她再移出去，
+    而不是承认这次复活；离场记录本身不被改动。"""
+    host = engine()
+    store = host.context.world_store
+    # 本轮结算事实：su 已离场，settled 投影不再包含她。
+    store.state["scene_speaker_presence"] = {
+        "office": {"su": {"present": False, "reason": "被辞退", "turn_id": "repair-turn"}}
+    }
+    store.state["current_scene"]["npcs_present"] = ["evelyn"]
+    freeze_turn_state(host)
+    # 叙述层把已离场的人写回了在场名单。
+    store.state["current_scene"]["npcs_present"] = ["su", "evelyn"]
+    view = call(host)
+    assert view["conflicts"] == ["npcs_present"]
+    repaired = call(host, "repair_turn_state", snapshot_token=view["snapshot_token"], reason="已离场人物被写回在场名单")
+    assert repaired["status"] == "repaired"
+    after = store.load()
+    assert after["current_scene"]["npcs_present"] == ["evelyn"]
+    assert after["scene_speaker_presence"]["office"]["su"]["present"] is False
+
+
+def test_repair_receipt_carries_turn_world_scene_reason_and_source():
+    host = engine()
+    store = host.context.world_store
+    store.state["current_scene"]["npcs_present"] = ["jin"]
+    view = call(host)
+    call(host, "repair_turn_state", snapshot_token=view["snapshot_token"], reason="旧在场角色残留")
+    entry = host._turn_mutations.entries[-1]
+    assert entry["name"] == "scene_projection_repair"
+    details = entry["details"]
+    assert details["receipt_id"] == view["snapshot_token"]
+    assert details["reason"] == "旧在场角色残留"
+    assert details["turn_id"] == "repair-turn"
+    assert details["world_id"] == "repair-world"
+    assert details["scene_id"] == "office"
+    assert details["source"] == "settled_turn_checkpoint"
+
+
 def test_tool_budget_closes_with_narration_and_no_more_effects():
     requests = []
     host = SimpleNamespace(messages=[], current_model="narrator", _combat_active=lambda: False)

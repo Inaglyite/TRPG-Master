@@ -33,6 +33,7 @@ def freeze_turn_state(engine) -> None:
     ledger = getattr(engine, "_turn_mutations", None)
     engine._turn_state_checkpoint = {
         "turn_id": getattr(engine, "active_turn_id", None),
+        "world_id": getattr(engine.context, "world_id", None),
         "expected": expected,
         "phase": str(getattr(phase, "value", phase) or "unknown"),
         "proof": [entry for entry in (ledger.snapshot() if ledger else [])
@@ -41,23 +42,40 @@ def freeze_turn_state(engine) -> None:
 
 
 def _view(engine, world: dict) -> dict:
+    from src.gameplay.turn_projection import build_turn_projection
+
     checkpoint = getattr(engine, "_turn_state_checkpoint", None)
     if not checkpoint or checkpoint["turn_id"] != getattr(engine, "active_turn_id", None):
         return {"ok": False, "error": "no_settled_turn_checkpoint"}
+    world_id = getattr(engine.context, "world_id", None)
+    if checkpoint.get("world_id") != world_id:
+        # 读档/分支切换后，旧世界冻结的检查点不能在新世界查询或修正。
+        return {"ok": False, "error": "checkpoint_world_mismatch",
+                "instruction": "检查点属于旧世界或旧分支；在当前世界重新结算回合后才能查询或修正。"}
     current = _projection(world.get("current_scene") or {})
     expected = checkpoint["expected"]
     pending = world.get("pending_departure")
     token_input = [world.get("revision"), current, checkpoint, pending]
     token = hashlib.sha256(json.dumps(token_input, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     present = set(expected.get("npcs_present") or [])
+    # 与叙述/裁决上下文消费同一份每轮重建的投影，避免检查工具另拼名单。
+    authority = build_turn_projection(world, engine=engine)
+    keeper = authority["keeper"]
+    from src.gameplay.endings import ending_readiness
+    npc_briefs = (keeper.get("presence") or {}).get("npc_briefs") or {}
     return {
         "ok": True, "snapshot_token": token,
-        "revision": world.get("revision"), "current_scene": current,
+        "revision": world.get("revision"), "world_id": world_id, "current_scene": current,
         "settled_scene": copy.deepcopy(expected), "phase": checkpoint["phase"],
         "pending_departure": copy.deepcopy(pending),
         "executed_transitions": copy.deepcopy(checkpoint["proof"]),
-        "speakers": [{"id": npc["id"], "name": npc.get("name")}
-                     for npc in world.get("npcs", []) if npc.get("id") in present],
+        "speakers": [{"id": npc_id, "name": (npc_briefs.get(npc_id) or {}).get("name")}
+                     for npc_id, _brief in npc_briefs.items() if npc_id in present],
+        "departed_speakers": (keeper.get("presence") or {}).get("departed_briefs") or [],
+        "open_goals": (keeper.get("goals") or {}).get("open") or [],
+        "pending_matters": keeper.get("pending_matters") or [],
+        "planned_destination": keeper.get("planned_destination"),
+        "ending_readiness": ending_readiness(world),
         "conflicts": [field for field in FIELDS if current[field] != expected[field]],
         "instruction": "有冲突时可用本次 snapshot_token 请求 repair_turn_state；无冲突时修正叙事。不能以叙事为依据移动、增加人物或改写检定。",
     }
@@ -93,7 +111,15 @@ def execute_turn_state_tool(engine, name: str, args: dict) -> str:
             changed = result["conflicts"]
             ledger = getattr(engine, "_turn_mutations", None)
             if ledger:
-                ledger.record_domain("scene_projection_repair", {"changed_fields": changed, "snapshot_token": args["snapshot_token"], "reason": args["reason"]})
+                ledger.record_domain("scene_projection_repair", {
+                    "changed_fields": changed,
+                    "receipt_id": args["snapshot_token"],
+                    "reason": args["reason"],
+                    "turn_id": getattr(engine, "active_turn_id", None),
+                    "world_id": getattr(engine.context, "world_id", None),
+                    "scene_id": str((store.load().get("current_scene") or {}).get("id") or ""),
+                    "source": "settled_turn_checkpoint",
+                })
             result = {"ok": True, "status": "repaired", "changed_fields": changed,
                       "current_scene": _projection(store.load().get("current_scene") or {})}
     return json.dumps(result, ensure_ascii=False)

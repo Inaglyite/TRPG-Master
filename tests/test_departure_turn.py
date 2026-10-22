@@ -137,7 +137,64 @@ def test_move_without_pending_decision_arrives_immediately(tmp_path, monkeypatch
     assert engine.context.world_store.load()["current_scene"]["id"] == "university"
 
 
-def test_invalid_speaker_after_movement_rolls_back_uncommitted_scene(tmp_path, monkeypatch):
+def test_move_receipt_records_origin_destination_presence_and_turn_scope(tmp_path, monkeypatch):
+    """移动回执：出发地、目的地、是否执行、实际在场人物、本轮范围、回合标识。"""
+    engine, _ = make_engine(tmp_path, monkeypatch, [moving(INPUT)], ["你乘车抵达大学。"])
+    engine.handle_action(INPUT)
+    turn_id = engine.turn_journal.latest_completed_id()
+    mutations = engine.turn_journal.read(turn_id)["diagnostics"]["mutations"]
+    receipts = [entry for entry in mutations if entry.get("name") == "scene_transition"]
+    assert len(receipts) == 1
+    details = receipts[0]["details"]
+    state = engine.context.world_store.load()
+    assert details["executed"] is True
+    assert details["origin_scene_id"] == "hall"
+    assert details["destination_scene_id"] == "university"
+    assert details["present_npc_ids"] == list(state["current_scene"]["npcs_present"])
+    assert details["turn_id"] == turn_id
+    assert details["turn_scope"] == "arrival_only"
+
+
+def test_refused_move_records_not_executed_receipt_with_reason(tmp_path, monkeypatch):
+    """结算被拒的移动同样留回执：executed=False 加可诊断的未执行原因，世界不移动。"""
+    from src.gameplay.turn_mutations import TurnMutationLedger
+
+    engine, _ = make_engine(tmp_path, monkeypatch, [], [])
+    engine._turn_mutations = TurnMutationLedger()
+    engine._active_turn_id = "turn-refused"
+    assert engine._resolve_scene_transition("去一个不存在的地方。", destination_scene_id="nowhere") is None
+    receipts = [entry for entry in engine._turn_mutations.entries if entry["name"] == "scene_transition"]
+    assert len(receipts) == 1
+    details = receipts[0]["details"]
+    assert details["executed"] is False
+    assert details["reason"] == "destination_not_in_catalog"
+    assert details["origin_scene_id"] == "hall"
+    assert details["destination_scene_id"] == "nowhere"
+    assert details["turn_id"] == "turn-refused"
+    assert engine.context.world_store.load()["current_scene"]["id"] == "hall"
+
+
+def test_origin_speaker_farewell_allowed_after_movement(tmp_path, monkeypatch):
+    """抵达回合放行出发地人物的简短送别台词：移动已在叙事前结算，
+    当前场景是目的地，送行角色属于出发场景，台词合法且回合正常完成。"""
+    engine, _ = make_engine(tmp_path, monkeypatch, [], [])
+    del engine._stream_llm
+
+    def create(**kwargs):
+        if not kwargs.get("stream"):
+            return response(moving(INPUT))
+        raw = {"segments": [{"kind": "speech", "speaker_id": "guard", "text": "路上小心。"}]}
+        return iter([build_chunk({"content": json.dumps(raw)}), build_chunk({"finish_reason": "stop"})])
+
+    engine.client.chat.completions.create = create
+    engine.handle_action(INPUT)
+    state = engine.context.world_store.load()
+    assert state["current_scene"]["id"] == "university"
+    assert state["world_clock"]["elapsed_minutes"] == 35
+
+
+def test_unrelated_speaker_after_movement_rolls_back_uncommitted_scene(tmp_path, monkeypatch):
+    """与出发地、目的地都无关的人物台词仍被拒，未提交的场景移动照常回滚。"""
     from src.ai.model.model_streamer import ModelResponseError
 
     engine, _ = make_engine(tmp_path, monkeypatch, [], [])
@@ -146,7 +203,7 @@ def test_invalid_speaker_after_movement_rolls_back_uncommitted_scene(tmp_path, m
     def create(**kwargs):
         if not kwargs.get("stream"):
             return response(moving(INPUT))
-        raw = {"segments": [{"kind": "speech", "speaker_id": "guard", "text": "留在大厅的护卫不能在大学说话。"}]}
+        raw = {"segments": [{"kind": "speech", "speaker_id": "librarian", "text": "既不在大厅也不在大学的第三者不能说话。"}]}
         return iter([build_chunk({"content": json.dumps(raw)}), build_chunk({"finish_reason": "stop"})])
 
     engine.client.chat.completions.create = create
@@ -156,6 +213,53 @@ def test_invalid_speaker_after_movement_rolls_back_uncommitted_scene(tmp_path, m
     after = engine.context.world_store.load()
     assert after["current_scene"] == before["current_scene"]
     assert (after.get("world_clock") or {}).get("elapsed_minutes", 0) == 0
+
+
+def dismissal_plan():
+    return {"intent": "interact", "input_quote": "让守卫回去吧", "approach": "遣散守卫",
+            "on_success": [{"kind": "speaker_departure", "target": "guard",
+                            "evidence_quote": "让守卫回去吧", "reason": "玩家遣散了守卫"}]}
+
+
+def test_departed_this_turn_farewell_commits_departure_record(tmp_path, monkeypatch):
+    """正向对照：本回合离场者的告别台词合法，回合提交后离场记录落账。
+    与回滚测试共用同一计划，证明回滚断言不是空转（计划确实会落账离场）。"""
+    engine, _ = make_engine(tmp_path, monkeypatch, [], [])
+    del engine._stream_llm
+
+    def create(**kwargs):
+        if not kwargs.get("stream"):
+            return response(dismissal_plan())
+        raw = {"segments": [{"kind": "speech", "speaker_id": "guard", "text": "“那我先回去了。”"}]}
+        return iter([build_chunk({"content": json.dumps(raw)}), build_chunk({"finish_reason": "stop"})])
+
+    engine.client.chat.completions.create = create
+    engine.handle_action("让守卫回去吧")
+    state = engine.context.world_store.load()
+    assert state["scene_speaker_presence"]["hall"]["guard"]["present"] is False
+    assert state["current_scene"]["npcs_present"] == []
+
+
+def test_failed_narrative_rolls_back_departure_record(tmp_path, monkeypatch):
+    """叙述未通过校验时，本回合已落账的离场记录随回合一起回滚（scene 移动
+    回滚之外的离场记录域断言）。"""
+    from src.ai.model.model_streamer import ModelResponseError
+
+    engine, _ = make_engine(tmp_path, monkeypatch, [], [])
+    del engine._stream_llm
+
+    def create(**kwargs):
+        if not kwargs.get("stream"):
+            return response(dismissal_plan())
+        raw = {"segments": [{"kind": "speech", "speaker_id": "librarian", "text": "不在场的人不能说话。"}]}
+        return iter([build_chunk({"content": json.dumps(raw)}), build_chunk({"finish_reason": "stop"})])
+
+    engine.client.chat.completions.create = create
+    with pytest.raises(ModelResponseError):
+        engine.handle_action("让守卫回去吧")
+    state = engine.context.world_store.load()
+    assert "scene_speaker_presence" not in state
+    assert state["current_scene"]["npcs_present"] == ["guard"]
 
 
 @pytest.mark.parametrize("tool", ["state_set", "state_add_clue", "npc_reveal", "combat_start", "end_game"])

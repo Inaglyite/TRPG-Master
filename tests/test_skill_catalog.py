@@ -98,7 +98,7 @@ def tmp_context(tmp_path: Path, world_id: str, project_root: Path) -> SimpleName
 
 def test_official_catalog_loads_and_covers_all_skill_files():
     catalog = load_official_catalog(PROJECT_ROOT)
-    assert len(catalog.skills) == 15
+    assert len(catalog.skills) == 16
     assert catalog.skills[0].id == "core.trpg_master"
     assert {"keeper.magic", "investigator.methods"} == {
         entry.id for entry in catalog.on_demand_entries()

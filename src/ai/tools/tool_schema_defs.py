@@ -41,3 +41,39 @@ LOAD_SKILL_TOOL = {
         },
     },
 }
+
+
+END_GAME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "end_game",
+        "description": "请求结束游戏。若模组定义了结局，必须提供 ending_id；引擎会校验 required_flags，前置条件未满足时拒绝进入结局画面。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ending_id": {
+                    "type": "string",
+                    "description": "world_state.endings 中的稳定结局 ID",
+                },
+                "source_token": {
+                    "type": "string",
+                    "description": "可选：inspect_turn_state 返回的 ending_readiness.source_token；状态变化后拒绝旧来源。",
+                },
+                "ending_type": {
+                    "type": "string",
+                    "enum": ["good", "bad", "neutral", "secret"],
+                    "description": "结局类型",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "结局标题，如「真相大白」「疯狂之末」",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "结局概要，200字以内，总结整个冒险的关键发现和最终命运",
+                },
+            },
+            "required": ["ending_type", "title", "summary"],
+        },
+    },
+}

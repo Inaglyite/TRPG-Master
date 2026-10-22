@@ -63,11 +63,31 @@ def enrich_public_history_record(
 def enrich_public_history(records: Iterable[dict], engine: Any) -> list[dict]:
     """Enrich a complete lineage while sharing one immutable speaker cache."""
     resolver = SpeakerPayloadResolver(engine)
-    return [
+    history = [
         enrich_public_history_record(record, engine, resolve_speaker=resolver)
         for record in records
         if isinstance(record, dict)
     ]
+    if history:
+        history[-1]["current_choices"] = current_history_choices(history, engine.context.world_store.load())
+    return history
+
+
+def current_history_choices(history: list[dict], world: dict) -> list[dict]:
+    """Historical menus remain unchanged; only the actionable menu is refreshed."""
+    from src.ai.model.dialogue_output import _strip_trailing_menu
+    from src.gameplay.choice_policy import filter_choice_targets
+
+    if not history or world.get("game_over"):
+        return []
+    choices = history[-1].get("choices") or []
+    targets = [dict(choice["target"], choice_index=index)
+               for index, choice in enumerate(choices, 1)
+               if isinstance(choice.get("target"), dict)]
+    public_text = "\n".join(_strip_trailing_menu(str(row.get("narrative") or ""))[0]
+                            for row in history[-12:])
+    kept, _ = filter_choice_targets([str(choice.get("label") or "") for choice in choices], targets, world, public_text)
+    return [copy.deepcopy(choices[index - 1]) for index in kept]
 
 
 def restore_tagged_speakers(messages: list[dict], journal: Any) -> list[dict]:
@@ -76,8 +96,8 @@ def restore_tagged_speakers(messages: list[dict], journal: Any) -> list[dict]:
 
     旧存档的 messages 只存了剥标签的干净正文，直接喂给模型会把历史教成
     “全是旁白”。回合 record 里的 narrative_segments 是定稿时已验证的结构，
-    按正文归一化精确匹配回填；匹配不上（摘要、压缩、旧纯文本）保持原样，
-    不臆造身份，不写回存档，不发起任何模型调用。
+    新历史按稳定回合 ID 关联；无来源的旧正文仅在归属唯一时精确回填。
+    同文异人、摘要与不可恢复旧文绝不猜身份，不写回存档，不调用模型。
     """
     if journal is None:
         return messages
@@ -85,13 +105,23 @@ def restore_tagged_speakers(messages: list[dict], journal: Any) -> list[dict]:
         records = journal.list_completed(limit=10000)
     except Exception:
         return messages
+    from src.ai.context.message_provenance import HISTORY_KIND_KEY, TURN_SOURCE_KEY
     from src.ai.model.dialogue_output import segments_to_tagged_text
     from src.app.turn_rewrite import normalize_narrative_for_match
 
-    tagged_by_text: dict[str, str] = {}
+    by_id: dict[str, dict] = {}
+    by_text: dict[str, list[dict]] = {}
     for record in records:
         if not isinstance(record, dict):
             continue
+        record_id = str(record.get("turn_id") or "")
+        if record_id:
+            by_id[record_id] = record
+        key = normalize_narrative_for_match(str(record.get("narrative") or ""))
+        if key:
+            by_text.setdefault(key, []).append(record)
+
+    def tagged(record: dict) -> str | None:
         segments = record.get("narrative_segments") or []
         if not any(
             isinstance(segment, dict)
@@ -99,19 +129,32 @@ def restore_tagged_speakers(messages: list[dict], journal: Any) -> list[dict]:
             and segment.get("npc_id")
             for segment in segments
         ):
-            continue
-        key = normalize_narrative_for_match(str(record.get("narrative") or ""))
-        if key:
-            tagged_by_text[key] = segments_to_tagged_text(segments)
-    if not tagged_by_text:
-        return messages
+            return None
+        return segments_to_tagged_text(segments)
+
     restored: list[dict] = []
     for message in messages:
-        if message.get("role") == "assistant":
-            tagged = tagged_by_text.get(
-                normalize_narrative_for_match(str(message.get("content") or ""))
+        if message.get("role") == "assistant" and not message.get("tool_calls"):
+            content = str(message.get("content") or "")
+            key = normalize_narrative_for_match(content)
+            source_id = message.get(TURN_SOURCE_KEY)
+            candidates = (
+                [by_id[source_id]] if isinstance(source_id, str) and source_id in by_id
+                else [] if source_id else by_text.get(key, [])
             )
-            if tagged:
-                message = dict(message, content=tagged)
+            candidates = [record for record in candidates if
+                          normalize_narrative_for_match(str(record.get("narrative") or "")) == key]
+            variants = {body for record in candidates if (body := tagged(record))}
+            if len(variants) == 1 and all(tagged(record) for record in candidates):
+                message = dict(message, content=variants.pop(), **{HISTORY_KIND_KEY: "dialogue"})
+                if len(candidates) == 1 and candidates[0].get("turn_id"):
+                    message[TURN_SOURCE_KEY] = candidates[0]["turn_id"]
+            elif len(candidates) == 1 and candidates[0].get("narrative_format") == "dialogue_v1":
+                # A verified narration-only turn is a valid structured example.
+                message = dict(message, **{HISTORY_KIND_KEY: "dialogue"})
+                if candidates[0].get("turn_id"):
+                    message[TURN_SOURCE_KEY] = candidates[0]["turn_id"]
+            elif "【npc:" not in content and message.get(HISTORY_KIND_KEY) != "dialogue":
+                message = dict(message, **{HISTORY_KIND_KEY: "legacy_unattributed"})
         restored.append(message)
     return restored

@@ -127,9 +127,13 @@ def infer_action_check(content: str, world: dict) -> ActionCheck | None:
 
     技能取值用与掷骰层一致的有效视图（skill_view）：规则表基础值可补卡上
     缺项，虚构技能仍不可用。不复活旧 CLI 的兼容性默认值。
+
+    复合行动只结算最早真正阻塞后续的风险点：多个技能词命中时按文本中
+    最先出现的位置取胜（同位置按声明顺序），而不是按模式表声明顺序。
+    一次输入最多一个检定，前面的无风险动作直接完成，不拆成多个骰子。
     """
     text = " ".join(str(content).strip().split())
-    if not text or _NEGATED_ACTION.search(text) or _DISCUSSED_ACTION.search(text):
+    if not text:
         return None
 
     from src.gameplay.skill_view import effective_skills
@@ -138,12 +142,21 @@ def infer_action_check(content: str, world: dict) -> ActionCheck | None:
     if not skills:
         return None
 
-    for skill, reason, patterns in _CHECK_PATTERNS:
+    best: tuple[int, int, ActionCheck] | None = None
+    for order, (skill, reason, patterns) in enumerate(_CHECK_PATTERNS):
         if skill not in skills:
             continue
-        if any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns):
-            return ActionCheck(skill=skill, reason=reason)
-    return None
+        for clause in re.finditer(r"[^，,。；;！？!?]+", text):
+            if _NEGATED_ACTION.search(clause[0]) or _DISCUSSED_ACTION.search(clause[0]):
+                continue
+            for pattern in patterns:
+                match = re.search(pattern, clause[0], re.IGNORECASE)
+                if match is None:
+                    continue
+                candidate = (clause.start() + match.start(), order, ActionCheck(skill=skill, reason=reason))
+                if best is None or candidate[:2] < best[:2]:
+                    best = candidate
+    return best[2] if best else None
 
 
 def _scene_aliases(scene: dict) -> set[str]:
@@ -215,6 +228,16 @@ def infer_scene_transition(content: str, world: dict) -> str | None:
     return scene_id
 
 
+def _record_check_diagnostic(engine: Any, entry: dict) -> None:
+    """模型规划与确定性后备链的差异落进回合诊断，供汇总层（T11）消费。"""
+    diagnostics = getattr(engine, "_turn_diagnostics", None)
+    if not isinstance(diagnostics, list):
+        return
+    from src.ai.model.route_service import with_route_info
+
+    diagnostics.append(with_route_info(engine, "adjudication", entry))
+
+
 def resolve_action_check(
     engine: Any, content: str, preferred_skill: str | None = None
 ) -> dict | None:
@@ -222,6 +245,11 @@ def resolve_action_check(
 
     骰前裁决已给出检定时，参数（技能/难度/奖惩/推骰授权）全部来自冻结方案；
     推骰必须先由玩家确认已声明的风险。GameEngine 仅作薄委托。
+
+    后备链辨认"漏判"与"有理由不检定"：裁决明确 check=null 时通用关键词
+    匹配被抑制、不补骰；裁决缺位（无冻结方案）时确定性匹配按既有规则补。
+    模组明确声明 requires_success 的发现规则（preferred_skill）不被
+    check=null 取消——规则要求的必要风险不凭风格偏好免除。
     """
     import json
 
@@ -238,7 +266,8 @@ def resolve_action_check(
     if pc_incapacitated(world):
         # 失去行动能力的调查员不做行动检定；濒死体验由 sanity/叙事通道处理。
         return None
-    check = infer_action_check(content, world)
+    inferred = infer_action_check(content, world)
+    check = inferred
     if preferred_skill:
         check = ActionCheck(skill=preferred_skill, reason="模组发现规则要求检定")
     resolution = getattr(engine, "_action_resolution", None)
@@ -251,40 +280,66 @@ def resolve_action_check(
     if proposal is not None:
         adjudicated = proposal.get("check")
         if not adjudicated:
-            return None
-        check = ActionCheck(skill=adjudicated["skill"], reason=adjudicated["reason"])
-        from src.gameplay.check_context import approach_fingerprint
+            if not preferred_skill:
+                if inferred is not None:
+                    _record_check_diagnostic(engine, {
+                        "role": "action_check", "status": "adjudicated_no_check",
+                        "adjudicated_skill": "", "deterministic_skill": inferred.skill,
+                    })
+                return None
+            _record_check_diagnostic(engine, {
+                "role": "action_check", "status": "module_rule_requires_check",
+                "adjudicated_skill": "", "deterministic_skill": inferred.skill if inferred else "",
+                "preferred_skill": preferred_skill,
+            })
+        else:
+            if inferred is None or inferred.skill != adjudicated["skill"]:
+                _record_check_diagnostic(engine, {
+                    "role": "action_check", "status": "adjudicated_check",
+                    "adjudicated_skill": str(adjudicated["skill"]),
+                    "deterministic_skill": inferred.skill if inferred else "",
+                })
+            check = ActionCheck(skill=adjudicated["skill"], reason=adjudicated["reason"])
+            from src.gameplay.check_context import approach_fingerprint
 
-        check_args = {
-            **adjudicated,
-            # 做法指纹共用裁决/兜底同一构造：模型改写措辞不改变逐字引用锚点。
-            "approach": approach_fingerprint(proposal["approach"], proposal.get("input_quote", "")),
-            # 对象目标并入 target_id：门锁/容器等由 check.target 标识，NPC 用 target_npc_id。
-            "target_id": proposal.get("target_npc_id", "") or adjudicated.get("target", ""),
-            "push": bool(adjudicated.get("push_context_id")),
-        }
-        check_args.pop("reason", None)
-        check_args.pop("target", None)
-        if check_args["push"]:
-            risk = engine.context.world_store.load()["pc"]["_push_contexts"][
-                check_args["push_context_id"]
-            ]["push_risk"]
-            selected = engine.cb.on_decision(
-                {
-                    "id": "push_check",
-                    "kind": "push_check",
-                    "presentation": "chat",
-                    "title": "孤注一掷",
-                    "description": f"再次失败的风险：{risk}；额外耗时至少 10 分钟。",
-                    "options": [
-                        {"id": "confirm_push", "label": "承担风险，按新做法再试"},
-                        {"id": "cancel_push", "label": "放弃重试"},
-                    ],
-                    "default_option": "cancel_push",
-                }
-            )
-            if selected != "confirm_push":
-                raise TurnCancelledError("玩家取消孤注一掷")
+            check_args = {
+                **adjudicated,
+                # 做法指纹共用裁决/兜底同一构造：模型改写措辞不改变逐字引用锚点。
+                "approach": approach_fingerprint(proposal["approach"], proposal.get("input_quote", "")),
+                # 对象目标并入 target_id：门锁/容器等由 check.target 标识，NPC 用 target_npc_id。
+                "target_id": proposal.get("target_npc_id", "") or adjudicated.get("target", ""),
+                "push": bool(adjudicated.get("push_context_id")),
+            }
+            check_args.pop("reason", None)
+            check_args.pop("obstacle", None)
+            check_args.pop("target", None)
+            if check_args["push"]:
+                risk = engine.context.world_store.load()["pc"]["_push_contexts"][
+                    check_args["push_context_id"]
+                ]["push_risk"]
+                selected = engine.cb.on_decision(
+                    {
+                        "id": "push_check",
+                        "kind": "push_check",
+                        "presentation": "chat",
+                        "title": "孤注一掷",
+                        "description": f"再次失败的风险：{risk}；额外耗时至少 10 分钟。",
+                        "options": [
+                            {"id": "confirm_push", "label": "承担风险，按新做法再试"},
+                            {"id": "cancel_push", "label": "放弃重试"},
+                        ],
+                        "default_option": "cancel_push",
+                    }
+                )
+                if selected != "confirm_push":
+                    raise TurnCancelledError("玩家取消孤注一掷")
+    elif check is not None:
+        # 裁决缺位（漏判）：确定性后备按既有规则补骰，并记录这次兜底。
+        _record_check_diagnostic(engine, {
+            "role": "action_check", "status": "deterministic_fallback",
+            "adjudicated_skill": "", "deterministic_skill": check.skill,
+            "preferred_skill": preferred_skill or "",
+        })
     if check is None:
         return None
 

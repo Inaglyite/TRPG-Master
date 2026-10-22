@@ -2,7 +2,34 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
+
+
+def ending_readiness(state: dict) -> dict:
+    """Keeper-private candidates and their exact state source; never a completion command."""
+    flags = state.get("flags") or {}
+    blockers = []
+    if (state.get("combat_state") or {}).get("active"):
+        blockers.append("combat_active")
+    if state.get("pending_departure"):
+        blockers.append("departure_pending")
+    if state.get("combat_pending_roll"):
+        blockers.append("combat_roll_pending")
+    source = {key: state.get(key) for key in
+              ("module_meta", "module", "module_version", "endings", "flags", "game_over",
+               "combat_state", "pending_departure", "combat_pending_roll")}
+    token = hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+    return {"source_token": token, "source_revision": state.get("revision"),
+            "module": state.get("module_meta") or {"id": state.get("module"), "version": state.get("module_version")},
+            "blockers": blockers, "already_ended": bool(state.get("game_over")),
+            "candidates": [{"id": ending_id,
+                            "eligible": all(flags.get(key) == value for key, value in (ending.get("required_flags") or {}).items()),
+                            "conditions": [{"flag_id": key, "expected": value, "recorded": key in flags,
+                                            "actual": flags.get(key), "source": f"flags.{key}"}
+                                           for key, value in (ending.get("required_flags") or {}).items()]}
+                           for ending_id, ending in _ending_map(state).items()]}
 
 
 def _ending_map(state: dict) -> dict[str, dict]:

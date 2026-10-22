@@ -357,6 +357,24 @@ def _on_demand_catalog_section(
     )
 
 
+def _deduplicate_prompt_sources(parts: list[str]) -> list[str]:
+    """Only exact source blocks/long horizontal-rule sections may be omitted.
+
+    Legacy pins may classify module guides as core, so deduplication covers
+    both core and module sources. Distinct frozen text always survives.
+    """
+    unique: list[str] = []
+    delimiter = "\n\n---\n\n"
+    for source in parts:
+        if not source or any(source in existing for existing in unique):
+            continue
+        sections = [section for section in source.split(delimiter)
+                    if len(section) < 500 or not any(section in existing for existing in unique)]
+        if sections:
+            unique.append(delimiter.join(sections))
+    return unique
+
+
 def load_system_prompt(
     context: RuntimeContext | None = None,
     *,
@@ -404,7 +422,7 @@ def load_system_prompt(
     # 结构化开场的公开剧情由本轮权威快照提供。这里不加载 module.md、
     # 模组 skill 或无关规则，避免私有时间线泄露并缩短首轮输入。
     if profile == "opening":
-        return "\n\n---\n\n".join(parts)
+        return "\n\n---\n\n".join(dict.fromkeys(parts))
     spine_parts = [
         content for content in mod_skill_contents if _PROMPT_SPINE_MARKER in content[:300]
     ]
@@ -417,14 +435,14 @@ def load_system_prompt(
         if content:
             parts.append(neutralize_legacy_format_contract(content))
     # 仅加载【当前模组】的专属 skill，避免多模组内容串扰
-    parts.extend(
-        neutralize_legacy_format_contract(content)
-        for content in (spine_parts if use_spine else mod_skill_contents)
-    )
+    parts.extend(neutralize_legacy_format_contract(content)
+                 for content in (spine_parts if use_spine else mod_skill_contents))
     on_demand_section = _on_demand_catalog_section(catalog, context)
     if on_demand_section:
         parts.append(on_demand_section)
-    return "\n\n---\n\n".join(parts)
+    # Identical source blocks need one owner/copy; never trim arbitrary prose
+    # or silently swap the frozen rules of an old world.
+    return "\n\n---\n\n".join(_deduplicate_prompt_sources(parts))
 
 
 # ---- 存档 ----
@@ -503,6 +521,8 @@ def save_game(
     checkpoint = resolve_checkpoint(checkpoint)
 
     # 序列化消息（去掉不可序列化的字段）
+    from src.ai.context.message_provenance import preserve_provenance
+
     serializable = []
     for m in messages:
         entry = {"role": m["role"], "content": m.get("content", "")}
@@ -510,7 +530,7 @@ def save_game(
             entry["tool_calls"] = m["tool_calls"]
         if "tool_call_id" in m:
             entry["tool_call_id"] = m["tool_call_id"]
-        serializable.append(entry)
+        serializable.append(preserve_provenance(m, entry))
 
     # 读取当前世界状态作为快照
     world_state = context.world_store.load()

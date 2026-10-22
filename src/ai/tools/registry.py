@@ -13,7 +13,7 @@ from src.ai.tools.tool_policy import (
     allows_engine_internal_state_path,
 )
 from src.ai.tools.tool_runtime import ToolRuntime, UnknownToolError
-from src.ai.tools.tool_schema_defs import LOAD_SKILL_TOOL, READ_FILE_TOOL
+from src.ai.tools.tool_schema_defs import END_GAME_TOOL, LOAD_SKILL_TOOL, READ_FILE_TOOL
 from src.ai.tools.turn_state_tool_defs import TURN_STATE_TOOLS
 from src.app.runtime import RuntimeContext
 from src.gameplay.combat import (
@@ -573,36 +573,7 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "end_game",
-            "description": "请求结束游戏。若模组定义了结局，必须提供 ending_id；引擎会校验 required_flags，前置条件未满足时拒绝进入结局画面。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ending_id": {
-                        "type": "string",
-                        "description": "world_state.endings 中的稳定结局 ID",
-                    },
-                    "ending_type": {
-                        "type": "string",
-                        "enum": ["good", "bad", "neutral", "secret"],
-                        "description": "结局类型",
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "结局标题，如「真相大白」「疯狂之末」",
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "结局概要，200字以内，总结整个冒险的关键发现和最终命运",
-                    },
-                },
-                "required": ["ending_type", "title", "summary"],
-            },
-        },
-    },
+    END_GAME_TOOL,
     READ_FILE_TOOL,
     LOAD_SKILL_TOOL,
     # ---- 属性检定与核心机制 ----

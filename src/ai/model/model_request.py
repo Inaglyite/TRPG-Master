@@ -101,6 +101,11 @@ def prepare_model_request(
         elif system_overlay:
             messages.insert(0, {"role": "system", "content": system_overlay})
 
+    from src.ai.context.message_provenance import provider_message
+
+    # Persist provenance for restore/branch matching, but never transmit private
+    # keys (or unknown old prose as an assistant format example) to providers.
+    messages = [provider_message(message) for message in messages]
     request_role = "combat" if system_overlay else "story"
     if getattr(host, "_structured_dialogue", False) is True:
         from src.ai.model.dialogue_output import (
@@ -110,7 +115,10 @@ def prepare_model_request(
 
         messages = [dict(message) for message in messages]
         if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = f"{messages[0].get('content', '')}\n\n{DIALOGUE_INSTRUCTION}"
+            # Repair messages already own this same contract. Appending it a
+            # second time gives competing examples and wastes context.
+            if DIALOGUE_INSTRUCTION not in str(messages[0].get("content") or ""):
+                messages[0]["content"] = f"{messages[0].get('content', '')}\n\n{DIALOGUE_INSTRUCTION}"
         else:
             messages.insert(0, {"role": "system", "content": DIALOGUE_INSTRUCTION})
         # 存档里的历史 assistant 叙事是内部小说体（标签已剥、选项菜单在正文），
@@ -263,6 +271,14 @@ def prepare_model_request(
             "tools": request_snapshot.tool_catalog_digest,
         },
     }
+    from src.ai.context.prompt_composition import describe_prompt, source_catalog
+
+    request_envelope["prompt_composition"] = describe_prompt(messages, source_catalog(host))
+    if consume_request_step:
+        host._turn_request_id = request_snapshot.request_id
+        from src.gameplay.turn_diagnostics import record_stage
+
+        record_stage(host, "model_request", "prepared")
     provider_kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,

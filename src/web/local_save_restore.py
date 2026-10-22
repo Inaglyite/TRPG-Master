@@ -168,6 +168,10 @@ async def restore_local_save(
         await progress("history")
         phase_start = perf_counter()
         history, history_source = await asyncio.to_thread(_saved_history_projection, engine, slot_id)
+        if history:
+            from src.ai.context.narrative_history import current_history_choices
+
+            history[-1]["current_choices"] = current_history_choices(history, engine.context.world_store.load())
         timings["history_ms"] = round((perf_counter() - phase_start) * 1000)
         await progress("character")
         phase_start = perf_counter()

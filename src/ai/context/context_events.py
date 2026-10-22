@@ -156,6 +156,8 @@ def infer_event_type(message: dict[str, Any]) -> str:
     semantically separate from player actions.
     """
     role = str(message.get("role") or "")
+    if message.get("_trpg_history_kind") == "summary":
+        return EVENT_CONTEXT_INJECTION
     if role == "user":
         if _is_control_message(message):
             return EVENT_CONTEXT_INJECTION

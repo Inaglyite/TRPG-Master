@@ -138,6 +138,26 @@ def test_check_result_records_pass_fail() -> None:
     assert check.result is True
 
 
+def test_driver_explicitly_pushes_only_the_current_unresolved_discovery():
+    world = _world()
+    world["clues_found"] = {}
+    world["current_scene"]["id"] = "wright_office"
+    world["clue_catalog"] = {"wright_private_diary": {"source": "wright_office", "discovery_rules": [
+        {"intent": "search", "targets": ["办公室", "日记"], "requires_success": True, "skill": "spot_hidden"},
+    ]}}
+    world["pc"]["_check_history"] = [{"check_id": "failed", "scene_id": "wright_office", "success": False,
+                                       "discovery_ids": ["wright_private_diary"]}]
+    world["pc"]["_push_contexts"] = {"failed": {"target_id": "办公室夹层", "push_risk": "暴露行踪", "used": False}}
+    beat = next(b for b in scarlet_beats() if b.key == "B3a_office")
+    assert "明确选择孤注一掷" in choose_beat_input(beat, 2, world)
+    world["pc"]["_push_contexts"]["failed"]["used"] = True
+    assert "明确选择孤注一掷" not in choose_beat_input(beat, 2, world)
+    world["pc"]["_push_contexts"]["failed"]["used"] = False
+    world["pc"]["_check_history"][0]["goal_achieved"] = True
+    assert "明确选择孤注一掷" not in choose_beat_input(beat, 2, world)
+    assert make_callbacks(Capture()).on_decision({"kind": "push_check"}) == "confirm_push"
+
+
 def test_empty_gun_and_low_hp_change_player_strategy():
     beats = {beat.key: beat for beat in scarlet_beats()}
     world = _world()

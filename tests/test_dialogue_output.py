@@ -52,6 +52,54 @@ def test_multiple_paragraphs_do_not_drop_speaker():
     assert "第二段" in "".join(s.text for s in segments)
 
 
+def test_menu_written_into_narration_is_deduplicated_when_choices_present():
+    raw = {
+        "segments": [
+            {
+                "kind": "narration",
+                "text": "他把钥匙推到你面前。\n\n**你可以——**\n1. 拿上钥匙去办公室。\n2. 继续追问。",
+            }
+        ],
+        "introduced_npc_ids": [],
+        "choices": ["拿上钥匙去办公室", "继续追问"],
+    }
+    text = decode_dialogue_output(json.dumps(raw, ensure_ascii=False), present_npc_ids=set())
+    assert text.count("你可以——") == 1
+    assert "他把钥匙推到你面前。" in text
+    assert "1. 拿上钥匙去办公室\n2. 继续追问" in text
+
+
+def test_menu_written_into_narration_becomes_choices_when_array_empty():
+    raw = {
+        "segments": [
+            {
+                "kind": "narration",
+                "text": "惠特克罗夫特转过身来。\n\n**你可以——**\n1. 请他打开冷柜。\n2. [自由行动] 你决定做什么？",
+            }
+        ],
+        "introduced_npc_ids": [],
+        "choices": [],
+    }
+    text = decode_dialogue_output(json.dumps(raw, ensure_ascii=False), present_npc_ids=set())
+    assert text.count("你可以——") == 1
+    assert "1. 请他打开冷柜。" in text
+    assert "惠特克罗夫特转过身来。" in text
+
+
+def test_menu_only_narration_block_leaves_no_empty_segment():
+    raw = {
+        "segments": [
+            {"kind": "narration", "text": "雨还在下。"},
+            {"kind": "narration", "text": "**你可以——**\n1. 继续"},
+        ],
+        "introduced_npc_ids": [],
+        "choices": [],
+    }
+    text = decode_dialogue_output(json.dumps(raw, ensure_ascii=False), present_npc_ids=set())
+    assert text.count("你可以——") == 1
+    assert "雨还在下。" in text
+
+
 def make_host(raw, *, finish_reason="stop", tool=None):
     captured = []
     host = streamer_host(None)
@@ -100,6 +148,42 @@ def test_real_stream_boundary_validates_json_before_emitting_speaker_ids():
 ])
 def test_invalid_or_truncated_stream_never_leaks_json_or_guessed_speech(raw, finish):
     host, _ = make_host(raw, finish_reason=finish)
+    with pytest.raises(ModelResponseError):
+        run_stream(host)
+    assert host.speech == []
+
+
+def test_arrival_turn_allows_origin_scene_farewell_speech():
+    """抵达回合（移动已在叙事前结算，当前场景是目的地）放行出发地人物的送别台词。"""
+    raw = {"segments": [
+        {"kind": "narration", "text": "你撑伞走出报馆。"},
+        {"kind": "speech", "speaker_id": "su", "text": "“路上小心。”"},
+    ]}
+    host, _ = make_host(json.dumps(raw, ensure_ascii=False))
+    host.context.world_store = SimpleNamespace(load=lambda: {
+        "current_scene": {"id": "station", "npcs_present": []},
+        "scene_catalog": {"office": {"id": "office", "npcs_present": ["su"]}},
+        "npcs": [{"id": "su", "name": "苏晚晴"}],
+    })
+    host.is_valid_npc_id = lambda value: value == "su"
+    host._action_resolution = SimpleNamespace(is_arrival=True, origin_scene_id="office")
+    text, calls = run_stream(host)
+    assert calls == []
+    assert any(npc == "su" for _t, npc in host.speech)
+    assert "【npc:su】" in text
+
+
+def test_non_arrival_turn_still_rejects_absent_speaker():
+    """非抵达回合：出发地人物不算在场，发言仍被拒。"""
+    raw = {"segments": [{"kind": "speech", "speaker_id": "su", "text": "“路上小心。”"}]}
+    host, _ = make_host(json.dumps(raw, ensure_ascii=False))
+    host.context.world_store = SimpleNamespace(load=lambda: {
+        "current_scene": {"id": "station", "npcs_present": []},
+        "scene_catalog": {"office": {"id": "office", "npcs_present": ["su"]}},
+        "npcs": [{"id": "su", "name": "苏晚晴"}],
+    })
+    host.is_valid_npc_id = lambda value: value == "su"
+    host._action_resolution = SimpleNamespace(is_arrival=False, origin_scene_id="office")
     with pytest.raises(ModelResponseError):
         run_stream(host)
     assert host.speech == []

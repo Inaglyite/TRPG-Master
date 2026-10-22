@@ -30,13 +30,26 @@
     {
       "id": "core.dice_system",
       "path": "skills/core/dice_system.skill",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "trust": "core",
       "residency": "core",
       "description": "d100 检定系统：三难度、奖励/惩罚骰、孤注一掷与对抗",
       "opening": false,
       "model_invocable": false,
       "max_context_tokens": 4700,
+      "activation": {},
+      "diagnostic_keywords": []
+    },
+    {
+      "id": "keeper.adjudication",
+      "path": "skills/keeper/keeper_adjudication.skill",
+      "version": "1.1.0",
+      "trust": "core",
+      "residency": "core",
+      "description": "CoC 骰前裁决：目标范围、检定必要性、成功沿用、孤注一掷与时钟依据",
+      "opening": false,
+      "model_invocable": false,
+      "max_context_tokens": 3000,
       "activation": {},
       "diagnostic_keywords": []
     },

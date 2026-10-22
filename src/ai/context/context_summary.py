@@ -148,3 +148,46 @@ def validate_summary_visibility(
         if fragment in normalised_summary:
             return SummarySafetyResult(False, "private_fragment")
     return SummarySafetyResult(True)
+
+
+def validate_compacted_surface(messages: Iterable[Mapping[str, Any]]) -> str | None:
+    """压实后模型表面的结构校验（发布请求前的最后防线）。
+
+    返回问题代码或 None：
+    - tool_pairing_split：assistant 的 tool_calls 与 tool 结果不在同一回合内配对；
+    - unterminated_speaker_tag：assistant 正文里的发言标签不闭合（截断痕迹）。
+    """
+    pending: list[str] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant":
+            if pending:
+                return "tool_pairing_split"
+            calls = message.get("tool_calls")
+            if isinstance(calls, list):
+                for call in calls:
+                    call_id = str(call.get("id") or "") if isinstance(call, Mapping) else ""
+                    if call_id:
+                        if call_id in pending:
+                            return "tool_pairing_split"
+                        pending.append(call_id)
+            content = str(message.get("content") or "")
+            if content.count("【npc:") != content.count("【/npc】"):
+                return "unterminated_speaker_tag"
+            opened = False
+            for match in re.finditer(r"【npc:[A-Za-z0-9_-]{1,48}】|【/npc】", content):
+                opening = match.group() != "【/npc】"
+                if opened == opening:
+                    return "unterminated_speaker_tag"
+                opened = opening
+            if opened:
+                return "unterminated_speaker_tag"
+        elif role == "tool":
+            call_id = str(message.get("tool_call_id") or "")
+            if call_id in pending:
+                pending.remove(call_id)
+            else:
+                return "tool_pairing_split"
+        elif role == "user" and pending:
+            return "tool_pairing_split"
+    return "tool_pairing_split" if pending else None

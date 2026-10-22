@@ -8,7 +8,11 @@ from typing import Any
 
 from src.ai.model.dialogue_output import (
     AttributionSuspicion,
+    DialogueFormatError,
+    DialogueValidationError,
+    SpeakerDepartedError,
     SpeechBlock,
+    choice_skill_hint_map,
     decode_dialogue_output,
     narration_attribution_suspicion,
     parse_dialogue_output,
@@ -16,7 +20,7 @@ from src.ai.model.dialogue_output import (
 from src.ai.model.llm_concurrency import ModelResponseError
 from src.ai.model.provider_adapter import note_model_retry
 from src.ai.tools.tool_protocol import strip_tool_protocol
-from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
+from src.gameplay.npc_speaker_aliases import current_scene_npc_ids, turn_allowed_npc_ids
 from src.gameplay.speaker_parser import SpeakerStreamParser
 from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
 
@@ -24,10 +28,10 @@ from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
 def _guest_context(host, parsed) -> tuple[set[str], set[str], str]:
     """(本回合可用 guest id 全集, 本轮新声明 id, 当前场景 id)。
 
-    可用集合 = 已登记且场景匹配的临时身份 ∪ 本轮新声明。世界状态读不到时
-    只允许本轮新声明，不阻断叙事。
+    可用集合 = 已登记且场景匹配的临时身份 ∪ 本回合离场者（仅告别）∪ 本轮新声明。
+    世界状态读不到时只允许本轮新声明，不阻断叙事。
     """
-    from src.gameplay.guest_speakers import registered_guest_ids
+    from src.gameplay.guest_speakers import guest_registry, turn_allowed_guest_ids
 
     declared = {block.speaker_id for block in parsed.guest_speakers}
     try:
@@ -35,7 +39,54 @@ def _guest_context(host, parsed) -> tuple[set[str], set[str], str]:
     except Exception:
         return set(declared), declared, ""
     scene_id = str((world.get("current_scene") or {}).get("id") or "")
-    registered = registered_guest_ids(world, scene_id)
+    from src.gameplay.scene_speaker_presence import departed_speakers, departure_ids_this_turn
+
+    departed_map = departed_speakers(world, scene_id)
+    farewell = departure_ids_this_turn(host) & set(world.get("guest_speakers") or {})
+    redeclared = sorted(declared & (set(departed_map) - farewell))
+    if redeclared:
+        raise SpeakerDepartedError(
+            redeclared[0],
+            departed_map.get(redeclared[0]),
+            message=f"人物已离场，不能通过重复声明临时身份重新出场：{redeclared[0]}",
+        )
+    if declared and departed_map:
+        # 把已离场人物换个新 guest id 重新声明同样属于绕过：按离场事实拦截。
+        registry = guest_registry(world)
+        departed_names: dict[str, str] = {}
+        for speaker_id in departed_map:
+            entry = registry.get(speaker_id)
+            if entry is not None and entry.get("display_name"):
+                departed_names[str(entry["display_name"])] = speaker_id
+        for npc in world.get("npcs", []) or []:
+            if isinstance(npc, dict) and str(npc.get("id") or "") in departed_map:
+                for key in ("name", "display_name"):
+                    if npc.get(key):
+                        departed_names[str(npc[key])] = str(npc["id"])
+        for npc_id, asset in ((world.get("asset_map") or {}).get("npcs") or {}).items():
+            if str(npc_id) in departed_map and isinstance(asset, dict):
+                label = str(asset.get("label") or asset.get("name") or "")
+                if label:
+                    departed_names[label] = str(npc_id)
+        renamed = next(
+            (
+                block
+                for block in parsed.guest_speakers
+                if block.speaker_id in declared and block.display_name in departed_names
+            ),
+            None,
+        )
+        if renamed is not None:
+            departed_id = departed_names[renamed.display_name]
+            raise SpeakerDepartedError(
+                departed_id,
+                departed_map.get(departed_id),
+                message=(
+                    f"临时身份 {renamed.speaker_id} 的称呼与已离场人物重复："
+                    f"{renamed.display_name}（{departed_id}）"
+                ),
+            )
+    registered = turn_allowed_guest_ids(host, world, scene_id)
     # 声明一个已存在的正式 NPC id：guest_ 前缀之外的兜底碰撞检查
     real_npc_ids = {
         str(npc.get("id") or "")
@@ -49,19 +100,68 @@ def _guest_context(host, parsed) -> tuple[set[str], set[str], str]:
     return registered | declared, declared, scene_id
 
 
+def _departed_context(host) -> dict:
+    """当前场景的已离场记录（decode 的 departed 参数）；读不到时退化为不在场错误。"""
+    try:
+        world = host.context.world_store.load()
+    except Exception:
+        return {}
+    from src.gameplay.scene_speaker_presence import departed_speakers
+
+    return departed_speakers(world)
+
+
+def _speaker_display_name(host, speaker_id: str) -> str:
+    if not speaker_id:
+        return ""
+    try:
+        world = host.context.world_store.load()
+    except Exception:
+        return ""
+    from src.gameplay.scene_speaker_presence import speaker_display_name
+
+    return speaker_display_name(world, speaker_id)
+
+
 def emit_structured_dialogue(
     host, raw, parser, *, finish_reason, log_error, report_error=True
 ) -> str:
     if finish_reason in {"transport_error", "length", "content_filter"}:
         raise ModelResponseError(f"模型结构化对话未完成：{finish_reason}")
     try:
-        parsed = parse_dialogue_output(raw)
+        try:
+            parsed = parse_dialogue_output(raw)
+        except ValueError as exc:
+            raise DialogueFormatError(f"对话 JSON 损坏或结构缺失：{exc}") from exc
         guest_ids, declared_guest_ids, _scene_id = _guest_context(host, parsed)
+        from src.ai.model.dialogue_choices import prepare_dialogue_choices
+
+        world = host.context.world_store.load()
+        _, original_hint_drops = choice_skill_hint_map(parsed)
+        wire = json.loads(raw)
+        for field, attr in (("choice_skill_hints", "_turn_choice_hint_dropped"),
+                            ("choice_targets", "_turn_choice_policy_dropped")):
+            original = wire.get(field, [])
+            discarded = max(0, len(original) - len(getattr(parsed, field))) if isinstance(original, list) else 1
+            if discarded:
+                host.__dict__.setdefault(attr, []).append({"choice_index": 0, "reason": "malformed_metadata", "count": discarded})
+        public_history = "\n".join(str(message.get("content") or "")
+                                   for message in getattr(host, "messages", [])[-12:]
+                                   if message.get("role") == "assistant" and not message.get("tool_calls"))
+        parsed, choice_drops = prepare_dialogue_choices(parsed, world, history_text=public_history,
+                                                       extra_present=declared_guest_ids)
+        raw = parsed.model_dump_json()
+        if choice_drops:
+            host.__dict__.setdefault("_turn_choice_policy_dropped", []).extend(choice_drops)
+        host._turn_choice_targets = {target.choice_index: target.model_dump() for target in parsed.choice_targets}
+        # 抵达回合放行出发场景人物的送别台词（turn_allowed_npc_ids）。
+        allowed_npc_ids = turn_allowed_npc_ids(host) or set()
         text = sanitize_visible_narrative(
             decode_dialogue_output(
                 raw,
-                present_npc_ids=current_scene_npc_ids(host) or set(),
+                present_npc_ids=allowed_npc_ids,
                 guest_speaker_ids=guest_ids,
+                departed=_departed_context(host),
             )
         )
         if not text.strip():
@@ -77,7 +177,7 @@ def emit_structured_dialogue(
         # fail-closed；不播出未验证归属的草稿。复核预算独立于格式修复。
         if (
             not getattr(host, "_attribution_review_used", False)
-            and ((current_scene_npc_ids(host) or set()) or guest_ids)
+            and (allowed_npc_ids or guest_ids)
             and narration_attribution_suspicion(parsed)
         ):
             raise AttributionSuspicion(parsed)
@@ -90,14 +190,30 @@ def emit_structured_dialogue(
             if is_replayed_narrative(text, replay_guard):
                 raise ValueError("修复结果整段复用上一轮叙事")
     except ValueError as exc:
+        from src.gameplay.turn_diagnostics import record_stage
+
+        record_stage(host, "dialogue_validation", "rejected",
+                     code=getattr(exc, "category", "invalid_dialogue"),
+                     speaker_id=getattr(exc, "speaker_id", ""),
+                     source_turn_id=(getattr(exc, "departure", None) or {}).get("turn_id", ""))
         log_error(f"模型结构化对话无效：{exc}")
         if report_error and not isinstance(exc, AttributionSuspicion):
             if "复用上一轮叙事" in str(exc):
                 host.cb.on_error(
                     "本轮叙述修复失败：修复结果与上一轮相同，未提交任何内容；请重试本轮。"
                 )
+            elif isinstance(exc, DialogueValidationError) and exc.category == "departed_speaker":
+                name = _speaker_display_name(host, exc.speaker_id)
+                who = f"「{name}」" if name else "有角色"
+                host.cb.on_error(
+                    f"本轮叙述未通过校验：{who}已经离场，不能再在现场发言；"
+                    "本轮结果未保存，请重新发送刚才的行动。"
+                )
             else:
-                host.cb.on_error("模型对话格式或发言者无效，请重试本轮。")
+                host.cb.on_error(
+                    "本轮叙述未通过校验：对话格式损坏或发言者无效；"
+                    "本轮结果未保存，请重新发送刚才的行动。"
+                )
         raise ModelResponseError("模型结构化对话未通过校验") from exc
     # Canonical IDs alone own speech; no prose inference is permitted here.
     # guest id 本轮新声明时引擎身份表尚未登记，发射解析器只认 decode 已放行的集合。
@@ -119,6 +235,18 @@ def emit_structured_dialogue(
         {"speaker_id": block.speaker_id, "display_name": block.display_name}
         for block in parsed.guest_speakers
     ]
+    # 选项“可能检定”提议随本轮输出走：平台在定稿时按统一有效技能视图解析
+    # 可用性与数值；越界/重复按条丢弃并记入诊断，不影响整轮。
+    hint_map, hint_drops = choice_skill_hint_map(parsed)
+    hint_drops = original_hint_drops + hint_drops
+    host._turn_choice_skill_hints = hint_map
+    if hint_drops:
+        for entry in hint_drops:
+            log_error(f"选项技能提示丢弃：{entry['reason']}（选项序号 {entry['choice_index']}）")
+        try:
+            host.__dict__.setdefault("_turn_choice_hint_dropped", []).extend(hint_drops)
+        except AttributeError:
+            pass
     return text
 
 
@@ -159,7 +287,7 @@ def _run_attribution_review(
         run_attribution_review,
     )
 
-    present = current_scene_npc_ids(host) or set()
+    present = turn_allowed_npc_ids(host) or set()
     guest_ids, _declared, _scene_id = _guest_context(host, suspicion.output)
     try:
         fixed = run_attribution_review(
@@ -221,7 +349,9 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
             ), []
         if not repair_allowed:
             raise
-        validation_error = str(exc.__cause__ or exc)
+        # 类型化的校验错误（DialogueValidationError 子类）原样传给修复上下文，
+        # 修复指令按错误类别（JSON 损坏 / 已离场 / 不在场）区分。
+        validation_error = exc.__cause__ if isinstance(exc.__cause__, ValueError) else exc
     note_model_retry(host, "invalid_dialogue", "unknown", 0)
     source = request_options["messages_override"]
     from src.ai.model.dialogue_repair_context import (
@@ -230,6 +360,9 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
     )
 
     source = source if source is not None else host.messages
+    from src.gameplay.turn_diagnostics import record_stage
+
+    record_stage(host, "dialogue_repair", "started", code=getattr(validation_error, "category", "invalid_dialogue"))
     messages = repair_messages(host, source, raw, validation_error)
     # 复读拦截与原草稿是否有内容解耦：任何协议修复都不得在解码后整段复制
     # 上一轮长篇叙事。守卫挂在 host 上由 emit_structured_dialogue 在任何

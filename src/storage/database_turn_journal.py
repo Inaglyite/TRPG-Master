@@ -642,7 +642,7 @@ class DatabaseTurnJournal:
         atomic_write_json(slot_dir / "snapshot.json", state)
         atomic_write_json(slot_dir / "meta.json", metadata)
 
-    def finish_incomplete(self, turn_id: str, *, status: str, error: str = "") -> dict:
+    def finish_incomplete(self, turn_id: str, *, status: str, error: str = "", diagnostics: dict | None = None) -> dict:
         if status not in {"cancelled", "failed", "interrupted"}:
             raise ValueError(f"非法回合结束状态: {status}")
         with session_scope(self.database_url) as session:
@@ -665,6 +665,8 @@ class DatabaseTurnJournal:
                 }
             )
             row.status = status
+            if diagnostics is not None:
+                record["diagnostics"] = _json_safe(diagnostics)
             row.record = record
             return copy.deepcopy(record)
 
@@ -922,7 +924,7 @@ class DatabaseTurnJournal:
         if not target:
             return None
         record = self.read(target)
-        if record.get("status") != "completed":
+        if record.get("status") not in {"completed", "failed", "cancelled", "interrupted"}:
             return None
         diagnostics = record.get("diagnostics") or {}
         calls = diagnostics.get("model_calls") or []
@@ -936,6 +938,9 @@ class DatabaseTurnJournal:
         return {
             "turn_id": record.get("turn_id"),
             "kind": record.get("kind"),
+            "status": record.get("status"),
+            "commit_status": diagnostics.get("commit_status", "committed" if record.get("status") == "completed" else "not_committed"),
+            "stages": copy.deepcopy(diagnostics.get("stages") or []),
             "completed_at": record.get("completed_at"),
             "duration_ms": record.get("duration_ms"),
             "world_revision": record.get("world_revision"),

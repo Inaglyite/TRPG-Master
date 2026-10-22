@@ -58,3 +58,39 @@ def _clean_label(label: str) -> str:
         label = wrapper.group(1).strip()
     label = re.sub(r"[*_`]+", "", label)
     return re.sub(r"\s+", " ", label)
+
+
+def resolve_skill_hints(
+    choices: list[dict], hint_map: dict[int, str], pc: dict
+) -> tuple[list[dict], list[dict]]:
+    """把 {选项序号(1 起): skill_id} 解析为选项上的 skillHint 展示元数据。
+
+    可用性与当前有效值一律走 skill_view 统一有效视图（与正式检定同一来源，
+    卡上显式值优先、规则基础值兜底）；未知技能与越界序号按条丢弃并返回诊断
+    （不含模型原文）。模型用中文名提议时按全表唯一别名解析。注解仅作展示，
+    不承诺该行动一定触发检定；返回新列表，不改入参。
+    """
+    from src.gameplay.skill_view import display_name, effective_skills, rule_name_aliases
+
+    view = effective_skills(pc)
+    aliases = rule_name_aliases()
+    resolved = [dict(choice) for choice in choices]
+    dropped: list[dict] = []
+    for index, skill_id in sorted(hint_map.items()):
+        if not 1 <= index <= len(resolved):
+            dropped.append({"choice_index": index, "reason": "index_out_of_range"})
+            continue
+        key = str(skill_id).strip()
+        if key not in view:
+            alias = aliases.get(key)
+            if alias and alias in view:
+                key = alias
+            else:
+                dropped.append({"choice_index": index, "reason": "unknown_skill"})
+                continue
+        resolved[index - 1]["skillHint"] = {
+            "skillId": key,
+            "name": display_name(key),
+            "value": view[key],
+        }
+    return resolved, dropped

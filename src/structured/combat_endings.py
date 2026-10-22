@@ -266,6 +266,11 @@ def finish_encounter(state: dict, payload: dict, ctx: CommandContext) -> Command
 
 def finish_game(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
     _open_game(state)
+    from src.gameplay.endings import ending_readiness
+
+    readiness = ending_readiness(state)
+    if payload.get("source_token") and payload["source_token"] != readiness["source_token"]:
+        raise StructuredError("stale_revision", "结案依据已经变化，请刷新结局材料。", retryable=True)
     if (state.get("combat_state") or {}).get("active"):
         raise StructuredError("invalid_action", "先结算或明确结束当前战斗，再结算结局。")
     resolution = validate_ending(state, payload)
@@ -297,6 +302,8 @@ def finish_game(state: dict, payload: dict, ctx: CommandContext) -> CommandResul
         )
         events.append(EventSpec("case_settled", copy.deepcopy(receipt), {"kind": "keeper"}))
     state["game_over"] = ending
+    state["case_closure_source"] = {"source_token": readiness["source_token"],
+                                    "source_revision": readiness["source_revision"]}
     from .case_closure import close_case_work
 
     events.extend(close_case_work(ctx))

@@ -90,6 +90,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from src.ai.context.narrative_history import enrich_public_history_record
+from src.ai.model.llm_concurrency import ModelResponseError
 from src.ai.model.model_stream_diagnostics import turn_context_summary
 from src.ai.model.route_service import LocalRouteResolver
 from src.app.config import (
@@ -573,10 +574,17 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
 
                 print(redact_log(f"[ws] 回合异常: {e}"), file=sys.stderr)
                 print(redact_log(traceback.format_exc()), file=sys.stderr)
+                # 模型叙述校验失败时回合事务已回滚，结果未保存，必须如实告知玩家；
+                # 其他异常类型保持原提示。检定失败不是错误，不会走到这里。
+                message = (
+                    "本轮叙述未通过校验，结果未保存，请重新发送刚才的行动。"
+                    if isinstance(e, ModelResponseError)
+                    else "本轮处理失败，请重新发送刚才的行动。"
+                )
                 emit(
                     {
                         "type": "error",
-                        "message": "本轮处理失败，请重新发送刚才的行动。",
+                        "message": message,
                         "terminal": True,
                     }
                 )

@@ -23,6 +23,7 @@ from src.app.config import _enabled_env
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
 from src.gameplay.action_resolution import ActionPhase, ActionResolution, pc_incapacitated
+from src.gameplay.adjudication_policy import recent_goal_checks
 from src.gameplay.case_clock_time import time_rule_applies
 from src.gameplay.destination_grounding import (
     DestinationGroundingError,
@@ -118,23 +119,29 @@ class CheckProposal(StrictProposal):
     bonus_dice: int = Field(default=0, ge=0, le=2)
     penalty_dice: int = Field(default=0, ge=0, le=2)
     reason: str = Field(min_length=1, max_length=300)
+    obstacle: str = Field(default="", max_length=300, description="阻碍玩家目标的真实不确定因素；紧张氛围本身不是阻力")
     push_context_id: str = Field(default="", max_length=80)
-    push_risk: str = Field(default="", max_length=500)
+    push_risk: str = Field(default="", max_length=500, description="首次可孤注一掷检定时提前说明重试失败的风险；已完成目标不生成重试")
 
 
 class EffectProposal(StrictProposal):
-    kind: Literal["clock_advance", "npc_reaction", "take_item", "consume_item", "flag_set", "rescue"]
+    kind: Literal["clock_advance", "npc_reaction", "take_item", "consume_item", "flag_set", "rescue", "speaker_departure", "speaker_return"]
     target: str = Field(min_length=1, max_length=180)
     value: str = Field(default="", max_length=80, description="npc_reaction 时仅限 cooperative/guarded/nervous/submissive/unknown")
     source_id: str = Field(default="", max_length=180)
     evidence_quote: str = Field(min_length=1, max_length=300)
     reason: str = Field(min_length=1, max_length=300)
+    clock_trigger: str = Field(default="", max_length=500, description="clock_advance 时逐字选择目标时钟 advance_when 中本次实际满足的一条")
 
 
 class ActionProposal(StrictProposal):
     intent: Literal["interact", "prepare_move", "move", "wait", "clarify", "decline", "combat"]
     input_quote: str = Field(min_length=1, max_length=1200)
     approach: str = Field(min_length=1, max_length=500)
+    goal_id: str = Field(default="", max_length=120, description="场景内完整行动目标的稳定标识；继续同一目标须复用，不按问句/抽屉拆分")
+    goal: str = Field(default="", max_length=300, description="玩家实际授权的目标及本次检定覆盖范围")
+    changed_conditions: str = Field(default="", max_length=300, description="对已检定目标再次掷骰时的实质局势变化；措辞变化不算")
+    change_evidence_quote: str = Field(default="", max_length=300, description="逐字引用输入、最近对话或当前权威状态中的新条件")
     target_npc_id: str = Field(default="", max_length=80)
     destination_scene_id: str = Field(default="", max_length=100)
     destination_reason: str = Field(default="", max_length=600, description="结合玩家意图、最近对话与地点设定，说明本轮为何前往该地点")
@@ -199,7 +206,8 @@ def adjudication_schema(world: dict | None = None) -> dict:
     Defaults remain available when loading older frozen plans.
     """
     schema = ActionProposal.model_json_schema()
-    schema["required"].append("departure_question")
+    schema["required"].extend(["departure_question", "goal_id", "goal"])
+    schema["$defs"]["CheckProposal"]["required"].append("obstacle")
     if world is not None:
         from src.gameplay.adjudication_constraints import constrain_adjudication_schema
 
@@ -245,12 +253,30 @@ def available_items(world: dict) -> dict[str, str]:
 
 def adjudication_context(world: dict, content: str, fallback: ActionResolution, dialogue: list[dict] | None = None) -> dict:
     from src.gameplay.sanity_sources import available_sanity_sources
+    from src.gameplay.scene_speaker_presence import departed_speakers
+    from src.gameplay.turn_projection import build_turn_projection
 
     scene = world.get("current_scene") or {}
     present = set(scene.get("npcs_present", []))
+    # 与叙述上下文、状态查询工具同一份每轮重建投影：目标、待决事项、
+    # 计划目的地不在这里另拼一份。
+    authority = build_turn_projection(world)
+    keeper_authority = authority["keeper"]
     return {
         "player_input": content,
         "recent_dialogue": dialogue or [],
+        "guest_speakers": world.get("guest_speakers", {}),
+        "departed_speakers": departed_speakers(world),
+        "goals": keeper_authority["goals"],
+        "pending_matters": keeper_authority["pending_matters"],
+        "planned_destination": keeper_authority["planned_destination"],
+        "module_diagnostics": authority["diagnostics"],
+        "known_scene_discoveries": [
+            {"id": key, "text": clue.get("text"), "granted_item": clue.get("granted_item")}
+            for key, clue in (world.get("clue_catalog") or {}).items()
+            if key in _known_clue_ids(world) and isinstance(clue, dict)
+            and clue.get("source") == str(scene.get("id") or "")
+        ],
         "pending_departure": world.get("pending_departure"),
         "known_people_locations": known_people(world, dialogue or []),
         "current_scene": {k: v for k, v in scene.items() if k not in {"document", "action_routes", "action_advisories", "entry_beat"}},
@@ -274,11 +300,7 @@ def adjudication_context(world: dict, content: str, fallback: ActionResolution, 
         "elapsed_minutes": elapsed_minutes(world),
         "module_rules": world.get("module_rules", {}),
         "sanity_sources": available_sanity_sources(world),
-        "recent_checks": [
-            {key: record.get(key) for key in ("skill", "target_id", "approach", "success")}
-            for record in (world.get("pc", {}).get("_check_history") or [])[-8:]
-            if isinstance(record, dict) and record.get("scene_id") == str(scene.get("id") or "")
-        ],
+        "recent_checks": recent_goal_checks(world),
         "combat_state": world.get("combat_state", {}),
         "pc_incapacitated": pc_incapacitated(world),
         # 与叙事层保持同一权威视图：裁决器需要知道"什么已经落定"，
@@ -294,6 +316,9 @@ def adjudication_context(world: dict, content: str, fallback: ActionResolution, 
 
 def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionResolution, dialogue: list[dict] | None = None) -> ActionResolution:
     proposal = ActionProposal.model_validate(raw)
+    from src.gameplay.adjudication_policy import validate_goal_check
+
+    validate_goal_check(proposal, world, content, dialogue or [])
     if proposal.input_quote not in content:
         raise ValueError("input_quote 必须逐字引用玩家输入")
     if proposal.intent == "prepare_move":
@@ -471,6 +496,12 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
         if effect.kind == "clock_advance":
             if effect.target not in (world.get("case_clocks") or {}) or effect.target not in (world.get("case_clock_definitions") or {}):
                 raise ValueError("时钟必须由模组声明")
+            triggers = (world["case_clock_definitions"][effect.target].get("advance_when") or [])
+            if (proposal.goal_id or effect.clock_trigger) and effect.clock_trigger not in triggers:
+                raise ProposalValidationError(
+                    "时钟推进必须选择该时钟 advance_when 中实际满足的触发条件；本轮完成或检定成败不自动推进",
+                    code="ungrounded_clock_trigger", field="clock_trigger", candidates=list(triggers),
+                )
             if (
                 proposal.intent == "wait"
                 and proposal.time_minutes > 0
@@ -488,6 +519,18 @@ def validate_proposal(raw: dict, content: str, world: dict, fallback: ActionReso
                     field="clock_advance",
                     value=re.sub(r"[^0-9A-Za-z_-]", "", effect.target)[:80],
                 )
+        elif effect.kind == "speaker_departure":
+            from src.gameplay.guest_speakers import registered_guest_ids
+            from src.gameplay.scene_speaker_presence import departed_speakers
+
+            if effect.target not in (present | registered_guest_ids(world, current_scene_id)) - set(departed_speakers(world)):
+                raise ValueError("离场人物必须是当前在场的正式或临时人物")
+        elif effect.kind == "speaker_return":
+            from src.gameplay.scene_speaker_presence import departed_speakers
+
+            if effect.target not in departed_speakers(world, current_scene_id):
+                # 强行复活必须被拒：回归只能销掉一条真实的离场记录。
+                raise ValueError("回归人物必须有本场景的离场记录；没有离场事实的回归是伪造的")
         elif effect.kind == "npc_reaction":
             if effect.target not in present or effect.value not in {"cooperative", "guarded", "nervous", "submissive", "unknown"}:
                 raise ValueError("NPC 反应必须限于在场人物的社交态度")
@@ -558,6 +601,16 @@ pc_incapacitated=true 时玩家已失去行动能力：只能 wait/clarify/decli
 可附 npc_reaction（呼救/谈判）与 clock_advance；conditions 含 dead 时不可逆，不得提出救援。
 发挥语义理解：发卡拨动锁芯属于开锁，借身份/说辞支走守卫需要结合 NPC 反应裁量，
 不要因为动作不在固定句式里就忽略。日常无风险交流不检定；有不确定性和代价才检定。
+先写 goal_id 与 goal，明确玩家授权目标；检定写 obstacle 和失败后果。普通问话、观察、等待、取物和走位不因场景紧张自动检定。
+玩家只等候时推进对方可感知的反应，不自行增加听清人数、辨认密谈的额外目标；普通喝问身份也不自动扩为震慑退敌。
+goal_id 以完整目标为单位，继续同一搜查或交涉沿用 recent_checks：成功后条件未变用 check=null；失败重试走孤注一掷或提交有证据的新条件。
+clock_advance 必须填写 clock_trigger，逐字选取目标时钟 advance_when 中实际满足的一条，reason 解释因果；不因完成一轮、检定成功/失败自动推进。
+人物被赶走、主动离开或遭遇结束时，用 speaker_departure 效果落账（正式/临时人物都用已有 id）。
+复合动作中已独立完成的赶人不受后续搜查检定成败影响，两个结果分支均应登记相应离场。
+departed_speakers 中的人已离开，不再编写其脚步靠近、试门、敲门或现场对话；无新授权遭遇时不要换个临时身份再生成一批人。
+已离场人物只有玩家输入给出真实回归事由（如被叫回、主动返回）时才用 speaker_return 回到现场：
+目标必须在本场景已有离场记录，evidence_quote 逐字引用该事由；没有离场事实的"回归"是伪造，会被拒绝。
+known_scene_discoveries 已完成，继续谈及或查看它们不重新搜查、掷骰或重新领取。改变摸法、换技能只是新做法，失败重试应走孤注一掷，不能冒充外部局势变化。
 从角色表选技能，解释难度与奖励/惩罚依据；在骰前确定成功与失败后果。
 check.target 填检定对象的稳定标识（如"左边房门锁""阁楼暗格"）；NPC 目标用 target_npc_id。
 换对象时必须换新标识——同一技能对同场景不同对象的检定不算重复。
@@ -641,7 +694,11 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     if session is not None and session.plan is not None:
         return validate_proposal(session.plan, content, world, fallback, dialogue)
     payload = adjudication_context(world, content, fallback, dialogue)
-    messages = [{"role": "system", "content": _PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
+    from src.gameplay.adjudication_policy import policy_instruction
+
+    policy = policy_instruction(engine)
+    messages = [{"role": "system", "content": _PROMPT + ("\n\n" + policy if policy else "")},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     model = model_for_role(engine, "adjudication")
     started = time.monotonic()
     last_error = ""
@@ -667,6 +724,9 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             raw_arguments = str(calls[0].function.arguments or "")
             proposal = json.loads(raw_arguments)
             resolution = validate_proposal(proposal, content, world, fallback, dialogue)
+            from src.gameplay.turn_diagnostics import record_stage
+
+            record_stage(engine, "adjudication", "accepted")
             if session is not None:
                 session.freeze_plan(json.loads(resolution.adjudication_json))
             elapsed = time.monotonic() - started
@@ -681,6 +741,9 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             last_error = public_error_summary(exc)
             last_detail = f"{type(exc).__name__}: {exc}"
             last_exc = exc
+            from src.gameplay.turn_diagnostics import record_stage
+
+            record_stage(engine, "adjudication", "rejected", code=getattr(exc, "code", "proposal_invalid"))
             if isinstance(exc, DestinationGroundingError):
                 destination_error = str(exc)
             # 可观测性：_turn_diagnostics 会经 diagnostic_report 公开到 WS，
@@ -746,6 +809,11 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
             discovery_matches=(),
             adjudication_json=json.dumps(refusal, ensure_ascii=False),
         )
+    if isinstance(last_exc, ProposalValidationError) and last_exc.code in {"goal_requires_push", "ungrounded_check_change"}:
+        return replace(fallback, discovery_matches=(), adjudication_json=ActionProposal(
+            intent="clarify", input_quote=content[:1200],
+            approach="同一调查目标已经检定失败，本轮未再次掷骰。换做法重试需要玩家明确选择孤注一掷并承担已公布的风险，或先取得真实的新条件。请说明这一真实原因，不编造角色失忆或迟疑。",
+        ).model_dump_json())
     log_game(f"行动裁决回退 | {last_error[:300]}")
     if hasattr(engine, "_turn_diagnostics"):
         engine._turn_diagnostics.append(with_route_info(engine, "adjudication", {"model": model, "role": "adjudication", "status": "fallback", "error": last_error[:300]}))
@@ -762,7 +830,8 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     return fallback
 
 
-def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_result: dict | None) -> dict:
+def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_result: dict | None,
+                              resolved_discoveries: list[dict] | None = None) -> dict:
     if not resolution.adjudication_json:
         return {}
     plan = ActionProposal.model_validate_json(resolution.adjudication_json)
@@ -813,8 +882,22 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
         description = f"{description or plan.approach} {NO_FINDING_CONTRACT}"
     result = {"success": succeeded, "status": status, "description": description,
               "npc_direction": plan.npc_direction, "events": []}
+    from src.gameplay.discovery_settlement import discovery_outcome_description, paid_discoveries
+
+    discoveries = resolved_discoveries or []
+    if not blocked_check and status == "executed_failure" and paid_discoveries(discoveries):
+        result.update(status="executed_with_cost", goal_achieved=True,
+                      description=discovery_outcome_description(discoveries))
     if check_result and check_result.get("push_consequence"):
-        result["description"] = check_result["push_consequence"]
+        result["description"] = check_result["push_consequence"] + (
+            "\n" + result["description"] if result.get("goal_achieved") else ""
+        )
+    paid_costs = {
+        str(cost["clock_id"]): cost
+        for discovery in discoveries
+        if isinstance((cost := (discovery.get("fallback") or {}).get("paid_cost")), dict)
+        and cost.get("clock_id")
+    }
 
     def mutate(world: dict):
         if plan.intent in {"move", "decline"}:
@@ -828,13 +911,34 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
         clock_events = time_event.pop("clock_events", [])
         result["events"].append(time_event)
         result["events"].extend(clock_events)
+        result["events"].extend({
+            "type": "clock_advance", "target": key, "before": cost["before"],
+            "after": cost["after"], "source": "discovery_fallback",
+        } for key, cost in paid_costs.items())
         for effect in effects:
             if effect.kind == "clock_advance":
+                if effect.target in paid_costs:
+                    continue  # Same fallback consequence is already paid and recorded.
                 clocks = world["case_clocks"]
                 definition = world["case_clock_definitions"][effect.target]
                 before = int(clocks[effect.target])
                 clocks[effect.target] = min(before + 1, int(definition.get("max", before + 1)))
                 result["events"].append({"type": effect.kind, "target": effect.target, "before": before, "after": clocks[effect.target]})
+            elif effect.kind == "speaker_departure":
+                from src.gameplay.scene_speaker_presence import depart_speaker
+
+                result["events"].append(depart_speaker(
+                    world, effect.target, reason=effect.reason,
+                    turn_id=str(getattr(engine, "active_turn_id", "") or ""),
+                ))
+            elif effect.kind == "speaker_return":
+                from src.gameplay.scene_speaker_presence import return_speaker
+
+                result["events"].append(return_speaker(
+                    world, effect.target, reason=effect.reason,
+                    turn_id=str(getattr(engine, "active_turn_id", "") or ""),
+                    evidence=effect.evidence_quote,
+                ))
             elif effect.kind == "npc_reaction":
                 npc = next(n for n in world["npcs"] if n.get("id") == effect.target)
                 npc["disposition"] = effect.value
@@ -887,9 +991,18 @@ def apply_adjudicated_effects(engine: Any, resolution: ActionResolution, check_r
                 pc["conditions"] = [c for c in conditions if c not in {"dying", "unconscious"}]
                 result["events"].append({"type": effect.kind, "rescuer": effect.target, "hp_after": pc.get("hp")})
         session = getattr(engine, "_resolution_session", None)
+        from src.gameplay.adjudication_policy import record_goal_check
+
+        record_goal_check(world, plan, check_result, result["description"],
+                          goal_achieved=succeeded or bool(result.get("goal_achieved")),
+                          turn_id=getattr(engine, "active_turn_id", None),
+                          resolution_id=session.id if session else None)
         world["last_action_outcome"] = {"resolution_id": session.id if session else "", **result}
 
     engine.context.world_store.update(mutate)
+    from src.gameplay.turn_diagnostics import record_stage
+
+    record_stage(engine, "outcome", "staged", receipt_id=(check_result or {}).get("check_id"))
     if plan.sanity_source_id:
         from src.gameplay.sanity_sources import validate_sanity_source
 

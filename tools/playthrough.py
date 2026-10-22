@@ -95,6 +95,9 @@ def make_callbacks(capture: Capture, *, decision_strategy: str = "default") -> E
                 ),
                 info.get("default_option"),
             )
+        if info.get("kind") == "push_check":
+            # The harness player explicitly requested the push in choose_beat_input.
+            return "confirm_push"
         if decision_strategy == "confirm":
             options = [o for o in info.get("options", []) if isinstance(o, dict)]
             for option in options:
@@ -387,16 +390,21 @@ def scarlet_beats() -> list[Beat]:
             title="精神病院：塞西尔·亨特与三个买家",
             inputs=[
                 "前往阿卡姆疗养院，看望被开除的学生塞西尔·亨特",
+                "我先在门厅向护士说明调查身份，请她联系主治医生办理探视与查看相关私人物品的许可；如果已过探视时间，我愿意等到明天上午九点按流程登记。",
                 "安抚亨特，请他讲述文档和他复制的内容",
                 "继续追问亨特：都有谁想要收购这批文档",
                 # 对齐 hunter_copy 确定性发现规则（talk/examine 双路）
                 "向亨特询问他偷偷复制的那份复制件，请他交给我检查",
-                "接过那份复制件，在烛光下仔细检查纸上的墨迹",
+                "如果复制件已经实际交到我手上，我检查纸上墨迹；否则先请主治医生许可查看亨特的复制件，遵守探视与物品保管手续，不假设已经拿到。",
+                "我按刚才登记的安排在院外等到次日上午九点，再向主治医生出示大学委托身份，申请在护士监督下查看亨特的复制件；请医生先答复许可，不假定已经获批。",
+                "若医生已经许可，我请护士依批准流程带我查看亨特的复制件，在她监督下检查墨迹，不带走；若还需大学书面凭据，我先联系法伦主任请他向医生核实委托。",
+                "我现在联系法伦主任，请他直接向主治医生核实我受大学委托调查莱特的身份，并依医生要求补交书面凭据。我等院方核对完，再听医生如何安排监督下查看复制件。",
+                "我按院方刚才答复的手续行动，获准后由护士陪同查看亨特的复制件，仔细检查纸面；若还未批准，请主治医生说明具体欠缺的材料，我先补齐，不索取未获准的物品。",
             ],
             goal=lambda w, c: (
                 scene_is("arkham_sanatorium")(w, c) and clue_found("hunter_copy")(w, c)
             ),
-            max_turns=10,
+            max_turns=14,
             checks=[
                 check_scene(2, "arkham_sanatorium"),
                 check_clue(3, "hunter_copy"),
@@ -417,7 +425,10 @@ def scarlet_beats() -> list[Beat]:
                 )
                 >= 2
             ),
-            max_turns=12,
+            # Includes actual descent, each participant's turn, and a safe
+            # negotiated stop when ammunition runs low. Never advance beats
+            # while the authoritative combat is still active.
+            max_turns=18,
             checks=[
                 Check(
                     2,
@@ -639,6 +650,24 @@ def choose_beat_input(beat: Beat, attempt: int, world: dict) -> str:
                 f"前往{destination.get('name') or pending['destination_scene_id']}。"
                 "抵达后若有入内手续，我会在现场另行处理。"
             )
+    if not combat.get("active"):
+        from src.gameplay.discovery import match_discovery_rules
+
+        wanted = {match.clue_id for match in match_discovery_rules("。".join(beat.inputs), world)}
+        scene_id = str((world.get("current_scene") or {}).get("id") or "")
+        contexts = (world.get("pc") or {}).get("_push_contexts") or {}
+        for check in reversed((world.get("pc") or {}).get("_check_history") or []):
+            context = contexts.get(check.get("check_id")) or {}
+            if (check.get("scene_id") == scene_id and not check.get("success")
+                    and not check.get("goal_achieved")
+                    and wanted.intersection(check.get("discovery_ids") or [])
+                    and context.get("push_risk") and not context.get("used")):
+                return (
+                    "我明确选择孤注一掷，承担刚才宣布的失败风险。仍检查原对象："
+                    + str(context.get("target_id") or "原调查目标")
+                    + "，沿用原检定技能。这次重新安排检查顺序，用已有照明逐段比对并花更多时间复核，"
+                    "采用这个新做法重试一次，不寻找其他目标。"
+                )
     if beat.key == "B5b_clock":
         scene = str((world.get("current_scene") or {}).get("id") or "")
         if scene != "trivial_pursuits":

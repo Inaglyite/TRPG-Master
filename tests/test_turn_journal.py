@@ -287,7 +287,11 @@ class TurnJournalTests(unittest.TestCase):
 
             self.assertEqual(3, restored_count)
             self.assertNotEqual("old system prompt", restarted.messages[0]["content"])
-            self.assertEqual(messages[1:], restarted.messages[1:])
+            self.assertEqual(messages[1:], [
+                {key: value for key, value in message.items() if not key.startswith("_trpg_")}
+                for message in restarted.messages[1:]
+            ])
+            self.assertEqual(restarted.messages[-1]["_trpg_history_kind"], "legacy_unattributed")
 
     def test_same_process_cannot_start_overlapping_turn(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -477,6 +481,30 @@ class TurnJournalTests(unittest.TestCase):
                 )
             )
             self.assertEqual(engine.messages[-1]["content"], saved_messages[-1]["content"])
+
+    def test_rewrite_rechecks_current_menu_without_changing_historical_choices(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine = self.make_engine(Path(temp))
+
+            def initial_stream(*_args, **_kwargs):
+                engine._turn_choice_targets = {
+                    1: {"kind": "goal", "target_id": "rubbing", "evidence_quote": "桌上的摹本"}
+                }
+                return "你看见桌上的摹本。\n\n**你可以——**\n1. 研究摹本\n2. 自由行动", []
+
+            engine._stream_llm = initial_stream
+            engine.handle_action("留在原地观察")
+            turn_id = engine.turn_journal.latest_completed_id()
+            before = engine.turn_journal.read(turn_id)
+            self.assertEqual(2, len(before["choices"]))
+            engine._stream_llm = lambda *_a, **_kw: ("房间很安静。", [])
+            result = engine.rewrite_turn(turn_id)
+            self.assertEqual([before["choices"][1]], result["choices"])
+            after = engine.turn_journal.read(turn_id)
+            self.assertEqual(before["choices"], after["choices"])
+            from src.ai.context.narrative_history import enrich_public_history
+
+            self.assertEqual(result["choices"], enrich_public_history([after], engine)[0]["current_choices"])
 
     def test_rewrite_uses_narrative_route_slot(self):
         """重写属于叙述角色：上一回合可能停在裁决 client，必须切回叙述绑定。"""

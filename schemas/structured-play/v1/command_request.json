@@ -1315,6 +1315,7 @@
         "payload": {
           "type": "object",
           "properties": {
+            "source_token": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "ending_id": {
               "$ref": "common.json#/$defs/id_string"
             },

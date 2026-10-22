@@ -313,7 +313,7 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(
             envelope["context_section_digests"]["tools"],
-            "3f305e7e87cb3803b5390bf41fcf79e28884a05fcddcd5bfb8e1bba152ac9ba5",
+            "0147cd828333ce5ce095b8009dcbb23efb20beb69d14a356630913b810780c80",
         )
 
     def test_provider_calls_receive_server_snapshot_and_catalog_digest(self):

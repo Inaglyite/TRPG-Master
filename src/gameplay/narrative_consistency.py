@@ -88,6 +88,29 @@ def _settled_minutes(outcome: dict) -> int | None:
     return None
 
 
+def _rewrite_allowed_speakers(engine: Any) -> tuple[set[str], set[str], dict]:
+    """一致性重写闸门的发言者判定集合，与主叙述路径完全一致。
+
+    返回 (在场正式 NPC 含抵达回合出发地送别与本回合离场者, 合法 guest 含本回合
+    离场者告别, 已离场记录)。读不到世界状态时返回空集合——本模块整体 fail-open，
+    空集合只会让重写结果被拒而保留原文。
+    """
+    from src.gameplay.guest_speakers import turn_allowed_guest_ids
+    from src.gameplay.npc_speaker_aliases import turn_allowed_npc_ids
+    from src.gameplay.scene_speaker_presence import departed_speakers
+
+    try:
+        world = engine.context.world_store.load()
+    except Exception:  # noqa: BLE001 - 校验辅助失败不得影响叙事
+        world = {}
+    scene_id = str((world.get("current_scene") or {}).get("id") or "")
+    return (
+        turn_allowed_npc_ids(engine) or set(),
+        turn_allowed_guest_ids(engine, world, scene_id),
+        departed_speakers(world, scene_id),
+    )
+
+
 def apply_narrative_consistency(engine: Any, narrative: str) -> str:
     """Return the narrative, rewritten at most once when it outruns the settlement."""
     if not narrative.strip() or not _enabled_env("TRPG_NARRATIVE_CONSISTENCY", True):
@@ -138,10 +161,23 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
             raise ValueError("一致性重写未完整结束")
         rewritten = str(response.choices[0].message.content or "").strip()
         if structured_dialogue:
-            from src.ai.model.dialogue_output import decode_dialogue_output
-            from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
+            from src.ai.model.dialogue_choices import prepare_dialogue_choices
+            from src.ai.model.dialogue_output import decode_dialogue_output, parse_dialogue_output
 
-            rewritten = decode_dialogue_output(rewritten, present_npc_ids=current_scene_npc_ids(engine) or set())
+            checked, choice_drops = prepare_dialogue_choices(
+                parse_dialogue_output(rewritten), engine.context.world_store.load()
+            )
+            if choice_drops:
+                engine.__dict__.setdefault("_turn_choice_policy_dropped", []).extend(choice_drops)
+            rewritten = checked.model_dump_json()
+
+            present, guest_ids, departed = _rewrite_allowed_speakers(engine)
+            rewritten = decode_dialogue_output(
+                rewritten,
+                present_npc_ids=present,
+                guest_speaker_ids=guest_ids,
+                departed=departed,
+            )
     except Exception as exc:
         engine.raise_if_turn_cancelled()
         log_game(f"叙事一致性重写失败 | {type(exc).__name__}: {exc}"[:200])

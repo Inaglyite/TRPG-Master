@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.app.config import PROJECT_ROOT
@@ -12,6 +13,19 @@ from src.storage.database import SaveSlot, Snapshot, new_id, session_scope
 from src.storage.database_turn_journal import DatabaseTurnJournal
 from src.storage.persistence import save_game
 from src.storage.world_branches import WorldBranchService
+
+
+@pytest.fixture(autouse=True)
+def _restore_active_context():
+    """读档处理器会切换 server._active_context；测试结束必须还回原值，
+    否则进程内后续的运行时隔离断言读到本测试的临时上下文。"""
+    import server
+
+    original = server._active_context
+    try:
+        yield
+    finally:
+        server._active_context = original
 
 
 def receive_until(ws, kind):

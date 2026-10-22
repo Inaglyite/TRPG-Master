@@ -164,6 +164,8 @@
         "type": "object", "additionalProperties": false,
         "required": ["id", "title", "ending_type", "description", "trigger", "eligible", "can_prepare", "blocked_reason", "conditions"],
         "properties": {
+          "source_token": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "source_revision": {"type": ["integer", "null"]},
           "id": {"$ref": "common.json#/$defs/id_string"},
           "title": {"type": "string"},
           "ending_type": {"enum": ["good", "neutral", "bad", "secret"]},

@@ -18,7 +18,7 @@ from src.ai.context.lorebook import (
     record_lore_usage,
     select_lore,
 )
-from src.ai.context.narrative_history import restore_tagged_speakers
+from src.ai.context.narrative_history import current_history_choices, restore_tagged_speakers
 from src.ai.model.model_session import ModelSession
 from src.ai.model.model_settings import ModelSettings
 from src.ai.model.model_streamer import (
@@ -64,13 +64,11 @@ from src.gameplay.action_resolution import (
     departure_tool_refusal,
     plan_player_action,
 )
-from src.gameplay.case_clocks import clock_status
 from src.gameplay.characters import apply_character_to_state, default_character_ref
 from src.gameplay.characters import settle_case as settle_character_case
 from src.gameplay.combat_agent import build_combat_overlay
 from src.gameplay.discovery import DiscoveryMatch, match_discovery_rules, preferred_check_skill
-from src.gameplay.encounters import SceneEncounterResolution, resolve_scene_encounters
-from src.gameplay.endings import eligible_endings
+from src.gameplay.encounters import resolve_scene_encounters
 from src.gameplay.escalation_preflight import resolve_player_escalation
 from src.gameplay.guest_speakers import commit_guest_declarations
 from src.gameplay.handouts import matching_handouts
@@ -337,7 +335,6 @@ class GameEngine:
         )
         # 旧存档的 assistant 正文只有剥标签的干净文本；用回合记录里已验证的
         # narrative_segments 还原发言标签正本（不匹配的旧内容保持原样）。
-        history = restore_tagged_speakers(history, getattr(self, "turn_journal", None))
         self.messages = [system_msg, *history]
         self._round_count = 0
         self._player_turn_count = 0
@@ -346,7 +343,23 @@ class GameEngine:
         self._last_turn_high_risk = False
         self._summary_token_estimate = 0
         _context_shadow.adopt_engine(self, checkpoint)
+        self._restore_speaker_history()
         return len(self.messages)
+
+    def _restore_speaker_history(self) -> None:
+        # Validate/resume the saved surface first. Speaker restoration is then
+        # recorded as an explicit projection replacement, never mistaken for
+        # a corrupt save checkpoint or a reason to lose its lineage.
+        restored = restore_tagged_speakers(self.messages, getattr(self, "turn_journal", None))
+        fallback = False
+        for index, message in enumerate(restored):
+            if message == self.messages[index]:
+                continue
+            if not _context_shadow.compact_engine(self, index, index + 1, message):
+                fallback = True
+            self.messages[index] = message
+        if fallback:
+            _context_shadow.rebase_engine(self)
 
     def restore_latest_committed_history(self) -> int:
         """Resume model context from the latest atomically committed turn.
@@ -389,8 +402,15 @@ class GameEngine:
         )
         _context_shadow.capture_turn_surface(self)
         self._active_turn_id = turn_id
+        self._turn_stage_trace = []
+        self._turn_request_id = ""
+        self.__dict__.pop("_pending_game_over", None)
+        self.__dict__.pop("_turn_choice_targets", None)
+        self.__dict__.pop("_turn_choice_policy_dropped", None)
         self._turn_diagnostics = []
         self._turn_lore_diagnostics = {}
+        self.__dict__.pop("_turn_choice_skill_hints", None)
+        self.__dict__.pop("_turn_choice_hint_dropped", None)
         self._turn_performance = TurnPerformance()
         self._turn_mutations = TurnMutationLedger()
         self._tool_pipeline_ledger = ToolExecutionLedger()
@@ -477,6 +497,9 @@ class GameEngine:
         investigator_roster.project_active_investigator(world_state)
         checkpoint = _context_shadow.finalize_engine_turn(self, turn_id)
         with self.performance_span("journal_commit"):
+            from src.gameplay.turn_diagnostics import record_stage
+
+            record_stage(self, "turn_commit", "attempted")
             record = journal.complete(
                 turn_id,
                 messages=self.messages,
@@ -486,8 +509,16 @@ class GameEngine:
                 executed_tools=executed_tools,
                 lore_entry_ids=lore_entry_ids,
                 diagnostics={
+                    "commit_status": "committed",
+                    "stages": list(getattr(self, "_turn_stage_trace", [])),
                     "narrative_format": "dialogue_v1" if getattr(self, "_structured_dialogue", False) else "legacy_text",
                     "model_calls": list(self._turn_diagnostics),
+                    "choice_skill_hints": {
+                        "dropped": list(self.__dict__.pop("_turn_choice_hint_dropped", [])),
+                    },
+                    "choice_policy": {
+                        "dropped": list(self.__dict__.pop("_turn_choice_policy_dropped", [])),
+                    },
                     "lorebook": dict(self._turn_lore_diagnostics),
                     "performance": performance,
                     "mutations": self._turn_mutations.snapshot(),
@@ -533,12 +564,17 @@ class GameEngine:
         journal = getattr(self, "turn_journal", None)
         if turn_id is None or journal is None:
             return None
+        from src.gameplay.turn_diagnostics import failure_diagnostics, record_stage
+
+        record_stage(self, "turn_commit", "not_committed", code=status)
         record = journal.finish_incomplete(
             turn_id,
             status=status,
             error=error,
+            diagnostics=failure_diagnostics(self),
         )
         _context_shadow.rollback_turn_surface(self)
+        self.__dict__.pop("_pending_game_over", None)
         self._active_turn_id = None
         return record
 
@@ -596,6 +632,9 @@ class GameEngine:
         # 改写里声明的临时展示身份：先用声明集合放行解析，等世界版本校验过后再落账，
         # 避免登记本身推高 revision 被误判成“改写期间世界状态变化”。
         guest_decls = self.__dict__.pop("_turn_guest_speaker_decls", None) or []
+        # 历史菜单不改；当前按钮根据改写正文及当前世界重新核对。
+        # 改写输出里的提示不应用、不残留到下一轮。
+        self.__dict__.pop("_turn_choice_skill_hints", None)
         declared_guest_ids = {str(d.get("speaker_id") or "") for d in guest_decls}
         def rewrite_is_valid(npc_id: str) -> bool:
             return npc_id in declared_guest_ids or self.is_valid_npc_id(npc_id)
@@ -658,7 +697,9 @@ class GameEngine:
             "turn_id": turn_id,
             "variant_id": variant["variant_id"],
             "narrative": rewritten,
-            "choices": copy.deepcopy(record.get("choices", [])),
+            "choices": current_history_choices(
+                [dict(record, narrative=rewritten)], self.context.world_store.load()
+            ),
             "world_revision": expected_revision,
             "narrative_segments": [s.to_dict() for s in rewrite_segments],
         }
@@ -798,7 +839,7 @@ class GameEngine:
             self._emit_unseen_discovered_handouts()
         # 保留当前 system prompt，恢复对话历史（旧存档用回合记录还原发言标签）
         system_msg = self.messages[0] if self.messages else {"role": "system", "content": ""}
-        self.messages = [system_msg] + restore_tagged_speakers(messages[1:], getattr(self, "turn_journal", None))
+        self.messages = [system_msg] + messages[1:]
         # 重置记忆管理状态
         self._round_count = 0
         self._player_turn_count = 0
@@ -809,6 +850,7 @@ class GameEngine:
         self._loaded_optional_skills = set()
         self._preconfirmed_escalation = None
         _context_shadow.rebind_loaded_engine(self, metadata)
+        self._restore_speaker_history()
         return len(messages) - 1
 
     def settle_case(
@@ -945,6 +987,8 @@ class GameEngine:
     def _emit_sanity_result(self, output: str) -> None:
         try:
             data = json.loads(output)
+            if data.get("duplicate"):
+                return
             roll = int(data["san_roll"])
             before = int(data["san_before"])
             loss = int(data["actual_loss"])
@@ -996,6 +1040,10 @@ class GameEngine:
         """Commit module-authored discovery effects before story generation."""
         resolved: list[dict] = []
         for match in matches:
+            from src.gameplay.discovery import _known_clue_ids
+
+            if match.clue_id in _known_clue_ids(self.context.world_store.load()):
+                continue
             rule = match.rule
             required_skill = str(rule.get("skill") or "")
             check_failed = bool(
@@ -1011,21 +1059,45 @@ class GameEngine:
             )
             fallback = rule.get("fallback") if check_failed else None
             fallback = fallback if isinstance(fallback, dict) else None
+            valid_failed_check = bool(
+                check_result and check_result.get("success") is False
+                and not check_result.get("repeat_blocked")
+                and (rule.get("check_type") == "luck" or str(check_result.get("skill") or "") == required_skill)
+            )
+            if check_failed and not valid_failed_check:
+                resolved.append({"clue_id": match.clue_id, "discovered": False,
+                                 "reason": "required_check_not_executed"})
+                continue
+            paid_cost = None
             if fallback and fallback.get("cost_clock") and fallback.get("cost_amount"):
                 clock_id = str(fallback["cost_clock"])
                 try:
                     world = self.context.world_store.load()
                     current = int((world.get("case_clocks") or {}).get(clock_id, 0))
                     amount = int(fallback.get("cost_amount") or 0)
+                    maximum = int((world.get("case_clock_definitions") or {}).get(clock_id, {}).get("max", current + amount))
+                    after = min(current + amount, maximum)
+                    if amount <= 0 or after - current < amount:
+                        resolved.append({"clue_id": match.clue_id, "discovered": False,
+                                         "reason": "fallback_cost_unavailable"})
+                        continue
                     self._execute_tool(
                         "state_set",
                         {
                             "path": f"case_clocks.{clock_id}",
-                            "value": json.dumps(current + amount),
+                            "value": json.dumps(after),
                         },
                     )
+                    actual = int((self.context.world_store.load().get("case_clocks") or {}).get(clock_id, current))
+                    if actual != after:
+                        raise ValueError("发现兜底代价未落账")
+                    paid_cost = {"clock_id": clock_id, "before": current, "after": after, "amount": amount}
                 except (OSError, TypeError, ValueError):
-                    pass
+                    resolved.append({"clue_id": match.clue_id, "discovered": False,
+                                     "reason": "fallback_cost_not_committed"})
+                    continue
+            if fallback and paid_cost:
+                fallback = {**fallback, "paid_cost": paid_cost}
             if check_failed and fallback and fallback.get("mode") == "alternate_clue":
                 alternate_id = str(fallback.get("clue_id") or "")
                 try:
@@ -1107,6 +1179,7 @@ class GameEngine:
                             )
                         },
                         "npc_reveals": npc_reveals,
+                        "granted_item": match.clue.get("granted_item"),
                         "fallback": fallback if check_failed else None,
                     }
                 )
@@ -1130,10 +1203,17 @@ class GameEngine:
                     "text": match.clue.get("text"),
                     "type": match.clue.get("type"),
                     "npc_reveals": npc_reveals,
+                    "granted_item": match.clue.get("granted_item"),
                     "fallback": fallback if check_failed else None,
                 }
             )
         return resolved
+
+    def _record_transition_receipt(self, **details) -> None:
+        """移动回执：出发地、目的地、是否执行、未执行原因、实际在场、回合范围。"""
+        ledger = getattr(self, "_turn_mutations", None)
+        if ledger is not None:
+            ledger.record_domain("scene_transition", details)
 
     def _resolve_scene_transition(
         self,
@@ -1145,9 +1225,20 @@ class GameEngine:
         try:
             world = self.context.world_store.load()
         except Exception:
+            self._record_transition_receipt(
+                executed=False, reason="world_unreadable",
+                destination_scene_id=destination_scene_id,
+                turn_id=str(getattr(self, "active_turn_id", None) or ""),
+            )
             return None
+        origin_scene_id = str((world.get("current_scene") or {}).get("id") or "")
         scene_id = destination_scene_id or infer_scene_transition(content, world)
         if scene_id and scene_id not in (world.get("scene_catalog") or {}):
+            self._record_transition_receipt(
+                executed=False, reason="destination_not_in_catalog",
+                origin_scene_id=origin_scene_id, destination_scene_id=scene_id,
+                turn_id=str(getattr(self, "active_turn_id", None) or ""),
+            )
             return None
         if scene_id is None:
             return None
@@ -1211,177 +1302,47 @@ class GameEngine:
         try:
             result = json.loads(output)
         except json.JSONDecodeError:
+            result = {}
+        if not result.get("ok"):
+            self._record_transition_receipt(
+                executed=False, reason="state_set_not_confirmed",
+                origin_scene_id=origin_scene_id, destination_scene_id=scene_id,
+                turn_id=str(getattr(self, "active_turn_id", None) or ""),
+            )
             return None
-        return scene_id if result.get("ok") else None
+        self._record_transition_receipt(
+            executed=True,
+            origin_scene_id=origin_scene_id, destination_scene_id=scene_id,
+            present_npc_ids=list(encounter.present_npc_ids),
+            turn_id=str(getattr(self, "active_turn_id", None) or ""),
+            turn_scope="arrival_only",
+        )
+        return scene_id
 
     def _authoritative_turn_context(
         self,
         check_result: dict | None = None,
         resolved_discoveries: list[dict] | None = None,
     ) -> str:
-        """Build a compact, private snapshot that anchors one story turn."""
+        """Build a compact, private snapshot that anchors one story turn.
+
+        内容全部由 src.gameplay.turn_projection 从权威世界状态每轮重建；
+        状态查询工具、修复上下文与裁决上下文消费同一份投影。
+        """
+        from src.gameplay.turn_projection import build_turn_projection
+
         try:
             world = self.context.world_store.load()
         except Exception:
             return ""
-        pc = world.get("pc", {})
-        scene = world.get("current_scene", {})
-        present_npc_ids = set(scene.get("npcs_present", []))
-        present_npcs = []
-        for npc in world.get("npcs", []):
-            if not isinstance(npc, dict) or npc.get("id") not in present_npc_ids:
-                continue
-            revealed = npc.get("revealed") or {}
-            present_npcs.append(
-                {
-                    "id": npc.get("id"),
-                    "name": npc.get("name"),
-                    "visible_tags": npc.get("visible_tags", []),
-                    "revealed_level": revealed.get("level", 0),
-                    "revealed_entries": revealed.get("entries", []),
-                    "keeper_private": {
-                        "disposition": npc.get("disposition"),
-                    },
-                }
-            )
-        known_clues = []
-        clue_groups = world.get("clues_found", {})
-        if isinstance(clue_groups, dict):
-            for category, clues in clue_groups.items():
-                if not isinstance(clues, list):
-                    continue
-                for clue in clues[-8:]:
-                    if isinstance(clue, dict):
-                        known_clues.append(
-                            {
-                                "id": clue.get("catalog_id") or clue.get("id"),
-                                "category": category,
-                                "text": str(clue.get("text") or "")[:220],
-                            }
-                        )
-        scene_clues = []
-        clue_catalog = world.get("clue_catalog", {})
-        if isinstance(clue_catalog, dict):
-            for clue_id, clue in clue_catalog.items():
-                if not isinstance(clue, dict):
-                    continue
-                related_scenes = clue.get("related_scenes", [])
-                if clue.get("source") != scene.get("id") and scene.get("id") not in related_scenes:
-                    continue
-                scene_clues.append(
-                    {
-                        "id": clue.get("id") or clue_id,
-                        "text": str(clue.get("text") or "")[:300],
-                        "category": clue.get("category"),
-                        "type": clue.get("type"),
-                        "discovery_notes": str(clue.get("discovery_notes") or "")[:300],
-                    }
-                )
-        module_rules = world.get("module_rules") or {}
-        latest_content = str(self.messages[-1].get("content") or "") if self.messages else ""
-        opening = (
-            str(world.get("module_opening") or "")[:1600]
-            if latest_content.startswith(self.CONTROL_MESSAGE_PREFIX)
-            and "开始新游戏" in latest_content
-            else ""
+        projection = build_turn_projection(
+            world,
+            engine=self,
+            check_result=check_result,
+            resolved_discoveries=resolved_discoveries,
         )
-        resolved_discoveries = resolved_discoveries or []
-        action_resolution = getattr(self, "_action_resolution", None)
-        encounter_resolution = getattr(self, "_encounter_resolution", None)
-        arrival_only = bool(action_resolution and action_resolution.is_arrival)
-        model_transition = bool(action_resolution and action_resolution.transition_kind == "model_adjudicated")
-        entry_beat = scene.get("entry_beat") if arrival_only and not model_transition else None
-        if (
-            not isinstance(entry_beat, dict)
-            or str(entry_beat.get("npc_id") or "") not in present_npc_ids
-        ):
-            entry_beat = None
-        opening_public_facts = (
-            [str(clue.get("text") or "")[:400] for clue in known_clues] if opening else []
-        )
-        newly_confirmed_facts = [
-            str(discovery.get("text") or "")[:400]
-            for discovery in resolved_discoveries
-            if isinstance(discovery, dict) and discovery.get("discovered") and discovery.get("text")
-        ]
-        payload = {
-            "module": world.get("module_meta") or {"id": world.get("module")},
-            "pc": {
-                "name": pc.get("name"),
-                "occupation": pc.get("occupation"),
-                "hp": pc.get("hp"),
-                "max_hp": pc.get("max_hp"),
-                "san": pc.get("san"),
-                "max_san": pc.get("max_san"),
-                "inventory": pc.get("inventory", []),
-                "conditions": pc.get("conditions", []),
-            },
-            "current_scene": {
-                "id": scene.get("id"),
-                "name": scene.get("name"),
-                "description": str(scene.get("description") or "")[:900],
-                "exits": scene.get("exits", []),
-                "npcs_present": scene.get("npcs_present", []),
-                "npc_public_state": present_npcs,
-            },
-            "flags": world.get("flags", {}),
-            "eligible_endings": eligible_endings(world),
-            "case_clocks": clock_status(
-                world.get("case_clocks"), world.get("case_clock_definitions")
-            ),
-            "recent_known_clues": known_clues[-20:],
-            "recent_npc_conversations": {
-                npc_id: list(entries[-6:])
-                for npc_id, entries in (world.get("npc_conversations") or {}).items()
-                if npc_id in present_npc_ids and isinstance(entries, list)
-            },
-            "available_scene_clues": scene_clues[:20],
-            "sanity_triggers": module_rules.get("sanity_triggers", []),
-            "keeper_memory": {
-                "goals_and_plans": str(
-                    (world.get("private_memory") or {}).get("goals_and_plans") or ""
-                )[:700],
-                "inference_notes": str(
-                    (world.get("private_memory") or {}).get("inference_notes") or ""
-                )[:700],
-            },
-            "resolved_check": check_result,
-            "resolved_discoveries": resolved_discoveries,
-            "resolved_encounter": (
-                {
-                    "scene_id": encounter_resolution.scene_id,
-                    "present_npc_ids": list(encounter_resolution.present_npc_ids),
-                    "outcomes": [
-                        {
-                            "npc_id": outcome.npc_id,
-                            "present": outcome.present,
-                            "availability": outcome.availability,
-                        }
-                        for outcome in encounter_resolution.outcomes
-                    ],
-                }
-                if isinstance(encounter_resolution, SceneEncounterResolution)
-                else None
-            ),
-            "scene_entry_beat": entry_beat,
-            "narrative_fact_scope": {
-                "closed_world_for_this_action": bool(
-                    opening or arrival_only or check_result is not None or resolved_discoveries
-                ),
-                "mode": "module_opening" if opening else "normal_turn",
-                "opening_public_facts": opening_public_facts,
-                "uncatalogued_opening_details": (
-                    "flavor_only_never_persist_as_clue_or_state" if opening else ""
-                ),
-                "newly_confirmed_facts": newly_confirmed_facts,
-                "unlisted_observations": "本行动没有额外可验证发现",
-                "action_resolution": (
-                    action_resolution.public_contract() if action_resolution else None
-                ),
-                "arrival_only": arrival_only,
-            },
-            "module_opening": opening,
-        }
+        payload = {"module": projection["module"], **projection["keeper"]}
+        payload["budget_report"] = projection["budget"]
         return (
             "[引擎权威状态｜仅供守秘人，不得复述]\n"
             + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -1390,6 +1351,21 @@ class GameEngine:
             "若其为空，禁止自行编造检定名、技能值、骰点、SAN 点数或成败。"
             "resolved_discoveries 是本行动开始叙述前已完成的权威结算；必须按其结果叙述，"
             "不得为其中的线索、SAN、flag 或 NPC 揭示再次调用工具。"
+            "失败骰点与发现结果分开：若 discovered=true 且 fallback.mode=grant_clue，已付代价并取得发现，"
+            "正文必须演出取得过程，后续选项不得让玩家继续寻找已发现的东西。"
+            "granted_item 非空表示该实物已加入随身物品：必须演出取出并收妥，不能把它继续留在暗格里，后续不能再要求领取或搬出同一件物品。"
+            "departed_speakers 已离场：仅本轮 speaker_departure 事件允许告别台词，后续不能写他们仍在门口试门或逼近；"
+            "无新遭遇授权，不可另编一批来人重复已解决的对峙。"
+            "goals.open 是仍未解决的当前目标，goals.completed 已达成：叙述与选项围绕 open 推进，"
+            "不得把 completed 当作未完成重提，也不得伪造 goals 之外的新主线目标。"
+            "pending_matters 是悬挂的待决事项：玩家未回答前不得替他决定，也不得当作已解决跳过。"
+            "planned_destination 含出发待决时移动尚未发生；departure_pending 为 true 不得叙述已抵达。"
+            "locked_candidates 全部 locked=true：它们是未解锁的后继候选，不等于已解锁目标，"
+            "不得向玩家公开其存在，也不得把它们当作当前可选目标或已知线索。"
+            "diagnostics 非空（如 module_version_mismatch）时模组创作内容已停用：只依据本世界"
+            "已结算事实叙述，不得套用其他版本模组的目标、线索或结局。"
+            "settled_this_turn 给出本轮刚结算结果的来源（turn_id / 回执 check_id）；"
+            "各块 source 字段标明了事实出处，冲突时以带权威来源的字段为准。"
             "narrative_fact_scope.closed_world_for_this_action 为 true 时，newly_confirmed_facts"
             "是本行动新发现的完整事实边界，不是扩写提纲；只能改写表达，不能增加可检验细节。"
             "narrative_fact_scope.arrival_only 为 true 时，本轮只叙述移动的出发衔接、旅行、抵达与接洽；"
@@ -1403,7 +1379,7 @@ class GameEngine:
             "不得转写为线索、证据、NPC 揭示、检定目标或 flag，也不得提前公开幕后秘密。"
             "玩家检查了未列出的部位或对象时，只能说明没有额外值得注意的发现；"
             "不得据此创造新选项、新物品或后续检定目标。available_scene_clues 只是守秘人候选，"
-            "未出现在 resolved_discoveries 中就仍未发现。"
+            "未出现在 resolved_discoveries 中就仍未发现；已发现的线索已从候选中移除，不得再建议寻找。"
             "未发现不等于不存在：检定失败、重复拒绝或没有发现，只能叙述本次没有结果；"
             "不得断言目标不存在、已被取走或已移到别处，也不得据此把未发现的线索改到别的场景。"
             "npc_public_state.keeper_private 仅供守秘人判断语气，不代表玩家已知；"

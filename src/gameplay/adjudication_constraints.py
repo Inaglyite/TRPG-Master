@@ -22,6 +22,14 @@ def constrain_adjudication_schema(schema: dict, world: dict, *, candidate_ids: l
         properties["discovery_refs"]["maxItems"] = 0
 
     present = list((world.get("current_scene") or {}).get("npcs_present") or [])
+    from src.gameplay.destination_grounding import known_people
+
+    known = [person["id"] for person in known_people(world, []) if person.get("id")]
+    properties["target_npc_id"]["enum"] = list(dict.fromkeys(["", *present, *known]))
+    properties["target_npc_id"]["description"] = (
+        "现场交互仅填 npcs_present 中的正式 id；前往已知人物所在地可用已知人物 id。"
+        "临时展示人物不填此字段，用 check.target 描述检定对象，不提交正式 NPC 的态度效果。"
+    )
     inventory = [item for item in (world.get("pc") or {}).get("inventory", []) if isinstance(item, str)]
     targets = {
         "clock_advance": list(world.get("case_clock_definitions") or {}),
@@ -31,6 +39,11 @@ def constrain_adjudication_schema(schema: dict, world: dict, *, candidate_ids: l
         "flag_set": list(world.get("completion_flags") or {}),
         "rescue": present if pc_incapacitated(world) else [],
     }
+    from src.gameplay.guest_speakers import registered_guest_ids
+
+    targets["speaker_departure"] = list(dict.fromkeys([
+        *present, *sorted(registered_guest_ids(world, str((world.get("current_scene") or {}).get("id") or ""))),
+    ]))
     original = schema["$defs"]["EffectProposal"]
     branches = []
     for kind, legal in targets.items():
@@ -42,6 +55,9 @@ def constrain_adjudication_schema(schema: dict, world: dict, *, candidate_ids: l
         if kind == "npc_reaction":
             branch["properties"]["value"]["enum"] = ["cooperative", "guarded", "nervous", "submissive", "unknown"]
             branch["required"].append("value")
+        if kind == "clock_advance":
+            branch["required"].append("clock_trigger")
+            branch["properties"]["clock_trigger"]["minLength"] = 1
         if kind == "take_item":
             branch["properties"]["source_id"]["enum"] = list(items)
             branch["required"].append("source_id")

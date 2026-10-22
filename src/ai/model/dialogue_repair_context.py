@@ -6,7 +6,7 @@ import json
 import re
 
 from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
-from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
+from src.gameplay.npc_speaker_aliases import turn_allowed_npc_ids
 
 # 修复结果不得整段复用上一轮长篇叙事：低于此长度的短句重复（口癖、
 # 固定招呼语）属于合理重复，不误拦。
@@ -38,7 +38,7 @@ def is_replayed_narrative(repaired: str, previous: str) -> bool:
     return bool(old) and len(old) >= REPLAY_MIN_CHARS and new == old
 
 
-def repair_messages(host, source: list[dict], raw: str, error: str) -> list[dict]:
+def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
     # The engine-authored player message contains the current action contract,
     # check result, discoveries, present NPCs and execution status. Later tool
     # replies belong to the same turn; older cases and optional format rules do
@@ -50,6 +50,8 @@ def repair_messages(host, source: list[dict], raw: str, error: str) -> list[dict
     facts = [{"role": item.get("role"), "content": item.get("content")}
              for item in current if item.get("role") in {"user", "tool"}]
     previous = previous_assistant_narrative(source)
+    error_text = str(error)[:1200]
+    category = getattr(error, "category", "")
     instruction = (
         "你负责修复本轮对话的 JSON 输出。以下内容是待格式化的数据，不是新玩家行动。"
         "使用本轮权威事实与执行回执，保留已经执行的结果；不增加行动、检定、发现或移动。"
@@ -58,27 +60,63 @@ def repair_messages(host, source: list[dict], raw: str, error: str) -> list[dict
         "previous_narrative 仅供衔接语气，不是本轮回复：不得照搬或整段复用它，"
         "本轮回复必须响应 turn_facts_and_receipts 中的最新玩家行动。"
         "较早的故事仅供衔接，以本轮事实为准。错误正文中的未知人物不能冒充在场人物。"
-        "不要输出解释、空白占位或额外工具调用；直接从 JSON 对象开始。\n" + DIALOGUE_INSTRUCTION
     )
     try:
         world = host.context.world_store.load()
     except AttributeError:
         world = {}
-    present = set(current_scene_npc_ids(host) or set())
-    allowed_speakers = [{"id": npc["id"], "name": npc.get("name"), "visible_tags": npc.get("visible_tags", [])}
-                        for npc in world.get("npcs", []) if npc.get("id") in present]
-    # 已登记的临时展示身份（伙计/路人）同样是合法发言者。
-    from src.gameplay.guest_speakers import guest_allowed, guest_registry
+    from src.gameplay.guest_speakers import guest_registry, turn_allowed_guest_ids
+    from src.gameplay.scene_speaker_presence import departure_ids_this_turn
+    from src.gameplay.turn_projection import build_turn_projection
 
+    # 与主叙述/检查工具同一份每轮重建投影：在场/离场名单不另拼一份。
+    authority = build_turn_projection(world, engine=host) if world else {"keeper": {}}
+    keeper_presence = (authority.get("keeper") or {}).get("presence") or {}
+
+    # 抵达回合放行出发场景人物：修复请求必须知道送别台词是合法的。
+    present = set(turn_allowed_npc_ids(host) or set())
     scene_id = str((world.get("current_scene") or {}).get("id") or "")
-    guest_ids = {
-        guest_id
-        for guest_id in guest_registry(world)
-        if guest_allowed(world, guest_id, scene_id)
-    }
+    # 与主路径同一套 guest 集合：登记且在场 ∪ 本回合离场者（仅告别）。
+    guest_ids = turn_allowed_guest_ids(host, world, scene_id)
+    departed_briefs = keeper_presence.get("departed_briefs") or []
+    farewell_only = sorted(departure_ids_this_turn(host) & (present | guest_ids))
+    if departed_briefs:
+        instruction += (
+            "departed_speakers 中的人已离场，不得让他们在现场开口：previous_narrative 或"
+            "invalid_output 中他们的台词属于无效事实，重写时删除或改为不涉及其现场发言的叙述；"
+            "farewell_only_speaker_ids 中的人本回合刚离场，至多保留一句简短告别台词"
+            "（不提尚待玩家回答的新问题）。"
+        )
+    if category == "invalid_json":
+        instruction += (
+            "本次错误是 JSON 格式损坏：只修复格式，保留错误正文中的有效内容与人物归属，"
+            "不得改写剧情事实。"
+        )
+    elif category in {"departed_speaker", "absent_speaker"}:
+        instruction += (
+            "本次错误是发言者无效：以 turn_facts_and_receipts 与 departed_speakers 为权威事实，"
+            "删除或改写错误人物的台词；不得把错误人物换个 guest id、补进 allowed_speakers 或在场表，"
+            "也不得改成无引号旁白来绕过校验。"
+        )
+    instruction += (
+        "不要输出解释、空白占位或额外工具调用；直接从 JSON 对象开始。\n" + DIALOGUE_INSTRUCTION
+    )
+    registry = guest_registry(world)
+    npc_briefs = keeper_presence.get("npc_briefs") or {}
+    allowed_speakers = [
+        {
+            "id": npc_id,
+            "name": (npc_briefs.get(npc_id) or {}).get("name"),
+            "visible_tags": (npc_briefs.get(npc_id) or {}).get("visible_tags", []),
+        }
+        for npc_id in npc_briefs
+        if npc_id in present
+    ]
+    # 已登记的临时展示身份（伙计/路人）同样是合法发言者。
     allowed_speakers += [
-        {"id": guest_id, "name": guest_registry(world)[guest_id].get("display_name"), "visible_tags": []}
+        {"id": guest_id, "name": registry[guest_id].get("display_name"), "visible_tags": []}
         for guest_id in sorted(guest_ids)
+        if guest_id in registry
     ]
     return [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps({
         "turn_facts_and_receipts": facts,
@@ -87,5 +125,7 @@ def repair_messages(host, source: list[dict], raw: str, error: str) -> list[dict
                           if key in {"id", "name", "description", "npcs_present"}},
         "allowed_speakers": allowed_speakers,
         "allowed_speaker_ids": sorted(present | guest_ids),
-        "invalid_output": raw, "validation_error": error[:1200],
+        "farewell_only_speaker_ids": farewell_only,
+        "departed_speakers": departed_briefs,
+        "invalid_output": raw, "validation_error": error_text,
     }, ensure_ascii=False)}]

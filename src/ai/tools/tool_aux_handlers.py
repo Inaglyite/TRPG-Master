@@ -123,19 +123,54 @@ def register_auxiliary_handlers(
 
     @runtime.handler("end_game")
     def end_game(args: dict, context: RuntimeContext) -> str:
-        resolution = validate_ending(context.world_store.load(), args)
-        if not resolution.get("ok"):
-            return json.dumps({"game_over": False, **resolution}, ensure_ascii=False)
+        from src.gameplay.endings import ending_readiness
+
+        resolution = {}
+
+        class EndingNotApplied(Exception):
+            pass
 
         def finish(data: dict) -> None:
+            nonlocal resolution
+            existing = data.get("game_over")
+            if existing:
+                resolution = {"ok": True, "already_ended": True, "ending_id": existing.get("id"),
+                              "ending_type": existing.get("type"), "title": existing.get("title"),
+                              "summary": existing.get("summary")}
+                raise EndingNotApplied
+            from types import SimpleNamespace
+
+            from src.gameplay.turn_projection import module_identity
+
+            _identity, _diagnostics, compatible = module_identity(data, SimpleNamespace(context=context))
+            if getattr(context, "module_record", None) is not None and not compatible:
+                resolution = {"ok": False, "error": "module_version_mismatch"}
+                raise EndingNotApplied
+            readiness = ending_readiness(data)
+            if args.get("source_token") and args["source_token"] != readiness["source_token"]:
+                resolution = {"ok": False, "error": "ending_source_changed"}
+                raise EndingNotApplied
+            if readiness["blockers"]:
+                resolution = {"ok": False, "error": "ending_work_unresolved", "blockers": readiness["blockers"]}
+                raise EndingNotApplied
+            resolution = validate_ending(data, args)
+            if not resolution.get("ok"):
+                raise EndingNotApplied
             data["game_over"] = {
                 "id": resolution.get("ending_id"),
                 "type": resolution["ending_type"],
                 "title": resolution["title"],
                 "summary": resolution["summary"],
+                "source_token": readiness["source_token"],
+                "source_revision": readiness["source_revision"],
             }
 
-        context.world_store.update(finish)
+        try:
+            context.world_store.update(finish)
+        except EndingNotApplied:
+            pass
+        if not resolution.get("ok"):
+            return json.dumps({"game_over": False, **resolution}, ensure_ascii=False)
         return json.dumps(
             {
                 "ok": True,
@@ -144,6 +179,7 @@ def register_auxiliary_handlers(
                 "ending_type": resolution["ending_type"],
                 "title": resolution["title"],
                 "summary": resolution["summary"],
+                "already_ended": bool(resolution.get("already_ended")),
             },
             ensure_ascii=False,
         )

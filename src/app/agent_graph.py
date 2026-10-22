@@ -47,7 +47,7 @@ from src.gameplay.action_preflight import match_action_preview
 from src.gameplay.choices import extract_action_choices
 from src.gameplay.crisis import maybe_fire_crisis
 from src.gameplay.discovery import preferred_luck_difficulty
-from src.gameplay.npc_speaker_aliases import current_scene_npc_ids
+from src.gameplay.npc_speaker_aliases import turn_allowed_npc_ids
 from src.gameplay.speaker_parser import Segment, parse_segments_full
 from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
 from src.gameplay.transition_prelude import build_scene_entry_beat, build_transition_prelude
@@ -357,9 +357,6 @@ def _prepare_turn_inner(
             if settled_scene_id != transition_id:
                 log_error(f"场景移动未结算 | 计划抵达={transition_id} 结算结果={settled_scene_id}")
                 raise RuntimeError(f"场景移动未结算：计划抵达 {transition_id}，但结算被拒绝")
-            ledger = getattr(engine, "_turn_mutations", None)
-            if ledger is not None:
-                ledger.record_domain("scene_transition", {"scene_id": transition_id})
             _stream_transition_beats()
             encounter_text = str(
                 getattr(engine, "_encounter_resolution", None).narrative_text
@@ -414,7 +411,9 @@ def _prepare_turn_inner(
         if not skip_agent and action_resolution.adjudication_json:
             from src.gameplay.action_adjudication import apply_adjudicated_effects
 
-            adjudicated_outcome = apply_adjudicated_effects(engine, action_resolution, check_result)
+            adjudicated_outcome = apply_adjudicated_effects(
+                engine, action_resolution, check_result, resolved_discoveries,
+            )
             engine._adjudicated_outcome = adjudicated_outcome
             ledger = getattr(engine, "_turn_mutations", None)
             if ledger is not None:
@@ -473,6 +472,7 @@ def _prepare_turn_inner(
                 "不要声称玩家说过原话之外的内容，也不要虚构电话、许可或接待安排。"
                 "本轮只抵达，尚未进行验尸、搜查或取得线索。"
                 "移动已成立：不得再让出发地人物提出尚待玩家回答的同行、许可或交接问题；"
+                "出发地人物可以有一句简短送别台词，其余台词只能来自目的地在场 NPC；"
                 "不得代替玩家补作选择。目的地的主动招呼只能由目的地在场 NPC 发出。"
             )
         if action_resolution.is_departure_pending and not skip_agent:
@@ -493,7 +493,8 @@ def _prepare_turn_inner(
             status_hint = {
                 "executed_success": "行动已执行并成功；按 description 叙述已发生的结果与代价。",
                 "executed_failure": "行动已执行但失败：必须叙述失败及其代价，不得演成成功或装作未尝试。",
-                "not_executed": "行动未执行：必须说明未执行及原因，不得把该行动演成已发生，不得提供需要行动能力的后续选项。",
+                "executed_with_cost": "检定失败，但模组兜底已付出代价并取得发现：必须按已落账发现叙述，不得说没找到或让玩家重复寻找。",
+                "not_executed": "行动未执行：直接说明未执行的真实原因，不虚构角色遗忘、失忆或已经重复动作。若因重复失败检定拒行，选项只提供明确孤注一掷、其他目标或离开，不再提供免费重试同一目标。失去行动能力时不提供身体动作选项。",
             }.get(status, "")
             status_line = f"\n[结果状态] {status}：{status_hint}" if status_hint else ""
             content += (
@@ -859,13 +860,12 @@ def _execute_tools(state: TurnState) -> dict:
 def _handle_end_game(engine: Any, output: str) -> None:
     try:
         end_data = json.loads(output)
-        if not end_data.get("game_over"):
+        if not end_data.get("game_over") or end_data.get("already_ended"):
             return
-        engine.cb.on_game_over(
-            end_data.get("ending_type", "neutral"),
-            end_data.get("title", "故事结束"),
-            end_data.get("summary", ""),
-        )
+        # The whole legacy turn may still fail. Publish only after its state,
+        # receipts and narrative have committed, so a repair failure cannot
+        # display an ending or settle a character from a rolled-back turn.
+        engine._pending_game_over = end_data
     except json.JSONDecodeError:
         pass
 
@@ -911,6 +911,8 @@ def _emit_combat_dice(engine: Any, output: str) -> None:
 def _emit_sanity_dice(engine: Any, output: str) -> None:
     try:
         data = json.loads(output)
+        if data.get("duplicate"):
+            return
         roll = int(data["san_roll"])
         before = int(data["san_before"])
         loss = int(data["actual_loss"])
@@ -958,7 +960,7 @@ def _parse_final_narrative(
             on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
             speaker_aliases=None if getattr(engine, "_structured_dialogue", False) is True else (getattr(engine, "npc_speaker_aliases", lambda: {})()),
             player_text=state.get("user_content"),
-            present_npc_ids=current_scene_npc_ids(engine),
+            present_npc_ids=turn_allowed_npc_ids(engine),
         )
         return (
             prefix_segments + suffix_segments,
@@ -971,7 +973,7 @@ def _parse_final_narrative(
         on_unknown_npc=getattr(engine, "log_unknown_npc_speaker", None),
         speaker_aliases=None if getattr(engine, "_structured_dialogue", False) is True else (getattr(engine, "npc_speaker_aliases", lambda: {})()),
         player_text=state.get("user_content"),
-        present_npc_ids=current_scene_npc_ids(engine),
+        present_npc_ids=turn_allowed_npc_ids(engine),
     )
 
 
@@ -1016,7 +1018,15 @@ def _finalize_turn(state: TurnState) -> dict:
         from src.gameplay.narrative_consistency import apply_narrative_consistency
 
         with _performance_span(engine, "narrative_consistency"):
-            narrative = apply_narrative_consistency(engine, narrative)
+            revised_narrative = apply_narrative_consistency(engine, narrative)
+        if revised_narrative != narrative and engine.__dict__.pop("_turn_choice_skill_hints", None):
+            # 一致性重写可能改动选项菜单，原提示序号已错位：放弃注解也不串选项。
+            engine.__dict__.setdefault("_turn_choice_hint_dropped", []).append(
+                {"reason": "consistency_rewrite"}
+            )
+        if revised_narrative != narrative:
+            engine.__dict__.pop("_turn_choice_targets", None)
+        narrative = revised_narrative
 
     # 本轮声明的临时展示身份（伙计/路人）先落账再解析：定稿 parse 的
     # is_valid_npc 校验以世界身份表为准，guest 必须先能被解析。
@@ -1045,6 +1055,8 @@ def _finalize_turn(state: TurnState) -> dict:
         engine.messages.append(
             {
                 "role": "assistant",
+                "_trpg_turn_id": str(getattr(engine, "active_turn_id", None) or ""),
+                "_trpg_history_kind": "dialogue" if getattr(engine, "_structured_dialogue", False) is True else "legacy_unattributed",
                 "content": finalized_history_content(
                     tagged_narrative.strip(),
                     narrative.strip(),
@@ -1098,8 +1110,27 @@ def _finalize_turn(state: TurnState) -> dict:
 
     _check_cancelled(engine)
     choices = extract_action_choices(narrative)
+    targets = engine.__dict__.pop("_turn_choice_targets", {})
+    for index, choice in enumerate(choices, 1):
+        if index in targets:
+            choice["target"] = {key: value for key, value in targets[index].items() if key != "choice_index"}
+    hint_map = engine.__dict__.pop("_turn_choice_skill_hints", None) or {}
+    if hint_map and choices:
+        # 模型只提议技能键；可用性、显示名与当前有效值按统一有效技能视图解析，
+        # 未知技能按条丢弃（记诊断），注解只随对应选项走、不串选项。
+        from src.gameplay.choices import resolve_skill_hints
+
+        try:
+            pc_sheet = (engine.context.world_store.load() or {}).get("pc") or {}
+        except Exception:
+            pc_sheet = {}
+        choices, hint_drops = resolve_skill_hints(choices, hint_map, pc_sheet)
+        if hint_drops:
+            for entry in hint_drops:
+                log_error(f"选项技能提示丢弃：{entry['reason']}（选项序号 {entry['choice_index']}）")
+            engine.__dict__.setdefault("_turn_choice_hint_dropped", []).extend(hint_drops)
     choices_callback = getattr(engine.cb, "on_choices", None)
-    if choices_callback and choices:
+    if choices_callback:
         choices_callback(choices)
     complete_turn = getattr(engine, "_complete_turn_record", None)
     resolution_session = getattr(engine, "_resolution_session", None)
@@ -1118,6 +1149,9 @@ def _finalize_turn(state: TurnState) -> dict:
         )
     if segment_dicts and getattr(engine.cb, "on_narrative_segments", None):
         engine.cb.on_narrative_segments(segment_dicts)
+    ending = engine.__dict__.pop("_pending_game_over", None)
+    if ending:
+        engine.cb.on_game_over(ending.get("ending_type", "neutral"), ending.get("title", "故事结束"), ending.get("summary", ""))
     engine._last_turn_high_risk = state.get("turn_had_check", False)
     engine._round_count += 1
     engine.__dict__.pop("_turn_user_content", None)

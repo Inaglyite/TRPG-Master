@@ -78,3 +78,55 @@ class EndingValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_legacy_ending_is_atomic_source_bound_and_idempotent(tmp_path):
+    from src.gameplay.endings import ending_readiness
+
+    store = WorldStore(tmp_path / "world")
+    store.initialize(ending_world(recovered=True, defeated=True))
+    context = SimpleNamespace(world_store=store)
+    source = ending_readiness(store.load())["source_token"]
+    store.update(lambda state: state.setdefault("flags", {}).update(extra=True))
+    stale = json.loads(execute_function("end_game", {"ending_id": "truth_and_seal", "source_token": source}, context=context))
+    assert stale["error"] == "ending_source_changed"
+    assert "game_over" not in store.load()
+    store.update(lambda state: state.update(pending_departure={"destination_scene_id": "hall"}))
+    blocked = json.loads(execute_function("end_game", {"ending_id": "truth_and_seal"}, context=context))
+    assert blocked["error"] == "ending_work_unresolved"
+    store.update(lambda state: state.pop("pending_departure"))
+    first = json.loads(execute_function("end_game", {"ending_id": "truth_and_seal"}, context=context))
+    before = store.load()
+    second = json.loads(execute_function("end_game", {"ending_id": "truth_and_seal"}, context=context))
+    assert first["game_over"] and not first["already_ended"]
+    assert second["already_ended"]
+    assert store.load() == before
+    assert before["game_over"]["source_token"]
+
+
+def test_failed_turn_never_publishes_ending_or_rewards(tmp_path, monkeypatch):
+    import pytest
+
+    from src.app.agent_graph import _handle_end_game
+    from tests.test_turn_journal import TurnJournalTests
+
+    engine = TurnJournalTests().make_engine(tmp_path)
+    ended = []
+    engine.cb.on_game_over = lambda *args: ended.append(args)
+
+    def story(*args, **kwargs):
+        engine.context.world_store.update(lambda state: state.update(game_over={"id": "end"}))
+        _handle_end_game(engine, json.dumps({"game_over": True, "ending_type": "good", "title": "结束", "summary": "结束。"}))
+        return "调查结束，所有人离开了。", []
+
+    engine._stream_llm = story
+    original = engine.turn_journal.complete
+    monkeypatch.setattr(engine.turn_journal, "complete", lambda *a, **kw: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(OSError):
+        engine.handle_action("留在原地观察")
+    assert not ended
+    assert not engine.context.world_store.load().get("game_over")
+    assert not getattr(engine, "_pending_game_over", None)
+    monkeypatch.setattr(engine.turn_journal, "complete", original)
+    engine.handle_action("留在原地观察")
+    assert len(ended) == 1

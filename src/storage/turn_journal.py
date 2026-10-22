@@ -148,7 +148,8 @@ def _assert_active_turn_owner(record: dict, owner_token: str, action: str) -> No
 
 
 def serialize_messages(messages: list[dict]) -> list[dict]:
-    """Keep only fields accepted by the OpenAI-compatible message history."""
+    """Persist message content and bounded private provenance, without runtime objects."""
+    from src.ai.context.message_provenance import preserve_provenance
     serializable: list[dict] = []
     for message in messages:
         entry = {
@@ -159,7 +160,7 @@ def serialize_messages(messages: list[dict]) -> list[dict]:
             entry["tool_calls"] = _json_safe(message["tool_calls"])
         if "tool_call_id" in message:
             entry["tool_call_id"] = message["tool_call_id"]
-        serializable.append(entry)
+        serializable.append(preserve_provenance(message, entry))
     return serializable
 
 
@@ -445,6 +446,7 @@ class TurnJournal:
         *,
         status: str,
         error: str = "",
+        diagnostics: dict | None = None,
     ) -> dict:
         if status not in {"cancelled", "failed", "interrupted"}:
             raise ValueError(f"非法回合结束状态: {status}")
@@ -468,6 +470,8 @@ class TurnJournal:
                     "error": str(error or ""),
                 }
             )
+            if diagnostics is not None:
+                record["diagnostics"] = _json_safe(diagnostics)
             self._write_record_unlocked(record)
             if index.get("active_turn_id") == turn_id:
                 index["active_turn_id"] = None
@@ -743,7 +747,7 @@ class TurnJournal:
             if not target_id:
                 return None
             record = self._read_record_unlocked(str(target_id))
-            if record.get("status") != "completed":
+            if record.get("status") not in {"completed", "failed", "cancelled", "interrupted"}:
                 return None
             diagnostics = record.get("diagnostics")
             if not isinstance(diagnostics, dict):
@@ -768,6 +772,9 @@ class TurnJournal:
             return {
                 "turn_id": record.get("turn_id"),
                 "kind": record.get("kind"),
+                "status": record.get("status"),
+                "commit_status": diagnostics.get("commit_status", "committed" if record.get("status") == "completed" else "not_committed"),
+                "stages": copy.deepcopy(diagnostics.get("stages") or []),
                 "completed_at": record.get("completed_at"),
                 "duration_ms": record.get("duration_ms"),
                 "world_revision": record.get("world_revision"),

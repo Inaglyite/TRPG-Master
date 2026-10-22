@@ -29,6 +29,52 @@ def rule_skill_catalog() -> dict[str, dict]:
     }
 
 
+@lru_cache(maxsize=1)
+def rule_attribute_catalog() -> dict[str, dict]:
+    """rules/rule_schema.json 声明的属性目录：id -> 规则条目。"""
+    try:
+        schema = json.loads((PROJECT_ROOT / "rules" / "rule_schema.json").read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        str(item["id"]): item
+        for item in schema.get("attributes", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+
+
+def display_name(check_id: str) -> str:
+    """规则表中文名（技能优先，其次属性）；卡上自定义技能键本身即显示名。"""
+    entry = rule_skill_catalog().get(check_id)
+    if entry and entry.get("name"):
+        return str(entry["name"])
+    attribute = rule_attribute_catalog().get(check_id)
+    if attribute and attribute.get("name"):
+        return str(attribute["name"])
+    return check_id
+
+
+@lru_cache(maxsize=1)
+def rule_name_aliases() -> dict[str, str]:
+    """中文名 -> 规则键，只收录全表唯一的名字（子技能类重名不收）。
+
+    供平台把模型用中文名提出的技能提示解析回规则键；多义名字宁可不解析。
+    """
+    names: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for catalog in (rule_skill_catalog(), rule_attribute_catalog()):
+        for key, entry in catalog.items():
+            name = str(entry.get("name") or "").strip()
+            if not name or name in ambiguous:
+                continue
+            if name in names and names[name] != key:
+                ambiguous.add(name)
+                del names[name]
+                continue
+            names[name] = key
+    return names
+
+
 def _schema_base_value(entry: dict, attributes: dict) -> int | None:
     base = entry.get("base")
     if isinstance(base, bool):

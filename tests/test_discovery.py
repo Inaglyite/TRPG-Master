@@ -119,6 +119,50 @@ class DiscoveryMatchingTests(unittest.TestCase):
         self.assertTrue(cached.outcomes[0].cached)
         self.assertEqual(rerolls, 0)
 
+    def test_departure_record_supersedes_cached_encounter_presence(self):
+        """已离场人物不因 once 缓存的遭遇结果悄悄回到在场名单（强行复活）。
+        回归只能走显式的 speaker_return 事件；遭遇文本也不再描述其在场。"""
+        world = {
+            "flags": {"campus_open": True},
+            "npcs": [{"id": "professor", "current_location": "office"}],
+            "scene_catalog": {
+                "office": {
+                    "encounters": [
+                        {
+                            "id": "professor_after_hours",
+                            "npc_id": "professor",
+                            "availability": "luck",
+                            "on_present_text": "教授恰好还在办公室。",
+                            "on_absent_text": "办公室已经空了。",
+                        }
+                    ],
+                },
+            },
+            "encounter_history": {
+                "office": {"professor_after_hours": {"present": True, "check_result": {"success": True}}},
+            },
+            # 更晚的权威事实：教授已被遣走。
+            "scene_speaker_presence": {
+                "office": {"professor": {"present": False, "reason": "玩家请教授先回避", "turn_id": "turn-7"}},
+            },
+        }
+        resolution = resolve_scene_encounters(
+            "office", world, luck_check=lambda _d: {"success": True, "d100_roll": 1, "skill_value": 60}
+        )
+        self.assertEqual(resolution.present_npc_ids, ())
+        self.assertFalse(resolution.outcomes[0].present)
+        self.assertEqual(resolution.narrative_text, "")
+        # 其他场景（无离场记录）的同一人物不受牵连：离场记录按场景隔离。
+        other = {
+            **world,
+            "current_scene": {"id": "office"},
+            "scene_speaker_presence": {
+                "hall": {"professor": {"present": False, "reason": "别处的离场", "turn_id": "turn-7"}},
+            },
+        }
+        again = resolve_scene_encounters("office", other)
+        self.assertEqual(again.present_npc_ids, ("professor",))
+
     def test_scarlet_opening_does_not_pregrant_document_contacts(self):
         world = json.loads(
             (PROJECT_ROOT / "mod" / "猩红文档" / "world_state_initial.json").read_text(

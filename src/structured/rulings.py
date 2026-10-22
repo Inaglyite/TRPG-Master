@@ -46,6 +46,9 @@ def ending_catalog(state: dict) -> list[dict]:
     historical flags outside the bounded human-ruling value type. Missing is
     explicit, not silently displayed as false. No conditions are auto-filled.
     """
+    from src.gameplay.endings import ending_readiness
+
+    readiness = ending_readiness(state)
     flags = state.get("flags") or {}
     catalogue = []
     for ending_id, definition in _ending_map(state).items():
@@ -62,6 +65,7 @@ def ending_catalog(state: dict) -> list[dict]:
         catalogue.append(
             {
                 "id": ending_id,
+                "source_token": readiness["source_token"],
                 "title": str(definition.get("title") or ending_id),
                 "ending_type": definition.get("ending_type", "neutral"),
                 "description": str(definition.get("description") or ""),

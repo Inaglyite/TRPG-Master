@@ -42,6 +42,7 @@ def test_declared_completion_effect_remains_valid_in_projected_schema():
     state = world()
     state["completion_flags"] = {"hall_searched": "大厅搜索完成"}
     plan = {"intent": "interact", "input_quote": "搜索", "approach": "搜索", "departure_question": "",
+            "goal_id": "hall_search", "goal": "搜索大厅",
             "on_success": [{"kind": "flag_set", "target": "hall_searched", "evidence_quote": "搜索", "reason": "搜索完成"}]}
     Draft202012Validator(adjudication_schema(state)).validate(plan)
 

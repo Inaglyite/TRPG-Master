@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -118,6 +118,20 @@ def resolve_scene_encounters(
             text=text,
             check_result=check_result,
         ))
+    # 离场记录（scene_speaker_presence）是晚于遭遇判定的权威事实：已离场人物
+    # 不因重进场景或 once 缓存的遭遇结果悄悄回到在场名单——那是强行复活。
+    # 回归只能走显式的 speaker_return 事件（带玩家输入证据与回合标识）。
+    from src.gameplay.scene_speaker_presence import departed_speakers
+
+    departed = set(departed_speakers(world, scene_id))
+    if departed:
+        present -= departed
+        outcomes = [
+            replace(outcome, present=False, text="")
+            if outcome.npc_id in departed and outcome.present
+            else outcome
+            for outcome in outcomes
+        ]
     return SceneEncounterResolution(
         scene_id=scene_id,
         present_npc_ids=tuple(sorted(present)),
