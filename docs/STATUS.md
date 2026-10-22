@@ -13,10 +13,25 @@
 （2026-10-14 发布，含 Windows 安装版、便携版与更新/校验文件），查询时 master 为
 `f7dde91bd64615d09d46f90f5ae1ad3bd08056cf`。GitHub 分支或 Release 状态不能证明
 正式服务器当前激活了哪个提交；下方 10 月 14 日部署记录保留为当时证据。
-本次没有检查正式站点、修改生产环境或重新发布。
+本次没有检查正式站点或修改生产环境；Windows 候选包交付见下方记录。
 
 10 月 22 日 Kimi 实现任务书 T01–T11 已完成接手审计、补实现与本地统一验收。
-后端业务提交 `7a508145`、前端提交 `e9c480eb`，尚未推送、合并或正式发布。
+后端业务提交 `7a508145`、前端提交 `e9c480eb`；用户随后授权提交、推送与打包，
+已推送 `fix/dialogue-bubbles-20261021` 和候选标签 `v1.0.3-rc.1`（`c329e227`）。
+未合并 master 或部署正式服务器。
+
+## Windows 候选包交付（2026-10-22）
+
+在 Windows 虚拟机的独立干净标签工作树完成 `1.0.3-rc.1` 安装版和便携版，
+打包后端迁移/启动、便携引导、解包桌面、NSIS 静默安装/启动/卸载均通过。
+回传后的两个 EXE 的 SHA256、更新清单 SHA512 与 GitHub 上传摘要一致。
+五个产物已附到 [Release 草稿](https://github.com/Inaglyite/TRPG-Master/releases/tag/untagged-3f09c7d793ce03938f64)，
+草稿尚未公开发布；稳定 Release 仍为 v1.0.2。
+
+候选源码的 [quality 检查](https://github.com/Inaglyite/TRPG-Master/actions/runs/39805298901)
+后端已通过（含 PostgreSQL，2329 项、170 subtests）；记录时前端完整 E2E 仍在运行，
+不能记作 CI 全绿。详细构建、原始失败、校验和与结果见
+[Windows 打包记录](../../mid_product/trpg-master/2026-10-22-windows-1.0.3-rc.1/PACKAGING.md)。
 
 ## 接手改进验收（2026-10-22）
 

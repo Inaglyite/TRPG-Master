@@ -15,6 +15,13 @@
 
 ## 归档资料
 
+2026-10-22 的 [Windows 1.0.3-rc.1 候选包交付](../../mid_product/trpg-master/2026-10-22-windows-1.0.3-rc.1/PACKAGING.md)
+冻结于 `mid_product/trpg-master/2026-10-22-windows-1.0.3-rc.1/`：构建固定标签 c329e227，
+后端隔离启动/迁移、便携引导、安装版静默安装/启动/卸载通过；安装包、便携包及更新/校验
+文件已上传 Release 草稿，远程文件摘要一致。记录 CI 后端2329项通过、前端E2E仍在运行的
+快照，不把未结束检查记作通过。原始构建后检查误将自建 venv 当作源码修改的失败保留，
+清理该环境后源码干净；不修改此前源码验收归档，不部署正式服务器。
+
 2026-10-22 的 [Kimi → Codex 接手实现与统一验收](../../mid_product/trpg-master/2026-10-22-kimi-codex-delivery/ACCEPTANCE.md)
 冻结于 `mid_product/trpg-master/2026-10-22-kimi-codex-delivery/`：T01–T11 的审计与修正，
 2321 项后端、1388 项前端、6 项本地 E2E、三宽度 UI 与实际 GPU、旧存档/连续压缩/
