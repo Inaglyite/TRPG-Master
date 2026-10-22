@@ -56,13 +56,17 @@ After selecting a module and investigator, open **游玩方式** (Play mode) on 
 | UI label | Meaning |
 | --- | --- |
 | 经典 AI 叙事 | Classic AI narration, using the legacy whole-turn path |
-| 人类主持 | Human Keeper, using structured commands without model calls |
+| 人类主持 | Human Keeper, using structured commands without model calls in the core play flow |
 | AI 辅助主持 | AI-assisted Keeper: private drafts require human approval |
 | AI 主持 | Agent Keeper using restricted structured commands |
 
 Local/cloud location, solo/multiplayer participation and Keeper mode are separate choices. Modes do not automatically have identical coverage. In particular, a legacy AI playthrough or a human-hosted structured playthrough does not verify a complete structured Agent playthrough. See [status](../STATUS.md).
 
 Suggested actions are optional; players can enter free-form actions. The server settles checks and state changes. A displayed narrative or animation is not by itself proof that a turn has been committed.
+
+Below the input, **使用技能** (Use skill) lets you choose a skill from your current investigator's sheet and describe your goal. Submitting proposes an action; the Keeper decides whether a check is needed. **整理线索** (Organize clues) extracts important information from the latest completed, displayed turn. Review or edit the draft and its original quotes before adding it to your private investigation notes. Automatic extraction uses your configured model even in human-hosted play; manual excerpts are available if extraction fails. It does not grant an acquired game clue or advance a turn.
+
+**场景移动** (Scene travel) opens a simple graph of locations the party has reached. Select a destination and confirm a travel proposal; existing departure decisions and travel rules still apply. The server filters unvisited locations before sending the graph. Older saves may show only locations whose visits can be established from their saved state.
 
 ## Model configuration
 

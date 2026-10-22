@@ -655,12 +655,19 @@ def choose_beat_input(beat: Beat, attempt: int, world: dict) -> str:
 
         wanted = {match.clue_id for match in match_discovery_rules("。".join(beat.inputs), world)}
         scene_id = str((world.get("current_scene") or {}).get("id") or "")
+        if (beat.key == "B2_students"
+                and scene_id not in {"miskatonic_history", "miskatonic_student_commons"}):
+            # A failed narrative can roll the move back. Do not proceed to
+            # questioning students who are still in another scene.
+            return "我现在离开医学院，独自前往历史系。到了以后再向艾米莉亚·考特询问莱特教授的情况。"
         contexts = (world.get("pc") or {}).get("_push_contexts") or {}
         for check in reversed((world.get("pc") or {}).get("_check_history") or []):
             context = contexts.get(check.get("check_id")) or {}
             if (check.get("scene_id") == scene_id and not check.get("success")
                     and not check.get("goal_achieved")
-                    and wanted.intersection(check.get("discovery_ids") or [])
+                    and (wanted.intersection(check.get("discovery_ids") or [])
+                         or (beat.key == "B3b_cottage" and scene_id == "wright_cottage"
+                             and check.get("skill") == "spot_hidden"))
                     and context.get("push_risk") and not context.get("used")):
                 return (
                     "我明确选择孤注一掷，承担刚才宣布的失败风险。仍检查原对象："

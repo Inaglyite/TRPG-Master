@@ -297,6 +297,30 @@ FIXED_JIN_VERDICT = json.dumps(
 CLEAN_NARRATION_VERDICT = json.dumps({"contains_direct_speech": False})
 
 
+def test_attribution_review_accepts_the_choices_copy_required_by_its_prompt():
+    from src.ai.model.dialogue_attribution import AttributionVerdict, validate_review_fix
+    from src.ai.model.dialogue_output import DialogueOutput
+
+    original = DialogueOutput.model_validate(json.loads(ALL_NARRATION_QUOTED))
+    verdict = AttributionVerdict.model_validate({**json.loads(FIXED_JIN_VERDICT), "choices": original.choices})
+    fixed = validate_review_fix(original, verdict, present_npc_ids={"jin"}, guest_speaker_ids=set())
+    assert fixed.choices == original.choices
+
+
+def test_attribution_review_still_rejects_changed_choices():
+    from src.ai.model.dialogue_attribution import (
+        AttributionReviewError,
+        AttributionVerdict,
+        validate_review_fix,
+    )
+    from src.ai.model.dialogue_output import DialogueOutput
+
+    original = DialogueOutput.model_validate(json.loads(ALL_NARRATION_QUOTED))
+    verdict = AttributionVerdict.model_validate({**json.loads(FIXED_JIN_VERDICT), "choices": ["凭空添加的行动"]})
+    with pytest.raises(AttributionReviewError, match="choices"):
+        validate_review_fix(original, verdict, present_npc_ids={"jin"}, guest_speaker_ids=set())
+
+
 def test_suspect_narration_gets_one_bounded_semantic_review():
     host = make_host("")
     host.client, calls = review_client(ALL_NARRATION_QUOTED, FIXED_JIN_VERDICT)

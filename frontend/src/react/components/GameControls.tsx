@@ -14,6 +14,7 @@ import { useStructuredStore } from "../../state/structured-store";
 import { useOnlineStore } from "../../state/online-store";
 import { ContextSummaryButton } from "./ModelSettingsPanel";
 import { StructuredToolRow } from "./structured/StructuredToolRow";
+import { PlayerActionToolbar } from "./PlayerActionToolbar";
 import { useDelayedClose } from "./transitions";
 
 export function GameControls() {
@@ -212,6 +213,11 @@ export function GameControls() {
           ⏎
         </button>
       </div>
+      <PlayerActionToolbar
+        canAct={enabled}
+        draft={text}
+        onActionSent={() => setText("")}
+      />
     </div>
   );
 }

@@ -27,6 +27,9 @@ Choose a scenario and an investigator, then describe what you want to do. Narrat
 | Saves and branches | Automatic/manual saves, loading feedback, history and branching, with different branch boundaries in each execution mode |
 | Clients | Electron desktop, browser-based solo play and multiplayer rooms |
 | Keeper tools | A human Keeper console, plus module, private-note, history and execution-receipt queries for agents |
+| Investigation toolbar | Below the input: choose an investigator skill, organize the latest turn's clues, or propose travel on a visited-location map |
+
+Skill actions go to the Keeper for adjudication. Clue organization produces an editable draft with original quotes for your private investigation notes. The map shows only locations the party has reached. Automatic note extraction calls your configured model; manual excerpts are also available.
 
 Classic AI turns and structured play use separate execution paths. Their capabilities and acceptance coverage differ; a successful playthrough in one mode does not establish complete coverage in every other mode. See the [project status](docs/STATUS.md) for release and development boundaries.
 

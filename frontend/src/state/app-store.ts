@@ -197,6 +197,7 @@ type AppState = {
   notesDirty: boolean;
   notesSaving: boolean;
   notesLoading: boolean;
+  notesLoaded: boolean;
   notesStatus: string;
   notesStatusKind: string;
   characterPanelOpen: boolean;
@@ -291,6 +292,7 @@ export const useAppStore = create<AppState>((set) => ({
   notesDirty: false,
   notesSaving: false,
   notesLoading: false,
+  notesLoaded: false,
   notesStatus: "",
   notesStatusKind: "",
   characterPanelOpen: false,
@@ -346,6 +348,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
   applyNotes: (payload) =>
     set((state) => ({
+      notesLoaded: true,
       notesText: state.notesDirty
         ? state.notesText
         : String(payload.text || ""),

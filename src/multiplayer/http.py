@@ -37,6 +37,7 @@ from src.multiplayer.solo_timeline_http import register_solo_timeline_http_route
 from src.multiplayer.solo_timeline_ws import solo_current_world_id_in_session
 from src.multiplayer.world_creation import create_owned_world
 from src.storage.database import World, WorldMember, session_scope
+from src.web.player_tools_http import register_player_tools_routes
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
     db_url = deps.database_url
     register_character_options_route(router, deps)
     register_keeper_routes(router, deps)
+    register_player_tools_routes(router, deps)
     register_archive_world_route(router, database_url=db_url, room_manager=deps.room_manager)
     register_solo_timeline_http_routes(
         router,

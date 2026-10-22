@@ -415,6 +415,24 @@ principal 和控制权由服务端 Session、成员、调查员 claim、keeper �
 - `solo_branch_create`：legacy 需要有效 turn_id；structured 从当前 committed 状态分支，不要求伪造 turn_id，可携带 expected_revision；模式不匹配或版本冲突要拒绝。
 - 不因云端单人分支已支持就宣称多人房间任意读档/分支入口均支持；边界见[状态](STATUS.md)。
 
+## 玩家调查行动栏（2026-10-23）
+
+- `GET /api/worlds/{world_id}/player-tools` 返回 `world_id/revision/character_name/skills/map/can_organize`。
+  技能项为 `id/name/value/trained`，使用本人控制调查员的有效技能与规则基础值，排除属性。
+  未认领调查员和旁观者没有技能表；地图是队伍已抵达节点的 `id/name/current` 与
+  `from/to` 连线，不含未到达节点、占位计数、作者坐标或描述。
+- `POST /api/worlds/{world_id}/investigation-digest` 接受
+  `{source_id,source_text}`，文字 4–12000 字符、实际请求体最多 100000 字节；仅 owner/player
+  可调用。响应 `{world_id,source_id,items:[{text,quote}]}`，最多 8 项，引文须逐字属于输入。
+  `source_id` 用于客户端关联，不是服务端认证的回合来源。该接口只产出私人笔记草稿，
+  不认证事实或授予游戏线索，也不直接保存笔记。
+- 两入口沿用世界成员权限；本地入口检查请求来源并拒绝匿名读取账号所属世界。
+  响应 `private, no-store`。云端提炼使用当前世界的模型路由，返回前再次核对成员权限；
+  服务异常返回通用 503，客户端允许重试或手动摘录，不自动重试付费调用。
+- 追加摘录须先读取已有私人笔记，并复用既有版本校验与保存回执。切换世界、角色或读档
+  时关闭工具，忽略迟到结果；整理本身不创建游戏回合。技能与移动仍走既有玩家行动入口，
+  不绕过当前行动权、待决出发事项或主持裁决。
+
 ## 7. 协议变更检查
 
 ### 主持笔记与资料查询（2026-10-13，实验实现）

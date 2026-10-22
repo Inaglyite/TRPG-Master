@@ -299,6 +299,9 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     if current_id in scenes:
         history.setdefault(current_id, {})
     history.setdefault(destination, {})
+    from src.gameplay.player_tools import record_scene_visits
+
+    record_scene_visits(state, current_id, destination)
     catalog_entry = {
         key: value for key, value in scene.items() if key not in {"document", "npcs_present"}
     }

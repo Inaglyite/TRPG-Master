@@ -8,6 +8,7 @@ import {
   saveNotes,
   onPlayerNotes,
   onNotesWorldChanged,
+  onNotesFailure,
 } from "./utility";
 
 vi.mock("./ws", () => ({ safeSend: vi.fn(), sendImmediately: vi.fn() }));
@@ -34,6 +35,32 @@ describe("私人笔记断线保护", () => {
     });
   });
   afterEach(() => vi.useRealTimers());
+
+  it("首次读取失败不把空白占位当作草稿；重试后保留已有服务器笔记", () => {
+    useAppStore.setState({
+      connection: "connected",
+      notesText: "",
+      notesDirty: false,
+      notesLoaded: false,
+      notesRevision: 0,
+    });
+    requestNotes();
+    const first = JSON.parse(vi.mocked(sendImmediately).mock.calls[0][0]);
+    onNotesFailure({ ...first, message: "读取暂时失败" });
+    expect(useAppStore.getState()).toMatchObject({
+      notesDirty: false,
+      notesLoaded: false,
+    });
+    requestNotes();
+    const second = JSON.parse(vi.mocked(sendImmediately).mock.calls[1][0]);
+    onPlayerNotes({ ...second, text: "已存的重要线索", revision: 4 });
+    expect(useAppStore.getState()).toMatchObject({
+      notesLoaded: true,
+      notesText: "已存的重要线索",
+      notesRevision: 4,
+      notesDirty: false,
+    });
+  });
 
   it("保存请求未确认时仍保留未保存标识，超时后可恢复操作", () => {
     useAppStore.setState({ connection: "connected" });

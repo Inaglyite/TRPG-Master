@@ -41,6 +41,7 @@ class AttributionVerdict(BaseModel):
     contains_direct_speech: bool
     segments: list[dict] = Field(default_factory=list)
     guest_speakers: list[GuestSpeakerBlock] = Field(default_factory=list)
+    choices: list[str] | None = None
 
 
 _REVIEW_INSTRUCTION = """你是对话归属复核员。给出的叙事 JSON 里，narration 块可能混入了人物正在直接发言的语句。
@@ -100,6 +101,8 @@ def validate_review_fix(
     """校验复核修正稿；任何一项不符即 AttributionReviewError。"""
     if not verdict.contains_direct_speech:
         raise AttributionReviewError("内部错误：无台词结论不应进入修正校验")
+    if verdict.choices is not None and verdict.choices != original.choices:
+        raise AttributionReviewError("复核修正改动了 choices")
     fixed = DialogueOutput.model_validate(
         {
             "segments": verdict.segments,

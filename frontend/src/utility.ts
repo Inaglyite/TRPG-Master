@@ -148,6 +148,7 @@ export function onPlayerNotes(data: any) {
     notesRevision: data.revision,
     notesSaving: false,
     notesLoading: false,
+    notesLoaded: true,
     notesDirty: dirty,
     notesStatus: dirty ? "未保存：保留此窗口的草稿" : "已保存",
     notesStatusKind: dirty ? "" : "success",
@@ -173,11 +174,11 @@ export function onPlayerNotesError(message: string) {
 
 export function onNotesFailure(data: any) {
   if (!requests.matches(notesScope(), data, true)) return;
-  requests.finish();
+  const operation = requests.finish();
   useAppStore.getState().setNotesProgress({
     notesSaving: false,
     notesLoading: false,
-    notesDirty: true,
+    notesDirty: useAppStore.getState().notesDirty || operation?.kind === "save",
     notesStatus: data.message || "笔记访问失败，草稿保留",
     notesStatusKind: "error",
   });
@@ -190,6 +191,7 @@ export function onNotesWorldChanged() {
     notesDirty: false,
     notesSaving: false,
     notesLoading: false,
+    notesLoaded: false,
     notesText: "",
     notesStatus: "",
     notesStatusKind: "",

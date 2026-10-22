@@ -1310,6 +1310,11 @@ class GameEngine:
                 turn_id=str(getattr(self, "active_turn_id", None) or ""),
             )
             return None
+        # Visits are independent of NPC encounters: an empty room is still a
+        # visited place. This write stays in the turn overlay until commit.
+        from src.gameplay.player_tools import record_scene_visits
+
+        self.context.world_store.update(lambda state: record_scene_visits(state, origin_scene_id, scene_id))
         self._record_transition_receipt(
             executed=True,
             origin_scene_id=origin_scene_id, destination_scene_id=scene_id,
