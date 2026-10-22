@@ -10,15 +10,19 @@
 
 本次只读查询 GitHub：最新正式 Release 为
 [v1.0.2](https://github.com/Inaglyite/TRPG-Master/releases/tag/v1.0.2)
-（2026-10-14 发布，含 Windows 安装版、便携版与更新/校验文件），查询时 master 为
-`f7dde91bd64615d09d46f90f5ae1ad3bd08056cf`。GitHub 分支或 Release 状态不能证明
-正式服务器当前激活了哪个提交；下方 10 月 14 日部署记录保留为当时证据。
-本次没有检查正式站点或修改生产环境；Windows 候选包交付见下方记录。
+（2026-10-14 发布，含 Windows 安装版、便携版与更新/校验文件）。
+GitHub 分支或 Release 状态不能证明正式服务器当前激活了哪个提交；下方 10 月 14 日部署记录保留为当时证据。
+Windows 候选包交付见下方记录。
 
 10 月 22 日 Kimi 实现任务书 T01–T11 已完成接手审计、补实现与本地统一验收。
 后端业务提交 `7a508145`、前端提交 `e9c480eb`；用户随后授权提交、推送与打包，
-已推送 `fix/dialogue-bubbles-20261021` 和候选标签 `v1.0.3-rc.1`（`c329e227`）。
-未合并 master 或部署正式服务器。
+推送了候选标签 `v1.0.3-rc.1`（`c329e227`）。2026-10-23 经用户确认已快进合并 master（`1eb2d56c`）并推送。quality
+[39809542051](https://github.com/Inaglyite/TRPG-Master/actions/runs/39809542051)
+全绿后人工触发 deploy-azure
+[39816059788](https://github.com/Inaglyite/TRPG-Master/actions/runs/39816059788)：
+首次运行仅 E2E「经典编辑器短窗口」用例因测试端 WebSocket 断连抖动超时
+（同 SHA 在 quality 已通过同套 E2E），重跑失败任务后全绿，
+日志确认 `release activated: 1eb2d56c182d80fbd1f2fa1fcbc9dfcaa954a0ae`。
 
 ## Windows 候选包交付（2026-10-22）
 
