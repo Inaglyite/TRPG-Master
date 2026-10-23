@@ -373,25 +373,48 @@ async function submitKeeperCommand(
 ): Promise<{ accepted: boolean; lastError: string }> {
   const attempts = options.attempts ?? 3;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const settled = () =>
-      framesOf(frames.received, "request_error").length +
-      framesOf(frames.received, "action_status").length +
-      framesOf(frames.received, "action_ack").length;
-    const before = settled();
-    const errorsBefore = framesOf(frames.received, "request_error").length;
+    const knownIds = new Set(
+      framesOf(frames.sent, "command_request").map(
+        (raw) => JSON.parse(raw).command_id,
+      ),
+    );
+    const receivedBefore = frames.received.length;
     await page.getByTestId("keeper-submit").click();
-    await expect.poll(settled, { timeout: 20_000 }).toBeGreaterThan(before);
-    const errors = framesOf(frames.received, "request_error");
-    if (errors.length === errorsBefore)
-      return { accepted: true, lastError: "" };
-    const last = JSON.parse(errors[errors.length - 1]) as {
-      payload?: { code?: string };
+    const submitted = () =>
+      framesOf(frames.sent, "command_request")
+        .map((raw) => JSON.parse(raw))
+        .find((command) => !knownIds.has(command.command_id));
+    await expect.poll(submitted, { timeout: 20_000 }).toBeTruthy();
+    const id = submitted().command_id;
+    const terminal = () => {
+      for (const raw of frames.received.slice(receivedBefore)) {
+        if (!raw.includes(id)) continue;
+        const frame = JSON.parse(raw);
+        const payload = frame.payload ?? {};
+        if ((payload.command_id ?? payload.request_id) !== id) continue;
+        if (frame.type === "request_error") return frame;
+        if (
+          ["action_status", "action_ack"].includes(frame.type) &&
+          ["completed", "failed", "declined", "cancelled"].includes(
+            payload.status,
+          )
+        )
+          return frame;
+      }
+      return undefined;
     };
-    const code = last.payload?.code ?? "";
-    if (code !== "revision_conflict") {
-      return { accepted: false, lastError: errors[errors.length - 1] };
-    }
-    await page.waitForTimeout(500);
+    await expect
+      .poll(terminal, { timeout: 30_000, message: `命令未结算：${id}` })
+      .toBeTruthy();
+    const result = terminal()!;
+    if (
+      result.type !== "request_error" &&
+      result.payload.status === "completed"
+    )
+      return { accepted: true, lastError: "" };
+    if (result.payload.code !== "revision_conflict")
+      return { accepted: false, lastError: JSON.stringify(result) };
+    await expect(page.getByTestId("keeper-submit")).toBeEnabled();
   }
   return { accepted: false, lastError: "revision_conflict 多次未能提交" };
 }
@@ -1079,17 +1102,17 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
         await expect(page.locator(".header-scene-name")).toHaveText(
           "密斯卡托尼克大学",
         );
-        const snapshot = JSON.parse(
-          framesOf(frames.received, "session_snapshot").at(-1)!,
-        ).payload;
-        const labels = (snapshot.items ?? []).map(
-          (item: { label: string }) => item.label,
-        );
-        expect(labels).toContain("莱特办公室的黄铜钥匙");
-        expect(labels).toContain("莱特小屋的黄铜钥匙");
-        const clueTexts = JSON.stringify(snapshot.clues ?? []);
-        expect(clueTexts).toContain("心力衰竭");
-        expect(clueTexts).toContain("下落不明");
+        // The client combines its lobby snapshot with startup delta events.
+        // Check its real rendered projection, not an arbitrary last snapshot.
+        const panel = page.locator("#char-panel");
+        for (const key of ["莱特办公室的黄铜钥匙", "莱特小屋的黄铜钥匙"])
+          await expect(panel.locator(".inv-card-items")).toContainText(key, {
+            timeout: 30_000,
+          });
+        for (const clue of ["心力衰竭", "下落不明"])
+          await expect(panel.locator(".inv-card-clues")).toContainText(clue, {
+            timeout: 30_000,
+          });
       }
     });
 
@@ -1164,8 +1187,14 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
         await checkKeeperCatalogueLayout(keeper);
         for (const frames of [playerAFrames, playerBFrames]) {
           await expect
-            .poll(() => framesOf(frames.received, "clue_granted").length)
-            .toBeGreaterThan(0);
+            .poll(() =>
+              framesOf(frames.received, "clue_granted").some(
+                (raw) =>
+                  JSON.parse(raw).payload.clue_id ===
+                  "fallon_document_contacts",
+              ),
+            )
+            .toBe(true);
         }
         await presentPhoto(keeper, "布莱斯·法伦", [invA, invB]);
         await ackHandout(playerA);
@@ -1761,9 +1790,19 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
         );
 
         // —— 乙使用真实持有物品（不消耗）——
-        const bItems = JSON.parse(
-          framesOf(playerBFrames.received, "session_snapshot").at(-1)!,
-        ).payload.items as { id: string; label: string; quantity: number }[];
+        const bItems = await playerB
+          .locator(".inv-item-row")
+          .evaluateAll((rows) =>
+            rows.map((row) => ({
+              id: (row as HTMLElement).dataset.itemId!,
+              label: (row as HTMLElement).dataset.item!,
+              quantity: Number(
+                row
+                  .querySelector(".inv-item-count")
+                  ?.textContent?.replace("×", "") || 1,
+              ),
+            })),
+          );
         const useTarget =
           bItems.find(
             (item) => item.quantity >= 1 && !item.label.startsWith(".38口径"),
@@ -1814,12 +1853,27 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
           "对时完成，未消耗。",
         );
         // 不消耗：物品仍在乙背包。
-        const bItemsAfter = JSON.parse(
-          framesOf(playerBFrames.received, "inventory_changed").at(-1)!,
-        ).payload.items as { id: string; quantity: number }[];
-        expect(
-          bItemsAfter.find((item) => item.id === useTarget.id)?.quantity,
-        ).toBe(useTarget.quantity);
+        await expect
+          .poll(() =>
+            framesOf(playerBFrames.received, "action_status").some((raw) => {
+              const payload = JSON.parse(raw).payload;
+              return (
+                payload.request_id === useReq && payload.status === "completed"
+              );
+            }),
+          )
+          .toBe(true);
+        await expect
+          .poll(() =>
+            itemRow.evaluate((row) =>
+              Number(
+                row
+                  .querySelector(".inv-item-count")
+                  ?.textContent?.replace("×", "") || 1,
+              ),
+            ),
+          )
+          .toBe(useTarget.quantity);
 
         // —— 乙通过「前往…」申请回大学（发起请求；实际移动由主持批准执行）——
         await playerB.getByTestId("btn-move").click();
@@ -2028,13 +2082,10 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
       await closeConsole(keeper);
 
       // 枪械持有者（.38 左轮是真实角色物品）：第一枪验证弹药消耗。
-      const holderOf = async (frames: Frames) =>
-        JSON.parse(framesOf(frames.received, "session_snapshot").at(-1)!)
-          .payload;
-      const snapA = await holderOf(playerAFrames);
-      const gunOwnerA = (snapA.items ?? []).some((item: { label: string }) =>
-        item.label.startsWith(".38口径左轮手枪"),
-      );
+      const gunOwnerA =
+        (await playerA
+          .locator('.inv-item-row[data-item^=".38口径左轮手枪"]')
+          .count()) > 0;
       const gunInv = gunOwnerA ? invA : invB;
       const gunPage = gunOwnerA ? playerA : playerB;
       const gunFrames = gunOwnerA ? playerAFrames : playerBFrames;
