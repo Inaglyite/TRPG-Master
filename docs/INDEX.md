@@ -15,13 +15,21 @@
 
 ## 归档资料
 
+2026-10-23 的 [调查行动栏正式发布与 CI 修正](../../mid_product/trpg-master/2026-10-23-toolbar-production-release/DEPLOYMENT.md)
+冻结于 `mid_product/trpg-master/2026-10-23-toolbar-production-release/`：正式业务版本
+`b363f8de` 的部署门禁与激活日志、三次 CI 同步缺口的原始失败、延迟观察复现、
+仅两个 E2E 文件的修正；最终 `f247c299` quality 首轮全绿，2348 后端、1403 前端、
+101 E2E / 2 skipped，本地三次人类主线 54/54、零模型。版本表区分正式业务、
+测试修正和文档提交，含索引与 SHA256；未在正式站测试，未发布新 Windows 稳定包。
+原始 trace 含私有测试上下文，不作为公开发布资产上传。
+
 2026-10-23 的 [玩家调查行动栏验收](../../mid_product/trpg-master/2026-10-23-game-action-toolbar/ACCEPTANCE.md)
 冻结于 `mid_product/trpg-master/2026-10-23-game-action-toolbar/`：技能行动、当前回合私人摘录与
 仅已到达场景地图；后端 2340 项、前端 1403 项，四宽度真实 UI、真实模型提炼与保存/重载、
 分支地图；最终真实主线 35 回合 33/33、无回合错误、一次裁决回退。
 保留首跑对白复核失败、中间访问写入失败、脚本推进问题和合法检定失败的原始证据。
 索引、源码指纹、运行数据库登记与 SHA256 分开保存；私有运行数据不随源码推送。
-本轮不发布生产或改动既有候选安装包。
+该源码验收阶段未发布生产或改动既有候选安装包；后续正式发布见上方记录。
 
 2026-10-22 的 [Windows 1.0.3-rc.1 候选包交付](../../mid_product/trpg-master/2026-10-22-windows-1.0.3-rc.1/PACKAGING.md)
 冻结于 `mid_product/trpg-master/2026-10-22-windows-1.0.3-rc.1/`：构建固定标签 c329e227，
