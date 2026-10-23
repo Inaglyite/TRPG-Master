@@ -53,8 +53,9 @@ const port = 8879;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const evidenceDir = resolve(
-  repositoryRoot,
-  "test-results/keeper-platform/scarlet-human-mainline",
+  process.env.TRPG_E2E_EVIDENCE_DIR ||
+    resolve(repositoryRoot, "frontend/test-results/keeper-platform"),
+  "scarlet-human-mainline",
   String(Date.now()),
 );
 const shotsDir = join(evidenceDir, "shots");
@@ -267,12 +268,21 @@ test.afterAll(async () => {
 
 type Frames = { sent: string[]; received: string[] };
 
-function collectFrames(page: Page): Frames {
+function collectFrames(
+  page: Page,
+  deferSettlement?: (deliver: () => void) => void,
+): Frames {
   const sent: string[] = [];
   const received: string[] = [];
   page.on("websocket", (socket) => {
     socket.on("framesent", (event) => sent.push(String(event.payload)));
-    socket.on("framereceived", (event) => received.push(String(event.payload)));
+    socket.on("framereceived", (event) => {
+      const raw = String(event.payload);
+      const deliver = () => received.push(raw);
+      if (deferSettlement && JSON.parse(raw).type === "case_settled")
+        deferSettlement(deliver);
+      else deliver();
+    });
   });
   return { sent, received };
 }
@@ -937,13 +947,21 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
   const keeper = await keeperContext.newPage();
   const playerA = await playerAContext.newPage();
   const playerB = await playerBContext.newPage();
+  let releasePrivateSettlement = false;
+  const heldPrivateSettlements: (() => void)[] = [];
   for (const page of [keeper, playerA, playerB]) page.setDefaultTimeout(30_000);
   pages.keeper = keeper;
   pages.playerA = playerA;
   pages.playerB = playerB;
   const keeperFrames = collectFrames(keeper);
   const playerAFrames = collectFrames(playerA);
-  const playerBFrames = collectFrames(playerB);
+  // Keep real transport untouched. Delay the test observer's private receipt
+  // until after the public ending, so assertions must await each receipt.
+  const playerBFrames = collectFrames(playerB, (deliver) => {
+    const later = () => setTimeout(deliver, 500);
+    if (releasePrivateSettlement) later();
+    else heldPrivateSettlements.push(later);
+  });
   frameDump.keeper = keeperFrames;
   frameDump.playerA = playerAFrames;
   frameDump.playerB = playerBFrames;
@@ -2028,6 +2046,8 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
       while (rounds < 10) {
         const combat = latestCombat();
         expect(combat, "战斗状态丢失").toBeTruthy();
+        // A major wound can end combat while an opponent still has HP.
+        if (combat.active === false) break;
         const feldman = combat.participants.find(
           (p: { id: string }) => p.id === "hector_kara_feldman",
         );
@@ -2500,6 +2520,23 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
             })
             .toBeGreaterThan(0);
         }
+        releasePrivateSettlement = true;
+        heldPrivateSettlements.splice(0).forEach((deliver) => deliver());
+        for (const [frames, investigatorId, label] of [
+          [playerAFrames, invA, "甲"],
+          [playerBFrames, invB, "乙"],
+        ] as const) {
+          await expect
+            .poll(
+              () =>
+                framesOf(frames.received, "case_settled").some(
+                  (raw) =>
+                    JSON.parse(raw).payload.investigator_id === investigatorId,
+                ),
+              { timeout: 30_000, message: `${label}没有收到自己的结案结算` },
+            )
+            .toBe(true);
+        }
         const settledA = framesOf(playerAFrames.received, "case_settled").map(
           (raw) => JSON.parse(raw).payload,
         );
@@ -2509,23 +2546,16 @@ test("猩红文档全真主线：人类主持+两玩家零模型跑完 truth_and
         expect(
           settledA.some(
             (payload: { investigator_id?: string }) =>
-              payload.investigator_id === invA,
-          ),
-          "甲没有收到自己的结案结算",
-        ).toBe(true);
-        expect(
-          settledB.some(
-            (payload: { investigator_id?: string }) =>
-              payload.investigator_id === invB,
-          ),
-          "乙没有收到自己的结案结算",
-        ).toBe(true);
-        expect(
-          settledA.some(
-            (payload: { investigator_id?: string }) =>
               payload.investigator_id === invB,
           ),
           "甲收到了乙的结案结算（串线）",
+        ).toBe(false);
+        expect(
+          settledB.some(
+            (payload: { investigator_id?: string }) =>
+              payload.investigator_id === invA,
+          ),
+          "乙收到了甲的结案结算（串线）",
         ).toBe(false);
         await closeConsole(keeper);
         for (const page of [keeper, playerA, playerB]) {
