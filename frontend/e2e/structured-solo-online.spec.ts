@@ -161,9 +161,15 @@ test.afterAll(async () => {
     await new Promise<void>((done) => modelTrap!.close(() => done()));
 });
 
-test.afterEach(() =>
-  expect(modelCalls, "人类云端单人链必须零模型连接").toBe(0),
-);
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await testInfo.attach("backend-output", {
+      body: `exit=${server?.exitCode}, signal=${server?.signalCode}\n${serverOutput}`,
+      contentType: "text/plain",
+    });
+  }
+  expect(modelCalls, "人类云端单人链必须零模型连接").toBe(0);
+});
 
 function collectFrames(page: Page): { sent: string[]; received: string[] } {
   const sent: string[] = [];
@@ -188,12 +194,31 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   let roomSocket: WebSocketRoute | null = null;
   let latestUpstream: WebSocketRoute | null = null;
   let holdSnapshot = false;
+  let delayAdvanceReceipt = false;
   const heldSnapshots: (string | Buffer)[] = [];
   await page.routeWebSocket(/\/ws\/room\?/, (client) => {
     roomSocket = client;
     const upstream = client.connectToServer();
     latestUpstream = upstream;
     upstream.onMessage((message) => {
+      const envelope = JSON.parse(String(message));
+      const advanceId = delayAdvanceReceipt
+        ? framesOf(frames.sent, "command_request")
+            .map((raw) => JSON.parse(raw))
+            .filter((command) => command.kind === "advance_time")
+            .at(-1)?.command_id
+        : null;
+      if (
+        delayAdvanceReceipt &&
+        ((envelope.type === "state_changed" && envelope.payload?.clock) ||
+          (envelope.type === "action_status" &&
+            envelope.payload?.request_id === advanceId))
+      ) {
+        // Make command settlement observably slower than preparing the next
+        // form. A sent frame alone is not proof that its revision committed.
+        setTimeout(() => client.send(message), 500);
+        return;
+      }
       if (
         holdSnapshot &&
         JSON.parse(String(message)).type === "session_snapshot"
@@ -243,7 +268,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
       ),
     ).toBe(true);
     await page.screenshot({
-      path: `/tmp/trpg-flow-ui-solo-create-${width}.png`,
+      path: test.info().outputPath(`trpg-flow-ui-solo-create-${width}.png`),
       fullPage: true,
     });
   }
@@ -321,7 +346,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
       expect(geometry.hit).toBe(true);
     }
     await page.screenshot({
-      path: `/tmp/trpg-cloud-character-choice-${viewport.width}.png`,
+      path: test
+        .info()
+        .outputPath(`trpg-cloud-character-choice-${viewport.width}.png`),
     });
   }
   await page.locator(".character-card").first().click();
@@ -342,7 +369,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   expect(confirmBounds.height).toBeGreaterThanOrEqual(44);
   expect(confirmBounds.bottom).toBeLessThanOrEqual(360);
   expect(confirmBounds.hit).toBe(true);
-  await page.screenshot({ path: "/tmp/trpg-cloud-character-claimed-390.png" });
+  await page.screenshot({
+    path: test.info().outputPath("trpg-cloud-character-claimed-390.png"),
+  });
   await confirmCharacter.click();
 
   // 结构化入口出现即说明服务端给出了 structured_v1 能力协商。
@@ -408,7 +437,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
         () => document.documentElement.scrollWidth <= innerWidth + 1,
       ),
     ).toBe(true);
-    await page.screenshot({ path: `/tmp/trpg-room-sync-waiting-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-room-sync-waiting-${width}.png`),
+    });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   holdSnapshot = false;
@@ -466,7 +497,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page.screenshot({ path: `/tmp/trpg-request-received-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-request-received-${width}.png`),
+    });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -539,6 +572,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   await page.locator('[data-field="minutes"] input').fill("30");
   await page.locator('[data-field="activity"] select').selectOption("travel");
   await page.locator('[data-field="reason"] input').fill("驱车前往医学院");
+  delayAdvanceReceipt = true;
   await page.getByTestId("keeper-submit").click();
   await expect
     .poll(() => framesOf(frames.sent, "command_request").length, {
@@ -560,6 +594,21 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
     activity: "travel",
     reason: "驱车前往医学院",
   });
+  // Await settlement before preparing a command against the next revision.
+  // In particular, changing form kinds must not turn a sent frame into a commit.
+  await expect
+    .poll(() =>
+      framesOf(frames.received, "action_status").some((raw) => {
+        const { payload } = JSON.parse(raw);
+        return (
+          payload.request_id === commandFrame.command_id &&
+          payload.status === "completed"
+        );
+      }),
+    )
+    .toBe(true);
+  delayAdvanceReceipt = false;
+  await expect(page.getByTestId("keeper-submit")).toBeEnabled();
 
   // ---- 零模型调用：页面上没有模型/连通性错误 ----
   await expect(
@@ -648,7 +697,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
     expect(layout.nowrap).toBe("nowrap");
     expect(layout.hit).toBe(true);
     expect(layout.overflow).toBe(false);
-    await page.screenshot({ path: `/tmp/trpg-history-control-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-history-control-${width}.png`),
+    });
   }
   const commandCount = framesOf(frames.sent, "command_request").length;
   const diceCount = framesOf(frames.received, "roll_resolved").length;
@@ -799,7 +850,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
       ),
     ).toBe(true);
     await page.screenshot({
-      path: `../docs/design/platform-ui/solo-save-restore-${width}.png`,
+      path: test.info().outputPath(`solo-save-restore-${width}.png`),
     });
   }
   await page.setViewportSize({ width: 390, height: 360 });
@@ -812,7 +863,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   expect(short!.y).toBeGreaterThanOrEqual(0);
   expect(short!.y + short!.height).toBeLessThanOrEqual(360);
   await page.screenshot({
-    path: "../docs/design/platform-ui/solo-save-restore-390-short.png",
+    path: test.info().outputPath("solo-save-restore-390-short.png"),
   });
   await confirmation.getByRole("button", { name: "取消", exact: true }).click();
   expect(framesOf(frames.sent, "solo_save_load")).toHaveLength(0);
@@ -977,7 +1028,7 @@ async function checkArchiveLayout(page: Page, surface: string) {
     }
     await page.waitForTimeout(1000); // screenshot the settled UI, not its exit/entry transition
     await page.screenshot({
-      path: `/tmp/trpg-archive-${surface}-${width}.png`,
+      path: test.info().outputPath(`trpg-archive-${surface}-${width}.png`),
     });
   }
 }
@@ -1018,7 +1069,9 @@ async function checkAccountLayout(page: Page) {
       ),
     ).toBe(true);
     await page.waitForTimeout(1000);
-    await page.screenshot({ path: `/tmp/trpg-account-layout-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-account-layout-${width}.png`),
+    });
   }
 }
 
@@ -1110,7 +1163,9 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page.screenshot({ path: `/tmp/trpg-account-expired-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-account-expired-${width}.png`),
+    });
   }
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码", { exact: true }).fill(password);
@@ -1176,7 +1231,9 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
       expect(box.right).toBeLessThanOrEqual(width);
       expect(box.hit).toBe(true);
     }
-    await page.screenshot({ path: `/tmp/trpg-timeline-edit-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-timeline-edit-${width}.png`),
+    });
     await input.press("Escape");
     await expect(input).toHaveCount(0);
     await expect(timeline).toBeVisible();
@@ -1196,7 +1253,9 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
-    await page.screenshot({ path: `/tmp/trpg-timeline-list-${width}.png` });
+    await page.screenshot({
+      path: test.info().outputPath(`trpg-timeline-list-${width}.png`),
+    });
     await timeline.locator(".solo-timeline-body").evaluate((node) => {
       node.scrollTop = 0;
     });
