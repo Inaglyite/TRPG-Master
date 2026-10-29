@@ -201,6 +201,35 @@ class TestLocalScope:
 
 
 class TestConnectionGates:
+    def test_optional_model_list_does_not_block_valid_generation(self, tmp_path, monkeypatch):
+        import src.app.settings_service as service
+
+        class NoModelList(Exception):
+            status_code = 404
+
+        class ProbeClient:
+            closed = False
+
+            def __init__(self):
+                self.models = self
+
+            def list(self, **_kwargs):
+                raise NoModelList("must not expose raw upstream body")
+
+            def close(self):
+                self.closed = True
+
+        fake = ProbeClient()
+        monkeypatch.setattr(service, "_probe_client", lambda *_args, **_kwargs: fake)
+        monkeypatch.setattr(service, "_probe_chat", lambda *_args: None)
+        scope = SettingsScope(mode="local", can_edit=True, local_path=tmp_path / "models.json")
+        result = run_test_connection(scope, {"role": "narrative", "confirm_data_sharing": True,
+            "service": {**CUSTOM_FORM["service"], "base_url": "http://127.0.0.1:9876/v1", "api_format": "responses"}})
+        assert result["ok"] is True and result["checks"][0]["optional"] is True
+        assert result["checks"][0]["ok"] is False and fake.closed
+        assert "raw upstream" not in str(result)
+        assert not scope.local_path.exists()  # testing never saves a new form
+
     def test_requires_edit_permission(self, db):
         member = room_scope(db, "member-1", "player")
         with pytest.raises(PermissionError):

@@ -66,6 +66,7 @@ export type TurnDiagnostics = {
 export type ServiceView = {
   label: string;
   provider_kind: string;
+  api_format?: string;
   /** 仅配置所有者可见完整 URL；成员为 null。 */
   base_url: string | null;
   base_url_host: string;
@@ -83,6 +84,7 @@ export type RoleView = {
 };
 
 export type ModelSettingsView = {
+  provider_presets?: ProviderPreset[];
   mode: "local" | "solo" | "room";
   can_edit: boolean;
   /** 云端为 true：default 绑定 = 未配置，平台不兜底，开局前必须配齐。 */
@@ -109,6 +111,7 @@ export type ModelSettingsView = {
 export type ServiceDraft = {
   label: string;
   provider_kind: string;
+  api_format?: string;
   base_url: string;
   api_key: string;
   model_id: string;
@@ -118,7 +121,20 @@ export type ServiceDraft = {
 
 export type RoleDraft = { mode: "default" | "custom"; service: ServiceDraft };
 
-export type TestCheck = { name: string; ok: boolean; detail: string };
+export type ProviderPreset = {
+  id: string;
+  label: string;
+  base_url: string;
+  model_id: string;
+  hint: string;
+};
+
+export type TestCheck = {
+  name: string;
+  ok: boolean;
+  detail: string;
+  optional?: boolean;
+};
 export type TestResult = {
   role: string;
   ok: boolean;
@@ -126,6 +142,7 @@ export type TestResult = {
   checks: TestCheck[];
   capabilities: { streaming?: boolean; tool_calling?: boolean } | null;
   elapsed_ms: number;
+  model_options?: string[];
 };
 
 /** 主界面上下文摘要（turn_performance 附带，纯数字）。 */
@@ -148,6 +165,7 @@ export function emptyServiceDraft(): ServiceDraft {
   return {
     label: "",
     provider_kind: "deepseek",
+    api_format: "chat_completions",
     base_url: "",
     api_key: "",
     model_id: "",
@@ -165,6 +183,7 @@ export function draftFromView(role: RoleView | undefined): RoleDraft {
     service: {
       label: role.service.label || "",
       provider_kind: role.service.provider_kind || "deepseek",
+      api_format: role.service.api_format || "chat_completions",
       base_url: role.service.base_url || "",
       api_key: "",
       model_id: role.model_id || "",

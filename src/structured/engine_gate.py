@@ -12,6 +12,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from src.ai.model.provider_transport import default_api_format, model_http_client
 from src.storage.database import World, session_scope
 
 from .gateway import world_modes
@@ -40,4 +41,6 @@ def build_engine_client(context: Any, *, api_key: str, base_url: str, timeout: f
         from src.ai.model.route_service import _BlockedClient
 
         return _BlockedClient("尚未配置模型凭据；请选择人类主持，或在模型设置中配置 API Key。")
-    return OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    return OpenAI(api_key=api_key, base_url=base_url, timeout=timeout,
+                  http_client=model_http_client(timeout=timeout,
+                      api_format=default_api_format(base_url, "openai_compatible")))

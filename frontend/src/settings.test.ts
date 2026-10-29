@@ -8,6 +8,7 @@ vi.mock("./state/app-store", async (importOriginal) => {
 
 import { safeSend } from "./ws";
 import {
+  chooseProviderPreset,
   fetchSettings,
   closeSettings,
   onModelSettings,
@@ -74,6 +75,72 @@ const view: ModelSettingsView = {
 };
 
 describe("settings commands", () => {
+  it("厂商预设填入地址与接口格式，清空旧 Key 和规格并重新确认目的地", () => {
+    const presetView = {
+      ...view,
+      provider_presets: [
+        {
+          id: "anthropic",
+          label: "Anthropic Messages",
+          base_url: "https://api.anthropic.com",
+          model_id: "",
+          hint: "原生协议",
+        },
+      ],
+    };
+    useModelStore.setState({
+      view: presetView,
+      confirmSharing: true,
+      drafts: {
+        narrative: {
+          mode: "custom",
+          service: {
+            ...draftFromView(view.narrative).service,
+            api_key: "old-private-key",
+          },
+        },
+        judgement: draftFromView(view.judgement),
+      },
+    });
+    chooseProviderPreset("narrative", "anthropic");
+    const state = useModelStore.getState();
+    expect(state.drafts.narrative.service.base_url).toBe(
+      "https://api.anthropic.com",
+    );
+    expect(state.drafts.narrative.service.api_format).toBe(
+      "anthropic_messages",
+    );
+    expect(state.drafts.narrative.service.api_key).toBe("");
+    expect(state.drafts.narrative.service.window_tokens).toBe("");
+    expect(state.confirmSharing).toBe(false);
+    expect(safeSendMock).not.toHaveBeenCalled();
+  });
+
+  it("自定义接口格式随保存和测试提交", () => {
+    updateServiceDraft("narrative", { api_format: "responses" });
+    useModelStore.setState({ confirmSharing: true });
+    saveSettings();
+    expect(
+      JSON.parse(safeSendMock.mock.calls.at(-1)![0]).narrative.service
+        .api_format,
+    ).toBe("responses");
+  });
+
+  it("模型探针在后端三项检查完成前不会按保存操作的十五秒超时", () => {
+    vi.useFakeTimers();
+    try {
+      useModelStore.setState({ confirmSharing: true });
+      testConnection("narrative");
+      vi.advanceTimersByTime(15001);
+      expect(useModelStore.getState().testingRole).toBe("narrative");
+      vi.advanceTimersByTime(75000);
+      expect(useModelStore.getState().testingRole).toBeNull();
+    } finally {
+      resetSettings();
+      vi.useRealTimers();
+    }
+  });
+
   it("上下文读取无回执时有界恢复刷新，并保留已有诊断", () => {
     vi.useFakeTimers();
     try {

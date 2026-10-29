@@ -38,6 +38,28 @@ def custom_binding(**overrides) -> dict:
 
 
 class TestParse:
+    @pytest.mark.parametrize("kind", ["moonshot", "qwen", "zhipu", "doubao", "gemini", "openai", "openrouter", "siliconflow", "anthropic"])
+    def test_provider_presets_are_valid_bindings(self, kind):
+        binding = parse_role_binding(custom_binding(provider_kind=kind), role_label="叙述模型", allow_private=True)
+        assert binding.service.provider_kind == kind
+
+    @pytest.mark.parametrize("api_format", ["chat_completions", "anthropic_messages", "responses"])
+    def test_api_format_survives_save_and_restore(self, tmp_path, api_format):
+        binding = parse_role_binding(custom_binding(api_format=api_format), role_label="叙述模型", allow_private=True)
+        settings = EffectiveSettings(narrative=binding, judgement=RoleBinding("default", None), revision=2)
+        path = tmp_path / "models.json"
+        save_local_settings(path, settings)
+        assert load_local_settings(path).narrative.service.api_format == api_format
+
+    def test_unknown_api_format_rejected(self):
+        with pytest.raises(ValueError, match="接口格式"):
+            parse_role_binding(custom_binding(api_format="run_shell"), role_label="叙述模型", allow_private=True)
+
+    def test_format_change_needs_explicit_key(self):
+        existing = parse_role_binding(custom_binding(), role_label="叙述模型", allow_private=True).service
+        with pytest.raises(ValueError, match="接口格式已变更"):
+            parse_role_binding(custom_binding(api_key="", api_format="responses"), role_label="叙述模型", allow_private=True, existing=existing)
+
     def test_default_mode(self):
         binding = parse_role_binding({"mode": "default"}, role_label="叙述模型", allow_private=True)
         assert binding.mode == "default" and binding.service is None

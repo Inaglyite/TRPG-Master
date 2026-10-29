@@ -25,7 +25,11 @@ let server: ChildProcess | null = null;
 let serverOutput = "";
 let modelServer: Server | null = null;
 let stubUrl = "";
-const modelRequests: Array<{ model?: string; tools?: boolean }> = [];
+const modelRequests: Array<{
+  model?: string;
+  tools?: boolean;
+  format?: string;
+}> = [];
 
 function narrativeChunk(content: string, model: string) {
   return {
@@ -47,7 +51,12 @@ async function startModelStub(): Promise<string> {
       response.end(JSON.stringify({ data: [{ id: "e2e-model" }] }));
       return;
     }
-    if (incoming.method !== "POST" || !url.endsWith("/chat/completions")) {
+    if (
+      incoming.method !== "POST" ||
+      !["/chat/completions", "/messages", "/responses"].some((path) =>
+        url.endsWith(path),
+      )
+    ) {
       response.writeHead(404).end();
       return;
     }
@@ -60,7 +69,143 @@ async function startModelStub(): Promise<string> {
       modelRequests.push({
         model: parsed.model,
         tools: Array.isArray(parsed.tools) && parsed.tools.length > 0,
+        format: url.endsWith("/messages")
+          ? "anthropic_messages"
+          : url.endsWith("/responses")
+            ? "responses"
+            : "chat_completions",
       });
+      if (!url.endsWith("/chat/completions")) {
+        const content = JSON.stringify(parsed).includes("请只回复一个字")
+          ? "好"
+          : modelDialogueContent(
+              JSON.stringify({ response_format: { type: "json_object" } }),
+              "雨幕笼罩着阿卡姆，你在约定的办公室里见到了等待已久的委托人。\n\n**你可以——**\n1. 请他说明委托\n2. 观察办公室\n3. 检查档案封面\n4. [自由行动] 你决定做什么？",
+            );
+        const tool = parsed.tools?.some(
+          (item: { name?: string }) => item.name === "probe_noop",
+        );
+        const anthropic = url.endsWith("/messages");
+        if (!parsed.stream) {
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(
+            JSON.stringify(
+              anthropic
+                ? {
+                    id: "msg-probe",
+                    model: parsed.model,
+                    type: "message",
+                    role: "assistant",
+                    stop_reason: tool ? "tool_use" : "end_turn",
+                    content: tool
+                      ? [
+                          {
+                            type: "tool_use",
+                            id: "toolu-probe",
+                            name: "probe_noop",
+                            input: { echo: "ok" },
+                          },
+                        ]
+                      : [{ type: "text", text: content }],
+                    usage: { input_tokens: 10, output_tokens: 5 },
+                  }
+                : {
+                    id: "resp-probe",
+                    model: parsed.model,
+                    status: "completed",
+                    created_at: 1,
+                    output: tool
+                      ? [
+                          {
+                            type: "function_call",
+                            id: "fc-probe",
+                            call_id: "call-probe",
+                            name: "probe_noop",
+                            arguments: '{"echo":"ok"}',
+                          },
+                        ]
+                      : [
+                          {
+                            type: "message",
+                            role: "assistant",
+                            content: [{ type: "output_text", text: content }],
+                          },
+                        ],
+                    usage: {
+                      input_tokens: 10,
+                      output_tokens: 5,
+                      total_tokens: 15,
+                    },
+                  },
+            ),
+          );
+          return;
+        }
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "close",
+        });
+        const events = anthropic
+          ? [
+              {
+                type: "message_start",
+                message: {
+                  id: "msg-story",
+                  model: parsed.model,
+                  usage: { input_tokens: 10 },
+                },
+              },
+              {
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "text", text: "" },
+              },
+              {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "text_delta", text: content },
+              },
+              { type: "content_block_stop", index: 0 },
+              {
+                type: "message_delta",
+                delta: { stop_reason: "end_turn" },
+                usage: { output_tokens: 15 },
+              },
+              { type: "message_stop" },
+            ]
+          : [
+              {
+                type: "response.created",
+                response: { id: "resp-story", model: parsed.model },
+              },
+              { type: "response.output_text.delta", delta: content },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp-story",
+                  model: parsed.model,
+                  status: "completed",
+                  output: [
+                    {
+                      type: "message",
+                      role: "assistant",
+                      content: [{ type: "output_text", text: content }],
+                    },
+                  ],
+                  usage: {
+                    input_tokens: 10,
+                    output_tokens: 15,
+                    total_tokens: 25,
+                  },
+                },
+              },
+            ];
+        for (const event of events)
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end();
+        return;
+      }
       // 能力探针：非流式 tool_call 应答
       if (parsed.stream === false) {
         const isToolProbe =
@@ -262,7 +407,9 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
   await narrativeCard
     .getByPlaceholder("https://api.deepseek.com/v1")
     .fill(stubUrl);
-  await narrativeCard.getByPlaceholder("sk-…").fill("sk-e2e-local");
+  await narrativeCard
+    .getByLabel("API Key", { exact: false })
+    .fill("sk-e2e-local");
   await narrativeCard.getByPlaceholder("deepseek-flash").fill("e2e-model");
   await narrativeCard.getByLabel("上下文窗口（高级，可选）").fill("65536");
 
@@ -272,7 +419,7 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
   // 测试连接（连通性 + 生成探针打到桩上）
   await narrativeCard.getByRole("button", { name: "测试连接" }).click();
   await expect(dialog.getByText(/✓ 测试通过/)).toBeVisible({ timeout: 30_000 });
-  await expect(dialog.getByText(/连通|connectivity/i).first()).toBeVisible();
+  await expect(dialog.getByText("模型列表（可选）").first()).toBeVisible();
 
   // 保存：下回合生效
   await dialog.getByRole("button", { name: /保存配置/ }).click();
@@ -330,6 +477,61 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
     narrativeCard2.getByRole("button", { name: "跟随默认" }),
   ).toHaveAttribute("aria-pressed", "true");
 });
+
+for (const format of ["anthropic_messages", "responses"] as const) {
+  test(`${format}：原生接口生成、工具探针、保存后真实游戏回合`, async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
+    await page.locator("#btn-settings").click();
+    const dialog = page.getByRole("dialog", { name: "模型设置" });
+    for (const role of ["narrative", "judgement"] as const) {
+      // Keep the real per-scope anti-abuse cooldown, including the prior test.
+      await page.waitForTimeout(10050);
+      const card = dialog.locator(`[data-role="${role}"]`);
+      await card.getByRole("button", { name: "自定义服务" }).click();
+      await card.getByLabel("厂商预设").selectOption("openai_compatible");
+      await card.getByLabel("Base URL").fill(stubUrl);
+      await card.getByLabel("接口格式").selectOption(format);
+      await card.getByLabel("API Key", { exact: false }).fill("sk-e2e-native");
+      await card.getByLabel("模型 ID", { exact: true }).fill("e2e-model");
+      await dialog.getByRole("checkbox").check();
+      await card.getByRole("button", { name: "测试连接" }).click();
+      await expect(card.getByText("✓ 测试通过", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      if (role === "judgement")
+        await expect(card.getByText("工具调用", { exact: true })).toBeVisible();
+    }
+    await dialog
+      .locator('[data-role="judgement"]')
+      .getByRole("button", { name: "跟随默认" })
+      .click();
+    await dialog.getByRole("button", { name: /保存配置/ }).click();
+    await expect(dialog.getByText(/配置已保存/)).toBeVisible();
+    await page.keyboard.press("Escape");
+    const before = modelRequests.length;
+    await enterGame(page);
+    await expect
+      .poll(() =>
+        modelRequests
+          .slice(before)
+          .some((item) => item.format === format && item.model === "e2e-model"),
+      )
+      .toBe(true);
+    await page.locator("#btn-model-settings").click();
+    await expect(
+      dialog.locator('[data-role="narrative"]').getByLabel("接口格式"),
+    ).toHaveValue(format);
+    await dialog.getByRole("button", { name: "恢复默认" }).click();
+    await expect(
+      dialog
+        .locator('[data-role="narrative"]')
+        .getByRole("button", { name: "跟随默认" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+}
 
 const viewports = [
   { width: 1280, height: 800 },
@@ -417,7 +619,22 @@ test("档案夹模型设置：四种窗口、真实配置读取、键盘分页�
     expect(body.client).toBeGreaterThanOrEqual(100);
     expect(body.scroll).toBeGreaterThan(body.client);
     await page.screenshot({
-      path: `/tmp/trpg-model-settings-${viewport.width}.png`,
+      path: test.info().outputPath(`model-settings-${viewport.width}.png`),
+    });
+    const formatSelect = dialog
+      .locator('[data-role="narrative"]')
+      .getByLabel("接口格式");
+    await formatSelect.scrollIntoViewIfNeeded();
+    await formatSelect.selectOption("anthropic_messages");
+    await expect(formatSelect).toBeInViewport();
+    await expect(
+      dialog
+        .locator('[data-role="narrative"]')
+        .getByLabel("厂商预设")
+        .locator("option"),
+    ).toHaveCount(11);
+    await page.screenshot({
+      path: test.info().outputPath(`provider-controls-${viewport.width}.png`),
     });
     const save = dialog.locator("#model-settings-save");
     await save.focus();
@@ -442,7 +659,9 @@ test("档案夹模型设置：四种窗口、真实配置读取、键盘分页�
       );
     })
     .toBe(true);
-  await page.screenshot({ path: "/tmp/trpg-model-settings-short-field.png" });
+  await page.screenshot({
+    path: test.info().outputPath("model-settings-short-field.png"),
+  });
   const modelsTab = dialog.getByRole("tab", { name: "模型配置" });
   await modelsTab.focus();
   await page.keyboard.press("ArrowRight");
@@ -505,7 +724,7 @@ test("档案夹模组导入：真实打包检查与安装，四种窗口，检�
       ".module-import-actions button",
     );
     await page.screenshot({
-      path: `/tmp/trpg-module-import-${viewport.width}.png`,
+      path: test.info().outputPath(`module-import-${viewport.width}.png`),
     });
   }
   const confirm = dialog.getByRole("button", { name: "导入并切换" });

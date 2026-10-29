@@ -16,16 +16,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
 from openai import OpenAI
 
 from src.ai.model import route_service
 from src.ai.model.egress_guard import validate_outbound_url
-from src.ai.model.pinned_transport import pinned_http_client
 from src.ai.model.provider_adapter import (
     ERROR_AUTH,
     ERROR_BUSY,
     ERROR_CONTEXT_WINDOW,
+    ERROR_INVALID_REQUEST,
+    ERROR_NOT_FOUND,
     ERROR_QUOTA,
     ERROR_RATE_LIMIT,
     ERROR_SERVER,
@@ -33,6 +33,8 @@ from src.ai.model.provider_adapter import (
     ERROR_TRANSPORT,
     classify_provider_error,
 )
+from src.ai.model.provider_profiles import PROVIDER_PRESETS
+from src.ai.model.provider_transport import default_api_format, model_http_client
 from src.ai.model.route_service import EffectiveSettings, RoleBinding
 from src.app.config import (
     JUDGEMENT_MODEL,
@@ -60,7 +62,13 @@ _ERROR_TEXT = {
     ERROR_SERVER: "服务商错误（5xx）",
     ERROR_CONTEXT_WINDOW: "上下文窗口不足",
     ERROR_BUSY: "服务繁忙",
+    ERROR_INVALID_REQUEST: "请求参数不兼容（400/422）：请核对接口格式、模型 ID 和参数要求",
+    ERROR_NOT_FOUND: "模型或接口不可用（404）：请核对地址、接口格式、模型 ID 及 Key 的模型权限",
 }
+
+
+class ConnectionProbeError(ValueError):
+    """Only fixed application-owned messages may be exposed from probes."""
 
 
 @dataclass(frozen=True)
@@ -152,6 +160,7 @@ def _role_view(binding: RoleBinding, slot: str, *, reveal_url: bool) -> dict:
         "service": {
             "label": service.label,
             "provider_kind": service.provider_kind,
+            "api_format": service.api_format,
             # 成员只见目的地主机名；完整 URL 仅配置所有者可见（供编辑）。
             "base_url": service.base_url if reveal_url else None,
             "base_url_host": host,
@@ -172,6 +181,7 @@ def build_payload(
         "room": "当前房间（房主配置，成员只读）",
     }[scope.mode]
     payload = {
+        "provider_presets": [dict(preset) for preset in PROVIDER_PRESETS],
         "type": "model_settings",
         "mode": scope.mode,
         "can_edit": scope.can_edit,
@@ -343,41 +353,51 @@ def _check_cooldown(scope: SettingsScope) -> None:
 
 
 def _readable_error(exc: BaseException) -> str:
+    if isinstance(exc, ConnectionProbeError):
+        return str(exc)
     return _ERROR_TEXT.get(classify_provider_error(exc), "未知错误（未通过连接测试）")
 
 
-def _probe_client(base_url: str, api_key: str, addresses: tuple[str, ...] = ()) -> OpenAI:
-    """探针专用短超时、最多一次重试的直连 client（不进共享缓存）；有已校验地址即钉扎。"""
-    http_client = (
-        pinned_http_client(addresses, timeout=TEST_TIMEOUT_SECONDS)
-        if addresses
-        else httpx.Client(follow_redirects=False, timeout=TEST_TIMEOUT_SECONDS, trust_env=False)
-    )
+def _probe_client(base_url: str, api_key: str, addresses: tuple[str, ...] = (), *, provider_kind: str = "openai_compatible", api_format: str | None = None) -> OpenAI:
+    """探针专用短超时、不自动重试的直连 client；有已校验地址即钉扎。"""
+    http_client = model_http_client(timeout=TEST_TIMEOUT_SECONDS, addresses=addresses,
+                                    provider_kind=provider_kind,
+                                    api_format=api_format or default_api_format(base_url, provider_kind))
     return OpenAI(
         api_key=api_key or "sk-probe",
         base_url=base_url,
         timeout=TEST_TIMEOUT_SECONDS,
-        max_retries=1,
+        max_retries=0,
         http_client=http_client,
     )
 
 
 def _probe_chat(client, model: str) -> None:
-    client.chat.completions.create(
+    stream = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "请只回复一个字：好"}],
-        max_tokens=16,
+        max_tokens=1024,
         temperature=0,
-        stream=False,
+        stream=True,
         timeout=TEST_TIMEOUT_SECONDS,
     )
+    content, finish = "", None
+    try:
+        for chunk in stream:
+            for choice in chunk.choices or []:
+                content += getattr(choice.delta, "content", None) or ""
+                finish = choice.finish_reason or finish
+    finally:
+        stream.close()
+    if not content.strip() or finish != "stop":
+        raise ConnectionProbeError("生成探针未完整返回文字：请检查输出额度及流式支持")
 
 
 def _probe_tool_calling(client, model: str) -> None:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "调用 probe_noop 工具，echo 填 ok"}],
-        max_tokens=64,
+        max_tokens=1024,
         temperature=0,
         stream=False,
         timeout=TEST_TIMEOUT_SECONDS,
@@ -395,11 +415,24 @@ def _probe_tool_calling(client, model: str) -> None:
                 },
             }
         ],
-        tool_choice={"type": "function", "function": {"name": "probe_noop"}},
+        # Some always-thinking models accept tools but reject forced tool names.
+        # There is only one harmless tool; validate what the model actually calls.
+        tool_choice="auto",
     )
     message = response.choices[0].message if response.choices else None
+    if response.choices and response.choices[0].finish_reason not in {"stop", "tool_calls"}:
+        raise ConnectionProbeError("工具探针未完整结束，未确认工具调用能力")
     if not message or not getattr(message, "tool_calls", None):
-        raise ValueError("该服务未按要求返回工具调用（不支持 tool calling）")
+        raise ConnectionProbeError("该服务未按要求返回工具调用（不支持 tool calling）")
+    for call in message.tool_calls:
+        import json
+
+        try:
+            valid = call.function.name == "probe_noop" and json.loads(call.function.arguments) == {"echo": "ok"}
+        except (ValueError, TypeError):
+            valid = False
+        if not valid:
+            raise ConnectionProbeError("工具探针返回的名称或参数不符合要求")
 
 
 def run_test_connection(scope: SettingsScope, data: dict) -> dict:
@@ -424,7 +457,8 @@ def run_test_connection(scope: SettingsScope, data: dict) -> dict:
         )
         service = binding.service
         addresses = validate_outbound_url(service.base_url, allow_private=scope.is_local).addresses
-        client = _probe_client(service.base_url, service.api_key, addresses)
+        client = _probe_client(service.base_url, service.api_key, addresses,
+                               provider_kind=service.provider_kind, api_format=service.api_format)
         model = service.model_id
         target_host = route_service.host_of(service.base_url)
     else:
@@ -436,7 +470,8 @@ def run_test_connection(scope: SettingsScope, data: dict) -> dict:
             addresses = validate_outbound_url(
                 service.base_url, allow_private=scope.is_local
             ).addresses
-            client = _probe_client(service.base_url, service.api_key, addresses)
+            client = _probe_client(service.base_url, service.api_key, addresses,
+                                   provider_kind=service.provider_kind, api_format=service.api_format)
             model = service.model_id
             target_host = route_service.host_of(service.base_url)
         elif not scope.is_local:
@@ -463,9 +498,8 @@ def run_test_connection(scope: SettingsScope, data: dict) -> dict:
             target_host = "平台默认服务"
 
     # 校验全部通过后才占用冷却窗口：校验失败不消耗测试频率额度。
-    _check_cooldown(scope)
-
     checks: list[dict] = []
+    model_options: list[str] = []
 
     def run_check(name: str, probe) -> bool:
         try:
@@ -476,11 +510,31 @@ def run_test_connection(scope: SettingsScope, data: dict) -> dict:
             checks.append({"name": name, "ok": False, "detail": _readable_error(exc)})
             return False
 
-    run_check("connectivity", lambda: client.models.list(timeout=TEST_TIMEOUT_SECONDS))
-    generated = run_check("generation", lambda: _probe_chat(client, model))
-    tool_ok = None
-    if generated and role == "judgement":
-        tool_ok = run_check("tool_calling", lambda: _probe_tool_calling(client, model))
+    def list_models():
+        from src.ai.model.model_settings import validate_model_id
+
+        page = client.models.list(timeout=TEST_TIMEOUT_SECONDS)
+        for item in (getattr(page, "data", None) or [])[:200]:
+            try:
+                model_id = validate_model_id(getattr(item, "id", None), "模型 ID")
+            except ValueError:
+                continue
+            if model_id not in model_options:
+                model_options.append(model_id)
+
+    try:
+        _check_cooldown(scope)
+        run_check("connectivity", list_models)
+        checks[-1]["optional"] = True
+        generated = run_check("generation", lambda: _probe_chat(client, model))
+        tool_ok = None
+        if generated and role == "judgement":
+            tool_ok = run_check("tool_calling", lambda: _probe_tool_calling(client, model))
+    finally:
+        # Only temporary probe clients are closed; the shared default stays alive.
+        close = getattr(client, "close", None) if service is not None else None
+        if callable(close):
+            close()
 
     capabilities = {"streaming": True, "tool_calling": bool(tool_ok)} if generated else None
     if generated and capabilities is not None and service is not None:
@@ -489,9 +543,10 @@ def run_test_connection(scope: SettingsScope, data: dict) -> dict:
     return {
         "type": "model_settings_test_result",
         "role": role,
-        "ok": all(check["ok"] for check in checks),
+        "ok": all(check["ok"] for check in checks if not check.get("optional")),
         "target_host": target_host,
         "checks": checks,
+        "model_options": model_options,
         "capabilities": capabilities,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
     }

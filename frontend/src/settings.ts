@@ -29,7 +29,7 @@ function clearOperationTimer() {
   operationTimer = null;
 }
 
-function armOperationTimer() {
+function armOperationTimer(timeoutMs = 15000) {
   clearOperationTimer();
   unconfirmedOperation = false;
   operationTimer = setTimeout(() => {
@@ -45,7 +45,7 @@ function armOperationTimer() {
           "操作超时，尚未确认结果。草稿已保留；请重新读取配置确认是否保存成功。",
       });
     }
-  }, 15000);
+  }, timeoutMs);
 }
 
 useAppStore.subscribe((state, previous) => {
@@ -179,6 +179,33 @@ export function updateServiceDraft(
       },
     },
     testResult: null,
+    ...(patch.base_url !== undefined || patch.api_format !== undefined
+      ? { confirmSharing: false }
+      : {}),
+  });
+}
+
+export function chooseProviderPreset(
+  role: "narrative" | "judgement",
+  id: string,
+) {
+  const preset = useModelStore
+    .getState()
+    .view?.provider_presets?.find((item) => item.id === id);
+  if (!preset) {
+    updateServiceDraft(role, { provider_kind: id });
+    return;
+  }
+  updateServiceDraft(role, {
+    provider_kind: preset.id,
+    api_format:
+      preset.id === "anthropic" ? "anthropic_messages" : "chat_completions",
+    base_url: preset.base_url,
+    model_id: preset.model_id,
+    label: preset.id === "openai_compatible" ? "" : preset.label,
+    api_key: "",
+    window_tokens: "",
+    max_output_tokens: "",
   });
 }
 
@@ -194,6 +221,7 @@ function rolePayload(draft: RoleDraft): Record<string, unknown> {
   const service: Record<string, unknown> = {
     label: draft.service.label.trim(),
     provider_kind: draft.service.provider_kind,
+    api_format: draft.service.api_format || "chat_completions",
     base_url: draft.service.base_url.trim(),
     model_id: draft.service.model_id.trim(),
   };
@@ -321,7 +349,7 @@ export function testConnection(role: "narrative" | "judgement") {
     status: "正在测试连接（固定探针，可能消耗少量额度）…",
     statusKind: "working",
   });
-  armOperationTimer();
+  armOperationTimer(90000);
   safeSend(JSON.stringify(payload));
 }
 

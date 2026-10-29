@@ -8,6 +8,7 @@ import {
 } from "../../narration-speed";
 import {
   closeSettings,
+  chooseProviderPreset,
   fetchSettings,
   openSettings,
   requestTurnDiagnostics,
@@ -67,6 +68,15 @@ const WINDOW_SOURCE_LABELS: Record<string, string> = {
 const PROVIDER_LABELS: Record<string, string> = {
   deepseek: "DeepSeek",
   openai_compatible: "OpenAI 兼容",
+  moonshot: "Kimi",
+  qwen: "通义千问",
+  zhipu: "智谱",
+  doubao: "豆包",
+  gemini: "Gemini",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  siliconflow: "硅基流动",
+  anthropic: "Anthropic Messages",
 };
 
 export function ModelSettingsTrigger() {
@@ -164,6 +174,15 @@ function RoleCard({
   const testingRole = useModelStore((state) => state.testingRole);
   const testing = testingRole === role;
   const service = draft.service;
+  const presets = useModelStore((state) => state.view?.provider_presets);
+  const preset = presets?.find((item) => item.id === service.provider_kind);
+  const canKeepKey =
+    view?.service?.has_key &&
+    view.service.base_url?.replace(/\/+$/, "") ===
+      service.base_url.trim().replace(/\/+$/, "") &&
+    view.service.provider_kind === service.provider_kind &&
+    (view.service.api_format || "chat_completions") ===
+      (service.api_format || "chat_completions");
   return (
     <section className="model-role-card" data-role={role}>
       <header className="model-role-card-header">
@@ -217,18 +236,47 @@ function RoleCard({
             />
           </label>
           <label className="model-role-field">
-            <span>服务类型</span>
+            <span>厂商预设</span>
             <select
               value={service.provider_kind}
               disabled={disabled}
               onChange={(event) =>
-                updateServiceDraft(role, { provider_kind: event.target.value })
+                chooseProviderPreset(role, event.target.value)
               }
             >
-              <option value="deepseek">DeepSeek 官方 / 兼容</option>
-              <option value="openai_compatible">OpenAI 兼容服务</option>
+              {presets ? (
+                presets.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="deepseek">DeepSeek 官方 / 兼容</option>
+                  <option value="openai_compatible">OpenAI 兼容服务</option>
+                </>
+              )}
             </select>
           </label>
+          <label className="model-role-field">
+            <span>接口格式</span>
+            <select
+              value={service.api_format || "chat_completions"}
+              disabled={disabled}
+              onChange={(event) =>
+                updateServiceDraft(role, { api_format: event.target.value })
+              }
+            >
+              <option value="chat_completions">
+                Chat Completions（/chat/completions）
+              </option>
+              <option value="anthropic_messages">
+                Anthropic Messages（/v1/messages）
+              </option>
+              <option value="responses">Responses（/responses）</option>
+            </select>
+          </label>
+          {preset && <p className="model-service-hint">{preset.hint}</p>}
           <label className="model-role-field">
             <span>Base URL</span>
             <input
@@ -244,13 +292,15 @@ function RoleCard({
           <label className="model-role-field">
             <span>
               API Key
-              {view?.service?.has_key ? "（已配置，留空保持不变）" : ""}
+              {canKeepKey ? "（已配置，留空保持不变）" : ""}
             </span>
             <input
               type="password"
               value={service.api_key}
               disabled={disabled}
-              placeholder={view?.service?.has_key ? "已配置，不回显" : "sk-…"}
+              placeholder={
+                canKeepKey ? "已配置，不回显" : "填写此服务的 API Key"
+              }
               autoComplete="off"
               spellCheck={false}
               onChange={(event) =>
@@ -262,6 +312,7 @@ function RoleCard({
             <span>模型 ID</span>
             <input
               value={service.model_id}
+              list={`model-options-${role}`}
               disabled={disabled}
               placeholder="deepseek-flash"
               spellCheck={false}
@@ -269,6 +320,12 @@ function RoleCard({
                 updateServiceDraft(role, { model_id: event.target.value })
               }
             />
+            <datalist id={`model-options-${role}`}>
+              {testResult?.role === role &&
+                testResult.model_options?.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+            </datalist>
           </label>
           <div className="model-role-field-pair">
             <label className="model-role-field">
@@ -332,8 +389,14 @@ function RoleCard({
                   className="model-test-check"
                   data-ok={check.ok}
                 >
-                  <span>{check.ok ? "✓" : "✕"}</span>
-                  <span>{check.name}</span>
+                  <span>{check.ok ? "✓" : check.optional ? "·" : "✕"}</span>
+                  <span>
+                    {{
+                      connectivity: "模型列表（可选）",
+                      generation: "流式生成",
+                      tool_calling: "工具调用",
+                    }[check.name] || check.name}
+                  </span>
                   <span>{check.detail}</span>
                 </div>
               ))}

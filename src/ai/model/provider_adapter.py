@@ -28,6 +28,8 @@ ERROR_TIMEOUT = "timeout"
 ERROR_ABORT = "abort"
 ERROR_BUSY = "busy"  # 本地并发排队，非 provider 错误
 ERROR_UNKNOWN = "unknown"
+ERROR_INVALID_REQUEST = "invalid_request"
+ERROR_NOT_FOUND = "not_found"
 
 _PASSBACK_KEY = "_reasoning_passback"
 _PASSBACK_MAX = 32
@@ -65,6 +67,10 @@ def classify_provider_error(exc: BaseException) -> str:
         return ERROR_QUOTA
     if "rate limit" in message or "rate_limit" in message:
         return ERROR_RATE_LIMIT
+    if status in (400, 422):
+        return ERROR_INVALID_REQUEST
+    if status == 404:
+        return ERROR_NOT_FOUND
     return ERROR_UNKNOWN
 
 

@@ -22,7 +22,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
 from openai import OpenAI
 
 from ...app.config import (
@@ -36,9 +35,9 @@ from ...app.config import (
 )
 from .egress_guard import validate_outbound_url
 from .model_settings import validate_model_id
-from .pinned_transport import pinned_http_client
+from .provider_profiles import PROVIDER_KINDS
+from .provider_transport import API_FORMATS, default_api_format, model_http_client
 
-PROVIDER_KINDS = frozenset({"deepseek", "openai_compatible"})
 WINDOW_MIN, WINDOW_MAX = 8192, 1_048_576
 MAX_OUTPUT_MIN, MAX_OUTPUT_MAX = 64, 131_072
 
@@ -77,11 +76,12 @@ class ServiceSpec:
     # 是否允许本机/私网目标：由保存时的作用域强制（本地 True / 云端 False），
     # 不接受用户载荷里的同名字段。
     allow_private: bool = False
+    api_format: str = "chat_completions"
 
     @property
     def binding_id(self) -> str:
         digest = hashlib.sha256(
-            f"{self.base_url}\n{self.model_id}\n{self.api_key}".encode()
+            f"{self.base_url}\n{self.model_id}\n{self.api_key}\n{self.api_format}".encode()
         ).hexdigest()
         return f"svc_{digest[:12]}"
 
@@ -162,6 +162,9 @@ def parse_service_spec(raw: object, *, role_label: str, allow_private: bool) -> 
     if provider_kind not in PROVIDER_KINDS:
         raise ValueError(f"{role_label} 的服务类型必须是 {' / '.join(sorted(PROVIDER_KINDS))}")
     endpoint = validate_outbound_url(raw.get("base_url"), allow_private=allow_private)
+    api_format = str(raw.get("api_format") or default_api_format(endpoint.base_url, provider_kind))
+    if api_format not in API_FORMATS:
+        raise ValueError("接口格式必须是 Chat Completions / Anthropic Messages / Responses")
     api_key = str(raw.get("api_key") or "").strip()
     if not api_key:
         raise ValueError(f"{role_label} 需要填写 API Key（留空表示沿用已保存的 Key）")
@@ -185,6 +188,7 @@ def parse_service_spec(raw: object, *, role_label: str, allow_private: bool) -> 
         max_output_tokens=_parse_max_output(raw.get("max_output_tokens")),
         capabilities=capabilities,
         allow_private=allow_private,
+        api_format=api_format,
     )
 
 
@@ -223,6 +227,8 @@ def parse_role_binding(
             raise ValueError(
                 f"{role_label} 的服务类型已变更，凭据不会沿用，请重新填写 API Key"
             )
+        if candidate.api_format != existing.api_format:
+            raise ValueError(f"{role_label} 的接口格式已变更，请重新填写 API Key")
         return RoleBinding(mode="custom", service=candidate)
     return RoleBinding(
         mode="custom",
@@ -246,6 +252,8 @@ def _server_default_client() -> OpenAI:
                     api_key=API_KEY or "sk-unconfigured",
                     base_url=BASE_URL,
                     timeout=model_timeout_seconds(),
+                    http_client=model_http_client(timeout=model_timeout_seconds(),
+                        api_format=default_api_format(BASE_URL, "openai_compatible")),
                 )
     return _default_client
 
@@ -255,9 +263,9 @@ _clients_lock = threading.Lock()
 _CLIENT_CACHE_MAX = 16
 
 
-def _custom_client(base_url: str, api_key: str, addresses: tuple[str, ...] = ()) -> OpenAI:
+def _custom_client(base_url: str, api_key: str, addresses: tuple[str, ...] = (), *, provider_kind: str = "openai_compatible", api_format: str = "chat_completions") -> OpenAI:
     # 缓存键含已校验地址集合：DNS 结果变化时自动淘汰旧 client（钉扎随动）。
-    key = hashlib.sha256(f"{base_url}\n{api_key}\n{','.join(addresses)}".encode()).hexdigest()
+    key = hashlib.sha256(f"{base_url}\n{api_key}\n{','.join(addresses)}\n{provider_kind}\n{api_format}".encode()).hexdigest()
     with _clients_lock:
         cached = _clients.get(key)
         if cached is not None:
@@ -267,11 +275,7 @@ def _custom_client(base_url: str, api_key: str, addresses: tuple[str, ...] = ())
     # 用户显式配置的端点直连，不读系统代理（无校验网络代理不在本轮范围）；
     # 凭据绝不随重定向转发到其他域名（SSRF 防线的一部分）。有已校验地址时
     # 拨号钉扎到这些地址，消除校验与连接之间的 DNS 重绑定窗口。
-    http_client = (
-        pinned_http_client(addresses, timeout=timeout)
-        if addresses
-        else httpx.Client(follow_redirects=False, timeout=timeout, trust_env=False)
-    )
+    http_client = model_http_client(timeout=timeout, addresses=addresses, provider_kind=provider_kind, api_format=api_format)
     client = OpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -303,7 +307,8 @@ def _resolve_role(binding: RoleBinding, *, slot: str, revision: int) -> Resolved
     # allow_private 是保存时由作用域烧入的（本地 True / 云端 False）。
     endpoint = validate_outbound_url(service.base_url, allow_private=service.allow_private)
     return ResolvedRole(
-        client=_custom_client(service.base_url, service.api_key, endpoint.addresses),
+        client=_custom_client(service.base_url, service.api_key, endpoint.addresses,
+                              provider_kind=service.provider_kind, api_format=service.api_format),
         model_id=service.model_id,
         window_tokens=service.window_tokens,
         window_source="manual" if service.window_tokens else "unknown",
@@ -501,6 +506,7 @@ def settings_to_json(settings: EffectiveSettings, *, include_secrets: bool) -> d
             "service": {
                 "label": service.label,
                 "provider_kind": service.provider_kind,
+                "api_format": service.api_format,
                 "base_url": service.base_url,
                 "model_id": service.model_id,
                 "window_tokens": service.window_tokens,

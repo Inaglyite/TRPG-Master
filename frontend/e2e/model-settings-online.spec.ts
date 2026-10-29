@@ -294,7 +294,7 @@ async function configureByokToStub(dialog: ReturnType<Page["getByRole"]>) {
     await card
       .getByPlaceholder("https://api.deepseek.com/v1")
       .fill(modelBaseUrl);
-    await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
+    await card.getByLabel("API Key", { exact: false }).fill("sk-e2e-byok");
     await card.getByPlaceholder("deepseek-flash").fill("e2e-model");
   }
   await dialog.getByRole("checkbox").check();
@@ -346,7 +346,9 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   await narrativeCard
     .getByPlaceholder("https://api.deepseek.com/v1")
     .fill("https://10.9.9.9/v1");
-  await narrativeCard.getByPlaceholder("sk-…").fill("sk-private");
+  await narrativeCard
+    .getByLabel("API Key", { exact: false })
+    .fill("sk-private");
   await narrativeCard.getByPlaceholder("deepseek-flash").fill("e2e-model");
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();
@@ -392,9 +394,9 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   await expect(
     narrativeCard2.getByPlaceholder("https://api.deepseek.com/v1"),
   ).toHaveValue(modelBaseUrl);
-  await expect(narrativeCard2.getByPlaceholder("已配置，不回显")).toHaveValue(
-    "",
-  );
+  await expect(
+    narrativeCard2.getByLabel("API Key", { exact: false }),
+  ).toHaveValue("");
 
   // 清除配置 = 回到未配置（云端没有平台默认可回退）
   await dialog2.getByRole("button", { name: "清除配置" }).click();

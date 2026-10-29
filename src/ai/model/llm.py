@@ -59,8 +59,12 @@ def _get_glm() -> OpenAI | None:
     if _glm_client is not None:
         return _glm_client
     if GLM_API_KEY:
+        from src.ai.model.provider_transport import default_api_format, model_http_client
+
         _glm_client = OpenAI(
-            api_key=GLM_API_KEY, base_url=GLM_BASE_URL, timeout=model_timeout_seconds()
+            api_key=GLM_API_KEY, base_url=GLM_BASE_URL, timeout=model_timeout_seconds(),
+            http_client=model_http_client(timeout=model_timeout_seconds(),
+                api_format=default_api_format(GLM_BASE_URL, "openai_compatible")),
         )
         return _glm_client
     return None
