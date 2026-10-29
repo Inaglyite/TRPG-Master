@@ -13,6 +13,7 @@
     TRPG_PRO_MODEL     Pro 模型名（默认 deepseek-v4-pro）
 """
 
+import getpass
 import json
 import os
 import subprocess
@@ -52,6 +53,7 @@ def load_config():
 
 def save_config(cfg):
     CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    CONFIG_FILE.chmod(0o600)
     print(f"配置已保存到 {CONFIG_FILE}")
 
 
@@ -74,8 +76,8 @@ def interactive_config():
     print("\n配置 API 连接（回车保留当前值）:\n")
 
     current_key = cfg.get("api_key", "")
-    display_key = (current_key[:20] + "...") if len(current_key) > 20 else "未设置"
-    api_key = input(f"API Key [{display_key}]: ").strip()
+    display_key = "已配置" if current_key else "未设置"
+    api_key = getpass.getpass(f"API Key [{display_key}，输入不回显]: ").strip()
     if api_key:
         cfg["api_key"] = api_key
 
@@ -91,8 +93,9 @@ def interactive_config():
     if pro_model:
         cfg["pro_model"] = pro_model
 
-    print("\n--- GLM-4 Flash（免费快速模型，检定摘要用）---")
-    glm_key = input(f"GLM API Key [{cfg.get('glm_api_key', '未设置')[:20]}...]: ").strip()
+    print("\n--- 可选的快速摘要服务 ---")
+    glm_status = "已配置" if cfg.get("glm_api_key") else "未设置"
+    glm_key = getpass.getpass(f"GLM API Key [{glm_status}，输入不回显]: ").strip()
     if glm_key:
         cfg["glm_api_key"] = glm_key
     glm_model = input(f"GLM 模型 [{cfg.get('glm_model', 'glm-4-flash-250414')}]: ").strip()
@@ -110,6 +113,14 @@ def run_game():
     env.setdefault("OPENAI_BASE_URL", cfg.get("base_url", "https://api.deepseek.com"))
     env.setdefault("TRPG_FLASH_MODEL", cfg.get("flash_model", "deepseek-flash"))
     env.setdefault("TRPG_PRO_MODEL", cfg.get("pro_model", "deepseek-v4-pro"))
+    for config_key, env_key in {
+        "narrative_model": "TRPG_NARRATIVE_MODEL",
+        "judgement_model": "TRPG_JUDGEMENT_MODEL",
+        "glm_base_url": "GLM_BASE_URL",
+        "story_thinking_mode": "TRPG_STORY_THINKING",
+    }.items():
+        if cfg.get(config_key):
+            env.setdefault(env_key, str(cfg[config_key]))
     if cfg.get("glm_api_key"):
         env.setdefault("GLM_API_KEY", cfg["glm_api_key"])
     env.setdefault("GLM_MODEL", cfg.get("glm_model", "glm-4-flash-250414"))
@@ -118,21 +129,19 @@ def run_game():
     if cfg.get("max_output_tokens"):
         env.setdefault("TRPG_MAX_OUTPUT_TOKENS", str(cfg["max_output_tokens"]))
 
-    if not env["OPENAI_API_KEY"]:
-        print("\n错误: 未配置 API Key")
-        print("  方式 1: export OPENAI_API_KEY=your-key && python3 start.py")
-        print("  方式 2: python3 start.py --config")
-        sys.exit(1)
+    # Respect an activated .venv instead of silently switching to another venv.
+    active_venv = sys.prefix != sys.base_prefix
+    python_exe = PYTHON_EXE if active_venv else (str(VENV_PYTHON) if VENV_PYTHON.exists() else PYTHON_EXE)
 
-    python_exe = str(VENV_PYTHON) if VENV_PYTHON.exists() else PYTHON_EXE
-
-    print(f"Flash: {env['TRPG_FLASH_MODEL']}")
-    print(f"Pro:   {env['TRPG_PRO_MODEL']}")
-    print(f"API:   {env['OPENAI_BASE_URL']}")
+    print("本地模型设置优先；未自定义的角色使用 .env.json / 环境变量。")
     print()
+    sys.stdout.flush()
 
     os.chdir(PROJECT_ROOT)
-    subprocess.run([python_exe, str(PROJECT_ROOT / "game_loop.py")], env=env)
+    try:
+        return subprocess.run([python_exe, str(PROJECT_ROOT / "game_loop.py")], env=env).returncode
+    except KeyboardInterrupt:
+        return 130
 
 
 def main():
@@ -152,13 +161,13 @@ def main():
 
         print(f"未知参数: {arg}")
         print("用法: python3 start.py [--setup | --config]")
-        return
+        return 2
 
-    if not VENV_PYTHON.exists():
+    if not VENV_PYTHON.exists() and sys.prefix == sys.base_prefix:
         print("提示: 首次运行建议先 python3 start.py --setup\n")
 
-    run_game()
+    return run_game()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
