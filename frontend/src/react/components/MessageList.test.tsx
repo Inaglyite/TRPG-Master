@@ -141,6 +141,39 @@ describe("MessageList", () => {
     expect(screen.getByText("危险链接")).not.toHaveAttribute("href");
   });
 
+  it("renders narration headings and bold phrases inside attributed NPC dialogue", () => {
+    useMessageStore.getState().replaceMessages([
+      {
+        id: "formatted-turn",
+        kind: "gm",
+        text: "",
+        segments: [
+          {
+            kind: "narration",
+            text: "### 报馆里的约定\n\n你收好**撕破的信封**。",
+          },
+          {
+            kind: "speech",
+            npcId: "su",
+            speaker: { type: "npc", id: "su", name: "苏晚晴" },
+            text: "“请在**今晚九点**之前回来。”",
+          },
+        ],
+      },
+    ]);
+    render(<MessageList />);
+    expect(
+      screen.getByRole("heading", { level: 3, name: "报馆里的约定" }),
+    ).toBeVisible();
+    expect(screen.getByText("撕破的信封").tagName).toBe("STRONG");
+    expect(
+      screen.getByText("今晚九点").closest(".speech-unit"),
+    ).toHaveTextContent("苏晚晴");
+    expect(
+      screen.getByText("今晚九点").closest(".speech-text"),
+    ).toHaveTextContent("“请在今晚九点之前回来。”");
+  });
+
   it("renders waiting and pending-roll states as React content", () => {
     render(<MessageList />);
     act(() => {

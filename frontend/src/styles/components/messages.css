@@ -644,9 +644,30 @@
 }
 
 /* GM 消息内的小标题/分隔线美化 */
-.msg.gm b {
+.msg.gm :is(b, strong) {
   color: var(--gold-bright);
   font-weight: 800;
+}
+.msg.gm :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 8px;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+.msg.gm :is(h1, h2) {
+  font-size: 1.3em;
+}
+.msg.gm h3 {
+  font-size: 1.15em;
+}
+.msg.gm :is(h4, h5, h6) {
+  font-size: 1.05em;
+}
+.msg.gm .chat-bubble > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
 }
 .msg.gm hr {
   border: 0;

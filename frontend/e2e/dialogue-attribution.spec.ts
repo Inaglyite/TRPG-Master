@@ -41,15 +41,22 @@ test.beforeAll(async () => {
       ) {
         const input = JSON.parse(latest).player_input;
         const ready = input.includes("独自出发");
-        const plan = {
-          intent: ready ? "move" : "prepare_move",
-          input_quote: input,
-          approach: ready ? "独自前往藏宝楼" : "先确定伊芙琳是否同行",
-          destination_scene_id: "shop",
-          destination_reason: "玩家选择藏宝楼",
-          departure_question: ready ? "" : "伊芙琳同行，还是留在报馆？",
-          time_minutes: ready ? 20 : 0,
-        };
+        const plan = input.includes("查看排版示例")
+          ? {
+              intent: "interact",
+              input_quote: input,
+              approach: "查看已经公开的内容",
+              time_minutes: 0,
+            }
+          : {
+              intent: ready ? "move" : "prepare_move",
+              input_quote: input,
+              approach: ready ? "独自前往藏宝楼" : "先确定伊芙琳是否同行",
+              destination_scene_id: "shop",
+              destination_reason: "玩家选择藏宝楼",
+              departure_question: ready ? "" : "伊芙琳同行，还是留在报馆？",
+              time_minutes: ready ? 20 : 0,
+            };
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
           JSON.stringify({
@@ -147,6 +154,21 @@ test.beforeAll(async () => {
           ],
           introduced_npc_ids: [],
           choices: [],
+        });
+      } else if (latest.includes("查看排版示例")) {
+        content = JSON.stringify({
+          segments: [
+            {
+              kind: "narration",
+              text: "### 报馆里的约定\n\n你收好**撕破的信封**，纸上只留着几点约定。\n\n- 地点：**报馆门口**\n- 时间：**今晚九点**",
+            },
+            {
+              kind: "speech",
+              speaker_id: "su",
+              text: "“请在**今晚九点**之前回来。”",
+            },
+          ],
+          choices: ["继续交谈", "自由行动"],
         });
       } else if (body.includes("再喝一杯")) {
         // 已登记的临时人物：不再声明，直接复用稳定 id
@@ -408,6 +430,51 @@ async function reloadFromSave(page: import("@playwright/test").Page) {
     .first()
     .click();
 }
+
+test("叙事 Markdown：标题与加粗在三种窗口及读档后保留", async ({
+  page,
+}, info) => {
+  await startDialogueWorld(page);
+  await page.locator("#user-input").fill("查看排版示例");
+  await page.locator("#user-input").press("Enter");
+  const heading = page
+    .getByRole("heading", { name: "报馆里的约定", level: 3 })
+    .last();
+  await expect(heading).toBeVisible();
+  await expect(page.locator("#user-input")).toBeEnabled();
+  for (const width of [1280, 939, 640]) {
+    await page.setViewportSize({ width, height: 900 });
+    await heading.scrollIntoViewIfNeeded();
+    const metrics = await heading.evaluate((element) => {
+      const bubble = element.closest(".chat-bubble")!;
+      const strong = bubble.querySelector("strong")!;
+      return {
+        heading: parseFloat(getComputedStyle(element).fontSize),
+        body: parseFloat(getComputedStyle(bubble).fontSize),
+        weight: getComputedStyle(strong).fontWeight,
+        color: getComputedStyle(strong).color,
+        expectedColor: getComputedStyle(element).color,
+        overflow: bubble.scrollWidth > bubble.clientWidth + 1,
+      };
+    });
+    expect(metrics.heading).toBeGreaterThan(metrics.body);
+    expect(Number(metrics.weight)).toBeGreaterThanOrEqual(700);
+    expect(metrics.color).toBe(metrics.expectedColor);
+    expect(metrics.overflow).toBe(false);
+    await page.screenshot({
+      path: info.outputPath(`narrative-markdown-${width}.png`),
+    });
+  }
+  const speech = page
+    .locator(".speech-unit")
+    .filter({ hasText: "请在今晚九点之前回来" })
+    .last();
+  await expect(speech.locator(".speech-name")).toHaveText("苏晚晴");
+  await expect(speech.locator("strong")).toHaveText("今晚九点");
+  await reloadFromSave(page);
+  await expect(heading).toBeVisible();
+  await expect(speech.locator("strong")).toHaveText("今晚九点");
+});
 
 test("真实后端：临时伙计有气泡与徽章，读档与分支后身份保持", async ({
   page,

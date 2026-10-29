@@ -141,6 +141,19 @@ def test_real_stream_boundary_validates_json_before_emitting_speaker_ids():
     assert not any("speaker_id" in t or "segments" in t for t, _ in host.speech)
 
 
+def test_markdown_survives_json_validation_and_speech_attribution():
+    raw = {"segments": [
+        {"kind": "narration", "text": "### 报馆里的约定\n\n你收好**撕破的信封**。"},
+        {"kind": "speech", "speaker_id": "su", "text": "“请在**今晚九点**之前回来。”"},
+    ], "choices": ["继续交谈"]}
+    host, _ = make_host(json.dumps(raw, ensure_ascii=False))
+    text, calls = run_stream(host)
+    assert not calls
+    assert "### 报馆里的约定" in text and "**撕破的信封**" in text
+    assert ("“请在**今晚九点**之前回来。”", "su") in host.speech
+    assert all("segments" not in chunk for chunk, _ in host.speech)
+
+
 @pytest.mark.parametrize("raw,finish", [
     ('{"segments":[', "stop"),
     (json.dumps(dialogue()), "length"),

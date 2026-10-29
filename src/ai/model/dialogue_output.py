@@ -179,8 +179,13 @@ def choice_skill_hint_map(output: DialogueOutput) -> tuple[dict[int, str], list[
     return hints, dropped
 
 
-DIALOGUE_INSTRUCTION = """本请求正文必须是 JSON 对象，不输出小说体纯文本、Markdown 代码围栏或发言标签。
+DIALOGUE_INSTRUCTION = """本请求外层必须是 JSON 对象，不在 JSON 外输出小说体正文、Markdown 代码围栏或发言标签。
 格式：{"segments":[{"kind":"narration","text":"他放下茶杯。"},{"kind":"speech","speaker_id":"在场 NPC 的稳定 id","text":"“这件事，请您另问别人。”"}],"introduced_npc_ids":[],"choices":[],"guest_speakers":[],"choice_skill_hints":[]}
+JSON 只约束传输结构，不禁止正文排版：segments[].text 支持 Markdown，直接在字符串内使用，不加代码围栏。
+出现玩家已知的重要物品、时间地点、明确线索或已结算行动后果时，主动用 **关键词或短句** 少量加粗；每段通常0到2处，不整段或整句台词都加粗。
+场景转换或叙事阶段明显变化时，可在 narration 的 text 中用 ### 简短小标题并换行；普通对白不加标题，不必每轮都插标题。
+例如旁白 text 可写成 "你在桌角发现**撕破的信封**。"，台词可写成 "“请在**今晚九点**之前回来。”"；台词引号仍须完整保留。
+强调只能依据玩家当下已知的信息，不用排版暗示未识破的谎言、未发现的秘密或隐藏剧情。choices 继续输出行动文本，格式标记只用于正文。
 旁白块禁止 speaker_id；台词块必须给出 speaker_id，只能来自当前场景在场人物或已声明的临时人物。
 人物说出的直接台词一律放进 speech 块；只有转述、纸条/文件文字、回忆引文、玩家自己的话才留在 narration。
 每次换说话人必须新建 speech 块；姓名、头像和资源由平台按 id 匹配，不要自行输出资源。
