@@ -15,6 +15,23 @@
 
 ## 归档资料
 
+2026-10-26 的 [CLI 维护验收](../../mid_product/trpg-master/2026-10-26-cli-maintenance/ACCEPTANCE.md)
+记录开场异常恢复、NPC 回调兼容、读档不调用模型、独立手动槽位及启动器环境选择，
+含 46 项回归和真实模型经终端入口的保存/读取验证，2026-10-29 已本地提交，未推送或发布。
+
+2026-10-25 的 [叙事 Markdown 排版验收](../../mid_product/trpg-master/2026-10-25-narrative-markdown/ACCEPTANCE.md)
+记录 JSON 正文中的加粗与小标题、真实 K3 输出、三窗口截图及读档保持格式的验证。
+本轮为正文排版改进，未新增自动调查纪要；2026-10-29 已本地提交，未推送或发布。
+
+2026-10-23 的 [多厂商与三种模型接口适配](../../mid_product/trpg-master/2026-10-23-multi-provider-compat/ACCEPTANCE.md)
+登记常见厂商预设、Chat Completions / Anthropic Messages / Responses 协议转换、
+本地 SDK/协议与设置页验收，以及 Kimi K3 真实流式/工具调用/工具回执续接验证。
+同时记录正文后卡在一致性校对、退出丢失未提交回合的诊断及修复，
+以及 40 回合、33/33 的本地真实猩红主线验收。
+保留充值前的 404、固定温度/强制工具探针失败、测试环境与冷却间隔修正证据；
+其他厂商没有逐家真实 Key 验收。本次源码改动未发布生产或生成正式安装包，
+原始记录仅限本人访问，不随源码公开。
+
 2026-10-23 的 [调查行动栏正式发布与 CI 修正](../../mid_product/trpg-master/2026-10-23-toolbar-production-release/DEPLOYMENT.md)
 冻结于 `mid_product/trpg-master/2026-10-23-toolbar-production-release/`：正式业务版本
 `b363f8de` 的部署门禁与激活日志、三次 CI 同步缺口的原始失败、延迟观察复现、

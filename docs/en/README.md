@@ -72,6 +72,13 @@ Below the input, **使用技能** (Use skill) lets you choose a skill from your 
 
 Use **模型设置** (Model settings) in the application, or `python3 start.py --config` for local configuration. Supply a compatible endpoint, model and API key. The local default context capacity is 262,144 tokens (256K); the selected model/service and an explicit configuration can impose a smaller window. A configured default does not enlarge a provider's actual capacity.
 
+Provider presets cover DeepSeek, Kimi, Qwen, Zhipu, Doubao, Gemini, OpenAI, OpenRouter and SiliconFlow.
+Choose the API format separately: **Chat Completions, Anthropic Messages, or Responses**.
+Endpoints and model IDs remain editable. Connection tests verify streamed text, plus tool calling for
+the judgement role; model listings are optional and populate model ID suggestions when available.
+Your key must have access to the selected model. Changing destination or API format requires an
+explicit key; saved keys are never displayed or automatically forwarded to a new destination.
+
 Cloud BYOK settings are scoped to accounts/worlds. A room member does not gain access to the Keeper's key. Never commit or share `.env.json`, API keys, sessions, databases or private saves. See [operations](../OPERATIONS.md) for deployment and credential boundaries.
 
 ## Saves and branches

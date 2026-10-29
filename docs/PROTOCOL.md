@@ -2,6 +2,22 @@
 
 现行入口，整理于 2026-10-10；产品基线 `2b66a582`。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；实际发布与验收范围见[状态](STATUS.md)。
 
+### 模型服务与接口格式
+
+`model_settings` 视图提供 `provider_presets`（id、label、base_url、model_id、hint），
+仅作可编辑起点，不推断未填写的上下文规格。服务绑定独立保存 `provider_kind` 和
+`api_format`；后者为 `chat_completions` / `anthropic_messages` / `responses`。
+`model_settings_update` 与 `model_settings_test` 中的 service 可携带该字段；缺省时
+普通服务沿用 Chat Completions，Anthropic 官方地址/厂商默认 Messages。
+旧 Key 只允许同地址、同厂商、同接口格式沿用，其他情况必须显式重新提供。
+
+`model_settings_test_result` 的 `checks` 中，`connectivity` 查询模型列表，标记
+`optional: true`，列表不可用不影响后续生成测试；`model_options` 返回受限模型 ID 候选。
+`generation` 必须实际流式返回非空正文并完整结束；裁决角色再验证固定无副作用的
+`probe_noop` 工具调用及参数。`capabilities.streaming` 来源于该次流式探针，
+不再从非流式生成成功推定。测试不调用游戏工具、不加载故事、不改变未保存的绑定。
+400/422、404、认证/额度/限流等错误使用固定可读分类，不向前端回传原始异常或 Key。
+
 ### 本地 legacy 存档恢复
 
 本地 `/ws` 的 `save_load` 只恢复存档，不创建续团回合、不请求模型或历史摘要。

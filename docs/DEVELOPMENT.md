@@ -10,6 +10,14 @@ Windows 用户可从 [Releases](https://github.com/Inaglyite/TRPG-Master/release
 启动器检查依赖与前端构建，选择本地游戏后才启动源码后端。
 英文操作入口见 [English guide](en/README.md)。
 
+终端入口为 `python3 start.py`，优先使用当前已激活的虚拟环境；模型路由与桌面
+共用本地 `model_settings.local.json`，未自定义的角色回退 `.env.json` / 环境变量。
+`python3 start.py --config` 配置默认服务；`TRPG_MODULE=猩红文档 python3 start.py`
+可选择模组。有存档时先输入 `/load` 或 `/new`，启动不会重置旧世界或先调用模型。
+`/retry` 重试失败的开场或原行动；`/save-new` 创建独立槽位，`/saves` 列出槽位，
+`/load slot_001` 读取指定进度并显示上次回复，读档不生成新回合。终端支持经典
+AI 叙事路径，结构化人类主持仍使用桌面/网页工作台。
+
 手动准备后端环境（仓库根目录，`python3` 应为 3.12+）：
 
 ```bash

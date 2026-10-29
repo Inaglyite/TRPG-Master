@@ -70,6 +70,11 @@ bash start_desktop.sh
 
 通过界面的模型设置配置服务地址、模型和 Key；也可使用 `python3 start.py --config` 配置本地模型。人类主持不调用模型；AI 主持和辅助功能需要可用的模型配置及服务额度。
 
+模型设置提供 DeepSeek、Kimi、通义千问、智谱、豆包、Gemini、OpenAI、OpenRouter、硅基流动等预设。
+厂商与接口格式可分别选择：支持 **Chat Completions、Anthropic Messages、Responses**，
+自定义地址和模型 ID 仍可编辑。测试连接实际验证流式生成，裁决模型另测工具调用；
+服务提供模型列表时可在模型 ID 输入框选择。账户须有对应模型的访问权限。
+
 云端需要账号，并使用对应账号/世界的 BYOK 绑定。加入房间不等于获得主持人的密钥；费用归属取决于实际使用的模型绑定。`.env.json`、API Key、数据库和真实存档不要提交到版本库。
 
 ## 创作自己的模组

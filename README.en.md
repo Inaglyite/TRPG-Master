@@ -70,6 +70,11 @@ The launcher checks dependencies and builds the frontend. It starts the local ba
 
 Use the in-app model settings to supply a service endpoint, model and API key. `python3 start.py --config` also configures local model access. AI features require a working model service and its associated usage allowance; human-hosted play does not call a model.
 
+Common provider presets and three API formats are available: **Chat Completions,
+Anthropic Messages, and Responses**. Endpoints and model IDs remain editable;
+connection tests verify streaming and, for the judgement role, tool calling.
+See the [configuration guide](docs/en/README.md#model-configuration).
+
 Cloud play requires an account and uses the applicable account/world BYOK binding. Joining a room does not expose the Keeper's key or imply free model usage. Keep `.env.json`, keys, databases and real saves out of version control.
 
 ## Create modules
