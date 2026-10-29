@@ -3,9 +3,11 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import httpx
 import pytest
+from openai import OpenAI
 
 from src.app.config import PROJECT_ROOT
 from src.app.engine import GameEngine
@@ -148,6 +150,22 @@ def test_narrated_day_span_still_triggers_gate():
     assert consistency_violations("你守了一夜。", settled_minutes=30)
 
 
+@pytest.mark.parametrize("heading", ["你可以——", "**你可以——**", "请选择：", "可选行动："])
+def test_unplayed_choices_do_not_count_as_elapsed_time(heading):
+    # 2026-10-23 申报馆事故：选项里的“失声前那几日”触发了长时间校对，
+    # 正文已经显示但回合未提交，退出后只能重新生成。
+    menu = (
+        f"\n\n{heading}\n"
+        "1. 安抚伊芙琳，追问叔父失声前那几日的具体言行\n"
+        "2. 连续三天监视古董店\n"
+        "3. 在门口等几个小时\n"
+        "4. 自由行动"
+    )
+    assert not consistency_violations("她把血谱推到你面前，等你的主意。" + menu, settled_minutes=5)
+    # 排除菜单不能放过正文中真实发生的越界。
+    assert consistency_violations("你守了三天，才等到他。" + menu, settled_minutes=5)
+
+
 def test_rewrite_that_changes_nothing_keeps_original():
     """重写甄别后认定争议表述是回忆/打算而原样保留时，改写没有消除任何越界，
     必须采用原文而不是接受了无谓改写的文本。"""
@@ -161,20 +179,22 @@ def test_rewrite_that_changes_nothing_keeps_original():
 
 
 def consistency_engine(outcome, reply="你守了很久。", finish="stop"):
-    return SimpleNamespace(
-        client=SimpleNamespace(
-            chat=SimpleNamespace(
-                completions=SimpleNamespace(
-                    create=lambda **_: SimpleNamespace(
-                        choices=[
-                            SimpleNamespace(
-                                finish_reason=finish, message=SimpleNamespace(content=reply)
-                            )
-                        ]
-                    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **_: SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            finish_reason=finish, message=SimpleNamespace(content=reply)
+                        )
+                    ]
                 )
             )
-        ),
+        )
+    )
+    client.with_options = Mock(return_value=client)
+    return SimpleNamespace(
+        client=client,
         context=SimpleNamespace(world_id="w"),
         raise_if_turn_cancelled=lambda: None,
         narrative_model="test-model",
@@ -220,7 +240,42 @@ def test_consistency_gate_is_fail_open():
     assert apply_narrative_consistency(clean, "你拨弄锁芯。") == "你拨弄锁芯。"
 
 
-def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path, monkeypatch):
+def test_consistency_timeout_uses_one_short_request_and_keeps_original(monkeypatch):
+    requests = []
+    phases = []
+
+    def stall(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("simulated upstream stall", request=request)
+
+    outcome = {"events": [{"type": "time_advanced", "before": 0, "after": 5}]}
+    engine = consistency_engine(outcome)
+    engine.cb = SimpleNamespace(on_phase=lambda phase, label: phases.append((phase, label)))
+    monkeypatch.setenv("TRPG_MODEL_TIMEOUT", "600")
+    original = "你在门外守了三天。"
+    with OpenAI(api_key="test-key", base_url="https://model.invalid/v1",
+                http_client=httpx.Client(transport=httpx.MockTransport(stall))) as client:
+        engine.client = client
+        assert apply_narrative_consistency(engine, original) == original
+    assert len(requests) == 1  # 不继承 SDK 默认两次重试。
+    assert requests[0].extensions["timeout"]["read"] == 20
+    assert phases == [("narrative_consistency", "正文已生成，正在核对本轮叙述……")]
+    assert engine._turn_diagnostics[-1]["status"] == "failed_open"
+    assert engine._turn_diagnostics[-1]["error_type"] == "APITimeoutError"
+
+
+def test_consistency_cancellation_is_not_swallowed():
+    from src.app.engine import TurnCancelledError
+
+    engine = consistency_engine({"events": [{"type": "time_advanced", "before": 0, "after": 5}]})
+    engine.raise_if_turn_cancelled = Mock(side_effect=TurnCancelledError("cancelled"))
+    with pytest.raises(TurnCancelledError):
+        apply_narrative_consistency(engine, "你在门外守了三天。")
+    engine.client.with_options.assert_not_called()
+
+
+@pytest.mark.parametrize("rewrite_times_out", [False, True])
+def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path, monkeypatch, rewrite_times_out):
     """A02：流式叙事把 5 分钟演成"几天"时，定稿阶段重写一次，
     消息历史与回合记录采用修正后的文本（前端权威段同理覆盖）。"""
     monkeypatch.setattr("src.app.engine.API_KEY", "configured-test-key")
@@ -233,6 +288,8 @@ def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path,
     def create(**kwargs):
         if kwargs.get("tools"):
             return response(proposal())
+        if rewrite_times_out:
+            raise TimeoutError("simulated stalled consistency request")
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -243,16 +300,29 @@ def test_overreaching_streamed_narrative_is_corrected_in_final_history(tmp_path,
         )
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client.with_options = Mock(return_value=client)
     with patch("src.structured.engine_gate.OpenAI", return_value=client):
         engine = GameEngine(context)
     engine._retrieve_lore_context = lambda *_: None
     engine._detect_content_skill_hint = lambda *_: None
     engine._maybe_summarize_after_turn = lambda: None
-    engine._stream_llm = lambda *_args, **_kwargs: ("你守了几天，终于撬开了门。", [])
+    original = "你守了几天，终于撬开了门。"
+    engine._stream_llm = lambda *_args, **_kwargs: (original, [])
+    done = []
+    engine.cb.on_done = lambda: done.append(engine.turn_journal.latest_completed_id())
     engine.handle_action(INPUT)
     final = [m["content"] for m in engine.messages if m.get("role") == "assistant"][-1]
-    assert final == "你拨弄锁芯，几分钟里始终留意着走廊。"
+    expected = original if rewrite_times_out else "你拨弄锁芯，几分钟里始终留意着走廊。"
+    assert final == expected
     assert any(d.get("role") == "narrative_consistency" for d in engine._turn_diagnostics)
+    # 校对超时仍完成原子提交，重开后有正文与快照；done 必须晚于提交。
+    record = engine.turn_journal.list_completed()[0]
+    messages, snapshot = engine.turn_journal.load_artifacts(record["turn_id"])
+    assert record["status"] == "completed"
+    assert record["narrative"] == expected
+    assert messages[-1]["content"] == expected
+    assert snapshot["current_scene"]["id"] == "hall"
+    assert done == [record["turn_id"]]
 
 
 # --- A06：重复检定闸门 --------------------------------------------------------

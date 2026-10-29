@@ -15,9 +15,12 @@ from typing import Any
 
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
-from src.app.config import _enabled_env
+from src.app.config import _enabled_env, model_timeout_seconds
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
+
+# 校对不是主叙事，不能继承主模型的十分钟等待和 SDK 自动重试。
+_REWRITE_TIMEOUT_SECONDS = 20.0
 
 # 以“天/夜”计的跨度词，覆盖中文数字（三天/两日/半个月等）。“第二天再说”这类
 # 将来打算也会被命中，交给重写模型按提示甄别（打算/回忆/假设可保留），
@@ -45,8 +48,11 @@ _TAGGED_SPEECH_ID = re.compile(r"【npc:([A-Za-z0-9_-]{1,48})】")
 
 
 def _narration_text(narrative: str) -> str:
-    """剔除结构化台词与成对引号对白，只保留叙述层文本。"""
-    return _QUOTED_DIALOGUE.sub("", _TAGGED_SPEECH.sub("", narrative))
+    """只检查已经发生的正文；选项、台词均不代表本轮时间推进。"""
+    from src.gameplay.turn_reconciler import narrative_body
+
+    body = narrative_body(narrative)
+    return _QUOTED_DIALOGUE.sub("", _TAGGED_SPEECH.sub("", body))
 
 
 def _speech_id_sequence(text: str) -> list[str]:
@@ -146,9 +152,23 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         messages[1]["content"] = json.dumps(payload, ensure_ascii=False)
     model = model_for_role(engine, "consistency")
     started = time.monotonic()
+    timeout = min(_REWRITE_TIMEOUT_SECONDS, model_timeout_seconds())
+    phase_callback = getattr(getattr(engine, "cb", None), "on_phase", None)
+    if phase_callback:
+        phase_callback("narrative_consistency", "正文已生成，正在核对本轮叙述……")
+    log_game(
+        f"叙事一致性校对开始 | world={getattr(engine.context, 'world_id', '')}"
+        f" | turn={getattr(engine, 'active_turn_id', '')} | model={model}"
+        f" | timeout={timeout:g}s | retries=0"
+    )
     try:
+        engine.raise_if_turn_cancelled()
         with llm_call_slot(model=model, world_id=str(getattr(engine.context, "world_id", ""))):
-            response = client_for_role(engine, "consistency").chat.completions.create(
+            engine.raise_if_turn_cancelled()
+            client = client_for_role(engine, "consistency").with_options(
+                timeout=timeout, max_retries=0
+            )
+            response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=0,
@@ -180,7 +200,26 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
             )
     except Exception as exc:
         engine.raise_if_turn_cancelled()
-        log_game(f"叙事一致性重写失败 | {type(exc).__name__}: {exc}"[:200])
+        elapsed = time.monotonic() - started
+        log_game(
+            f"叙事一致性重写失败，保留原文 | {type(exc).__name__}"
+            f" | elapsed={elapsed:.2f}s"
+        )
+        if hasattr(engine, "_turn_diagnostics"):
+            engine._turn_diagnostics.append(
+                with_route_info(
+                    engine,
+                    "consistency",
+                    {
+                        "model": model,
+                        "role": "narrative_consistency",
+                        "status": "failed_open",
+                        "elapsed_ms": round(elapsed * 1000),
+                        "error_type": type(exc).__name__,
+                        "timeout_seconds": timeout,
+                    },
+                )
+            )
         return narrative
     elapsed = time.monotonic() - started
     log_model_call(model, "narrative_consistency", elapsed, None, "chars", len(rewritten))

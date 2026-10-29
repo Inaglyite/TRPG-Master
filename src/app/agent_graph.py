@@ -1139,6 +1139,7 @@ def _finalize_turn(state: TurnState) -> dict:
             lambda world: world.update(last_resolution_id=resolution_session.id)
         )
     if complete_turn:
+        _emit_phase(engine, "committing", "正在保存本轮进度……")
         complete_turn(
             narrative=narrative,
             choices=choices,
