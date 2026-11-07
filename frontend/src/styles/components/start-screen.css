@@ -488,18 +488,63 @@
   gap: 8px;
   align-items: stretch;
 }
+/* Imagegen brass-and-leather tool plaques; text remains accessible HTML. */
 #btn-import-module,
 .module-workshop-link {
-  flex: 0 0 auto;
-  min-height: 0;
-  padding: 0 13px;
+  --module-plaque: url("../../assets/ui/module-workshop-plaque-v1.webp");
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 136px;
+  min-height: 44px;
+  padding: 0 12px 0 37px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--gold-bright);
   font-family: var(--font);
   font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.06em;
   white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  transition: filter 0.16s ease, transform 0.1s ease;
+}
+#btn-import-module {
+  --module-plaque: url("../../assets/ui/module-import-plaque-v1.webp");
+}
+#btn-import-module::before,
+.module-workshop-link::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--module-plaque) center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+#btn-import-module:hover:not(:disabled),
+.module-workshop-link:hover:not(:disabled) {
+  box-shadow: none;
+  filter: brightness(1.18);
+}
+#btn-import-module:focus-visible,
+.module-workshop-link:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+  box-shadow: none;
 }
 #btn-import-module:disabled {
   cursor: wait;
+  filter: grayscale(0.6);
+}
+@media (max-width: 700px) {
+  #module-selector { align-items: flex-start; }
+  #module-selector label { padding-top: 15px; }
+  .module-select-row > .module-select { flex-basis: 100%; }
+  #btn-import-module, .module-workshop-link { flex: 1 0 136px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #btn-import-module, .module-workshop-link { transition: none; }
 }
 #module-import-status {
   flex: 0 0 100%;
@@ -708,6 +753,11 @@
   font-size: 13px;
   text-align: center;
   transition: color 0.16s ease;
+}
+.start-menu-line-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
 }
 .start-menu-button:hover:not(:disabled),
 .start-menu-button:focus-visible {

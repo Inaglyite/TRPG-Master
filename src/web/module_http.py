@@ -6,16 +6,19 @@ import asyncio
 import mimetypes
 import tempfile
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from src.ai.context.lorebook import lorebook_json_schema
 from src.app.runtime import RuntimeContext
 from src.modules.editor_projects import editor_skill_json_schema
 from src.modules.module_compiler import compile_payload
+from src.modules.module_deletion import delete_module, module_usage
 from src.modules.module_format import (
     manifest_json_schema,
     manifest_v2_json_schema,
@@ -30,6 +33,16 @@ from src.modules.module_registry import (
 )
 
 
+@contextmanager
+def track_module_session(engine, sessions: set):
+    """Keep module removal blocked until a local websocket session has ended."""
+    sessions.add(engine)
+    try:
+        yield
+    finally:
+        sessions.discard(engine)
+
+
 @dataclass(frozen=True)
 class ModuleHttpDependencies:
     registry: Callable[[], ModuleRegistry]
@@ -38,6 +51,7 @@ class ModuleHttpDependencies:
     active_context: Callable[[], RuntimeContext]
     set_active_context: Callable[[RuntimeContext], None]
     auth_required: Callable[[], bool]
+    modules_in_use: Callable[[], set[str]] = lambda: set()
 
 
 def _module_error_response(exc: ModulePackageError) -> JSONResponse:
@@ -135,6 +149,42 @@ def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
             "modules": [record.to_dict() for record in deps.registry().list_modules()],
             "active": context.module_name,
         }
+
+    def removal_block(module_key: str) -> str:
+        if module_key == deps.active_context().module_name or module_key in deps.modules_in_use():
+            return "此模组正在使用，请先在开始页切换到其他模组，并关闭仍使用它的其他窗口。"
+        return ""
+
+    @router.get("/api/modules/manage")
+    async def manage_modules():
+        if deps.auth_required():
+            return JSONResponse({"error": "模组管理仅适用于本地模式"}, status_code=403)
+        registry = deps.registry()
+        return {"modules": [
+            {**record.to_dict(), **module_usage(registry, record.key),
+             "delete_block": "内置模组不能删除" if record.source != "user" else removal_block(record.key)}
+            for record in registry.list_modules()
+        ]}
+
+    @router.delete("/api/modules/{module_key}")
+    async def remove_module(module_key: str):
+        if deps.auth_required():
+            return JSONResponse({"error": "模组管理仅适用于本地模式"}, status_code=403)
+        if reason := removal_block(module_key):
+            return JSONResponse({"error": reason}, status_code=409)
+        try:
+            # No await between checking live sessions and removing their data. Local
+            # websocket switches run on this same event loop; active engines are blocked.
+            removed = delete_module(deps.registry(), module_key)
+            return {"ok": True, **removed}
+        except FileNotFoundError:
+            return JSONResponse({"error": "模组已不存在，请刷新列表"}, status_code=404)
+        except ModulePackageError as exc:
+            return _module_error_response(exc)
+        except IntegrityError:
+            return JSONResponse({"error": "存档仍被其他世界引用，删除已撤销"}, status_code=409)
+        except OSError:
+            return JSONResponse({"error": "模组文件无法删除，请检查文件权限或占用情况"}, status_code=500)
 
     @router.get("/api/modules/schema/manifest-v1")
     async def get_module_manifest_schema():

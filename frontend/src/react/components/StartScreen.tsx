@@ -12,6 +12,8 @@ import { useStartStore } from "../../state/start-store";
 import { CharacterDossier } from "./CharacterDossier";
 import { LocalPlayStylePanel } from "./LocalPlayStylePanel";
 import { ModelSettingsTrigger } from "./ModelSettingsPanel";
+import { StartMenuIcon } from "./StartMenuIcon";
+import { ModuleManager } from "./ModuleManager";
 import { ModuleImporter } from "./ModuleImporter";
 import { ModuleSelect } from "./ModuleSelect";
 import { useModuleTransition } from "./module-transition";
@@ -179,7 +181,7 @@ export function StartScreen() {
                 title="打开 TRPG Mod Editor 创作/编辑模组"
                 onClick={openModWorkshop}
               >
-                模组工坊
+                <span>模组工坊</span>
               </button>
             </div>
           </div>
@@ -208,6 +210,7 @@ export function StartScreen() {
               <span className="start-art-label">从存档开始</span>
             </button>
             <ModelSettingsTrigger />
+            <ModuleManager />
             <button
               type="button"
               className="start-menu-button"
@@ -215,7 +218,8 @@ export function StartScreen() {
                 useAppStore.getState().setCharacterLibraryOpen(true)
               }
             >
-              角色库
+              <StartMenuIcon kind="characters" />
+              <span>角色库</span>
             </button>
             {/\bElectron\//.test(navigator.userAgent) && (
               <button

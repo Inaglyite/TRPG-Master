@@ -153,9 +153,6 @@
   #module-selector {
     width: 100%;
   }
-  #btn-import-module span {
-    display: none;
-  }
   #btn-start {
     width: min(350px, 96%);
   }

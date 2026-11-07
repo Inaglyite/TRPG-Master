@@ -177,6 +177,7 @@ from src.web.module_http import (
     ModuleHttpDependencies,
     create_module_http_router,
     serve_module_asset,
+    track_module_session,
 )
 from src.web.operation_errors import operation_error_message
 from src.web.service_health import health_payload, readiness_payload
@@ -189,6 +190,7 @@ app.include_router(create_editor_router(EDITOR_PROJECTS))
 DATABASE_URL = database_url(RUNTIME_ROOT)
 _LOCAL_MODEL_SETTINGS_FILE = RUNTIME_ROOT / "model_settings.local.json"
 _active_context = RuntimeContext.local(DEFAULT_MODULE_NAME)
+_local_session_engines: set[GameEngine] = set()
 _world_turn_locks: dict[str, threading.Lock] = {}
 _world_turn_locks_guard = threading.Lock()
 ROOM_MANAGER = RoomManager(max_rooms=max(1, int(os.environ.get("TRPG_MAX_ACTIVE_ROOMS", "8"))))
@@ -452,6 +454,7 @@ app.include_router(
             project_root=PROJECT_ROOT,
             runtime_root=lambda: RUNTIME_ROOT,
             active_context=lambda: _active_context,
+            modules_in_use=lambda: {engine.context.module_name for engine in _local_session_engines},
             set_active_context=_set_active_context,
             auth_required=lambda: auth_required(),
         )
@@ -1659,7 +1662,8 @@ async def game_ws(ws: WebSocket):
         else:
             await ws.close(code=4403, reason="连接被拒绝")
         return
-    await run_ws_session(ws, engine, user_id=user.id if user else None)
+    with track_module_session(engine, _local_session_engines):
+        await run_ws_session(ws, engine, user_id=user.id if user else None)
 
 
 async def serve_asset(module_name: str, filename: str):

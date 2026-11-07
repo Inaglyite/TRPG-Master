@@ -37,6 +37,14 @@ python tools/module_packager.py validate dist/my-module.trpgmod
 
 英文步骤见 [Module authoring](en/README.md#module-authoring)。
 
+### 删除并重新导入
+
+本地开始页的“模组管理”列出已安装版本、时间线和存档点数量。
+删除已导入版本会同时永久删除它的所有世界（含已归档分支）、存档、回合历史与兼容导出文件；
+角色库、模组工坊工程和其他版本保留。确认后可重新导入相同版本号的修正版。
+内置模组不能删除。正在使用的版本须先在开始页切换到其他模组，并关闭仍使用它的其他窗口。
+管理接口为本地专用的 `GET /api/modules/manage` 与 `DELETE /api/modules/{module_key}`。
+
 ## 3. 应查哪份资料
 
 | 内容 | 位置 |

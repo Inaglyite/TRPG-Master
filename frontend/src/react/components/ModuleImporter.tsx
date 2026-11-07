@@ -170,6 +170,8 @@ function LocalModuleImporter() {
     <>
       <button
         id="btn-import-module"
+        aria-label="导入模组"
+        title="导入 .trpgmod 模组包"
         ref={trigger}
         type="button"
         disabled={busy}
@@ -180,7 +182,7 @@ function LocalModuleImporter() {
           }
         }}
       >
-        ⇧ <span>导入模组</span>
+        <span>导入模组</span>
       </button>
       <input
         ref={input}
