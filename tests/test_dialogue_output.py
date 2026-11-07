@@ -468,3 +468,40 @@ def test_history_narrative_normalized_to_dialogue_json_on_wire_only():
     wire = prepared.provider_kwargs["messages"]
     DialogueOutput.model_validate_json(wire[1]["content"])
     assert host.messages[1]["content"] == tagged
+
+
+@pytest.mark.parametrize("heading", ["**你可以——**", "你可以——", "### 你可以——", "__你可以--__："])
+@pytest.mark.parametrize("separator", [".", ")", "、", "．"])
+@pytest.mark.parametrize("explicit_choices", [True, False])
+def test_menu_format_variants_are_normalized_before_streaming(heading, separator, explicit_choices):
+    menu = f"{heading}\n\n  1{separator} 翻看剪报。\n\n  2{separator} 继续追问。\n"
+    raw = {"segments": [{"kind": "narration", "text": "窗外的雨忽然密了一阵。\n\n" + menu}],
+           "choices": ["翻看剪报", "继续追问"] if explicit_choices else []}
+    host, _ = make_host(json.dumps(raw, ensure_ascii=False))
+    text, calls = run_stream(host)
+    assert not calls
+    assert text.count("你可以") == 1
+    assert "窗外的雨忽然密了一阵。" in text
+    assert "1. 翻看剪报" in text and "2. 继续追问" in text
+    assert "".join(chunk for chunk, _ in host.speech).count("你可以") == 1
+
+
+def test_history_removes_repeated_menus_with_markdown_variations():
+    from src.ai.model.dialogue_output import narrative_history_to_dialogue_json
+
+    text = "雨还在下。\n\n你可以——\n  1. 翻看剪报。\n\n**你可以——**\n1. 翻看剪报。"
+    result = json.loads(narrative_history_to_dialogue_json(text))
+    assert result["segments"] == [{"kind": "narration", "text": "雨还在下。"}]
+    assert result["choices"] == ["翻看剪报。"]
+
+
+@pytest.mark.parametrize("text", [
+    "资料如下：\n1. 剪报\n2. 地图",
+    "他告诉你可以——\n1. 翻看剪报",
+    "你可以——\n1. 翻看剪报\n雨仍在下。",
+    "你可以——\n稍后再决定。",
+])
+def test_menu_cleanup_preserves_non_menu_narration(text):
+    from src.ai.model.dialogue_output import _strip_trailing_menu
+
+    assert _strip_trailing_menu(text) == (text, [])

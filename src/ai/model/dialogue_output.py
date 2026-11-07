@@ -219,7 +219,17 @@ display_name 只能用玩家可见称呼，不得写真实姓名或秘密身份�
 
 _SPEECH_TAG = re.compile(r"【npc:([A-Za-z0-9_-]{1,48})】(.*?)【/npc】", re.S)
 _INTRO_TAG = re.compile(r"【intro:([A-Za-z0-9_-]{1,48})】")
-_CHOICES_MENU = re.compile(r"\n?\*\*你可以——\*\*\s*\n((?:\d+\.[^\n]*(?:\n|$))+)\s*$")
+# Only a standalone heading followed entirely by numbered items is a menu.
+# Markdown rendering hides indentation and blank-line differences in model output.
+_CHOICES_MENU = re.compile(
+    r"(?:^|\n)[ \t]*(?:#{1,6}[ \t]+)?"
+    r"(?P<emphasis>\*{1,2}|_{1,2})?你可以[ \t]*[—–-]{1,2}"
+    r"(?(emphasis)(?P=emphasis))[ \t]*[:：]?[ \t]*\r?\n"
+    r"(?P<items>(?:[ \t]*\r?\n)*"
+    r"(?:[ \t]*\d+[.)、．][ \t]*[^\s\n][^\n]*(?:\n|$)"
+    r"(?:[ \t]*\r?\n)*)+)[ \t]*$"
+)
+_MENU_ITEM_PREFIX = re.compile(r"^[ \t]*\d+[.)、．][ \t]*")
 
 
 def narrative_history_to_dialogue_json(text: str) -> str:
@@ -233,16 +243,7 @@ def narrative_history_to_dialogue_json(text: str) -> str:
     stripped = text.strip()
     if not stripped or stripped.startswith("{"):
         return text
-    choices: list[str] = []
-    body = stripped
-    menu = _CHOICES_MENU.search(stripped)
-    if menu:
-        choices = [
-            re.sub(r"^\d+\.\s*", "", line).strip()
-            for line in menu.group(1).splitlines()
-            if line.strip()
-        ]
-        body = stripped[: menu.start()].rstrip()
+    body, choices = _strip_trailing_menu(stripped)
     introduced: list[str] = []
     body = _INTRO_TAG.sub(lambda match: introduced.append(match.group(1)) or "", body)
     segments: list[dict] = []
@@ -286,8 +287,8 @@ def _strip_trailing_menu(text: str) -> tuple[str, list[str]]:
         if not menu:
             break
         extracted = [
-            re.sub(r"^\d+\.\s*", "", line).strip()
-            for line in menu.group(1).splitlines()
+            _MENU_ITEM_PREFIX.sub("", line).strip()
+            for line in menu.group("items").splitlines()
             if line.strip()
         ]
         cleaned = cleaned[: menu.start()].rstrip()
