@@ -193,7 +193,7 @@ JSON 只约束传输结构，不禁止正文排版：segments[].text 支持 Mark
 每个 speech 块只放该人物带引号的台词，动作神态另放 narration 块；换人或穿插动作后重新分块，台词引号在各块内闭合。
 引号用于保证玩家阅读原文时仍能区分台词与旁白；speaker_id 用于人物气泡，两者必须同时提供，不能互相替代。
 修复、重新分段和重新叙述时保留已有台词引号；旧历史缺少引号不代表本轮可以省略，不能把直接台词改成无引号旁白或转述来规避人物归属。
-introduced_npc_ids 只填本轮实际首次介绍的在场人物；只是谈及的人物不填。
+introduced_npc_ids 只填本轮实际首次介绍的在场人物，允许包含本轮 guest_speakers 已声明的临时人物 id；只是谈及的人物不填。
 choices 是供玩家选择的后续行动文本数组，或空数组；每项必须是非空、单行、不带编号或菜单标题的文本。
 选项只允许出现在顶层 choices 中，narration 和 speech 正文都不得另写“你可以——”等菜单标题或行动选项列表。
 系统负责统一绘制菜单；违反以上格式会被拒绝，并要求重新输出完整 JSON。
@@ -205,9 +205,11 @@ choice_targets 可选：建议与人物、地点、目标或线索有关时提�
 npc 表示现场交谈，scene 表示可达出口，goal 表示继续未完成目标，clue 表示寻找尚未取得但已有公开依据的线索，review 表示查看已获线索。
 离场者不列为现场交谈对象，已经完成的目标或取得的物品不再列为待寻找；不得把未公开身份、线索真相或结局条件写进选项。
 正文被修复或重写后同步核对选项及其依据，不足三项也可以；自由行动保留，不需要 target。
-guest_speakers 只用于本轮首次开口的未登记人物（伙计、路人等未报姓名者）：
+guest_speakers 用于本轮首次登场的未登记人物（包括伙计、路人及已公开姓名的新人物）：
 声明 {"speaker_id":"guest_…","display_name":"玩家可见称呼"} 后本回合起可用该 id 发言；
-display_name 只能用玩家可见称呼，不得写真实姓名或秘密身份；已声明过的 id 直接复用，不要重复声明；
+display_name 使用玩家已知的公开称呼；新人物当场公开介绍的姓名也可使用，不得泄露尚未公开的真名或秘密身份。
+每个新人物使用独立且稳定的 guest_ id，不得借用在场熟人的 id 承载其台词；已声明过的 id 直接复用，不要重复声明；
+临时人物的首次介绍由 guest 声明登记完成，不生成正式 NPC 的线索卡。
 场景中的正式 NPC 一律使用既有 id，不得声明为 guest。
 需要游戏工具时先完成工具调用，工具结果返回后再输出最终 JSON；有工具调用的响应不夹带正文。
 怀疑场景或在场人物状态不一致时，先 inspect_turn_state；有冲突再 repair_turn_state 并按执行回执写正文，无冲突则修正叙事。
@@ -361,11 +363,13 @@ def decode_dialogue_output(
             if narration.strip():
                 parts.append(narration)
     for npc_id in dict.fromkeys(output.introduced_npc_ids):
-        if npc_id not in present_npc_ids:
+        if npc_id not in allowed_speakers:
             if npc_id in departed:
                 raise SpeakerDepartedError(npc_id, departed[npc_id])
             raise SpeakerAbsentError(f"介绍人物不在当前场景：{npc_id}", speaker_id=npc_id)
-        parts.append(f"【intro:{npc_id}】")
+        # Guest identity is registered from its declaration, without an authoritative NPC reveal.
+        if npc_id in present_npc_ids:
+            parts.append(f"【intro:{npc_id}】")
     raw_choices = list(output.choices) or menu_choices
     if raw_choices:
         if any(not choice.strip() or _RESERVED_TAG.search(choice) for choice in raw_choices):

@@ -141,6 +141,11 @@ def emit_structured_dialogue(
         from src.ai.model.dialogue_contract import validate_live_dialogue
 
         validate_live_dialogue(parsed)
+        original = getattr(host, "_dialogue_repair_original", None)
+        if original is not None:
+            from src.ai.model.dialogue_repair_guard import validate_repair_speakers
+
+            validate_repair_speakers(original, parsed)
         guest_ids, declared_guest_ids, _scene_id = _guest_context(host, parsed)
         from src.ai.model.dialogue_choices import prepare_dialogue_choices
 
@@ -218,6 +223,8 @@ def emit_structured_dialogue(
                     f"本轮叙述未通过校验：{who}已经离场，不能再在现场发言；"
                     "本轮结果未保存，请重新发送刚才的行动。"
                 )
+            elif isinstance(exc, DialogueValidationError) and exc.category == "speaker_reassigned":
+                host.cb.on_error("本轮修复改变了人物台词的归属，回复未展示或保存；请重试本轮。")
             elif isinstance(exc, DialogueValidationError) and exc.category in {"embedded_choice_menu", "invalid_choice_format"}:
                 host.cb.on_error("本轮叙述的行动选项格式仍不合规，未展示或保存这份回复；请重试本轮。")
             else:
@@ -384,6 +391,7 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
     guard = previous_assistant_narrative(source)
     if guard:
         host._dialogue_repair_guard = guard
+    host._dialogue_repair_original = raw
     try:
         return streamer.stream(
             model,
@@ -400,6 +408,7 @@ def finish_structured_dialogue(streamer, model, raw, parser, *, finish_reason, r
             ),
         )
     finally:
+        host.__dict__.pop("_dialogue_repair_original", None)
         if guard:
             try:
                 del host._dialogue_repair_guard

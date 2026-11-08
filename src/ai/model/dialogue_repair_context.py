@@ -60,6 +60,7 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
         "previous_narrative 仅供衔接语气，不是本轮回复：不得照搬或整段复用它，"
         "本轮回复必须响应 turn_facts_and_receipts 中的最新玩家行动。"
         "较早的故事仅供衔接，以本轮事实为准。错误正文中的未知人物不能冒充在场人物。"
+        "不得把甲的原有台词转交给乙；新登场人物通过 guest_speakers 独立声明，不得借用熟人的 id。"
     )
     try:
         world = host.context.world_store.load()
