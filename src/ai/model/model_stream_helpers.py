@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any
 
 from src.ai.model.dialogue_output import (
@@ -20,6 +21,7 @@ from src.ai.model.dialogue_output import (
 from src.ai.model.llm_concurrency import ModelResponseError
 from src.ai.model.provider_adapter import note_model_retry
 from src.ai.tools.tool_protocol import strip_tool_protocol
+from src.app.diagnostic_log import emit as log_diagnostic
 from src.gameplay.npc_speaker_aliases import current_scene_npc_ids, turn_allowed_npc_ids
 from src.gameplay.speaker_parser import SpeakerStreamParser
 from src.gameplay.speaker_parser import parse_segments as parse_speaker_segments
@@ -126,7 +128,10 @@ def _speaker_display_name(host, speaker_id: str) -> str:
 def emit_structured_dialogue(
     host, raw, parser, *, finish_reason, log_error, report_error=True
 ) -> str:
+    output_id = uuid.uuid4().hex
+    log_diagnostic("dialogue.raw", host, output_id=output_id, output_text=raw, finish_reason=finish_reason)
     if finish_reason in {"transport_error", "length", "content_filter"}:
+        log_diagnostic("dialogue.rejected", host, output_id=output_id, code=finish_reason)
         raise ModelResponseError(f"模型结构化对话未完成：{finish_reason}")
     try:
         try:
@@ -199,6 +204,7 @@ def emit_structured_dialogue(
                      code=getattr(exc, "category", "invalid_dialogue"),
                      speaker_id=getattr(exc, "speaker_id", ""),
                      source_turn_id=(getattr(exc, "departure", None) or {}).get("turn_id", ""))
+        log_diagnostic("dialogue.rejected", host, output_id=output_id, code=getattr(exc, "category", "invalid_dialogue"))
         log_error(f"模型结构化对话无效：{exc}")
         if report_error and not isinstance(exc, AttributionSuspicion):
             if "复用上一轮叙事" in str(exc):
@@ -220,6 +226,7 @@ def emit_structured_dialogue(
                     "本轮结果未保存，请重新发送刚才的行动。"
                 )
         raise ModelResponseError("模型结构化对话未通过校验") from exc
+    log_diagnostic("dialogue.accepted", host, output_id=output_id, output_text=text)
     # Canonical IDs alone own speech; no prose inference is permitted here.
     # guest id 本轮新声明时引擎身份表尚未登记，发射解析器只认 decode 已放行的集合。
     emit_parser = SpeakerStreamParser(
@@ -236,6 +243,7 @@ def emit_structured_dialogue(
                     host.cb.on_narrative(visible, npc_id)
                 else:
                     host.cb.on_narrative(visible)
+    log_diagnostic("dialogue.emitted", host, output_id=output_id)
     host._turn_guest_speaker_decls = [
         {"speaker_id": block.speaker_id, "display_name": block.display_name}
         for block in parsed.guest_speakers

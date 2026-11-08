@@ -554,6 +554,7 @@ class GameEngine:
             record.setdefault("diagnostics", {})["performance"] = performance
             self.cb.on_performance(performance)
         _context_shadow.commit_turn_surface(self)
+        log_diagnostic("turn.output", self, output_text=narrative)
         log_diagnostic("turn.committed", self, output_chars=len(narrative), choice_count=len(choices), segment_count=len(narrative_segments or []))
         self._active_turn_id = None
         self._turn_performance = None

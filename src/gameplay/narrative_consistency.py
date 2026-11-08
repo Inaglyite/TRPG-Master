@@ -180,6 +180,9 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         if response.choices[0].finish_reason != "stop":
             raise ValueError("一致性重写未完整结束")
         rewritten = str(response.choices[0].message.content or "").strip()
+        from src.app.diagnostic_log import emit as log_diagnostic
+
+        log_diagnostic("consistency.raw", engine, output_text=rewritten, model=model)
         if structured_dialogue:
             from src.ai.model.dialogue_choices import prepare_dialogue_choices
             from src.ai.model.dialogue_contract import validate_live_dialogue

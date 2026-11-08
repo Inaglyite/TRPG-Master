@@ -109,3 +109,80 @@ def test_reader_filters_rotations_and_tolerates_partial_lines(receipts):
     assert [r["event"] for r in rows] == ["turn.committed"]
     assert skipped == 1
     assert read_timeline(receipts, world="other")[0] == []
+
+
+def test_output_content_is_redacted_bounded_and_can_be_disabled(receipts, monkeypatch):
+    raw = '模型原文 sk-test-123456789\n' + '甲' * 70000
+    log.emit("dialogue.raw", host(), output_id="output-1", output_text=raw)
+    log.emit("unrelated.event", host(), output_text="must not be recorded")
+    row = read_timeline(receipts)[0][0]
+    assert row["content_recorded"] and row["content_truncated"]
+    assert len(row["output_text"]) == 65536
+    assert "sk-test" not in row["output_text"]
+    assert len(row["output_sha256"]) == 64
+    assert "output_text" not in read_timeline(receipts)[0][1]
+    monkeypatch.setenv("TRPG_DIAGNOSTIC_CONTENT", "0")
+    log.emit("dialogue.raw", host(), output_text=raw)
+    disabled = read_timeline(receipts)[0][-1]
+    assert not disabled["content_recorded"] and "output_text" not in disabled
+    assert disabled["output_sha256"] == row["output_sha256"]
+
+
+def test_second_turn_preserves_searchable_first_turn_across_rotation(receipts):
+    from tools.diagnose_turn import list_turns
+
+    engine = host()
+    log.emit("turn.started", engine)
+    log.emit("dialogue.raw", engine, output_text="拿上钥匙，先去寓所看看。")
+    log.emit("turn.committed", engine)
+    log._handler().doRollover()
+    engine._active_turn_id = "turn-2"
+    log.emit("turn.started", engine)
+    log.emit("dialogue.raw", engine, output_text="第二回合回复")
+    # A large number of events in a later turn must not hide the earlier turn index.
+    for _ in range(110):
+        log.emit("turn.stage", engine)
+    turns, _ = list_turns(receipts)
+    assert [t["turn_id"] for t in turns] == ["turn-1", "turn-2"]
+    assert turns[0]["saw_start"] and turns[0]["saw_end"]
+    assert not turns[1]["saw_end"]
+    matches, _ = read_timeline(receipts, search="拿上钥匙")
+    assert len(matches) == 1 and matches[0]["turn_id"] == "turn-1"
+    assert len(read_timeline(receipts, turn="turn-1")[0]) == 3
+
+
+def test_repair_trace_links_raw_rejection_and_emitted_content(receipts):
+    from tests.model_fixtures import ReplayClient, run_stream
+    from tests.test_dialogue_contract import payload
+    from tests.test_dialogue_output import make_host
+
+    engine, _ = make_host("")
+    engine._active_turn_id = "turn-repair"
+    bad = payload("你可以——\n1. 翻看剪报\n2. 询问细节")
+    engine.client = ReplayClient([
+        [{"content": bad}, {"finish_reason": "stop"}],
+        [{"content": payload()}, {"finish_reason": "stop"}],
+    ])
+    text, _ = run_stream(engine, retry_on_empty=True)
+    rows, _ = read_timeline(receipts, turn="turn-repair")
+    rows = [r for r in rows if r["event"].startswith("dialogue.")]
+    assert [r["event"] for r in rows] == ["dialogue.raw", "dialogue.rejected", "dialogue.raw", "dialogue.accepted", "dialogue.emitted"]
+    assert rows[0]["output_text"] == bad
+    assert rows[0]["output_id"] == rows[1]["output_id"]
+    assert rows[1]["code"] == "embedded_choice_menu"
+    assert rows[2]["output_id"] == rows[3]["output_id"] == rows[4]["output_id"]
+    assert rows[0]["output_id"] != rows[2]["output_id"]
+    assert rows[3]["output_text"] == text
+
+
+def test_cli_hides_content_until_explicitly_requested(receipts, monkeypatch, capsys):
+    from tools.diagnose_turn import main
+
+    log.emit("dialogue.raw", host(), output_text="剧情内容")
+    command = ["diagnose_turn", "--log-dir", str(receipts), "--json"]
+    monkeypatch.setattr("sys.argv", command)
+    assert main() == 0
+    assert "剧情内容" not in capsys.readouterr().out
+    monkeypatch.setattr("sys.argv", [*command, "--show-content"])
+    assert main() == 0
+    assert "剧情内容" in capsys.readouterr().out

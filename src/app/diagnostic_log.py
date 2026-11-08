@@ -1,7 +1,8 @@
-"""Bounded, metadata-only JSONL receipts. Logging must never change game outcomes."""
+"""Bounded JSONL receipts and redacted narrative evidence; never change game outcomes."""
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import logging
 import math
@@ -27,7 +28,7 @@ _IDS = frozenset({
     "source_turn_id", "speaker_id", "phase", "status", "code", "model", "role",
     "finish_reason", "prompt_profile", "thinking_mode", "tool", "call_id", "parent_call_id",
     "path", "clue_id", "skill_id", "check_id", "scene_id", "error_type", "event_type", "kind",
-    "error_class", "reason", "severity", "source_id",
+    "error_class", "reason", "severity", "source_id", "output_id", "output_sha256",
 })
 _NUMBERS = frozenset({
     "elapsed_ms", "first_token_ms", "tool_count", "message_count", "input_tokens", "output_tokens",
@@ -80,7 +81,7 @@ def emit(event: str, host=None, **fields) -> None:
             "request_id": getattr(host, "_turn_request_id", None),
             **fields,
         }
-        row = {"v": 1, "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
+        row = {"v": 2, "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
                "pid": os.getpid(), "run_id": _RUN_ID, "thread_id": threading.get_ident(),
                "event": event if _ID.fullmatch(event) else "invalid_event"}
         for key, value in references.items():
@@ -88,6 +89,16 @@ def emit(event: str, host=None, **fields) -> None:
                 row[key] = redact(value)
             elif key in _NUMBERS and isinstance(value, (int, float, bool)) and math.isfinite(value):
                 row[key] = value
+        # Output is admitted only at named narrative boundaries, never generic payloads.
+        if event in {"dialogue.raw", "dialogue.accepted", "dialogue.emitted", "turn.output", "consistency.raw"} and isinstance(fields.get("output_text"), str):
+            clean = redact(fields["output_text"])
+            row["output_sha256"] = hashlib.sha256(clean.encode("utf-8")).hexdigest()
+            row["output_chars"] = len(clean)
+            enabled = os.environ.get("TRPG_DIAGNOSTIC_CONTENT", "1").lower() not in {"0", "false", "off"}
+            row["content_recorded"] = enabled
+            row["content_truncated"] = enabled and len(clean) > 65536
+            if enabled:
+                row["output_text"] = clean[:65536]
         # No exception message, source code or locals: only frame locations for debugging.
         if isinstance(fields.get("exception"), BaseException):
             exc = fields["exception"]

@@ -61,7 +61,8 @@ Alembic/Uvicorn 正常的 INFO 也写入该流。Linux 上的 VA-API 初始化�
 后端保留普通运行日志 `trpg.log`，并默认写入 `diagnostics.jsonl`。
 后者每行是一个独立 JSON 事件，带 UTC 时间、进程/运行标识、世界、模组、回合和请求编号。
 记录范围包括经典引擎回合起止/提交、已有阶段校验记录、模型调用结果/重试、工具起止与有限的结果字段。
-它不是前端渲染确认，也不是所有玩法模式的完整审计；详细正文与权威状态仍以数据库回合记录为准。
+此外记录结构化叙述原文（`dialogue.raw`）、拒绝原因（`dialogue.rejected`）、通过校验后的文本（`dialogue.accepted`）、叙述回调完成（`dialogue.emitted`）、一致性重写原文（`consistency.raw`）及实际提交正文（`turn.output`）。同一份原文及其校验结果用 `output_id` 关联，不同修复尝试分别编号。
+`dialogue.emitted` 仅表示后端回调执行完成，不代表浏览器已接收或渲染。它不是所有玩法模式的完整审计，工具调用流、未进入结构化校验的中断流不保证有原文；权威状态仍以数据库回合记录为准。
 
 日志目录按以下优先级选择（启动时生效）：
 
@@ -73,8 +74,12 @@ Alembic/Uvicorn 正常的 INFO 也写入该流。Linux 上的 VA-API 初始化�
 ```bash
 # 最近 100 条事件；默认自动查找上述目录并读取轮转文件
 python tools/diagnose_turn.py
+# 列出保留日志内的历史回合，不仅仅是最新一轮
+python tools/diagnose_turn.py --list-turns
+# 用截图中的文字定位，再通过 world/turn 查看完整链路
+python tools/diagnose_turn.py --search "拿上钥匙"
 # 按世界/回合筛选；编号可从上一条命令输出中取得
-python tools/diagnose_turn.py --world WORLD_ID --turn TURN_ID --limit 200
+python tools/diagnose_turn.py --world WORLD_ID --turn TURN_ID --limit 200 --show-content
 # 指定桌面客户端的日志目录，输出筛选后的 JSONL
 python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --turn TURN_ID --json
 ```
@@ -86,10 +91,12 @@ python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --turn TURN_ID --j
 `model.completed` 表示本次调用已结束，是否成功必须看 `status`；并不保证整个回合已提交。
 
 JSONL 每份最多约 5 MiB，保留 3 份轮转备份；完整一行可能使文件短暂略超阈值。
-默认不记录玩家正文、提示词、原始模型回复、任意工具参数/结果或异常消息；
+正文证据默认开启：每条最多保留脱敏后的前 65536 个字符，`content_truncated` 标记截断，`output_sha256` 是完整脱敏文本的摘要。`TRPG_DIAGNOSTIC_CONTENT=0` 可关闭内容保存，仍记录长度和摘要；`--show-content` 控制查询时是否显示正文（含 `--json`），默认只显示元数据。内容可能含玩家信息、剧透和模型误输出的秘密；凭据按现有规则脱敏，不是匿名化，不应直接分享整个文件。
+不主动记录玩家输入、系统提示词、任意工具参数/结果或异常消息；
 工具异常只保留类型与最后 12 层代码位置。新目录权限为 `0700`，JSONL 新文件为 `0600`
 （Windows 仍以账户 ACL 为准）。原始日志可能包含内部实体 ID，不应未经核对直接外发。
 `TRPG_DIAGNOSTICS=0` 可关闭 JSONL，不影响原有日志。JSONL 写入失败仅提示一次并继续游戏。
+日志不回填升级前的输出。`--list-turns` 扫描所有保留的轮转文件，`saw_start/saw_end` 表示是否见到首尾事件，缺失可能来自轮转、未完成或旧版本，不能直接断言数据损坏。查询会打印实际目录；无结果时应先核对实例、运行目录和版本，不能以本地无记录认定远端未发生。日志不是永久归档，轮转后的更早历史需查对应实例的数据库回合记录。
 同一目录按单个后端进程设计，多进程部署应分别设置 `TRPG_LOG_DIR`，避免轮转互相覆盖。
 
 ## 2. 本地门禁
