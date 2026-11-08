@@ -473,17 +473,14 @@ def test_history_narrative_normalized_to_dialogue_json_on_wire_only():
 @pytest.mark.parametrize("heading", ["**你可以——**", "你可以——", "### 你可以——", "__你可以--__："])
 @pytest.mark.parametrize("separator", [".", ")", "、", "．"])
 @pytest.mark.parametrize("explicit_choices", [True, False])
-def test_menu_format_variants_are_normalized_before_streaming(heading, separator, explicit_choices):
+def test_menu_format_variants_remain_readable_by_legacy_decoder(heading, separator, explicit_choices):
     menu = f"{heading}\n\n  1{separator} 翻看剪报。\n\n  2{separator} 继续追问。\n"
     raw = {"segments": [{"kind": "narration", "text": "窗外的雨忽然密了一阵。\n\n" + menu}],
            "choices": ["翻看剪报", "继续追问"] if explicit_choices else []}
-    host, _ = make_host(json.dumps(raw, ensure_ascii=False))
-    text, calls = run_stream(host)
-    assert not calls
+    text = decode_dialogue_output(json.dumps(raw, ensure_ascii=False), present_npc_ids=set())
     assert text.count("你可以") == 1
     assert "窗外的雨忽然密了一阵。" in text
     assert "1. 翻看剪报" in text and "2. 继续追问" in text
-    assert "".join(chunk for chunk, _ in host.speech).count("你可以") == 1
 
 
 def test_history_removes_repeated_menus_with_markdown_variations():

@@ -44,6 +44,8 @@ from src.app.config import (
     STORY_THINKING_MODE,
     model_timeout_seconds,
 )
+from src.app.diagnostic_log import emit as log_diagnostic
+from src.app.diagnostic_log import trace_tool
 from src.app.engine_primitives import EngineCallbacks, TurnCancelledError
 from src.app.engine_session_switch import switch_engine_context
 from src.app.logger import error as log_error
@@ -285,6 +287,7 @@ class GameEngine:
 
     def _append_model_diagnostic(self, diagnostic: dict) -> None:
         self._ensure_model_session().append_diagnostic(diagnostic)
+        log_diagnostic("model.completed", self, **diagnostic)
 
     def _retrieve_lore_context(self, player_action: str = "") -> LoreSelection | None:
         lorebook = getattr(self, "_lorebook", None)
@@ -416,6 +419,7 @@ class GameEngine:
         self._tool_pipeline_ledger = ToolExecutionLedger()
         self._tool_pipeline_audit = []
         self._tool_pipeline_shadow = []
+        log_diagnostic("turn.started", self, kind=kind, input_chars=len(player_input or ""))
         return turn_id
 
     def performance_span(self, name: str):
@@ -550,6 +554,7 @@ class GameEngine:
             record.setdefault("diagnostics", {})["performance"] = performance
             self.cb.on_performance(performance)
         _context_shadow.commit_turn_surface(self)
+        log_diagnostic("turn.committed", self, output_chars=len(narrative), choice_count=len(choices), segment_count=len(narrative_segments or []))
         self._active_turn_id = None
         self._turn_performance = None
         return record
@@ -573,6 +578,7 @@ class GameEngine:
             error=error,
             diagnostics=failure_diagnostics(self),
         )
+        log_diagnostic("turn.incomplete", self, status=status)
         _context_shadow.rollback_turn_surface(self)
         self.__dict__.pop("_pending_game_over", None)
         self._active_turn_id = None
@@ -1594,6 +1600,7 @@ class GameEngine:
             )
         return self._execute_tool(name, args)
 
+    @trace_tool
     def _execute_tool(self, name: str, args: dict) -> str:
         """执行工具。确认类工具通过回调与玩家交互。"""
         if name == "load_skill":

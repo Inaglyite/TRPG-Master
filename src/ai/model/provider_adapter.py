@@ -172,6 +172,9 @@ def note_model_retry(host: Any, reason: str, error_class: str, backoff_ms: int) 
         retries = []
         host.__dict__["_turn_model_retries"] = retries
     retries.append({"reason": reason, "error_class": error_class, "backoff_ms": backoff_ms})
+    from src.app.diagnostic_log import emit
+
+    emit("model.retry", host, reason=reason, error_class=error_class, backoff_ms=backoff_ms)
     from src.gameplay.turn_performance import increment_counter
 
     increment_counter(host, "model_retry_count")

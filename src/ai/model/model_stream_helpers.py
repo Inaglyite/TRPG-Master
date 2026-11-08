@@ -133,6 +133,9 @@ def emit_structured_dialogue(
             parsed = parse_dialogue_output(raw)
         except ValueError as exc:
             raise DialogueFormatError(f"对话 JSON 损坏或结构缺失：{exc}") from exc
+        from src.ai.model.dialogue_contract import validate_live_dialogue
+
+        validate_live_dialogue(parsed)
         guest_ids, declared_guest_ids, _scene_id = _guest_context(host, parsed)
         from src.ai.model.dialogue_choices import prepare_dialogue_choices
 
@@ -209,6 +212,8 @@ def emit_structured_dialogue(
                     f"本轮叙述未通过校验：{who}已经离场，不能再在现场发言；"
                     "本轮结果未保存，请重新发送刚才的行动。"
                 )
+            elif isinstance(exc, DialogueValidationError) and exc.category in {"embedded_choice_menu", "invalid_choice_format"}:
+                host.cb.on_error("本轮叙述的行动选项格式仍不合规，未展示或保存这份回复；请重试本轮。")
             else:
                 host.cb.on_error(
                     "本轮叙述未通过校验：对话格式损坏或发言者无效；"

@@ -182,10 +182,13 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         rewritten = str(response.choices[0].message.content or "").strip()
         if structured_dialogue:
             from src.ai.model.dialogue_choices import prepare_dialogue_choices
+            from src.ai.model.dialogue_contract import validate_live_dialogue
             from src.ai.model.dialogue_output import decode_dialogue_output, parse_dialogue_output
 
+            parsed = parse_dialogue_output(rewritten)
+            validate_live_dialogue(parsed)
             checked, choice_drops = prepare_dialogue_choices(
-                parse_dialogue_output(rewritten), engine.context.world_store.load()
+                parsed, engine.context.world_store.load()
             )
             if choice_drops:
                 engine.__dict__.setdefault("_turn_choice_policy_dropped", []).extend(choice_drops)

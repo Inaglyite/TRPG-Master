@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import time
 
+from src.app.diagnostic_log import emit
+
 _ID = re.compile(r"^[\w.:-]{1,160}$")
 
 
@@ -22,6 +24,7 @@ def record_stage(engine, phase: str, status: str, **references) -> None:
         if isinstance(value, str) and _ID.fullmatch(value):
             entry[key] = value
     trace = engine.__dict__.setdefault("_turn_stage_trace", [])
+    emit("turn.stage", engine, **entry)
     trace.append(entry)
     del trace[:-64]
 

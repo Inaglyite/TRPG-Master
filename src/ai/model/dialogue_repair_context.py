@@ -92,6 +92,12 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
             "本次错误是 JSON 格式损坏：只修复格式，保留错误正文中的有效内容与人物归属，"
             "不得改写剧情事实。"
         )
+    elif category in {"embedded_choice_menu", "invalid_choice_format"}:
+        instruction += (
+            "本次错误是选项格式违规：把全部行动选项仅放进 choices 数组，每项一个不带编号的单行字符串。"
+            "从所有 segments（包括 narration 和 speech）中移除菜单标题及行动列表；不要在正文再写一份。"
+            "保留原有剧情和已执行回执，不增加检定或工具调用。"
+        )
     elif category in {"departed_speaker", "absent_speaker"}:
         instruction += (
             "本次错误是发言者无效：以 turn_facts_and_receipts 与 departed_speakers 为权威事实，"

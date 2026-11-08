@@ -11,12 +11,22 @@
 import logging
 import os
 import re
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path(
-    os.environ.get("TRPG_LOG_DIR", Path(__file__).resolve().parents[2] / "logs")
-)
+
+def _default_log_dir() -> Path:
+    runtime = os.environ.get("TRPG_RUNTIME_ROOT")
+    if runtime:
+        return Path(runtime) / "logs"
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "logs"
+    project = Path(__file__).resolve().parents[2]
+    return project.parent / "mid_product" / project.name / "work" / "runtime-logs"
+
+
+LOG_DIR = Path(os.environ.get("TRPG_LOG_DIR") or _default_log_dir())
 LOG_FILE = LOG_DIR / "trpg.log"
 MAX_BYTES = 5 * 1024 * 1024  # 5MB
 BACKUP_COUNT = 3
@@ -42,7 +52,7 @@ def _init():
         return
     _initialized = True
 
-    LOG_DIR.mkdir(exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     logger = logging.getLogger("trpg")
     logger.setLevel(getattr(logging, _level, logging.INFO))
