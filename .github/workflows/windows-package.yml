@@ -7,6 +7,7 @@ on:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
       - "tools/retry_network_command.py"
+      - "tools/cache_electron_runtime.py"
       - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
@@ -29,6 +30,7 @@ on:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
       - "tools/retry_network_command.py"
+      - "tools/cache_electron_runtime.py"
       - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
@@ -99,6 +101,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Python build dependency installation failed." }
           npm ci --prefix frontend
           if ($LASTEXITCODE -ne 0) { throw "Locked frontend dependency installation failed." }
+          python tools/retry_network_command.py python tools/cache_electron_runtime.py --electron-dir frontend/node_modules/electron --platform win32 --arch x64
+          if ($LASTEXITCODE -ne 0) { throw "Verified Electron runtime download failed." }
           python tools/retry_network_command.py node frontend/node_modules/electron/install.js
           if ($LASTEXITCODE -ne 0) { throw "Electron runtime installation failed." }
 

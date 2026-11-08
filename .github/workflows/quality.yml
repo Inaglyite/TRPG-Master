@@ -69,7 +69,9 @@ jobs:
           path: ${{ github.workspace }}/.electron-cache
           key: ${{ runner.os }}-electron-${{ hashFiles('frontend/package-lock.json') }}
       - name: Install Electron runtime for E2E
-        run: python ../tools/retry_network_command.py node node_modules/electron/install.js
+        run: |
+          python ../tools/retry_network_command.py python ../tools/cache_electron_runtime.py --platform linux --arch x64
+          python ../tools/retry_network_command.py node node_modules/electron/install.js
         working-directory: frontend
       - name: Save Electron runtime cache
         if: steps.electron-cache.outputs.cache-hit != 'true'
