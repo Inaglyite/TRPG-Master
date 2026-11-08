@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { StartMenuIcon } from "./StartMenuIcon";
 
 import {
   uploadModulePackage,
@@ -182,6 +184,7 @@ function LocalModuleImporter() {
           }
         }}
       >
+        <StartMenuIcon kind="import" />
         <span>导入模组</span>
       </button>
       <input
@@ -202,102 +205,108 @@ function LocalModuleImporter() {
       >
         {status}
       </div>
-      {rendered && (
-        <div
-          id="module-import-overlay"
-          className={closing ? "overlay-closing" : undefined}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) close();
-          }}
-        >
-          <ArchiveFolderPanel
-            ref={panel}
-            className="module-folder"
-            id="module-import-panel"
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="module-import-title"
+      {rendered &&
+        createPortal(
+          <div
+            id="module-import-overlay"
+            className={closing ? "overlay-closing" : undefined}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) close();
+            }}
           >
-            <div className="module-import-header">
-              <div>
-                <div className="module-import-eyebrow">
-                  TRPGMOD / PACKAGE REVIEW
-                </div>
-                <h2 id="module-import-title">导入模组</h2>
-              </div>
-              <button
-                id="module-import-close"
-                type="button"
-                aria-label="关闭模组导入"
-                disabled={busy}
-                onClick={close}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="module-import-body" data-dialog-scroll>
-              <p className="module-import-source">
-                本地模组库 · .trpgmod · 最大 64 MiB
-              </p>
-              <h3 id="module-import-name">
-                {summary?.title ||
-                  (error ? "模组包无法导入" : "正在检查模组包…")}
-              </h3>
-              {summary && (
-                <>
-                  <div id="module-import-meta">
-                    {summary.author || "未署名作者"} · v{summary.version} ·{" "}
-                    {summary.system || "未声明规则"} · {summary.file_count}{" "}
-                    个文件
+            <ArchiveFolderPanel
+              ref={panel}
+              className="module-folder"
+              id="module-import-panel"
+              tabIndex={-1}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="module-import-title"
+            >
+              <div className="module-import-header">
+                <div>
+                  <div className="module-import-eyebrow">
+                    TRPGMOD / PACKAGE REVIEW
                   </div>
-                  <p id="module-import-description">
-                    {summary.description || "这个模组没有提供简介。"}
-                  </p>
-                  {Boolean(summary.warnings?.length) && (
-                    <div id="module-import-warnings">
-                      <div className="module-import-warning-title">
-                        导入前请确认
-                      </div>
-                      <ul>
-                        {summary.warnings.map((warning) => (
-                          <li key={warning}>{warning}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </>
-              )}
-              {error && (
-                <div id="module-import-error" aria-live="assertive">
-                  {error}
+                  <h2 id="module-import-title">导入模组</h2>
                 </div>
-              )}
-              {!summary && !busy && file && (
                 <button
+                  id="module-import-close"
                   type="button"
-                  className="btn-ghost module-retry"
-                  onClick={() => void inspect(file)}
+                  aria-label="关闭模组导入"
+                  disabled={busy}
+                  onClick={close}
                 >
-                  重新检查
+                  ✕
                 </button>
-              )}
-            </div>
-            <div className="module-import-actions">
-              <button id="module-import-cancel" disabled={busy} onClick={close}>
-                取消
-              </button>
-              <button
-                id="module-import-confirm"
-                disabled={busy || !summary}
-                onClick={() => void install()}
-              >
-                {busy && summary ? "正在安装…" : "导入并切换"}
-              </button>
-            </div>
-          </ArchiveFolderPanel>
-        </div>
-      )}
+              </div>
+              <div className="module-import-body" data-dialog-scroll>
+                <p className="module-import-source">
+                  本地模组库 · .trpgmod · 最大 64 MiB
+                </p>
+                <h3 id="module-import-name">
+                  {summary?.title ||
+                    (error ? "模组包无法导入" : "正在检查模组包…")}
+                </h3>
+                {summary && (
+                  <>
+                    <div id="module-import-meta">
+                      {summary.author || "未署名作者"} · v{summary.version} ·{" "}
+                      {summary.system || "未声明规则"} · {summary.file_count}{" "}
+                      个文件
+                    </div>
+                    <p id="module-import-description">
+                      {summary.description || "这个模组没有提供简介。"}
+                    </p>
+                    {Boolean(summary.warnings?.length) && (
+                      <div id="module-import-warnings">
+                        <div className="module-import-warning-title">
+                          导入前请确认
+                        </div>
+                        <ul>
+                          {summary.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+                {error && (
+                  <div id="module-import-error" aria-live="assertive">
+                    {error}
+                  </div>
+                )}
+                {!summary && !busy && file && (
+                  <button
+                    type="button"
+                    className="btn-ghost module-retry"
+                    onClick={() => void inspect(file)}
+                  >
+                    重新检查
+                  </button>
+                )}
+              </div>
+              <div className="module-import-actions">
+                <button
+                  id="module-import-cancel"
+                  disabled={busy}
+                  onClick={close}
+                >
+                  取消
+                </button>
+                <button
+                  id="module-import-confirm"
+                  disabled={busy || !summary}
+                  onClick={() => void install()}
+                >
+                  {busy && summary ? "正在安装…" : "导入并切换"}
+                </button>
+              </div>
+            </ArchiveFolderPanel>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

@@ -155,84 +155,95 @@ export function StartScreen() {
           aria-label="主菜单"
           aria-hidden={menuOff}
         >
-          <div className="start-brand">
-            <div id="start-title" className="fx-glow">
-              {shown.title}
-            </div>
-            <div id="start-subtitle">{shown.subtitle}</div>
-            {shown.description && (
-              <div id="start-description">{shown.description}</div>
-            )}
-          </div>
-          <div id="module-selector">
-            <label id="module-select-label">当前模组</label>
-            <div className="module-select-row">
-              <ModuleSelect
-                options={state.modules}
-                value={shown.activeModule}
-                disabled={state.moduleSwitchPending}
-                labelledBy="module-select-label"
-                onSelect={(id) => void startCommand("switchModule", id)}
-              />
-              <ModuleImporter />
-              <button
-                type="button"
-                className="btn-ghost module-workshop-link"
-                title="打开 TRPG Mod Editor 创作/编辑模组"
-                onClick={openModWorkshop}
-              >
-                <span>模组工坊</span>
-              </button>
-            </div>
-          </div>
-          <nav className="start-menu-actions">
-            <button
-              id="btn-start"
-              className="start-art-button"
-              disabled={
-                state.gameStarting ||
-                state.moduleSwitchPending ||
-                !state.charactersReady ||
-                !characters.length
-              }
-              onClick={() => useStartStore.setState({ view: "characters" })}
-            >
-              <span className="start-art-label">
-                {shown.startButtonText || "开始新游戏"}
-              </span>
-            </button>
-            <button
-              id="btn-continue"
-              className="start-art-button art-plaque"
-              disabled={!state.hasSaves || state.gameStarting}
-              onClick={() => void startCommand("continueGame")}
-            >
-              <span className="start-art-label">从存档开始</span>
-            </button>
-            <ModelSettingsTrigger />
-            <ModuleManager />
+          <nav className="start-module-tools" aria-label="模组工具">
+            <ModuleImporter />
             <button
               type="button"
-              className="start-menu-button"
-              onClick={() =>
-                useAppStore.getState().setCharacterLibraryOpen(true)
-              }
+              className="btn-ghost module-workshop-link"
+              title="打开 TRPG Mod Editor 创作/编辑模组"
+              onClick={openModWorkshop}
             >
-              <StartMenuIcon kind="characters" />
-              <span>角色库</span>
+              <StartMenuIcon kind="workshop" />
+              <span>模组工坊</span>
             </button>
-            {/\bElectron\//.test(navigator.userAgent) && (
-              <button
-                id="btn-exit"
-                className="start-menu-button start-menu-exit"
-                onClick={() => window.close()}
-              >
-                <span>⏻</span>
-                <span>退出游戏</span>
-              </button>
-            )}
+            <ModuleManager />
           </nav>
-          <div id="start-hint">{state.hint}</div>
+          <div className="start-menu-main">
+            <div className="start-brand">
+              <div id="start-title" className="fx-glow">
+                {shown.title}
+              </div>
+              <div id="start-subtitle">{shown.subtitle}</div>
+              {shown.description && (
+                <div id="start-description">{shown.description}</div>
+              )}
+            </div>
+            <div id="module-selector">
+              <label id="module-select-label">当前模组</label>
+              <div className="module-select-row">
+                <ModuleSelect
+                  options={state.modules}
+                  value={shown.activeModule}
+                  disabled={state.moduleSwitchPending}
+                  labelledBy="module-select-label"
+                  onSelect={(id) => void startCommand("switchModule", id)}
+                />
+              </div>
+            </div>
+            <nav className="start-menu-actions">
+              <button
+                id="btn-start"
+                className="start-art-button"
+                disabled={
+                  state.gameStarting ||
+                  state.moduleSwitchPending ||
+                  !state.charactersReady ||
+                  !characters.length
+                }
+                onClick={() => useStartStore.setState({ view: "characters" })}
+              >
+                <span className="start-art-label">
+                  {shown.startButtonText || "开始新游戏"}
+                </span>
+              </button>
+              <button
+                id="btn-continue"
+                className="start-art-button art-plaque"
+                disabled={!state.hasSaves || state.gameStarting}
+                onClick={() => void startCommand("continueGame")}
+              >
+                <span className="start-art-label">从存档开始</span>
+              </button>
+            </nav>
+            <div id="start-hint">{state.hint}</div>
+          </div>
+          <nav className="start-corner-actions" aria-label="游戏工具">
+            <div className="start-library-actions">
+              <button
+                type="button"
+                className="start-menu-button"
+                onClick={() =>
+                  useAppStore.getState().setCharacterLibraryOpen(true)
+                }
+              >
+                <StartMenuIcon kind="characters" />
+                <span>角色库</span>
+              </button>
+            </div>
+            <div className="start-system-actions">
+              <ModelSettingsTrigger />
+              {/\bElectron\//.test(navigator.userAgent) && (
+                <button
+                  id="btn-exit"
+                  className="start-menu-button start-menu-exit"
+                  onClick={() => window.close()}
+                >
+                  <span>⏻</span>
+                  <span>退出游戏</span>
+                </button>
+              )}
+            </div>
+          </nav>
         </section>
         <section
           id="character-select-view"

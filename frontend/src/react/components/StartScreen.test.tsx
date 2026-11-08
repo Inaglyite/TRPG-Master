@@ -80,10 +80,13 @@ describe("StartScreen", () => {
     render(<StartScreen />);
     const moduleSelect = screen.getByRole("button", { name: "当前模组" });
     const importButton = screen.getByRole("button", { name: /导入模组/ });
-    // 自绘下拉触发器与导入按钮仍在同一行（.module-select-row）
-    expect(moduleSelect.closest(".module-select-row")).toBe(
-      importButton.parentElement,
+    // 主行动与角落工具分组，下拉不再与辅助按钮争抢宽度。
+    expect(moduleSelect.closest(".start-menu-main")).toBeInTheDocument();
+    expect(importButton.closest(".start-module-tools")).toHaveAttribute(
+      "aria-label",
+      "模组工具",
     );
+    expect(importButton.closest(".module-select-row")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /开始新游戏/ }));
     // 双挂载：两个视图常驻，切换只翻转 view-off class
     expect(document.getElementById("character-select-view")).not.toHaveClass(

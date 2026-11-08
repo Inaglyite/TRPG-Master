@@ -135,8 +135,17 @@
     max-height: calc(100vh - 28px);
   }
   #start-menu-view {
-    width: min(430px, 100%);
+    width: 100%;
+    height: calc(100dvh - 28px);
+    gap: 14px;
   }
+  .start-menu-main { width: min(430px, 100%); }
+  .start-module-tools { justify-self: center; }
+  .start-module-tools #btn-import-module,
+  .start-module-tools .module-workshop-link,
+  .start-module-tools .start-menu-button { min-height: 40px; }
+  .start-corner-actions { gap: 8px; }
+  .start-system-actions { gap: 0; }
   .start-brand {
     margin-bottom: 20px;
   }
@@ -151,7 +160,7 @@
     letter-spacing: 1px;
   }
   #module-selector {
-    width: 100%;
+    width: min(280px, 100%);
   }
   #btn-start {
     width: min(350px, 96%);
@@ -575,4 +584,17 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Short windows keep edge tools in normal document flow, with vertical scroll if needed. */
+@media (max-height: 560px) {
+  #start-overlay { overflow-y: auto; align-items: flex-start; }
+  #start-box { max-height: none; margin: 14px 0; }
+  #start-menu-view {
+    height: auto;
+    min-height: calc(100dvh - 28px);
+    grid-template-rows: auto 1fr auto;
+    gap: 20px;
+  }
+  .start-menu-main { padding: 10px 0; }
 }

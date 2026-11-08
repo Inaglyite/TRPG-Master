@@ -1,5 +1,9 @@
 /** Small line emblems for the secondary archive actions. */
-export function StartMenuIcon({ kind }: { kind: "modules" | "characters" }) {
+export function StartMenuIcon({
+  kind,
+}: {
+  kind: "modules" | "characters" | "import" | "workshop";
+}) {
   return (
     <svg
       className="start-menu-icon start-menu-line-icon"
@@ -16,6 +20,14 @@ export function StartMenuIcon({ kind }: { kind: "modules" | "characters" }) {
         <>
           <path d="M3 3.5h14v13H3zM3 9.5h14M8 6.5h4M8 12.5h4" />
           <path d="M5 16.5v1M15 16.5v1" />
+        </>
+      ) : kind === "import" ? (
+        <>
+          <path d="M10 2v10m-3-3 3 3 3-3M3 12v5h14v-5" />
+        </>
+      ) : kind === "workshop" ? (
+        <>
+          <path d="m12 3 5 5-9 9H3v-5zM10 5l5 5M3 17l4-1-3-3" />
         </>
       ) : (
         <>

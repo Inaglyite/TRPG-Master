@@ -27,7 +27,7 @@
 }
 #start-box {
   position: relative;
-  width: min(1080px, calc(100vw - 48px));
+  width: calc(100vw - 64px);
   max-height: calc(100vh - 40px);
   min-height: 0;
   filter: drop-shadow(0 10px 36px rgba(0, 0, 0, 0.72));
@@ -258,12 +258,69 @@
   display: none !important;
 }
 #start-menu-view {
-  width: min(480px, 100%);
+  width: 100%;
+  height: calc(100dvh - 40px);
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 20px;
   text-align: center;
+}
+.start-menu-main {
+  min-width: 0;
+  width: min(480px, 100%);
+  align-self: center;
+  justify-self: center;
+}
+#character-select-view {
+  width: min(1080px, 100%);
+  justify-self: center;
+}
+.start-module-tools {
+  min-width: 0;
+  justify-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  width: max-content;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 24%);
+}
+.start-corner-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.start-library-actions,
+.start-system-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.start-corner-actions .start-menu-button,
+.start-module-tools .start-menu-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 12px;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.start-corner-actions .start-menu-button:hover,
+.start-module-tools .start-menu-button:hover {
+  color: var(--gold-bright);
+}
+.start-corner-actions .start-menu-button:focus-visible,
+.start-module-tools .start-menu-button:focus-visible {
+  outline: 1px solid var(--gold-bright);
+  outline-offset: 2px;
 }
 .start-brand {
   margin-bottom: 30px;
@@ -318,21 +375,21 @@
 }
 
 #module-selector {
-  width: 100%;
+  width: min(280px, 100%);
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 22px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  margin: 0 auto 24px;
   text-align: left;
 }
 #module-selector label {
-  flex: 0 0 auto;
-  margin: 0 0 0 2px;
   color: var(--gold-dim);
   font-family: var(--font-display);
   font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.2em;
+  text-align: center;
   text-shadow: 0 1px 2px #000;
 }
 /* 自绘模组下拉（ModuleSelect）：原生 select 弹层由 OS 渲染无法主题化，
@@ -488,66 +545,52 @@
   gap: 8px;
   align-items: stretch;
 }
-/* Imagegen brass-and-leather tool plaques; text remains accessible HTML. */
+/* Compact archive tools; the central brass plaques remain the main actions. */
 #btn-import-module,
 .module-workshop-link {
-  --module-plaque: url("../../assets/ui/module-workshop-plaque-v1.webp");
-  position: relative;
-  isolation: isolate;
-  flex: 0 0 136px;
-  min-height: 44px;
-  padding: 0 12px 0 37px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: transparent;
   box-shadow: none;
-  color: var(--gold-bright);
+  color: var(--text-dim);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
   white-space: nowrap;
   text-shadow: 0 1px 2px #000;
-  transition: filter 0.16s ease, transform 0.1s ease;
-}
-#btn-import-module {
-  --module-plaque: url("../../assets/ui/module-import-plaque-v1.webp");
-}
-#btn-import-module::before,
-.module-workshop-link::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: var(--module-plaque) center / 100% 100% no-repeat;
-  pointer-events: none;
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease;
 }
 #btn-import-module:hover:not(:disabled),
 .module-workshop-link:hover:not(:disabled) {
-  box-shadow: none;
-  filter: brightness(1.18);
+  color: var(--gold-bright);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
 }
 #btn-import-module:focus-visible,
 .module-workshop-link:focus-visible {
-  outline: 2px solid var(--gold-bright);
-  outline-offset: 3px;
-  box-shadow: none;
+  outline: 1px solid var(--gold-bright);
+  outline-offset: 2px;
 }
 #btn-import-module:disabled {
   cursor: wait;
-  filter: grayscale(0.6);
-}
-@media (max-width: 700px) {
-  #module-selector { align-items: flex-start; }
-  #module-selector label { padding-top: 15px; }
-  .module-select-row > .module-select { flex-basis: 100%; }
-  #btn-import-module, .module-workshop-link { flex: 1 0 136px; }
+  opacity: 0.5;
 }
 @media (prefers-reduced-motion: reduce) {
   #btn-import-module, .module-workshop-link { transition: none; }
 }
 #module-import-status {
   flex: 0 0 100%;
+  max-width: 320px;
+  padding: 0 10px;
+  text-align: right;
   order: 3;
   min-height: 18px;
   margin-top: 2px;

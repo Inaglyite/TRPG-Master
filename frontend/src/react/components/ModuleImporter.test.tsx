@@ -56,6 +56,10 @@ describe("ModuleImporter boundaries", () => {
     const { container } = render(<ModuleImporter />);
     choose(container);
     await screen.findByText("测试模组");
+    expect(
+      screen.getByRole("dialog").closest("#module-import-overlay")
+        ?.parentElement,
+    ).toBe(document.body);
     const close = screen.getByRole("button", { name: "关闭模组导入" });
     // The summary can render before inspect's finally clears busy. Assert the
     // actual interactive transition rather than assuming text means ready.
