@@ -7,6 +7,7 @@ export function StartMenuIcon({
   return (
     <svg
       className="start-menu-icon start-menu-line-icon"
+      data-menu-icon={kind}
       viewBox="0 0 20 20"
       fill="none"
       stroke="currentColor"

@@ -155,7 +155,7 @@ export function StartScreen() {
           aria-label="主菜单"
           aria-hidden={menuOff}
         >
-          <nav className="start-module-tools" aria-label="模组工具">
+          <nav className="start-module-tools" aria-label="游戏工具">
             <ModuleImporter />
             <button
               type="button"
@@ -167,6 +167,27 @@ export function StartScreen() {
               <span>模组工坊</span>
             </button>
             <ModuleManager />
+            <button
+              type="button"
+              className="start-menu-button"
+              onClick={() =>
+                useAppStore.getState().setCharacterLibraryOpen(true)
+              }
+            >
+              <StartMenuIcon kind="characters" />
+              <span>角色库</span>
+            </button>
+            <ModelSettingsTrigger />
+            {/\bElectron\//.test(navigator.userAgent) && (
+              <button
+                id="btn-exit"
+                className="start-menu-button start-menu-exit"
+                onClick={() => window.close()}
+              >
+                <span aria-hidden="true">⏻</span>
+                <span>退出游戏</span>
+              </button>
+            )}
           </nav>
           <div className="start-menu-main">
             <div className="start-brand">
@@ -217,33 +238,6 @@ export function StartScreen() {
             </nav>
             <div id="start-hint">{state.hint}</div>
           </div>
-          <nav className="start-corner-actions" aria-label="游戏工具">
-            <div className="start-library-actions">
-              <button
-                type="button"
-                className="start-menu-button"
-                onClick={() =>
-                  useAppStore.getState().setCharacterLibraryOpen(true)
-                }
-              >
-                <StartMenuIcon kind="characters" />
-                <span>角色库</span>
-              </button>
-            </div>
-            <div className="start-system-actions">
-              <ModelSettingsTrigger />
-              {/\bElectron\//.test(navigator.userAgent) && (
-                <button
-                  id="btn-exit"
-                  className="start-menu-button start-menu-exit"
-                  onClick={() => window.close()}
-                >
-                  <span>⏻</span>
-                  <span>退出游戏</span>
-                </button>
-              )}
-            </div>
-          </nav>
         </section>
         <section
           id="character-select-view"

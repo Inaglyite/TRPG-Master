@@ -84,7 +84,7 @@ describe("StartScreen", () => {
     expect(moduleSelect.closest(".start-menu-main")).toBeInTheDocument();
     expect(importButton.closest(".start-module-tools")).toHaveAttribute(
       "aria-label",
-      "模组工具",
+      "游戏工具",
     );
     expect(importButton.closest(".module-select-row")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /开始新游戏/ }));
@@ -97,6 +97,41 @@ describe("StartScreen", () => {
       screen.getByRole("button", { name: "以此调查员开始" }),
     ).toBeEnabled();
   });
+  it("浏览器中的五个辅助入口集中在同一个游戏工具面板", () => {
+    render(<StartScreen />);
+    const tools = screen.getByRole("navigation", { name: "游戏工具" });
+    const buttons = within(tools).getAllByRole("button");
+    const names = ["导入模组", "模组工坊", "模组管理", "角色库", "游戏设置"];
+    expect(buttons).toHaveLength(names.length);
+    buttons.forEach((button, index) =>
+      expect(button).toHaveAccessibleName(names[index]),
+    );
+    expect(screen.queryByRole("button", { name: "退出游戏" })).toBeNull();
+    expect(document.querySelector(".start-corner-actions")).toBeNull();
+    expect(document.querySelector(".start-library-actions")).toBeNull();
+    expect(document.querySelector(".start-system-actions")).toBeNull();
+  });
+
+  it("Electron 退出入口与其余五个辅助入口放在同一个面板", () => {
+    const userAgent = vi
+      .spyOn(navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 Electron/42.4.1");
+    try {
+      render(<StartScreen />);
+      const tools = screen.getByRole("navigation", { name: "游戏工具" });
+      expect(within(tools).getAllByRole("button")).toHaveLength(6);
+      expect(
+        within(tools).getByRole("button", { name: "退出游戏" }),
+      ).toBeInTheDocument();
+      expect(within(tools).getAllByRole("button").at(-1)).toHaveAttribute(
+        "id",
+        "btn-exit",
+      );
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+
   it("does not spend roster space on empty character categories", () => {
     useStartStore.setState((state) => ({
       characterGroups: [

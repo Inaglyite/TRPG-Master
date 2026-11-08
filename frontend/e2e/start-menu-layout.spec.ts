@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { openLocalStartScreen } from "./readiness";
 
 const require = createRequire(import.meta.url);
@@ -13,40 +13,91 @@ test.afterAll(async () => {
   await stub?.close();
 });
 
+async function expectUnifiedTools(page: Page, desktop = false) {
+  const tools = page.getByRole("navigation", { name: "游戏工具" });
+  const names = ["导入模组", "模组工坊", "模组管理", "角色库", "游戏设置"];
+  if (desktop) names.push("退出游戏");
+  const buttons = tools.getByRole("button");
+  await expect(buttons).toHaveCount(names.length);
+  for (const [index, name] of names.entries()) {
+    await expect(buttons.nth(index)).toHaveAccessibleName(name);
+    await expect(buttons.nth(index)).toBeVisible();
+  }
+  await expect(page.locator(".start-corner-actions")).toHaveCount(0);
+  const measurements = await page.evaluate(() => {
+    const panel = document.querySelector(".start-module-tools")!;
+    const tools = panel.getBoundingClientRect();
+    const main = document
+      .querySelector(".start-menu-main")!
+      .getBoundingClientRect();
+    const controls = [...panel.querySelectorAll("button")].map((button) => {
+      const rect = button.getBoundingClientRect();
+      return {
+        x: rect.x,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        height: rect.height,
+        fits: button.scrollWidth <= button.clientWidth,
+        oneLine: [...button.querySelectorAll("span")]
+          .filter(
+            (label) =>
+              label.textContent?.trim() &&
+              label.getAttribute("aria-hidden") !== "true",
+          )
+          .every((label) => {
+            const range = document.createRange();
+            range.selectNodeContents(label);
+            return range.getClientRects().length <= 1;
+          }),
+      };
+    });
+    return {
+      panelFits: tools.left >= 0 && tools.right <= window.innerWidth,
+      noMainOverlap:
+        tools.right <= main.left ||
+        tools.left >= main.right ||
+        tools.bottom <= main.top ||
+        tools.top >= main.bottom,
+      buttonsInside: controls.every(
+        (button) =>
+          button.x >= tools.left &&
+          button.right <= tools.right &&
+          button.top >= tools.top &&
+          button.bottom <= tools.bottom,
+      ),
+      buttonsSeparate: controls.every((button, index) =>
+        controls
+          .slice(index + 1)
+          .every(
+            (other) =>
+              button.right <= other.x ||
+              button.x >= other.right ||
+              button.bottom <= other.top ||
+              button.top >= other.bottom,
+          ),
+      ),
+      heights: controls.map((button) => button.height),
+      labelsFit: controls.every((button) => button.fits && button.oneLine),
+    };
+  });
+  expect(measurements.panelFits).toBe(true);
+  expect(measurements.noMainOverlap).toBe(true);
+  expect(measurements.buttonsInside).toBe(true);
+  expect(measurements.buttonsSeparate).toBe(true);
+  expect(measurements.labelsFit).toBe(true);
+  expect(new Set(measurements.heights).size).toBe(1);
+  return tools;
+}
+
 for (const width of [1280, 939, 640, 390, 320]) {
-  test(`主菜单 ${width}px：主行动与角落工具独立，选角时辅助工具退场`, async ({
+  test(`主菜单 ${width}px：五个辅助入口集中且不重叠，选角时整体退场`, async ({
     page,
   }, info) => {
     await page.setViewportSize({ width, height: 800 });
     await openLocalStartScreen(page, `${origin}/?mode=local`);
     await expect(page.locator(".boot-loader")).toHaveCount(0);
-    const tools = page.getByRole("navigation", { name: "模组工具" });
-    await expect(tools.getByRole("button", { name: "导入模组" })).toBeVisible();
-    await expect(tools.getByRole("button", { name: "模组工坊" })).toBeVisible();
-    await expect(tools.getByRole("button", { name: "模组管理" })).toBeVisible();
-    const boxes = await page.evaluate(() => {
-      const rect = (selector: string) => {
-        const r = document.querySelector(selector)!.getBoundingClientRect();
-        return { x: r.x, right: r.right, top: r.top, bottom: r.bottom };
-      };
-      return {
-        tools: rect(".start-module-tools"),
-        main: rect(".start-menu-main"),
-        footer: rect(".start-corner-actions"),
-      };
-    });
-    expect(boxes.tools.x).toBeGreaterThanOrEqual(0);
-    expect(boxes.tools.right).toBeLessThanOrEqual(width);
-    expect(boxes.tools.bottom).toBeLessThan(boxes.main.top);
-    expect(boxes.main.bottom).toBeLessThan(boxes.footer.top);
-    const buttons = await tools.getByRole("button").evaluateAll((items) =>
-      items.map((item) => ({
-        height: item.getBoundingClientRect().height,
-        fits: item.scrollWidth <= item.clientWidth,
-      })),
-    );
-    expect(new Set(buttons.map((item) => item.height)).size).toBe(1);
-    expect(buttons.every((item) => item.fits)).toBe(true);
+    const tools = await expectUnifiedTools(page);
     await page.locator(".module-select-trigger").click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await page.keyboard.press("Escape");
@@ -55,7 +106,6 @@ for (const width of [1280, 939, 640, 390, 320]) {
     await page.screenshot({ path: info.outputPath(`start-menu-${width}.png`) });
     await page.locator("#btn-start").click();
     await expect(tools).toBeHidden();
-    await expect(page.locator(".start-corner-actions")).toBeHidden();
     await expect(
       page
         .locator("#character-select-view")
@@ -106,7 +156,7 @@ test("角落导入预览仍覆盖整个视口，取消后焦点回到原入口",
   await expect(page.locator("#btn-import-module")).toBeFocused();
 });
 
-test("低高度桌面窗口：退出和设置入口可见，角落工具与主行动不重叠", async ({
+test("低高度 Electron 窗口：六个辅助入口集中，按钮完整且与主行动不重叠", async ({
   browser,
 }, info) => {
   const context = await browser.newContext({
@@ -117,24 +167,7 @@ test("低高度桌面窗口：退出和设置入口可见，角落工具与主�
     const page = await context.newPage();
     await openLocalStartScreen(page, `${origin}/?mode=local`);
     await expect(page.locator(".boot-loader")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "退出游戏" })).toBeVisible();
-    await page.locator("#btn-settings").scrollIntoViewIfNeeded();
-    const measurements = await page.evaluate(() => {
-      const tools = document
-        .querySelector(".start-module-tools")!
-        .getBoundingClientRect();
-      const main = document
-        .querySelector(".start-menu-main")!
-        .getBoundingClientRect();
-      const footer = document
-        .querySelector(".start-corner-actions")!
-        .getBoundingClientRect();
-      return {
-        noOverlap: tools.bottom < main.top && main.bottom < footer.top,
-        fits: footer.left >= 0 && footer.right <= window.innerWidth,
-      };
-    });
-    expect(measurements).toEqual({ noOverlap: true, fits: true });
+    await expectUnifiedTools(page, true);
     await page.screenshot({ path: info.outputPath("short-electron-menu.png") });
   } finally {
     await context.close();

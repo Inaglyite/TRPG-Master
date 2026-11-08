@@ -141,11 +141,7 @@
   }
   .start-menu-main { width: min(430px, 100%); }
   .start-module-tools { justify-self: center; }
-  .start-module-tools #btn-import-module,
-  .start-module-tools .module-workshop-link,
-  .start-module-tools .start-menu-button { min-height: 40px; }
-  .start-corner-actions { gap: 8px; }
-  .start-system-actions { gap: 0; }
+
   .start-brand {
     margin-bottom: 20px;
   }
@@ -593,8 +589,18 @@
   #start-menu-view {
     height: auto;
     min-height: calc(100dvh - 28px);
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto;
     gap: 20px;
   }
   .start-menu-main { padding: 10px 0; }
+}
+
+@media (max-width: 520px) {
+  .start-module-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(286px, 100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #start-menu-view .start-module-tools > button { transition: none; }
 }

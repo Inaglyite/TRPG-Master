@@ -263,7 +263,7 @@
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 20px;
   text-align: center;
 }
@@ -280,47 +280,77 @@
 .start-module-tools {
   min-width: 0;
   justify-self: end;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  width: max-content;
-  padding: 5px;
-  border: 1px solid color-mix(in srgb, var(--gold) 26%, transparent);
+  gap: 4px 8px;
+  width: min(430px, 100%);
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
   border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
   box-shadow: 0 4px 18px rgb(0 0 0 / 24%);
 }
-.start-corner-actions {
+/* Each secondary action has its own imagegen plaque; labels stay native text. */
+#start-menu-view .start-module-tools > button {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.start-library-actions,
-.start-system-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.start-corner-actions .start-menu-button,
-.start-module-tools .start-menu-button {
-  flex: 0 0 auto;
-  min-height: 38px;
-  padding: 0 12px;
-  white-space: nowrap;
-  color: var(--text-dim);
-}
-.start-corner-actions .start-menu-button:hover,
-.start-module-tools .start-menu-button:hover {
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px 0 33px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--corner-plaque) center / 100% auto no-repeat;
+  box-shadow: none;
   color: var(--gold-bright);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px #000;
+  cursor: pointer;
+  transition: filter 0.16s ease, transform 0.16s ease;
 }
-.start-corner-actions .start-menu-button:focus-visible,
-.start-module-tools .start-menu-button:focus-visible {
-  outline: 1px solid var(--gold-bright);
+.start-module-tools #btn-import-module {
+  --corner-plaque: url("../../assets/ui/corner-import-plaque-v1.webp");
+}
+.start-module-tools .module-workshop-link {
+  --corner-plaque: url("../../assets/ui/corner-workshop-plaque-v1.webp");
+}
+.start-module-tools button:has([data-menu-icon="modules"]) {
+  --corner-plaque: url("../../assets/ui/corner-modules-plaque-v1.webp");
+}
+.start-module-tools button:has([data-menu-icon="characters"]) {
+  --corner-plaque: url("../../assets/ui/corner-characters-plaque-v1.webp");
+}
+.start-module-tools #btn-settings {
+  --corner-plaque: url("../../assets/ui/corner-settings-plaque-v1.webp");
+}
+.start-module-tools #btn-exit {
+  --corner-plaque: url("../../assets/ui/corner-exit-plaque-v1.webp");
+}
+.start-module-tools .start-menu-icon,
+.start-module-tools #btn-exit [aria-hidden="true"] {
+  display: none;
+}
+#start-menu-view .start-module-tools > button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.18);
+}
+#start-menu-view .start-module-tools > button:focus-visible {
+  outline: 2px solid var(--gold-bright);
   outline-offset: 2px;
+  filter: brightness(1.15);
+}
+#start-menu-view .start-module-tools > button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+  filter: grayscale(0.5);
 }
 .start-brand {
   margin-bottom: 30px;
@@ -588,8 +618,10 @@
 }
 #module-import-status {
   flex: 0 0 100%;
-  max-width: 320px;
-  padding: 0 10px;
+  grid-column: 1 / -1;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 5px;
   text-align: right;
   order: 3;
   min-height: 18px;
