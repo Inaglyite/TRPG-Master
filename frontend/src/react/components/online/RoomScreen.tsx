@@ -258,7 +258,7 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
             className="btn-ghost"
             onClick={() => openSettings()}
           >
-            模型设置
+            游戏设置
           </button>
           <button
             type="button"

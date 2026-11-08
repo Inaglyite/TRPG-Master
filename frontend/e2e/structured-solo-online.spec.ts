@@ -1,7 +1,7 @@
 /**
  * 云端单人（账号化私密世界）的结构化模式验收。
  *
- * 覆盖需求「本地、云端单人和多人均暴露相应模式和按钮，human 不被模型设置门禁挡住」：
+ * 覆盖需求「本地、云端单人和多人均暴露相应模式和按钮，human 不被游戏设置门禁挡住」：
  * - 云端单人创建冒险时可勾选“结构化操作模式（人类主持）”；
  * - human 结构化世界**不需要 BYOK**：不配置任何模型也能直接开局（对比：
  *   `model-settings-online.spec.ts` 证明 legacy/BYOK 世界未配置会被拒）；
@@ -321,7 +321,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
         .locator(".online-conn-hint")
         .evaluate((node) => getComputedStyle(node).whiteSpace),
     ).toBe("nowrap");
-    for (const label of ["角色库", "模型设置"]) {
+    for (const label of ["角色库", "游戏设置"]) {
       const geometry = await chooser
         .getByRole("button", { name: label, exact: true })
         .evaluate((node) => {
@@ -384,7 +384,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   await expect(page.locator("#hp-bar")).not.toContainText("--");
   await expect(page.getByTestId("btn-free-roll")).toBeEnabled();
   // 没有被模型门禁挡住：不出现门禁引导按钮（.model-gate-cta）与“尚未配置”提示。
-  // 顶栏的“模型设置”按钮是通用入口，任何模式都在，不算门禁。
+  // 顶栏的“游戏设置”按钮是通用入口，任何模式都在，不算门禁。
   await expect(page.getByText(/尚未配置/)).toHaveCount(0);
   await expect(page.locator(".model-gate-cta")).toHaveCount(0);
 

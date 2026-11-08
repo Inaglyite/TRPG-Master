@@ -145,7 +145,7 @@ export function SoloCharacterSelectScreen() {
             className="btn-ghost character-settings-entry"
             onClick={() => openSettings()}
           >
-            模型设置
+            游戏设置
           </button>
           <span
             className={`online-conn-hint${roomConnection === "connected" ? " online-conn-hint--ok" : ""}`}

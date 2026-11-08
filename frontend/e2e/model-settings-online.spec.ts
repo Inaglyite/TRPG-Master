@@ -1,8 +1,8 @@
 import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
- * 模型设置 e2e（云端：账号鉴权 + TLS + BYOK-only）。
+ * 游戏设置 e2e（云端：账号鉴权 + TLS + BYOK-only）。
  *
- * 闭环 A（云端单人）：注册 → 开世界 → 选角页模型设置入口 → 未配置开局被拒
+ * 闭环 A（云端单人）：注册 → 开世界 → 选角页游戏设置入口 → 未配置开局被拒
  * （model_not_configured + 引导按钮）→ 私网地址被 SSRF 策略拒绝（可读原因）→
  * 配置到 E2E 桩（运营白名单 + 连接钉扎）→ 测试连接真实探针 → 开局成功（平台
  * 兜底地址指向死端口，被调用即失败）→ 刷新后回填且 Key 不回显 → 清除配置回到
@@ -321,12 +321,12 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   await page.locator(".character-card").first().click();
   await expect(confirmCharacter).toBeEnabled({ timeout: 15_000 });
 
-  // 选角页有模型设置入口；面板显示 BYOK 未配置警示
+  // 选角页有游戏设置入口；面板显示 BYOK 未配置警示
   await page
     .getByTestId("solo-character-select")
-    .getByRole("button", { name: "模型设置" })
+    .getByRole("button", { name: "游戏设置" })
     .click();
-  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  const dialog = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/云端为自带 Key（BYOK）模式/)).toBeVisible();
   await dialog.getByRole("button", { name: "取消" }).click();
@@ -336,7 +336,7 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   await expect(page.getByText(/尚未配置/)).toBeVisible({ timeout: 15_000 });
   await page
     .locator(".online-notice")
-    .getByRole("button", { name: "打开模型设置" })
+    .getByRole("button", { name: "打开游戏设置" })
     .click();
   await expect(dialog).toBeVisible();
 
@@ -388,7 +388,7 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   const settingsEntry = page2.locator("#btn-model-settings");
   await settingsEntry.waitFor({ state: "visible", timeout: 60_000 });
   await settingsEntry.click();
-  const dialog2 = page2.getByRole("dialog", { name: "模型设置" });
+  const dialog2 = page2.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog2).toBeVisible();
   const narrativeCard2 = dialog2.locator('[data-role="narrative"]');
   await expect(
@@ -416,10 +416,10 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
   const member = await memberContext.newPage();
   try {
     await register(owner, `e2e_owner_${runId}`, false);
-    await owner.getByLabel("房间名称").fill("模型设置验收房");
+    await owner.getByLabel("房间名称").fill("游戏设置验收房");
     await owner.getByRole("button", { name: "创建房间" }).click();
     await expect(
-      owner.getByRole("heading", { name: "模型设置验收房" }),
+      owner.getByRole("heading", { name: "游戏设置验收房" }),
     ).toBeVisible();
     await owner.getByRole("button", { name: "选择" }).first().click();
     await expect(owner.getByRole("button", { name: "释放" })).toBeVisible();
@@ -435,7 +435,7 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
       .fill(inviteToken!);
     await member.getByRole("button", { name: "加入房间" }).click();
     await expect(
-      member.getByRole("heading", { name: "模型设置验收房" }),
+      member.getByRole("heading", { name: "游戏设置验收房" }),
     ).toBeVisible();
     await member.getByRole("button", { name: "选择" }).first().click();
     // 点击只代表选角请求已发出；选角落账会清除该成员的准备状态。
@@ -454,9 +454,9 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
     await expect(owner.getByText(/尚未配置/)).toBeVisible({ timeout: 15_000 });
     await owner
       .locator(".online-notice")
-      .getByRole("button", { name: "打开模型设置" })
+      .getByRole("button", { name: "打开游戏设置" })
       .click();
-    const ownerDialog = owner.getByRole("dialog", { name: "模型设置" });
+    const ownerDialog = owner.getByRole("dialog", { name: "游戏设置" });
     await expect(ownerDialog).toBeVisible();
 
     // 房主在房间页直接配置到 E2E 桩
@@ -466,9 +466,9 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
     // 成员面板：只读 + 费用归属说明 + 无保存按钮
     await member
       .locator(".online-room-screen")
-      .getByRole("button", { name: "模型设置" })
+      .getByRole("button", { name: "游戏设置" })
       .click();
-    const memberDialog = member.getByRole("dialog", { name: "模型设置" });
+    const memberDialog = member.getByRole("dialog", { name: "游戏设置" });
     await expect(memberDialog).toBeVisible();
     await expect(memberDialog.getByText(/仅房主可修改/)).toBeVisible();
     await expect(memberDialog.getByText(/额度由房主的 Key 承担/)).toBeVisible();
@@ -494,7 +494,7 @@ test("多人房间：BYOK 门禁、房主配置、成员只读脱敏与费用告
 
     // 成员再开面板：看到服务商与目的地主机名，看不到 Key 与完整 URL
     await member.locator("#btn-model-settings").click();
-    const memberDialog2 = member.getByRole("dialog", { name: "模型设置" });
+    const memberDialog2 = member.getByRole("dialog", { name: "游戏设置" });
     await expect(memberDialog2).toBeVisible();
     await expect(memberDialog2.getByText(/127\.0\.0\.1/).first()).toBeVisible();
     const memberText = await memberDialog2.textContent();

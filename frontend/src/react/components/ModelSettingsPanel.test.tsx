@@ -107,7 +107,7 @@ describe("ModelSettingsPanel keyboard boundaries", () => {
 
   it("focuses a named close control and contains Tab at both ends", () => {
     render(<ModelSettingsPanel />);
-    const close = screen.getByRole("button", { name: "关闭模型设置" });
+    const close = screen.getByRole("button", { name: "关闭游戏设置" });
     const save = screen.getByRole("button", { name: /保存配置/ });
     expect(close).toHaveFocus();
     save.focus();
@@ -152,7 +152,7 @@ describe("ModelSettingsPanel keyboard boundaries", () => {
   it("does not leave apparently clickable close/cancel buttons while saving", () => {
     useModelStore.setState({ saving: true });
     render(<ModelSettingsPanel />);
-    expect(screen.getByRole("button", { name: "关闭模型设置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "关闭游戏设置" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
   });
 });
@@ -184,10 +184,10 @@ describe("ModelSettingsPanel", () => {
     expect(screen.getByRole("button", { name: /保存配置/ })).toBeEnabled();
   });
 
-  it("两页签 + 角色卡片 + 版本三态行", () => {
+  it("三页签 + 角色卡片 + 版本三态行", () => {
     render(<ModelSettingsPanel />);
     expect(
-      screen.getByRole("dialog", { name: "模型设置" }),
+      screen.getByRole("dialog", { name: "游戏设置" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "模型配置" })).toHaveAttribute(
       "aria-selected",
@@ -350,6 +350,7 @@ describe("ModelSettingsPanel", () => {
 
   it("offers three narration speed tiers and persists the choice locally", () => {
     render(<ModelSettingsPanel />);
+    fireEvent.click(screen.getByRole("tab", { name: "游戏偏好" }));
     expect(screen.getByRole("button", { name: "标准" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -486,7 +487,7 @@ describe("ModelSettingsGateButton", () => {
     const { openSettings } = await import("../../settings");
     useOnlineStore.setState({ roomErrorCode: "model_not_configured" });
     render(<ModelSettingsGateButton />);
-    const cta = screen.getByRole("button", { name: "打开模型设置" });
+    const cta = screen.getByRole("button", { name: "打开游戏设置" });
     fireEvent.click(cta);
     expect(openSettings).toHaveBeenCalled();
   });
@@ -495,7 +496,7 @@ describe("ModelSettingsGateButton", () => {
     useOnlineStore.setState({ roomErrorCode: "model_route_blocked" });
     render(<ModelSettingsGateButton />);
     expect(
-      screen.getByRole("button", { name: "打开模型设置" }),
+      screen.getByRole("button", { name: "打开游戏设置" }),
     ).toBeInTheDocument();
   });
 

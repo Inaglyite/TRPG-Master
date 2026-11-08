@@ -9,6 +9,7 @@ import {
 } from "../../options";
 import { confirmEnding } from "../../panels";
 import { interactionPath } from "../../protocol/structured";
+import { useGamePreferences } from "../../state/game-preferences";
 import { useAppStore, type EndingProposal } from "../../state/app-store";
 import { useStructuredStore } from "../../state/structured-store";
 import { useOnlineStore } from "../../state/online-store";
@@ -21,6 +22,7 @@ export function GameControls() {
   const appEnabled = useAppStore((state) => state.inputEnabled);
   const appPlaceholder = useAppStore((state) => state.inputPlaceholder);
   const choices = useAppStore((state) => state.choices);
+  const showActionHints = useGamePreferences((state) => state.showActionHints);
   const ending = useAppStore((state) => state.ending);
   const mode = useAppStore((state) => state.mode);
   const roomStatus = useOnlineStore((state) => state.roomStatus);
@@ -145,36 +147,42 @@ export function GameControls() {
             </button>
           </>
         ) : (
-          choices.map((choice, index) => {
-            // 注解仅作展示；损坏元数据降级为无注解。提交文本永远是原行动文本。
-            const skillHint = normalizeSkillHint(choice.skillHint);
-            return (
-              <button
-                key={`${choice.label}-${index}`}
-                className={`opt-btn${choice.isFree ? " free" : ""}`}
-                disabled={!choicesEnabled}
-                title={choice.description || undefined}
-                onClick={() => {
-                  if (choice.decisionId && choice.decisionOptionId) {
-                    void sendDecisionReply(
-                      choice.decisionId,
-                      choice.decisionOptionId,
-                      choice.label,
-                    );
-                  } else {
-                    void sendAction(choice.label);
-                  }
-                }}
-              >
-                {index + 1}. {choice.label}
-                {skillHint && (
-                  <span className="opt-skill-hint">
-                    可能检定：{skillHint.name} {skillHint.value}%
-                  </span>
-                )}
-              </button>
-            );
-          })
+          choices
+            .filter(
+              (choice) =>
+                showActionHints ||
+                (choice.decisionId && choice.decisionOptionId),
+            )
+            .map((choice, index) => {
+              // 注解仅作展示；损坏元数据降级为无注解。提交文本永远是原行动文本。
+              const skillHint = normalizeSkillHint(choice.skillHint);
+              return (
+                <button
+                  key={`${choice.label}-${index}`}
+                  className={`opt-btn${choice.isFree ? " free" : ""}`}
+                  disabled={!choicesEnabled}
+                  title={choice.description || undefined}
+                  onClick={() => {
+                    if (choice.decisionId && choice.decisionOptionId) {
+                      void sendDecisionReply(
+                        choice.decisionId,
+                        choice.decisionOptionId,
+                        choice.label,
+                      );
+                    } else {
+                      void sendAction(choice.label);
+                    }
+                  }}
+                >
+                  {index + 1}. {choice.label}
+                  {skillHint && (
+                    <span className="opt-skill-hint">
+                      可能检定：{skillHint.name} {skillHint.value}%
+                    </span>
+                  )}
+                </button>
+              );
+            })
         )}
       </div>
       <div id="context-summary-row">

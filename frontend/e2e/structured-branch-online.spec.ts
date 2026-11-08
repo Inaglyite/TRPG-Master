@@ -376,13 +376,13 @@ test("云端单人结构化：从当前进度创建分支真的成功（不依�
  * 帧里必须带真实 turn_id（结构化那条才不带）。这条守住两边共用同一入口时
  * 服务端的 `if not is_structured and not turn_id: reject` 分支语义没被改坏。
  */
-/** 选角页的模型设置里，把两个角色都指向 E2E 桩（云端 BYOK-only 的 legacy 世界入口）。 */
+/** 选角页的游戏设置里，把两个角色都指向 E2E 桩（云端 BYOK-only 的 legacy 世界入口）。 */
 async function configureByokToStub(page: Page) {
   await page
     .getByTestId("solo-character-select")
-    .getByRole("button", { name: "模型设置" })
+    .getByRole("button", { name: "游戏设置" })
     .click();
-  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  const dialog = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog).toBeVisible({ timeout: 30_000 });
   for (const role of ["narrative", "judgement"] as const) {
     const card = dialog.locator(`[data-role="${role}"]`);

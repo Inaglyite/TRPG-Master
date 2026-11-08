@@ -18,6 +18,7 @@ import {
   updateRoleDraft,
   updateServiceDraft,
 } from "../../settings";
+import { useGamePreferences } from "../../state/game-preferences";
 import { useAppStore } from "../../state/app-store";
 import { useStructuredStore } from "../../state/structured-store";
 import { useOnlineStore } from "../../state/online-store";
@@ -90,7 +91,7 @@ export function ModelSettingsTrigger() {
       <span className="start-menu-icon" aria-hidden="true">
         ⚙
       </span>
-      <span>模型设置</span>
+      <span>游戏设置</span>
     </button>
   );
 }
@@ -101,7 +102,7 @@ export function ModelSettingsGateButton() {
   // 人类主持世界不需要模型配置：以**该世界当前的 keeper_mode** 为准
   // （快照的 keeper_mode，M0 必填字段），而不是服务端“支持哪些模式”的能力列表
   // ——服务端会同时声明 human/assisted/agent，用能力列表判断会把人类房间误判成
-  // 需要模型。满足条件时给出说明，而不是把玩家引到模型设置。
+  // 需要模型。满足条件时给出说明，而不是把玩家引到游戏设置。
   const humanHosted = useStructuredStore(
     (state) => state.identity.keeperMode === "human",
   );
@@ -126,9 +127,9 @@ export function ModelSettingsGateButton() {
     <button
       type="button"
       className="btn-ghost model-gate-cta"
-      onClick={() => openSettings()}
+      onClick={() => openSettings("models")}
     >
-      打开模型设置
+      打开游戏设置
     </button>
   );
 }
@@ -414,14 +415,79 @@ function RoleCard({
   );
 }
 
+function GeneralTab() {
+  const [narrationSpeed, setNarrationSpeedState] = useState<NarrationSpeed>(
+    () => getNarrationSpeed(),
+  );
+  const showActionHints = useGamePreferences((state) => state.showActionHints);
+  const setShowActionHints = useGamePreferences(
+    (state) => state.setShowActionHints,
+  );
+  return (
+    <div className="model-settings-tab-body">
+      <section
+        className="game-hints-section"
+        aria-labelledby="game-hints-title"
+      >
+        <h3 id="game-hints-title">行动提示</h3>
+        <label className="game-setting-toggle">
+          <span>
+            <strong>显示行动提示</strong>
+            <small>
+              显示“你可以——”菜单和建议行动按钮。关闭后可自行输入行动。
+            </small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="显示行动提示"
+            checked={showActionHints}
+            onChange={(event) => setShowActionHints(event.target.checked)}
+          />
+        </label>
+        <p className="narration-speed-hint">
+          立即生效并保存在本机，单机与联机共用。必要的确认与检定交互仍会显示。
+        </p>
+      </section>
+      <section
+        className="narration-speed-section"
+        aria-labelledby="narration-speed-title"
+      >
+        <h3 id="narration-speed-title">叙述速度</h3>
+        <div id="narration-speed-control" className="model-preset-control">
+          {NARRATION_SPEED_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={narrationSpeed === option.value ? "selected" : ""}
+              aria-pressed={narrationSpeed === option.value}
+              onClick={() => {
+                setNarrationSpeed(option.value);
+                setNarrationSpeedState(option.value);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="narration-speed-hint">
+          {
+            NARRATION_SPEED_OPTIONS.find(
+              (option) => option.value === narrationSpeed,
+            )?.hint
+          }
+          ；立即生效并保存在本机，单机与联机共用。
+        </p>
+      </section>
+    </div>
+  );
+}
+
 function ModelsTab({ disabled }: { disabled: boolean }) {
   const view = useModelStore((state) => state.view);
   const drafts = useModelStore((state) => state.drafts);
   const scopeDraft = useModelStore((state) => state.scopeDraft);
   const confirmSharing = useModelStore((state) => state.confirmSharing);
-  const [narrationSpeed, setNarrationSpeedState] = useState<NarrationSpeed>(
-    () => getNarrationSpeed(),
-  );
   const loading = useModelStore((state) => state.loading);
   const loadError = useModelStore((state) => state.loadError);
   if (!view) {
@@ -549,36 +615,6 @@ function ModelsTab({ disabled }: { disabled: boolean }) {
           </span>
         </label>
       )}
-      <section
-        className="narration-speed-section"
-        aria-labelledby="narration-speed-title"
-      >
-        <h3 id="narration-speed-title">叙述速度</h3>
-        <div id="narration-speed-control" className="model-preset-control">
-          {NARRATION_SPEED_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={narrationSpeed === option.value ? "selected" : ""}
-              aria-pressed={narrationSpeed === option.value}
-              onClick={() => {
-                setNarrationSpeed(option.value);
-                setNarrationSpeedState(option.value);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <p className="narration-speed-hint">
-          {
-            NARRATION_SPEED_OPTIONS.find(
-              (option) => option.value === narrationSpeed,
-            )?.hint
-          }
-          ；立即生效并保存在本机，单机与联机共用。
-        </p>
-      </section>
     </div>
   );
 }
@@ -877,14 +913,14 @@ export function ModelSettingsPanel() {
       >
         <header className="model-settings-header">
           <div>
-            <div className="model-settings-eyebrow">KEEPER / MODEL ROUTING</div>
-            <h2 id="model-settings-title">模型设置</h2>
+            <div className="model-settings-eyebrow">GAME / PREFERENCES</div>
+            <h2 id="model-settings-title">游戏设置</h2>
           </div>
           <button
             id="model-settings-close"
             type="button"
             disabled={saving}
-            aria-label="关闭模型设置"
+            aria-label="关闭游戏设置"
             onClick={() => closeSettings()}
           >
             ✕
@@ -893,7 +929,7 @@ export function ModelSettingsPanel() {
         <div
           className="model-settings-tabs"
           role="tablist"
-          aria-label="模型设置分页"
+          aria-label="游戏设置分页"
           onKeyDown={(event) => {
             if (
               event.nativeEvent.isComposing ||
@@ -901,20 +937,34 @@ export function ModelSettingsPanel() {
             )
               return;
             event.preventDefault();
+            const tabs = ["general", "models", "context"] as const;
+            const offset = event.key === "ArrowLeft" ? -1 : 1;
             const next =
               event.key === "Home"
-                ? "models"
+                ? "general"
                 : event.key === "End"
                   ? "context"
-                  : tab === "models"
-                    ? "context"
-                    : "models";
+                  : tabs[
+                      (tabs.indexOf(tab) + offset + tabs.length) % tabs.length
+                    ];
             useModelStore.setState({ tab: next });
             panel.current
               ?.querySelector<HTMLButtonElement>(`#model-settings-tab-${next}`)
               ?.focus();
           }}
         >
+          <button
+            type="button"
+            role="tab"
+            id="model-settings-tab-general"
+            aria-controls="model-settings-tab-panel"
+            tabIndex={tab === "general" ? 0 : -1}
+            aria-selected={tab === "general"}
+            className={tab === "general" ? "selected" : ""}
+            onClick={() => useModelStore.setState({ tab: "general" })}
+          >
+            游戏偏好
+          </button>
           <button
             type="button"
             role="tab"
@@ -947,7 +997,9 @@ export function ModelSettingsPanel() {
           role="tabpanel"
           aria-labelledby={`model-settings-tab-${tab}`}
         >
-          {tab === "models" ? (
+          {tab === "general" ? (
+            <GeneralTab />
+          ) : tab === "models" ? (
             <ModelsTab disabled={readOnly || saving} />
           ) : (
             <ContextTab />
@@ -957,9 +1009,9 @@ export function ModelSettingsPanel() {
           id="model-settings-status"
           role="status"
           aria-live="polite"
-          data-state={statusKind || undefined}
+          data-state={tab === "general" ? undefined : statusKind || undefined}
         >
-          {status}
+          {tab === "general" ? "游戏偏好在本机保存，修改后立即生效。" : status}
         </div>
         <footer className="model-settings-actions">
           {tab === "models" && !readOnly && (
@@ -978,7 +1030,7 @@ export function ModelSettingsPanel() {
             disabled={saving}
             onClick={() => closeSettings()}
           >
-            {readOnly ? "关闭" : "取消"}
+            {tab !== "models" || readOnly ? "关闭" : "取消"}
           </button>
           {tab === "models" && !readOnly && (
             <button

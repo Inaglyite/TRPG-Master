@@ -1,6 +1,6 @@
 import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
- * 模型设置 e2e（本地模式真实后端 + 可探测模型桩）。
+ * 游戏设置 e2e（本地模式真实后端 + 可探测模型桩）。
  *
  * 闭环：表单填自定义服务（本机 http 桩，本地模式允许）→ 数据发送确认 →
  * 测试连接（连通性/生成/能力探针）→ 保存（下回合生效）→ 真实回合确实切到
@@ -392,9 +392,9 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
   test.setTimeout(240_000);
   await enterGame(page);
 
-  // 打开模型设置：两页签
+  // 打开游戏设置：两页签
   await page.locator("#btn-model-settings").click();
-  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  const dialog = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole("tab", { name: "模型配置" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "上下文" })).toBeVisible();
@@ -453,7 +453,7 @@ test("本地模式：自定义服务全链路（测试→保存→回合切换�
   await page.reload();
   await expect(page.locator(".boot-loader")).toBeHidden({ timeout: 30_000 });
   await page.locator("#btn-settings").click();
-  const dialog2 = page.getByRole("dialog", { name: "模型设置" });
+  const dialog2 = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog2).toBeVisible();
   const narrativeCard2 = dialog2.locator('[data-role="narrative"]');
   await expect(
@@ -485,7 +485,7 @@ for (const format of ["anthropic_messages", "responses"] as const) {
     test.setTimeout(180_000);
     await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
     await page.locator("#btn-settings").click();
-    const dialog = page.getByRole("dialog", { name: "模型设置" });
+    const dialog = page.getByRole("dialog", { name: "游戏设置" });
     for (const role of ["narrative", "judgement"] as const) {
       // Keep the real per-scope anti-abuse cooldown, including the prior test.
       await page.waitForTimeout(10050);
@@ -580,16 +580,16 @@ async function verifyFooter(page: Page, panelId: string, selector: string) {
   }
 }
 
-test("档案夹模型设置：四种窗口、真实配置读取、键盘分页、独立正文滚动", async ({
+test("档案夹游戏设置：四种窗口、真实配置读取、键盘分页、独立正文滚动", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   await openLocalStartScreen(page, `${baseUrl}/?mode=local`);
   await page.locator("#btn-settings").click();
-  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  const dialog = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog.locator('[data-role="narrative"]')).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "关闭模型设置" }),
+    dialog.getByRole("button", { name: "关闭游戏设置" }),
   ).toBeFocused();
   for (const role of ["narrative", "judgement"]) {
     await dialog
@@ -640,7 +640,7 @@ test("档案夹模型设置：四种窗口、真实配置读取、键盘分页�
     await save.focus();
     await page.keyboard.press("Tab");
     await expect(
-      dialog.getByRole("button", { name: "关闭模型设置" }),
+      dialog.getByRole("button", { name: "关闭游戏设置" }),
     ).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(save).toBeFocused();

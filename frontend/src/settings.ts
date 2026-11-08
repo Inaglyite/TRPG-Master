@@ -115,7 +115,7 @@ export function fetchSettings() {
   safeSend(JSON.stringify({ type: "model_settings_get" }));
 }
 
-export function openSettings(tab?: "models" | "context") {
+export function openSettings(tab?: "general" | "models" | "context") {
   const state = useModelStore.getState();
   useModelStore.setState({
     open: true,
@@ -429,8 +429,8 @@ export function onModelSettingsError(message: string) {
     loading: false,
     // 操作/校验失败不能抹掉已有权威视图，否则用户无法修正草稿并重试。
     // 只有首次加载没有视图时才进入整页错误态。
-    loadError: hasView ? null : message || "模型设置操作失败",
-    status: message || "模型设置操作失败",
+    loadError: hasView ? null : message || "模型配置操作失败",
+    status: message || "模型配置操作失败",
     statusKind: "error",
   });
 }

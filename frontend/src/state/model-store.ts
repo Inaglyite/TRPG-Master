@@ -197,7 +197,7 @@ export function draftFromView(role: RoleView | undefined): RoleDraft {
 
 type ModelState = {
   open: boolean;
-  tab: "models" | "context";
+  tab: "general" | "models" | "context";
   view: ModelSettingsView | null;
   drafts: { narrative: RoleDraft; judgement: RoleDraft };
   scopeDraft: "account" | "world";

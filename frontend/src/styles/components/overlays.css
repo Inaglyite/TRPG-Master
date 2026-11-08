@@ -1,4 +1,4 @@
-/* ---- 模型设置 ---- */
+/* ---- 游戏设置 ---- */
 #model-settings-overlay {
   position: fixed;
   inset: 0;
@@ -830,4 +830,73 @@
   padding: 0 16px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* 本机游戏偏好：独立于模型配置的加载、权限与保存。 */
+.game-hints-section h3 {
+  margin: 0 0 12px;
+  color: var(--gold);
+}
+.game-setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg2);
+  cursor: pointer;
+}
+.game-setting-toggle span {
+  min-width: 0;
+}
+.game-setting-toggle strong {
+  display: block;
+  color: var(--text);
+}
+.game-setting-toggle small {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+.game-setting-toggle input {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border-bright);
+  border-radius: 999px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.game-setting-toggle input::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s ease;
+}
+.game-setting-toggle input:checked {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 25%, var(--bg));
+}
+.game-setting-toggle input:checked::before {
+  transform: translateX(18px);
+  background: var(--gold-bright);
+}
+.game-setting-toggle:has(input:focus-visible) {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+.game-hints-section .narration-speed-hint {
+  margin-top: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
 }

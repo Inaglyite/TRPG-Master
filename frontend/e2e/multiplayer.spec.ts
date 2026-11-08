@@ -338,9 +338,9 @@ async function configureRoomByok(page: Page): Promise<void> {
   if (externalBaseUrl) return;
   await page
     .locator(".online-room-screen")
-    .getByRole("button", { name: "模型设置" })
+    .getByRole("button", { name: "游戏设置" })
     .click();
-  const dialog = page.getByRole("dialog", { name: "模型设置" });
+  const dialog = page.getByRole("dialog", { name: "游戏设置" });
   await expect(dialog).toBeVisible();
   for (const role of ["narrative", "judgement"] as const) {
     const card = dialog.locator(`[data-role="${role}"]`);

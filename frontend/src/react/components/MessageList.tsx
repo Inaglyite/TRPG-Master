@@ -14,6 +14,8 @@ import {
   isDice3DEligible,
   rollDice3D,
 } from "../../dice3d/controller";
+import { withoutActionHints } from "../../action-hints";
+import { useGamePreferences } from "../../state/game-preferences";
 import { renderMarkdown } from "../../markdown";
 import { NARRATION_LONG_PRESS_MS } from "../../narration-speed";
 import {
@@ -245,7 +247,23 @@ const Message = memo(function Message({
 }) {
   const [actionsDisabled, setActionsDisabled] = useState(false);
   useEffect(() => setActionsDisabled(false), [actionReset]);
-  const html = useMemo(() => renderMarkdown(message.text), [message.text]);
+  const showActionHints = useGamePreferences((state) => state.showActionHints);
+  const visibleText =
+    message.kind === "gm" && !showActionHints
+      ? withoutActionHints(message.text)
+      : message.text;
+  const html = useMemo(() => renderMarkdown(visibleText), [visibleText]);
+  const visibleSegments = useMemo(
+    () =>
+      message.segments
+        ?.map((segment) =>
+          segment.kind === "narration" && !showActionHints
+            ? { ...segment, text: withoutActionHints(segment.text) }
+            : segment,
+        )
+        .filter((segment) => segment.text.trim()),
+    [message.segments, showActionHints],
+  );
   const character = useAppStore((state) => state.character);
   const mode = useAppStore((state) => state.mode);
   // 联机：时间线分支仅云端单人房主可用（多人房间服务端结构性拒绝，
@@ -276,7 +294,15 @@ const Message = memo(function Message({
   const playerAvatar =
     message.speaker?.avatar ||
     (mode !== "online" ? character?.avatar : undefined);
-  if (message.hidden) return null;
+  if (
+    message.hidden ||
+    (message.kind === "gm" &&
+      !message.streaming &&
+      !(message.segments?.length
+        ? visibleSegments?.length
+        : visibleText.trim()))
+  )
+    return null;
   if (message.kind === "dice") return <DiceMessage message={message} />;
   const className = [
     "msg",
@@ -334,7 +360,7 @@ const Message = memo(function Message({
         </>
       ) : hasSegments ? (
         <div className="chat-event-list">
-          {message.segments!.map((segment, index) =>
+          {visibleSegments!.map((segment, index) =>
             segment.kind === "speech" ? (
               <SpeechUnit key={segment.eventId || index} segment={segment} />
             ) : (

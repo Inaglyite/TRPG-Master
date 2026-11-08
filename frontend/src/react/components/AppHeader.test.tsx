@@ -71,8 +71,8 @@ describe("AppHeader 多人房主专属操作", () => {
     render(<AppHeader />);
     expect(screen.queryByLabelText("快速存档")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("打开存档管理")).not.toBeInTheDocument();
-    // 模型设置入口对成员可见（只读视图由后端 can_edit 控制），不再按模式隐藏
-    expect(screen.getByLabelText("打开模型设置")).toBeInTheDocument();
+    // 游戏设置入口对成员可见（只读视图由后端 can_edit 控制），不再按模式隐藏
+    expect(screen.getByLabelText("打开游戏设置")).toBeInTheDocument();
     expect(screen.queryByLabelText("开始新游戏")).not.toBeInTheDocument();
   });
 
@@ -90,6 +90,6 @@ describe("AppHeader 多人房主专属操作", () => {
     useAppStore.setState({ mode: "local" });
     render(<AppHeader />);
     expect(screen.getByLabelText("快速存档")).toBeInTheDocument();
-    expect(screen.getByLabelText("打开模型设置")).toBeInTheDocument();
+    expect(screen.getByLabelText("打开游戏设置")).toBeInTheDocument();
   });
 });

@@ -209,8 +209,8 @@ export function AppHeader() {
         />
         <button
           id="btn-model-settings"
-          title="模型设置"
-          aria-label="打开模型设置"
+          title="游戏设置"
+          aria-label="打开游戏设置"
           onClick={openModelSettings}
         />
       </div>
