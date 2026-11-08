@@ -68,7 +68,7 @@ def _handler():
         return _HANDLER
 
 
-def emit(event: str, host=None, **fields) -> None:
+def emit(event: str, host=None, /, **fields) -> None:
     """Whitelist fields before serialization; never serialize arbitrary payloads."""
     if os.environ.get("TRPG_DIAGNOSTICS", "1").lower() in {"0", "false", "off"}:
         return
@@ -79,6 +79,7 @@ def emit(event: str, host=None, **fields) -> None:
             "module": getattr(context, "module_name", None),
             "turn_id": getattr(host, "_active_turn_id", None),
             "request_id": getattr(host, "_turn_request_id", None),
+            "event_type": fields.get("event"),
             **fields,
         }
         row = {"v": 2, "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),

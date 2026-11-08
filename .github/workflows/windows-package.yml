@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
+      - "tools/retry_network_command.py"
       - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
@@ -27,6 +28,7 @@ on:
     paths:
       - ".github/workflows/windows-package.yml"
       - "packaging/**"
+      - "tools/retry_network_command.py"
       - "editor/dist/**"
       - "frontend/electron/**"
       - "frontend/package.json"
@@ -60,6 +62,7 @@ jobs:
       # `runner` context is unavailable at job-level `env`; keep caches inside
       # the checked-out workspace so the workflow can be parsed and dispatched.
       ELECTRON_CACHE: ${{ github.workspace }}/.electron-cache
+      electron_config_cache: ${{ github.workspace }}/.electron-cache
       ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.electron-builder-cache
 
     steps:
@@ -91,13 +94,17 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
           python -m pip install --index-url https://pypi.org/simple -r requirements-packaging.txt
+          if ($LASTEXITCODE -ne 0) { throw "Python build dependency installation failed." }
           npm ci --prefix frontend
-          node frontend/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw "Locked frontend dependency installation failed." }
+          python tools/retry_network_command.py node frontend/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw "Electron runtime installation failed." }
 
       - name: Build backend, NSIS, and portable packages
         shell: pwsh
-        run: ./packaging/build_windows.ps1 -SkipDependencyInstall
+        run: python tools/retry_network_command.py pwsh -NoProfile -File ./packaging/build_windows.ps1 -SkipDependencyInstall
 
       - name: Smoke packaged backend and fresh migrations
         shell: pwsh

@@ -186,3 +186,13 @@ def test_cli_hides_content_until_explicitly_requested(receipts, monkeypatch, cap
     monkeypatch.setattr("sys.argv", [*command, "--show-content"])
     assert main() == 0
     assert "剧情内容" in capsys.readouterr().out
+
+
+def test_payload_event_cannot_override_receipt_or_break_caller(receipts):
+    payload = {"event": "context_summary_rejected", "reason": "mismatch"}
+    log.emit("model.completed", host(), **payload)
+    row = read_timeline(receipts)[0][0]
+    assert row["event"] == "model.completed"
+    assert row["event_type"] == "context_summary_rejected"
+    assert row["reason"] == "mismatch"
+    assert payload == {"event": "context_summary_rejected", "reason": "mismatch"}

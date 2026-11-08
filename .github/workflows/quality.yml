@@ -37,6 +37,9 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.electron-cache
+      electron_config_cache: ${{ github.workspace }}/.electron-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,9 +62,21 @@ jobs:
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
+      - name: Restore Electron runtime cache
+        id: electron-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.electron-cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('frontend/package-lock.json') }}
       - name: Install Electron runtime for E2E
-        run: node node_modules/electron/install.js
+        run: python ../tools/retry_network_command.py node node_modules/electron/install.js
         working-directory: frontend
+      - name: Save Electron runtime cache
+        if: steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.electron-cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('frontend/package-lock.json') }}
       - run: xvfb-run --auto-servernum npm run test:e2e
         working-directory: frontend
       # E2E 失败时保留现场：trace / 截图 / error-context 是判断「页面没挂载还是

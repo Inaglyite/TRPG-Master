@@ -38,7 +38,9 @@ let modelBaseUrl = "";
 let tlsSpkiFingerprint = "";
 let server: ChildProcess | null = null;
 let serverOutput = "";
+const websocketFrameBuffers: string[][] = [];
 let modelServer: Server | null = null;
+let delayNextAction = true;
 type ElectronApplication = Awaited<ReturnType<typeof electron.launch>>;
 
 async function startModelStub(): Promise<string> {
@@ -52,9 +54,12 @@ async function startModelStub(): Promise<string> {
       body += String(chunk);
     });
     incoming.once("end", () => {
-      // 行动类请求延迟响应，制造确定的“回合进行中”窗口，供并发拒绝断言使用；
-      // 其余请求（开场等）立即返回，避免拖慢整体用例。
-      const delayMs = body.includes("我检查门锁和附近的脚印") ? 4000 : 0;
+      // 每个用例只延迟首个行动请求，制造并发拒绝窗口。后续叙事/修复请求
+      // 同样含历史行动文本，不能反复延迟累加成几十秒的测试桩等待。
+      const shouldDelay =
+        delayNextAction && body.includes("我检查门锁和附近的脚印");
+      const delayMs = shouldDelay ? 4000 : 0;
+      if (shouldDelay) delayNextAction = false;
       setTimeout(() => {
         if (response.destroyed) return;
         const content =
@@ -348,10 +353,10 @@ async function configureRoomByok(page: Page): Promise<void> {
     await card
       .getByPlaceholder("https://api.deepseek.com/v1")
       .fill(modelBaseUrl);
-    await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
+    await card.getByLabel("API Key", { exact: false }).fill("sk-e2e-byok");
     await card.getByPlaceholder("deepseek-flash").fill("e2e-model");
   }
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /我知晓/ }).check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();
   await expect(dialog.locator("#model-settings-status")).toContainText(
     "下一回合生效",
@@ -363,6 +368,7 @@ async function configureRoomByok(page: Page): Promise<void> {
 
 function collectWebSocketFrames(page: Page): string[] {
   const frames: string[] = [];
+  websocketFrameBuffers.push(frames);
   page.on("websocket", (socket) => {
     socket.on("framereceived", ({ payload }) => {
       frames.push(String(payload));
@@ -484,6 +490,24 @@ test.beforeAll(async () => {
     serverOutput += String(chunk);
   });
   await waitForServer();
+});
+
+test.beforeEach(() => {
+  websocketFrameBuffers.length = 0;
+  delayNextAction = true;
+});
+
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus && serverOutput) {
+    await testInfo.attach("backend.log", {
+      body: serverOutput,
+      contentType: "text/plain",
+    });
+    await testInfo.attach("room-events.json", {
+      body: JSON.stringify(websocketFrameBuffers, null, 2),
+      contentType: "application/json",
+    });
+  }
 });
 
 test.afterAll(async () => {

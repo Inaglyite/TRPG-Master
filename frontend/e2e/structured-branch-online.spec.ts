@@ -390,10 +390,10 @@ async function configureByokToStub(page: Page) {
     await card
       .getByPlaceholder("https://api.deepseek.com/v1")
       .fill(modelBaseUrl);
-    await card.getByPlaceholder("sk-…").fill("sk-e2e-byok");
+    await card.getByLabel("API Key", { exact: false }).fill("sk-e2e-byok");
     await card.getByPlaceholder("deepseek-flash").fill("e2e-model");
   }
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /我知晓/ }).check();
   await dialog.getByRole("button", { name: /保存配置/ }).click();
   await expect(dialog.getByText(/下一回合生效/)).toBeVisible({
     timeout: 30_000,
