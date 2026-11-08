@@ -32,6 +32,7 @@ import {
 import { useDelayedClose } from "./transitions";
 import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
 import { useDialogKeyboard } from "./useDialogKeyboard";
+import { StartMenuIcon } from "./StartMenuIcon";
 
 const reasons: Record<string, string> = {
   selected: "已选",
@@ -86,11 +87,10 @@ export function ModelSettingsTrigger() {
       id="btn-settings"
       className="start-menu-button"
       type="button"
+      title="游戏设置"
       onClick={() => openSettings()}
     >
-      <span className="start-menu-icon" aria-hidden="true">
-        ⚙
-      </span>
+      <StartMenuIcon kind="settings" />
       <span>游戏设置</span>
     </button>
   );

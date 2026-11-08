@@ -160,7 +160,7 @@ export function StartScreen() {
             <button
               type="button"
               className="btn-ghost module-workshop-link"
-              title="打开 TRPG Mod Editor 创作/编辑模组"
+              title="模组工坊：创作或编辑模组"
               onClick={openModWorkshop}
             >
               <StartMenuIcon kind="workshop" />
@@ -170,6 +170,7 @@ export function StartScreen() {
             <button
               type="button"
               className="start-menu-button"
+              title="角色库"
               onClick={() =>
                 useAppStore.getState().setCharacterLibraryOpen(true)
               }
@@ -182,9 +183,10 @@ export function StartScreen() {
               <button
                 id="btn-exit"
                 className="start-menu-button start-menu-exit"
+                title="退出游戏"
                 onClick={() => window.close()}
               >
-                <span aria-hidden="true">⏻</span>
+                <StartMenuIcon kind="exit" />
                 <span>退出游戏</span>
               </button>
             )}

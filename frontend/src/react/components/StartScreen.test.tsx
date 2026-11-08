@@ -103,9 +103,14 @@ describe("StartScreen", () => {
     const buttons = within(tools).getAllByRole("button");
     const names = ["导入模组", "模组工坊", "模组管理", "角色库", "游戏设置"];
     expect(buttons).toHaveLength(names.length);
-    buttons.forEach((button, index) =>
-      expect(button).toHaveAccessibleName(names[index]),
-    );
+    buttons.forEach((button, index) => {
+      expect(button).toHaveAccessibleName(names[index]);
+      expect(button).toHaveAttribute("title");
+      const icon = button.querySelector("img[data-menu-icon]");
+      expect(icon).toHaveAttribute("src", expect.stringMatching(/\.png$/));
+      expect(icon).toHaveAttribute("alt", "");
+      expect(icon).toHaveAttribute("aria-hidden", "true");
+    });
     expect(screen.queryByRole("button", { name: "退出游戏" })).toBeNull();
     expect(document.querySelector(".start-corner-actions")).toBeNull();
     expect(document.querySelector(".start-library-actions")).toBeNull();
@@ -123,9 +128,12 @@ describe("StartScreen", () => {
       expect(
         within(tools).getByRole("button", { name: "退出游戏" }),
       ).toBeInTheDocument();
-      expect(within(tools).getAllByRole("button").at(-1)).toHaveAttribute(
-        "id",
-        "btn-exit",
+      const exitButton = within(tools).getAllByRole("button").at(-1)!;
+      expect(exitButton).toHaveAttribute("id", "btn-exit");
+      expect(exitButton).toHaveAttribute("title", "退出游戏");
+      expect(exitButton.querySelector("img")).toHaveAttribute(
+        "data-menu-icon",
+        "exit",
       );
     } finally {
       userAgent.mockRestore();

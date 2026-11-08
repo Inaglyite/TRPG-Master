@@ -140,7 +140,7 @@
     gap: 14px;
   }
   .start-menu-main { width: min(430px, 100%); }
-  .start-module-tools { justify-self: center; }
+  .start-module-tools { justify-self: end; }
 
   .start-brand {
     margin-bottom: 20px;
@@ -595,10 +595,18 @@
   .start-menu-main { padding: 10px 0; }
 }
 
-@media (max-width: 520px) {
-  .start-module-tools {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: min(286px, 100%);
+@media (max-width: 360px) {
+  .start-module-tools { gap: 5px; }
+  #start-menu-view .start-module-tools > button {
+    flex-basis: 40px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .start-module-tools .start-menu-icon {
+    width: 28px;
+    height: 28px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

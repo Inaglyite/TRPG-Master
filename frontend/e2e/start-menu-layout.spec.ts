@@ -20,8 +20,29 @@ async function expectUnifiedTools(page: Page, desktop = false) {
   const buttons = tools.getByRole("button");
   await expect(buttons).toHaveCount(names.length);
   for (const [index, name] of names.entries()) {
-    await expect(buttons.nth(index)).toHaveAccessibleName(name);
-    await expect(buttons.nth(index)).toBeVisible();
+    const button = buttons.nth(index);
+    const icon = button.locator("img[data-menu-icon]");
+    await expect(button).toHaveAccessibleName(name);
+    await expect(button).toHaveAttribute("title", /.+/);
+    await expect(button).toBeVisible();
+    await expect(icon).toBeVisible();
+    await expect(icon).toHaveAttribute("src", /\.png(?:$|\?)/);
+    await expect
+      .poll(() =>
+        icon.evaluate(
+          (node: HTMLImageElement) => node.complete && node.naturalWidth > 0,
+        ),
+      )
+      .toBe(true);
+    const before = await button.boundingBox();
+    const iconBefore = await icon.boundingBox();
+    await button.hover();
+    await expect(icon).toBeVisible();
+    await expect.poll(() => button.boundingBox()).toEqual(before);
+    await expect.poll(() => icon.boundingBox()).toEqual(iconBefore);
+    expect(
+      await button.evaluate((node) => getComputedStyle(node).backgroundImage),
+    ).toBe("none");
   }
   await expect(page.locator(".start-corner-actions")).toHaveCount(0);
   const measurements = await page.evaluate(() => {
@@ -32,24 +53,20 @@ async function expectUnifiedTools(page: Page, desktop = false) {
       .getBoundingClientRect();
     const controls = [...panel.querySelectorAll("button")].map((button) => {
       const rect = button.getBoundingClientRect();
+      const icon = button.querySelector("img")!.getBoundingClientRect();
       return {
         x: rect.x,
         right: rect.right,
         top: rect.top,
         bottom: rect.bottom,
+        width: rect.width,
         height: rect.height,
-        fits: button.scrollWidth <= button.clientWidth,
-        oneLine: [...button.querySelectorAll("span")]
-          .filter(
-            (label) =>
-              label.textContent?.trim() &&
-              label.getAttribute("aria-hidden") !== "true",
-          )
-          .every((label) => {
-            const range = document.createRange();
-            range.selectNodeContents(label);
-            return range.getClientRects().length <= 1;
-          }),
+        iconSize: icon.width,
+        iconFits:
+          icon.left >= rect.left &&
+          icon.right <= rect.right &&
+          icon.top >= rect.top &&
+          icon.bottom <= rect.bottom,
       };
     });
     return {
@@ -59,6 +76,10 @@ async function expectUnifiedTools(page: Page, desktop = false) {
         tools.left >= main.right ||
         tools.bottom <= main.top ||
         tools.top >= main.bottom,
+      transparent:
+        getComputedStyle(panel).backgroundColor === "rgba(0, 0, 0, 0)" &&
+        getComputedStyle(panel).backgroundImage === "none" &&
+        getComputedStyle(panel).boxShadow === "none",
       buttonsInside: controls.every(
         (button) =>
           button.x >= tools.left &&
@@ -66,32 +87,31 @@ async function expectUnifiedTools(page: Page, desktop = false) {
           button.top >= tools.top &&
           button.bottom <= tools.bottom,
       ),
+      oneRow: controls.every((button) => button.top === controls[0].top),
       buttonsSeparate: controls.every((button, index) =>
-        controls
-          .slice(index + 1)
-          .every(
-            (other) =>
-              button.right <= other.x ||
-              button.x >= other.right ||
-              button.bottom <= other.top ||
-              button.top >= other.bottom,
-          ),
+        controls.slice(index + 1).every((other) => button.right <= other.x),
       ),
-      heights: controls.map((button) => button.height),
-      labelsFit: controls.every((button) => button.fits && button.oneLine),
+      sizesCorrect: controls.every(
+        (button) =>
+          button.width === (window.innerWidth <= 360 ? 40 : 44) &&
+          button.height === button.width &&
+          button.iconSize === (window.innerWidth <= 360 ? 28 : 32) &&
+          button.iconFits,
+      ),
     };
   });
   expect(measurements.panelFits).toBe(true);
   expect(measurements.noMainOverlap).toBe(true);
+  expect(measurements.transparent).toBe(true);
   expect(measurements.buttonsInside).toBe(true);
+  expect(measurements.oneRow).toBe(true);
   expect(measurements.buttonsSeparate).toBe(true);
-  expect(measurements.labelsFit).toBe(true);
-  expect(new Set(measurements.heights).size).toBe(1);
+  expect(measurements.sizesCorrect).toBe(true);
   return tools;
 }
 
 for (const width of [1280, 939, 640, 390, 320]) {
-  test(`主菜单 ${width}px：五个辅助入口集中且不重叠，选角时整体退场`, async ({
+  test(`主菜单 ${width}px：五个小图标单行且不重叠，悬停正常，选角时整体退场`, async ({
     page,
   }, info) => {
     await page.setViewportSize({ width, height: 800 });
@@ -156,20 +176,24 @@ test("角落导入预览仍覆盖整个视口，取消后焦点回到原入口",
   await expect(page.locator("#btn-import-module")).toBeFocused();
 });
 
-test("低高度 Electron 窗口：六个辅助入口集中，按钮完整且与主行动不重叠", async ({
-  browser,
-}, info) => {
-  const context = await browser.newContext({
-    viewport: { width: 640, height: 480 },
-    userAgent: "Mozilla/5.0 Chrome/134.0.0.0 Electron/42.4.1 Safari/537.36",
+for (const width of [640, 320]) {
+  test(`低高度 Electron ${width}px：六个小图标单行，悬停正常且与主行动不重叠`, async ({
+    browser,
+  }, info) => {
+    const context = await browser.newContext({
+      viewport: { width, height: 480 },
+      userAgent: "Mozilla/5.0 Chrome/134.0.0.0 Electron/42.4.1 Safari/537.36",
+    });
+    try {
+      const page = await context.newPage();
+      await openLocalStartScreen(page, `${origin}/?mode=local`);
+      await expect(page.locator(".boot-loader")).toHaveCount(0);
+      await expectUnifiedTools(page, true);
+      await page.screenshot({
+        path: info.outputPath(`short-electron-menu-${width}.png`),
+      });
+    } finally {
+      await context.close();
+    }
   });
-  try {
-    const page = await context.newPage();
-    await openLocalStartScreen(page, `${origin}/?mode=local`);
-    await expect(page.locator(".boot-loader")).toHaveCount(0);
-    await expectUnifiedTools(page, true);
-    await page.screenshot({ path: info.outputPath("short-electron-menu.png") });
-  } finally {
-    await context.close();
-  }
-});
+}
