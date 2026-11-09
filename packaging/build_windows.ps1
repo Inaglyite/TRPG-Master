@@ -89,7 +89,12 @@ try {
     $env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/"
   }
 
-  npm run dist:win
+  # The Electron installer verifies the runtime against its bundled SHA256 values.
+  # Reuse that distribution: builder's separate downloader fetches SHASUMS256
+  # online even on cache hits, which can fail independently with a gateway 504.
+  node node_modules/electron/install.js
+  Assert-LastCommand "verified Electron runtime installation"
+  npm run dist:win -- --config.electronDist=node_modules/electron/dist
   Assert-LastCommand "electron-builder"
 }
 finally {
