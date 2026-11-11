@@ -1,6 +1,6 @@
 # 运维、安全与发布
 
-现行入口，整理于 2026-10-10。详细配置、命令、备份和恢复演练原文已迁入[归档资料](INDEX.md#归档资料)；现行发布脚本保留在 `deploy/` 和 `.github/workflows/`。仓库模板不代表主机已经采用相同配置；本文不授予任何生产操作权限。
+现行入口，更新于 2026-11-11。详细配置、命令、备份和恢复演练原文已迁入[归档资料](INDEX.md#归档资料)；现行发布脚本保留在 `deploy/` 和 `.github/workflows/`。仓库模板不代表主机已经采用相同配置；本文不授予任何生产操作权限。
 
 ## 1. 环境边界
 
@@ -55,13 +55,29 @@
 
 故障先保留版本、时间、请求/命令 ID 与脱敏诊断，再定位；不得为了调查导出完整 Key、Cookie、生产数据库或玩家剧情到第三方。紧急账号/注册/SSH 改动也须有恢复入口与明确权限，不能“顺手关闭 22”造成运维锁死。
 
+后端的 `trpg.log` 与 `diagnostics.jsonl` 共用启动时选定的日志目录：`TRPG_LOG_DIR` 优先，
+其次为 `TRPG_RUNTIME_ROOT/logs`；未设置运行目录时，源码默认在仓库同级 `mid_product/<仓库名>/work/runtime-logs/`，
+打包后端默认在可执行文件旁。桌面客户端正常设置运行目录，因此通常使用用户数据目录下的 `runtime/logs/`。
+按回合查询、轮转、正文证据开关及覆盖限制见[开发日志说明](DEVELOPMENT.md#按回合查看开发日志)。
+内容证据默认开启，可能包含玩家信息与剧透；凭据脱敏不等于内容匿名化。
+同目录仅按单个后端进程设计，多进程须使用独立日志目录，不能让轮转互相覆盖。
+
+复现重复选项或人物串话时，保留同一回合的 raw/rejected/accepted/turn.output 及其 `output_id`，
+不要只截最后一轮日志。日志不会补录升级前的内容；缺失记录应先核对实例、版本与实际日志目录，
+不能以另一台机器无记录认定问题未发生。日志证据也不能替代数据库中已提交状态。
+
 正式上线是否具备条件，只根据[当前状态](STATUS.md)和指定候选证据判断，不根据旧报告的“全部完成”。
 
 ## 7. 桌面客户端发布与自动更新
 
 1. 只从 git 标签对应的干净检出构建（Windows VM 或 `windows-package` CI），不从脏工作区打包；候选提交先过本地 quality 与架构门禁。
-2. 构建：`packaging/build_windows.ps1`（缺依赖时可加 `-UseChinaMirrors`）。构建/验收脚本兼容 Windows 自带 PowerShell 5.1 与 CI 的 pwsh；5.1 下原生命令 stderr 与多行参数的两个已知坑已在脚本内处理，不要再退回依赖 pwsh 特性。产物为 NSIS 安装包、portable 包、`latest.yml`、`*.blockmap` 与 `SHA256SUMS.txt`。
+2. 构建：`packaging/build_windows.ps1`（确需镜像时显式加 `-UseChinaMirrors`，仅表示选择镜像，不替代安装依赖）。先经 Electron installer 校验/安装，再让打包器复用本地运行时，生成 NSIS 安装包、portable 包、`latest.yml` 和 `*.blockmap`；桌面验收脚本再生成 `SHA256SUMS.txt`。最新完整证据对应 Windows CI 的 pwsh；其他 PowerShell/系统版本仍需按发布目标复核。
 3. 发布前必须在 Windows 上跑通 `packaging/smoke_windows_backend.ps1` 与 `packaging/verify_windows_desktop_artifacts.ps1`（含 NSIS 静默安装/启动/卸载），全绿才允许上传。
 4. 发布：`gh release create vX.Y.Z` 上传安装包、portable、`latest.yml`、`*.blockmap` 与校验和；tag 指向实际构建所用提交。
 5. 自动更新经 `latest.yml` 检查（仓库须保持 public）：启动后延迟检查、后台下载、默认退出时静默安装，玩家可选择立即重启更新；检查/下载失败一律 fail-open 只记日志。`TRPG_SKIP_AUTO_UPDATE=1` 可禁用（验收脚本已内置）。
 6. 自动更新从“包含更新器的那一版”之后才开始生效；首版发布后需在下一版实测一次升级链路。
+
+2026-11-09 的 `c56e28dd` 已通过完整 quality 与 Windows 构建/安装验收，记录见[状态](STATUS.md#3-最新完整验收)。
+CI 用官方 GitHub API 预取 Electron，按锁定 npm 包内的 SHA256 校验，并对短暂网络失败有限重试；
+禁止为绕过下载错误关闭 TLS 或完整性校验。Actions 附件只是该 SHA 的构建产物，公开稳定 Release
+仍需单独发布；截至 2026-11-11，公开稳定版为 v1.0.2，未因本轮 CI 成功自动升级。

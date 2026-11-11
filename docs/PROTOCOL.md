@@ -1,6 +1,6 @@
 # 协议入口
 
-现行入口，整理于 2026-10-10；产品基线 `2b66a582`。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；实际发布与验收范围见[状态](STATUS.md)。
+现行入口，更新于 2026-11-11；本次同步的源码基线为 `c56e28dd`。字段契约按 schema 和实际 handler 核对，不以历史交接报告替代；实际发布与验收范围见[状态](STATUS.md)。
 
 ### 模型服务与接口格式
 
@@ -17,6 +17,19 @@
 `probe_noop` 工具调用及参数。`capabilities.streaming` 来源于该次流式探针，
 不再从非流式生成成功推定。测试不调用游戏工具、不加载故事、不改变未保存的绑定。
 400/422、404、认证/额度/限流等错误使用固定可读分类，不向前端回传原始异常或 Key。
+
+### 本地模组管理与显示偏好
+
+`GET /api/modules/manage` 返回安装版本、`world_count`、`save_count` 与 `delete_block`。
+`DELETE /api/modules/{module_key}` 删除精确安装版本及其全部世界/分支、存档和回合数据，
+成功返回 `{ok: true, world_count, save_count, cleanup_pending}`。两者只允许本地服务；
+云端账号模式返回 403，当前使用中的版本返回 409，内置版本不能删除。前端明确二次确认，
+无专门的远程管理授权或通过改显示名称删除其他版本的路径。
+删除服务协调文件暂存与数据库事务，失败按既有边界回滚；`cleanup_pending` 表示提交已成功但暂存清理待处理，
+不能因此重复删除或声称原世界仍可读。人物卡库和工坊工程不属于删除目标，重导入不恢复被删进度。
+
+“游戏设置 → 游戏偏好”的行动提示开关是客户端本机 `localStorage` 偏好，不增加 HTTP/WS 字段。
+隐藏正文菜单与底部建议不改变 `choices`、叙事校验、骰点、权威状态或存档；必要确认和检定仍按各自协议展示。
 
 ### 本地 legacy 存档恢复
 
@@ -66,7 +79,13 @@ GameEngine（legacy 运行路径）的 AI 叙事模型输出 `dialogue_v1` JSON�
 不生成正式 NPC 的 reveal 标记或线索卡。协议修复不得把原有台词转交给其他 id：
 对较长台词的复用（忽略空白及标点，允许首尾删减）做校验，违规以 `speaker_reassigned`
 拒绝并停止发布；短招呼语不作此检查，不能将其视为任意语义串人的完整检测。
-`choices` 仍是字符串数组；可选的 `choice_skill_hints`（`[{"choice_index":1,"skill_id":"history"}]`，
+新输出的选项只允许放在顶层 `choices`，每项为非空、单行、不带编号或菜单标题的字符串。
+`segments` 的 narration/speech 都不得再写“你可以——”或复制行动菜单；发布前以
+`embedded_choice_menu` / `invalid_choice_format` 拒绝违规草稿，最多一次禁工具格式修复，再次失败不发布该回复。
+旧记录保留兼容解码，不以此重写存档；一致性改写也须过相同契约，非法改写被丢弃。
+前端从结构化选项统一绘制菜单，关闭行动提示仅影响显示，不改变这项约束。
+
+可选的 `choice_skill_hints`（`[{"choice_index":1,"skill_id":"history"}]`，
 序号从 1 对应 `choices` 顺序）只由模型提议“该行动可能需要哪个技能”，不承诺必定检定。
 平台在定稿时按有效技能视图（与正式检定同一来源）解析可用性、中文显示名与当前有效值，
 以选项上的 `skillHint: {skillId, name, value}` 元数据随 WS choices 事件、回合记录与读档
@@ -169,6 +188,15 @@ GameEngine（legacy 运行路径）的 AI 叙事模型输出 `dialogue_v1` JSON�
 纯询问不强制执行动作。自卫确认门同时读取当前存活战斗参与者的敌意，不能因 NPC
 社交态度为顺从而拦住伏击战中的自卫。无关目标，以及过期/倒地参战者的标记，
 不会据此免除确认；NPC 自身的敌意仍按原规则判断。
+
+### 后端诊断证据与客户端回执
+
+`src/app/diagnostic_log.py` 写本机轮转 JSONL，不新增玩家可见 WS 事件，也不作为权威提交账本。
+`dialogue.raw/rejected/accepted/emitted` 通过 `output_id` 区分模型原文、拒绝、接受与后端发言回调；
+`consistency.raw` 记录辅助重写，`turn.output` 记录实际提交正文。`dialogue.emitted` 不证明浏览器收到或渲染，
+`model.completed` 必须结合 `status` 判断成功，不等于 `turn.committed`。
+日志格式、正文上限、轮转、内容关闭开关及历史查询边界见[开发日志](DEVELOPMENT.md#按回合查看开发日志)。
+日志会脱敏凭据但可能保留剧情和个人信息；授权的世界历史与普通公开错误帧仍遵守各自可见性，不向玩家传递私有诊断文件。
 
 ### 物品转交的执行边界
 

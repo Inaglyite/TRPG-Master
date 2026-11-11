@@ -4,6 +4,8 @@
 
 This guide covers setup, play modes and scenario authoring. The application interface and bundled modules are currently primarily Chinese. The six [Chinese reference documents](#technical-reference) remain the detailed source of current behavior; this guide links to them rather than maintaining a second full protocol specification.
 
+Updated **2026-11-11**, against verified source commit `c56e28dd`. The public stable installer remains **v1.0.2**. New source features and successful CI artifacts are separate from stable releases and production deployments; see [status](../STATUS.md#1-版本与交付范围).
+
 ## Choose how to run
 
 | Option | Requirements | Start here |
@@ -64,13 +66,15 @@ Local/cloud location, solo/multiplayer participation and Keeper mode are separat
 
 Suggested actions are optional; players can enter free-form actions. The server settles checks and state changes. A displayed narrative or animation is not by itself proof that a turn has been committed.
 
+Under **游戏设置 → 游戏偏好** (Game settings → Game preferences), disable **显示行动提示** (Show action suggestions) to hide the “你可以——” menu and bottom suggestions. Free input and necessary confirmations/checks remain. The switch takes effect immediately, is stored in local browser storage, and can be reversed without changing saved history or model output.
+
 Below the input, **使用技能** (Use skill) lets you choose a skill from your current investigator's sheet and describe your goal. Submitting proposes an action; the Keeper decides whether a check is needed. **整理线索** (Organize clues) extracts important information from the latest completed, displayed turn. Review or edit the draft and its original quotes before adding it to your private investigation notes. Automatic extraction uses your configured model even in human-hosted play; manual excerpts are available if extraction fails. It does not grant an acquired game clue or advance a turn.
 
 **场景移动** (Scene travel) opens a simple graph of locations the party has reached. Select a destination and confirm a travel proposal; existing departure decisions and travel rules still apply. The server filters unvisited locations before sending the graph. Older saves may show only locations whose visits can be established from their saved state.
 
 ## Model configuration
 
-Use **模型设置** (Model settings) in the application, or `python3 start.py --config` for local configuration. Supply a compatible endpoint, model and API key. The local default context capacity is 262,144 tokens (256K); the selected model/service and an explicit configuration can impose a smaller window. A configured default does not enlarge a provider's actual capacity.
+Use **游戏设置 → 模型配置** (Game settings → Model configuration), or `python3 start.py --config` for local configuration. Older clients label the entry 模型设置 (Model settings). The other settings tabs are 游戏偏好 (Game preferences) and 上下文 (Context). Supply a compatible endpoint, model and API key. The local default context capacity is 262,144 tokens (256K); the selected model/service and an explicit configuration can impose a smaller window. A configured default does not enlarge a provider's actual capacity.
 
 Provider presets cover DeepSeek, Kimi, Qwen, Zhipu, Doubao, Gemini, OpenAI, OpenRouter and SiliconFlow.
 Choose the API format separately: **Chat Completions, Anthropic Messages, or Responses**.
@@ -90,6 +94,12 @@ Cloud BYOK settings are scoped to accounts/worlds. A room member does not gain a
 
 ## Module authoring
 
+### Module management
+
+Start-screen tools are grouped in a single row of icons in the top-right corner. Hover for names; desktop clients also provide an exit control. **导入模组** (Import module) installs a `.trpgmod` package for selection in a new world.
+
+In **local mode**, **模组管理** (Module management) lists installed versions, timelines and save counts. To replace an imported version, first select another module and close any windows still using it, then confirm deletion. Deletion permanently removes that version's module files, every associated world/branch (including archived branches), automatic/manual saves and turn history. Reimporting does not restore those records. The character library, workshop projects and other module versions remain. Built-in modules cannot be deleted; this management API is not available in account-based cloud mode.
+
 ### Visual workshop
 
 Click **模组工坊** (Module Workshop) on the start screen. The desktop client opens the editor in a browser; the local backend serves it at `/editor/`. Edit your project, export a `.trpgmod` package and import it into the game. Use a separate world for playtesting.
@@ -101,13 +111,15 @@ Desktop versions that include the component updater can offer compatible editor 
 From the repository root with the Python environment active:
 
 ```bash
-cp -r examples/module-template my-module
-python tools/module_packager.py compile my-module
-python tools/module_packager.py pack my-module dist/my-module.trpgmod
-python tools/module_packager.py validate dist/my-module.trpgmod
+TRPG_AUTHOR_WORK="$(dirname "$PWD")/mid_product/$(basename "$PWD")/work/module-authoring"
+mkdir -p -m 700 "$TRPG_AUTHOR_WORK"
+cp -r examples/module-template "$TRPG_AUTHOR_WORK/my-module"
+python tools/module_packager.py compile "$TRPG_AUTHOR_WORK/my-module"
+python tools/module_packager.py pack "$TRPG_AUTHOR_WORK/my-module" "$TRPG_AUTHOR_WORK/my-module.trpgmod"
+python tools/module_packager.py validate "$TRPG_AUTHOR_WORK/my-module.trpgmod"
 ```
 
-Start with `manifest.json`, `module.json` and `keeper.md`. A `.trpgmod` file is a ZIP package; supported v1/v2 definitions cover scenes, NPCs, clues, rules and endings. Runtime progress lives in the database, not in the exported authoring package.
+Use a fresh authoring directory for the initial copy; do not copy over an existing project. Temporary packages and compiled outputs stay outside the checkout. Start with `manifest.json`, `module.json` and `keeper.md`. A `.trpgmod` file is a ZIP package; supported v1/v2 definitions cover scenes, NPCs, clues, rules and endings. Runtime progress lives in the database, not in the exported authoring package. Deleting a module version is not a backup operation.
 
 Check references, asset paths, public/secret visibility, discovery conditions, failure outcomes, repeat actions and reachable endings. A schema field does not guarantee every execution mode implements that behavior. Maps, tokens, fog of war and arbitrary party splitting are not enabled merely by adding unrecognized fields.
 
@@ -129,13 +141,38 @@ Frontend, from `frontend/`:
 npm test
 npm run format:check
 npm run build
-npx playwright install chromium
+npx playwright install --with-deps chromium
+node node_modules/electron/install.js
 npm run test:e2e
 ```
 
 Some checks need PostgreSQL, browser dependencies or explicitly authorized live-model scenarios. Record skips and limitations separately from passing checks. Gameplay changes also need the applicable real playthrough checks; UI changes need actual screenshots at the required sizes. Use isolated local data and consult [development](../DEVELOPMENT.md).
 
-To build Windows artifacts on Windows, use `packaging/build_windows.ps1`, optionally with `-UseChinaMirrors`. Building artifacts does not publish them. Deployment and release require their own validation and authorization.
+Electron's install scripts are disabled during `npm ci`; the explicit runtime installation above is required before Electron E2E tests.
+
+On Linux CI, the full E2E suite runs under `xvfb-run --auto-servernum`. The workflows also prefetch the official Electron release asset through GitHub's API, verify it against the npm package's bundled SHA256 values and use bounded retries for transient download failures. See [development](../DEVELOPMENT.md#electron-下载与-windows-打包).
+
+To build Windows artifacts on Windows, use `packaging/build_windows.ps1`, optionally with `-UseChinaMirrors`. It verifies/installs Electron and passes the installed distribution to the packager, avoiding a second runtime/checksum download. Building artifacts does not publish them. Deployment and release require their own validation and authorization.
+
+## Diagnostic logs
+
+The backend writes ordinary operational messages to `trpg.log` and bounded per-turn diagnostic events to `diagnostics.jsonl`. Directory precedence, fixed at backend startup:
+
+1. `TRPG_LOG_DIR`, if explicitly set.
+2. `TRPG_RUNTIME_ROOT/logs`, when a runtime root is configured. Packaged desktop clients normally use their Electron user-data `runtime/logs` directory.
+3. Without a runtime root, a packaged backend uses `logs` beside its executable; source runs use the repository's sibling `mid_product/<repository-name>/work/runtime-logs/` directory.
+
+Run the query tool from the source checkout; use `--log-dir` for a different instance or packaged client:
+
+```bash
+python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --list-turns
+python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --search "text from the screenshot"
+python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --world WORLD_ID --turn TURN_ID --show-content
+```
+
+Search a distinctive part of the displayed text, then inspect that turn by ID; a search result alone is not its entire timeline. `dialogue.raw`, `dialogue.rejected`, `dialogue.accepted`, `dialogue.emitted` and `turn.output` distinguish model output, validation, backend callbacks and committed text. `dialogue.emitted` does not prove browser receipt/rendering. `model.completed` needs a successful `status`; a completed model call is not necessarily a committed game turn.
+
+The tool scans retained rotations, including earlier turns. It cannot reconstruct outputs from before the logging upgrade or after rotations expire; use the authorized instance's database turn history for older committed records. JSONL files rotate at about 5 MiB, with three backups. Narrative evidence is enabled by default, is redacted and capped at 65,536 characters per event, and can still contain spoilers or personal information. `TRPG_DIAGNOSTIC_CONTENT=0` disables storing text while retaining lengths/hashes; `TRPG_DIAGNOSTICS=0` disables JSONL. The query tool hides text unless `--show-content` is requested, including JSON output. Never share an entire log without reviewing it. Full coverage and privacy limits are documented in [development](../DEVELOPMENT.md#按回合查看开发日志).
 
 ## Technical reference
 
@@ -148,4 +185,4 @@ To build Windows artifacts on Windows, use `packaging/build_windows.ps1`, option
 | [Operations](../OPERATIONS.md) | Credentials, backups, environment boundaries, releases and rollback |
 | [Project status](../STATUS.md) | Dated release evidence, validated capabilities and open work |
 
-Screenshots in the READMEs are from a local development build captured on 2026-10-22 with public demonstration dialogue. They illustrate the interface and do not certify a released version or a complete gameplay test. When the workflow changes, update this guide and both READMEs together.
+The README start-screen screenshot was captured on 2026-11-08; the other images are from 2026-10-22. All use isolated local data. See [provenance](../screenshots/README.md). They illustrate the interface and do not certify a released version or a complete gameplay test. When the workflow changes, update this guide and both READMEs together.

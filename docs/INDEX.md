@@ -1,5 +1,7 @@
 # 文档入口
 
+更新于 2026-11-11。当前功能说明以已验证的源码 `c56e28dd` 为基线；稳定安装包、源码 CI 与正式部署分别见[状态](STATUS.md#1-版本与交付范围)。
+
 详细规格以以下六份中文现行文档为主。产品介绍见根 [中文 README](../README.md)
 与 [English README](../README.en.md)，英文操作说明见 [English guide](en/README.md)。
 代码、schema、fixtures、模组与正式前端素材仍在仓库内；详细历史资料不是运行依赖。
@@ -13,7 +15,31 @@
 | [运维](OPERATIONS.md) | 环境保护、BYOK、发布、备份与恢复要求 |
 | [状态](STATUS.md) | 当前发布、已验收范围和未解决事项 |
 
+## 常用操作
+
+| 需求 | 入口 |
+| --- | --- |
+| 开始游戏、选择客户端 | [中文 README](../README.md#安装与启动) / [English guide](en/README.md) |
+| 导入、删除并重新导入模组 | [模组管理](MODULE_FORMAT.md#删除并重新导入) |
+| 关闭“你可以——”行动建议 | [游戏显示偏好](DEVELOPMENT.md#游戏显示偏好) |
+| 查找日志、搜索第二轮及更早的对话 | [按回合查看开发日志](DEVELOPMENT.md#按回合查看开发日志) |
+| 排查重复菜单或人物台词错配 | [对话格式诊断](DEVELOPMENT.md#对话格式诊断) / [对话契约](PROTOCOL.md#ai-对话出发待决与状态修正) |
+| Electron 下载失败、Windows 打包 | [构建环境](DEVELOPMENT.md#electron-下载与-windows-打包) / [发布边界](OPERATIONS.md#7-桌面客户端发布与自动更新) |
+| 了解当前 CI、版本和未解决问题 | [项目状态](STATUS.md) |
+
 ## 归档资料
+
+2026-11-11 的[文档更新记录](../../mid_product/trpg-master/2026-11-11-docs-refresh/README.md)
+保留更新前全部入口文档、旧状态页和开始页截图，含链接/命令验证、源码基线与 SHA256。
+其中[旧 STATUS 原件](../../mid_product/trpg-master/2026-11-11-docs-refresh/originals/docs/STATUS.md)
+完整保留 10 月各阶段结果和当时的交付状态；下列旧档案的“未提交/未推送/实验分支”措辞为历史记录，
+当前 master 与发布范围以现行 STATUS 为准。
+
+2026-11-09 的 [Windows CI 后续修复验收](../../mid_product/trpg-master/2026-11-09-windows-package-followup/README.md)
+冻结于 `mid_product/trpg-master/2026-11-09-windows-package-followup/`：`c56e28dd` 的原始下载 504、
+打包复用已校验 Electron 的修正、本地 46 项测试、真实打包器 staging，以及同 SHA 的
+quality/Windows CI 完整成功日志。后端 2522 项、前端 1419 项、115 E2E / 2 skipped，
+Windows 安装/启动/卸载及产物上传通过；未据此发布新稳定 Release 或部署生产。
 
 2026-10-26 的 [CLI 维护验收](../../mid_product/trpg-master/2026-10-26-cli-maintenance/ACCEPTANCE.md)
 记录开场异常恢复、NPC 回调兼容、读档不调用模型、独立手动槽位及启动器环境选择，

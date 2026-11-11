@@ -2,6 +2,8 @@
 
 本入口说明制作流程与运行边界。现行字段以 [schema](../schemas/trpgmod/) 和 `src/modules/module_format.py` 为准；完整历史示例及编译诊断说明原样保留在[归档资料](INDEX.md#归档资料)，不要靠摘要猜可用字段。
 
+更新于 2026-11-11，操作以源码 `c56e28dd` 为基线；旧安装包可能没有相同入口，版本边界见[状态](STATUS.md#1-版本与交付范围)。
+
 ## 1. 作者态与运行态
 
 `.trpgmod` 是 ZIP 包，支持格式 v1/v2，包含结构化定义、Markdown 和素材。作者态定义场景、NPC、线索、秘密、规则与结局；安装编译生成 `module.md` 与 `world_state_initial.json`。
@@ -12,7 +14,7 @@
 
 ### 可视化创作
 
-在游戏开局页点击“模组工坊”。桌面客户端通过本地后端打开浏览器编辑器，
+在游戏开局页右上角的工具图标中点击“模组工坊”（悬停可见名称）。桌面客户端通过本地后端打开浏览器编辑器，
 源码服务地址为 `/editor/`；云端编辑接口仍受账号/管理员权限限制。
 在编辑器中组织场景、NPC、线索和主持资料，导出 `.trpgmod` 后回到游戏导入，
 选择该模组并在新的独立世界试玩。工程是作者数据，游戏进度不会写回工程。
@@ -27,13 +29,15 @@
 在仓库根目录，激活开发虚拟环境后：
 
 ```bash
-cp -r examples/module-template my-module
-python tools/module_packager.py compile my-module
-python tools/module_packager.py pack my-module dist/my-module.trpgmod
-python tools/module_packager.py validate dist/my-module.trpgmod
+TRPG_AUTHOR_WORK="$(dirname "$PWD")/mid_product/$(basename "$PWD")/work/module-authoring"
+mkdir -p -m 700 "$TRPG_AUTHOR_WORK"
+cp -r examples/module-template "$TRPG_AUTHOR_WORK/my-module"
+python tools/module_packager.py compile "$TRPG_AUTHOR_WORK/my-module"
+python tools/module_packager.py pack "$TRPG_AUTHOR_WORK/my-module" "$TRPG_AUTHOR_WORK/my-module.trpgmod"
+python tools/module_packager.py validate "$TRPG_AUTHOR_WORK/my-module.trpgmod"
 ```
 
-先修改 `manifest.json`、`module.json` 和 `keeper.md`，再编译、打包、预检导入，在独立世界试玩。模板见 [examples/module-template](../examples/module-template/manifest.json)，schema 见 [schemas/trpgmod](../schemas/trpgmod/)。
+以上使用新的作者工作目录；已有工程无需再次复制模板。先修改 `manifest.json`、`module.json` 和 `keeper.md`，再编译、打包、预检导入，在独立世界试玩。临时包与编译输出留在仓库外，已正式维护的模组源码仍可作为项目文件纳入版本库。模板见 [examples/module-template](../examples/module-template/manifest.json)，schema 见 [schemas/trpgmod](../schemas/trpgmod/)。
 
 英文步骤见 [Module authoring](en/README.md#module-authoring)。
 
@@ -44,6 +48,8 @@ python tools/module_packager.py validate dist/my-module.trpgmod
 角色库、模组工坊工程和其他版本保留。确认后可重新导入相同版本号的修正版。
 内置模组不能删除。正在使用的版本须先在开始页切换到其他模组，并关闭仍使用它的其他窗口。
 管理接口为本地专用的 `GET /api/modules/manage` 与 `DELETE /api/modules/{module_key}`。
+
+需要保留游玩进度时，不应先删除模组；旧存档和数据库备份应单独保管。模组包/工坊工程仅包含作者数据，不是玩家进度备份。网络中断导致结果不明时先刷新管理列表核对，不将“未收到回执”当作“删除未发生”。
 
 ## 3. 应查哪份资料
 
@@ -56,7 +62,7 @@ python tools/module_packager.py validate dist/my-module.trpgmod
 | 游戏命令与玩家可见性 | [协议](PROTOCOL.md) |
 | 尚未实现的地图/工坊方向 | [状态与后续方向](STATUS.md) |
 
-场景地图、Token、迷雾和自由分头行动不能通过手写未识别字段启用；它们不是当前格式已支持的承诺。
+自由布置的场景地图、Token、迷雾和自由分头行动不能通过手写未识别字段启用；它们不是当前格式已支持的承诺。游戏内已探索地点的移动图是运行进度投影，与这类作者态地图系统不同。
 
 ## 4. 过渡与旧存档兼容
 

@@ -1,5 +1,7 @@
 # 开发、协作与文档维护
 
+更新于 2026-11-11，已验证业务基线为 `c56e28dd`；源码、安装包与正式部署范围见[状态](STATUS.md)。
+
 根目录 `AGENTS.md` 是本机私有协作约定，不纳入 Git；存在时先读。共享规则由本文与[运维](OPERATIONS.md)维护。默认本地开发与测试；真实模型调用、预发布、正式发布分别授权。工作区他人改动不得覆盖、stash 或顺手提交。
 
 ## 1. 本地环境
@@ -39,7 +41,7 @@ python server.py
 
 浏览器打开 `http://127.0.0.1:8765/?mode=local`。首次运行可选择模组、调查员，
 再在选角页的“游玩方式”切换经典 AI 叙事、人类、AI 辅助或 AI 主持。
-人类主持不需要模型 Key；AI 功能按模型设置页/BYOK 路由配置。
+人类主持核心流程不需要模型 Key；AI 功能按“游戏设置 → 模型配置”及 BYOK 路由配置。
 经典 AI 和结构化模式的能力与验收覆盖分别见 [STATUS](STATUS.md)。
 
 前端热更新可另开终端运行 `cd frontend && npm run dev`，访问 Vite 输出的地址并加
@@ -71,6 +73,9 @@ Alembic/Uvicorn 正常的 INFO 也写入该流。Linux 上的 VA-API 初始化�
 3. 打包程序使用可执行文件旁的 `logs/`；源码开发默认使用仓库父目录
    `mid_product/<仓库目录名>/work/runtime-logs/`。不会搬动既有日志。
 
+正常打包桌面客户端已设置 `TRPG_RUNTIME_ROOT`，因此实际使用 Electron 用户数据目录下的
+`runtime/logs/`，而不是安装目录。用源码查询工具排查桌面或另一实例时，应显式传入该实例的 `--log-dir`。
+
 ```bash
 # 最近 100 条事件；默认自动查找上述目录并读取轮转文件
 python tools/diagnose_turn.py
@@ -83,6 +88,8 @@ python tools/diagnose_turn.py --world WORLD_ID --turn TURN_ID --limit 200 --show
 # 指定桌面客户端的日志目录，输出筛选后的 JSONL
 python tools/diagnose_turn.py --log-dir /path/to/runtime/logs --turn TURN_ID --json
 ```
+
+`--search` 只返回匹配文字的事件；找到世界/回合 ID 后，去掉 `--search`，再按 ID 查看完整保留链路。
 
 排障时先找 `turn.started`，再看 `turn.stage` 中的校验状态、`model.completed` 的
 `status/error_class`、`model.retry` 的原因与退避、`tool.completed` 的 `ok/code`，
@@ -103,6 +110,13 @@ JSONL 每份最多约 5 MiB，保留 3 份轮转备份；完整一行可能使�
 
 “游戏设置 → 游戏偏好”中的“显示行动提示”默认开启，关闭后隐藏守秘人正文的行动菜单和底部建议按钮，保留必要的确认、检定与结局交互。修改立即生效，使用本机 `localStorage` 保存；仅影响显示，不改写消息、存档或模型输出，重新开启即可恢复。
 
+### 对话格式诊断
+
+新回复的 `segments` 只承载旁白和台词，行动选项只能放入顶层 `choices`（非空单行、不带编号的字符串）。正文菜单在发布回调前拒绝；阶段日志中的 `embedded_choice_menu` 表示正文夹带菜单，`invalid_choice_format` 表示选项项格式无效。格式修复最多一次、禁用工具，避免重复执行检定；再次失败则不展示该回复并报告错误。历史记录仍使用兼容解码。叙事一致性校对也应用相同校验，违规重写被丢弃。
+
+按 `output_id` 对照 `dialogue.raw`、拒绝原因和修复后 `dialogue.accepted`，再核对 `turn.output`。
+临时人物被错配时同时查看 `speaker_id`、`speaker_reassigned` 及当场 guest 声明；格式通过不代表所有自然语言归属或秘密泄漏均已被检测。
+
 ## 2. 本地门禁
 
 在仓库根目录、已激活开发虚拟环境下：
@@ -119,10 +133,27 @@ python -m pytest -q
 npm test
 npm run format:check
 npm run build
+npx playwright install --with-deps chromium
+node node_modules/electron/install.js
 npm run test:e2e
 ```
 
 浏览器依赖与 Electron 环境按 `.github/workflows/quality.yml`、Playwright 配置及用例要求准备；不能仅因本地缺环境就说相关能力已验收。PostgreSQL 迁移/集成、Windows 打包和隔离恢复有独立条件，按变更范围补验。
+
+### Electron 下载与 Windows 打包
+
+`frontend/.npmrc` 禁用依赖安装脚本，因此 `npm ci` 后执行 Electron E2E 前须显式运行上面的 `install.js`。
+Linux 无图形会话时参照 CI 使用 `xvfb-run --auto-servernum npm run test:e2e`。
+
+CI 设置 `electron_config_cache`，用 `tools/cache_electron_runtime.py` 从官方 GitHub Release API
+预取当前锁定版本，并按 npm 包内 `checksums.json` 的 SHA256 校验；下载中断或校验失败不发布缓存文件。
+`tools/retry_network_command.py` 仅对识别出的短暂网络错误最多尝试三次，非网络构建错误直接保留失败退出码。
+这些步骤不使用第三方镜像，也不关闭校验；手动构建只有显式 `-UseChinaMirrors` 才选择镜像。
+
+Windows 使用 `packaging/build_windows.ps1`（已准备依赖时可加 `-SkipDependencyInstall`），
+先经 Electron installer 校验/安装，再以 `--config.electronDist=node_modules/electron/dist` 供打包器复用，
+避免打包器再次联网下载运行时/校验清单。Windows CI 另跑后端迁移、便携启动与 NSIS 安装/启动/卸载。
+构建只产出包与校验文件，不自动公开 Release 或部署正式服务，发布见[运维](OPERATIONS.md#7-桌面客户端发布与自动更新)。
 
 涉及场景、线索、战斗、SAN、结局、handout、检定或大版本发版时，按仓库 `scarlet-playthrough-check` 技能检查真实主线；涉及按钮按 `ui-button-check`。模型验收先确认服务目的地、测试数据、预算与重试上限；只用独立测试世界。legacy 主线不得代替 structured Agent 验收。
 
@@ -193,7 +224,3 @@ README 实际引用的公开截图保留在 `docs/screenshots/`，来源与用�
 使用隔离运行目录和演示世界，确认不含真实存档、密钥或未公开剧情后，
 只复制最终选用的图片到文档目录。标注日期、开发版/发布版和演示数据范围，
 实际打开中英文页面检查图片、说明及链接；截图不替代功能验收。
-
-### 对话格式诊断
-
-新回复的 `segments` 只承载旁白和台词，行动选项只能放入顶层 `choices`（非空单行、不带编号的字符串）。正文菜单在发布回调前拒绝；阶段日志中的 `embedded_choice_menu` 表示正文夹带菜单，`invalid_choice_format` 表示选项项格式无效。格式修复最多一次、禁用工具，避免重复执行检定；再次失败则不展示该回复并报告错误。历史记录仍使用兼容解码。叙事一致性校对也应用相同校验，违规重写被丢弃。
