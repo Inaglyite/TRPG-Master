@@ -200,6 +200,21 @@
     "command.end_game": {
       "roles": ["keeper", "agent"],
       "conditions": ["keeper_authority", "current_controller_epoch"]
+    },
+    "command.interact_point": {
+      "roles": [
+        "keeper",
+        "agent"
+      ],
+      "conditions": [
+        "can_keeper",
+        "agent_requires_current_epoch",
+        "actor_available",
+        "current_room_point",
+        "authored_requirements",
+        "matching_live_check_receipt",
+        "atomic_effects"
+      ]
     }
   },
   "notes": [

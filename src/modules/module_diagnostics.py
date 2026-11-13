@@ -102,8 +102,11 @@ def analyze_module(
             path="manifest.capabilities",
             message="自定义 Skill 会进入守秘人模型上下文",
         ))
+    spatial = getattr(module, "spatial", None)
+    point_clues = {effect.clue_id for point in spatial.points.values() for action in point.actions.values()
+                  for effect in [*action.success, *action.failure] if effect.kind == "grant_clue"} if spatial else set()
     for clue_id, clue in module.clues.items():
-        if clue.type == "hidden" and not clue.discovery_notes.strip():
+        if clue.type == "hidden" and not clue.discovery_notes.strip() and clue_id not in point_clues:
             diagnostics.append(ModuleDiagnostic(
                 phase="content_advice",
                 level="advice",

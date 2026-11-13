@@ -417,6 +417,13 @@ def _validate_package_content(
             "manifest.json 与 module.json 的 format_version 必须一致",
         )
 
+    from src.modules.spatial_validation import validate_spatial
+
+    try:
+        validate_spatial(module, manifest)
+    except ValueError as exc:
+        raise ModulePackageError("invalid_spatial_contract", str(exc)) from exc
+
     referenced_files = set()
     if manifest.keeper_document:
         referenced_files.add(manifest.keeper_document)

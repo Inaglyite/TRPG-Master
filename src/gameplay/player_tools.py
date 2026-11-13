@@ -47,7 +47,7 @@ def visited_scene_map(state: dict) -> dict:
         scene = current if scene_id == current_id else catalog.get(scene_id)
         if not isinstance(scene, dict):
             continue
-        view = player_scene_view({"current_scene": {**scene, "id": scene_id},
+        view = player_scene_view({**state, "current_scene": {**scene, "id": scene_id},
                                   "scene_catalog": catalog})
         if view:
             nodes.append({"id": scene_id, "name": view["name"],
@@ -57,7 +57,9 @@ def visited_scene_map(state: dict) -> dict:
     for node in nodes:
         scene_id = node["id"]
         scene = current if node["current"] else catalog.get(scene_id, {})
-        exits = scene.get("exits")
+        from src.gameplay.spatial import connections_from, enabled
+
+        exits = [target for _, _, target in connections_from(state, scene_id)] if enabled(state) else scene.get("exits")
         if not isinstance(exits, list):
             continue
         for target in exits:

@@ -1,5 +1,179 @@
 {
   "$defs": {
+    "Action": {
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "enum": [
+            "examine",
+            "search",
+            "read",
+            "take",
+            "talk",
+            "enter",
+            "use"
+          ],
+          "title": "Intent",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Aliases",
+          "type": "array"
+        },
+        "requires": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/Group",
+              "always": "#/$defs/Always",
+              "any": "#/$defs/Group",
+              "clock": "#/$defs/Clock",
+              "clue": "#/$defs/Clue",
+              "completed": "#/$defs/Completed",
+              "flag": "#/$defs/Flag",
+              "item": "#/$defs/Item",
+              "not": "#/$defs/Negation"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Always"
+            },
+            {
+              "$ref": "#/$defs/Group"
+            },
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "$ref": "#/$defs/Flag"
+            },
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "$ref": "#/$defs/Clue"
+            },
+            {
+              "$ref": "#/$defs/Clock"
+            },
+            {
+              "$ref": "#/$defs/Completed"
+            }
+          ],
+          "title": "Requires"
+        },
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Check"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repeat": {
+          "default": false,
+          "title": "Repeat",
+          "type": "boolean"
+        },
+        "success": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "adjust_item_state": "#/$defs/AdjustItem",
+                "advance_clock": "#/$defs/AdvanceClock",
+                "give_item": "#/$defs/GiveItem",
+                "grant_clue": "#/$defs/GrantClue",
+                "reveal_scene": "#/$defs/RevealScene",
+                "set_flag": "#/$defs/SetFlag",
+                "unlock_connection": "#/$defs/Unlock"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/GrantClue"
+              },
+              {
+                "$ref": "#/$defs/GiveItem"
+              },
+              {
+                "$ref": "#/$defs/AdjustItem"
+              },
+              {
+                "$ref": "#/$defs/SetFlag"
+              },
+              {
+                "$ref": "#/$defs/RevealScene"
+              },
+              {
+                "$ref": "#/$defs/Unlock"
+              },
+              {
+                "$ref": "#/$defs/AdvanceClock"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "title": "Success",
+          "type": "array"
+        },
+        "failure": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "adjust_item_state": "#/$defs/AdjustItem",
+                "advance_clock": "#/$defs/AdvanceClock",
+                "give_item": "#/$defs/GiveItem",
+                "grant_clue": "#/$defs/GrantClue",
+                "reveal_scene": "#/$defs/RevealScene",
+                "set_flag": "#/$defs/SetFlag",
+                "unlock_connection": "#/$defs/Unlock"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/GrantClue"
+              },
+              {
+                "$ref": "#/$defs/GiveItem"
+              },
+              {
+                "$ref": "#/$defs/AdjustItem"
+              },
+              {
+                "$ref": "#/$defs/SetFlag"
+              },
+              {
+                "$ref": "#/$defs/RevealScene"
+              },
+              {
+                "$ref": "#/$defs/Unlock"
+              },
+              {
+                "$ref": "#/$defs/AdvanceClock"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "title": "Failure",
+          "type": "array"
+        }
+      },
+      "required": [
+        "intent"
+      ],
+      "title": "Action",
+      "type": "object"
+    },
     "ActionAdvisoryDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -330,6 +504,86 @@
       "title": "ActionRouteDefinition",
       "type": "object"
     },
+    "AdjustItem": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "adjust_item_state",
+          "title": "Kind",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "state": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "State",
+          "type": "string"
+        },
+        "delta": {
+          "maximum": 100000,
+          "minimum": -100000,
+          "title": "Delta",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "item_id",
+        "state",
+        "delta"
+      ],
+      "title": "AdjustItem",
+      "type": "object"
+    },
+    "AdvanceClock": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "advance_clock",
+          "title": "Kind",
+          "type": "string"
+        },
+        "clock_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Clock Id",
+          "type": "string"
+        },
+        "amount": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Amount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "clock_id",
+        "amount"
+      ],
+      "title": "AdvanceClock",
+      "type": "object"
+    },
+    "Always": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "always",
+          "default": "always",
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "default": true,
+          "title": "Value",
+          "type": "boolean"
+        }
+      },
+      "title": "Always",
+      "type": "object"
+    },
     "AssetDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -444,6 +698,80 @@
         "event"
       ],
       "title": "AssetRevealTrigger",
+      "type": "object"
+    },
+    "Check": {
+      "additionalProperties": false,
+      "properties": {
+        "skill": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Skill",
+          "type": "string"
+        },
+        "difficulty": {
+          "default": "regular",
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill"
+      ],
+      "title": "Check",
+      "type": "object"
+    },
+    "Clock": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "clock",
+          "title": "Op",
+          "type": "string"
+        },
+        "clock_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Clock Id",
+          "type": "string"
+        },
+        "minimum": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Minimum",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "op",
+        "clock_id",
+        "minimum"
+      ],
+      "title": "Clock",
+      "type": "object"
+    },
+    "Clue": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "clue",
+          "title": "Op",
+          "type": "string"
+        },
+        "clue_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Clue Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "clue_id"
+      ],
+      "title": "Clue",
       "type": "object"
     },
     "ClueDefinition": {
@@ -601,6 +929,158 @@
         "to"
       ],
       "title": "ClueLinkDefinition",
+      "type": "object"
+    },
+    "Completed": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "completed",
+          "title": "Op",
+          "type": "string"
+        },
+        "point_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Point Id",
+          "type": "string"
+        },
+        "action_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Action Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "point_id",
+        "action_id"
+      ],
+      "title": "Completed",
+      "type": "object"
+    },
+    "Connection": {
+      "additionalProperties": false,
+      "properties": {
+        "source_scene_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Source Scene Id",
+          "type": "string"
+        },
+        "target_scene_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Target Scene Id",
+          "type": "string"
+        },
+        "bidirectional": {
+          "default": false,
+          "title": "Bidirectional",
+          "type": "boolean"
+        },
+        "visible_when": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/Group",
+              "always": "#/$defs/Always",
+              "any": "#/$defs/Group",
+              "clock": "#/$defs/Clock",
+              "clue": "#/$defs/Clue",
+              "completed": "#/$defs/Completed",
+              "flag": "#/$defs/Flag",
+              "item": "#/$defs/Item",
+              "not": "#/$defs/Negation"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Always"
+            },
+            {
+              "$ref": "#/$defs/Group"
+            },
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "$ref": "#/$defs/Flag"
+            },
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "$ref": "#/$defs/Clue"
+            },
+            {
+              "$ref": "#/$defs/Clock"
+            },
+            {
+              "$ref": "#/$defs/Completed"
+            }
+          ],
+          "title": "Visible When"
+        },
+        "requires": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/Group",
+              "always": "#/$defs/Always",
+              "any": "#/$defs/Group",
+              "clock": "#/$defs/Clock",
+              "clue": "#/$defs/Clue",
+              "completed": "#/$defs/Completed",
+              "flag": "#/$defs/Flag",
+              "item": "#/$defs/Item",
+              "not": "#/$defs/Negation"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Always"
+            },
+            {
+              "$ref": "#/$defs/Group"
+            },
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "$ref": "#/$defs/Flag"
+            },
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "$ref": "#/$defs/Clue"
+            },
+            {
+              "$ref": "#/$defs/Clock"
+            },
+            {
+              "$ref": "#/$defs/Completed"
+            }
+          ],
+          "title": "Requires"
+        },
+        "remember_unlock": {
+          "default": false,
+          "title": "Remember Unlock",
+          "type": "boolean"
+        },
+        "costs": {
+          "items": {
+            "$ref": "#/$defs/AdjustItem"
+          },
+          "maxItems": 8,
+          "title": "Costs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source_scene_id",
+        "target_scene_id"
+      ],
+      "title": "Connection",
       "type": "object"
     },
     "DiscoveryFallbackDefinition": {
@@ -934,6 +1414,158 @@
       "title": "EndingDefinition",
       "type": "object"
     },
+    "Flag": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "flag",
+          "title": "Op",
+          "type": "string"
+        },
+        "flag_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Flag Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "flag_id",
+        "value"
+      ],
+      "title": "Flag",
+      "type": "object"
+    },
+    "GiveItem": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "give_item",
+          "title": "Kind",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "quantity": {
+          "default": 1,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "item_id"
+      ],
+      "title": "GiveItem",
+      "type": "object"
+    },
+    "GrantClue": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "grant_clue",
+          "title": "Kind",
+          "type": "string"
+        },
+        "clue_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Clue Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "clue_id"
+      ],
+      "title": "GrantClue",
+      "type": "object"
+    },
+    "Group": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "all",
+            "any"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "conditions": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/Group",
+                "always": "#/$defs/Always",
+                "any": "#/$defs/Group",
+                "clock": "#/$defs/Clock",
+                "clue": "#/$defs/Clue",
+                "completed": "#/$defs/Completed",
+                "flag": "#/$defs/Flag",
+                "item": "#/$defs/Item",
+                "not": "#/$defs/Negation"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Always"
+              },
+              {
+                "$ref": "#/$defs/Group"
+              },
+              {
+                "$ref": "#/$defs/Negation"
+              },
+              {
+                "$ref": "#/$defs/Flag"
+              },
+              {
+                "$ref": "#/$defs/Item"
+              },
+              {
+                "$ref": "#/$defs/Clue"
+              },
+              {
+                "$ref": "#/$defs/Clock"
+              },
+              {
+                "$ref": "#/$defs/Completed"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Conditions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "conditions"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
     "InitialStateDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -979,6 +1611,174 @@
         }
       },
       "title": "InitialStateDefinition",
+      "type": "object"
+    },
+    "Item": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "item",
+          "title": "Op",
+          "type": "string"
+        },
+        "item_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "quantity": {
+          "default": 1,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "minimum_states": {
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "type": "integer"
+            }
+          },
+          "title": "Minimum States",
+          "type": "object"
+        }
+      },
+      "required": [
+        "op",
+        "item_id"
+      ],
+      "title": "Item",
+      "type": "object"
+    },
+    "ItemDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "states": {
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/NumericState"
+            }
+          },
+          "title": "States",
+          "type": "object"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "ItemDefinition",
+      "type": "object"
+    },
+    "Negation": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "condition": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/Group",
+              "always": "#/$defs/Always",
+              "any": "#/$defs/Group",
+              "clock": "#/$defs/Clock",
+              "clue": "#/$defs/Clue",
+              "completed": "#/$defs/Completed",
+              "flag": "#/$defs/Flag",
+              "item": "#/$defs/Item",
+              "not": "#/$defs/Negation"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Always"
+            },
+            {
+              "$ref": "#/$defs/Group"
+            },
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "$ref": "#/$defs/Flag"
+            },
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "$ref": "#/$defs/Clue"
+            },
+            {
+              "$ref": "#/$defs/Clock"
+            },
+            {
+              "$ref": "#/$defs/Completed"
+            }
+          ],
+          "title": "Condition"
+        }
+      },
+      "required": [
+        "op",
+        "condition"
+      ],
+      "title": "Negation",
+      "type": "object"
+    },
+    "Node": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "location",
+          "enum": [
+            "container",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "parent_scene_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Scene Id"
+        },
+        "entry_scene_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry Scene Id"
+        },
+        "hidden": {
+          "default": false,
+          "title": "Hidden",
+          "type": "boolean"
+        }
+      },
+      "title": "Node",
       "type": "object"
     },
     "NpcDefinition": {
@@ -1145,6 +1945,30 @@
       "title": "NpcRevealEffectDefinition",
       "type": "object"
     },
+    "NumericState": {
+      "additionalProperties": false,
+      "properties": {
+        "initial": {
+          "default": 0,
+          "title": "Initial",
+          "type": "integer"
+        },
+        "minimum": {
+          "default": 0,
+          "title": "Minimum",
+          "type": "integer"
+        },
+        "maximum": {
+          "default": 100,
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Maximum",
+          "type": "integer"
+        }
+      },
+      "title": "NumericState",
+      "type": "object"
+    },
     "PcTemplate": {
       "additionalProperties": false,
       "properties": {
@@ -1225,6 +2049,89 @@
       "title": "PcTemplate",
       "type": "object"
     },
+    "Point": {
+      "additionalProperties": false,
+      "properties": {
+        "scene_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 1200,
+          "title": "Description",
+          "type": "string"
+        },
+        "visible_when": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/Group",
+              "always": "#/$defs/Always",
+              "any": "#/$defs/Group",
+              "clock": "#/$defs/Clock",
+              "clue": "#/$defs/Clue",
+              "completed": "#/$defs/Completed",
+              "flag": "#/$defs/Flag",
+              "item": "#/$defs/Item",
+              "not": "#/$defs/Negation"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Always"
+            },
+            {
+              "$ref": "#/$defs/Group"
+            },
+            {
+              "$ref": "#/$defs/Negation"
+            },
+            {
+              "$ref": "#/$defs/Flag"
+            },
+            {
+              "$ref": "#/$defs/Item"
+            },
+            {
+              "$ref": "#/$defs/Clue"
+            },
+            {
+              "$ref": "#/$defs/Clock"
+            },
+            {
+              "$ref": "#/$defs/Completed"
+            }
+          ],
+          "title": "Visible When"
+        },
+        "actions": {
+          "maxProperties": 16,
+          "minProperties": 1,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/Action"
+            }
+          },
+          "title": "Actions",
+          "type": "object"
+        }
+      },
+      "required": [
+        "scene_id",
+        "name",
+        "actions"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
     "PrivateMemoryDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -1261,6 +2168,27 @@
         }
       },
       "title": "ProgressionDefinition",
+      "type": "object"
+    },
+    "RevealScene": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "reveal_scene",
+          "title": "Kind",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Scene Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "scene_id"
+      ],
+      "title": "RevealScene",
       "type": "object"
     },
     "SceneDefinition": {
@@ -1403,6 +2331,116 @@
       ],
       "title": "SceneEntryBeatDefinition",
       "type": "object"
+    },
+    "SetFlag": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "set_flag",
+          "title": "Kind",
+          "type": "string"
+        },
+        "flag_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Flag Id",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "kind",
+        "flag_id",
+        "value"
+      ],
+      "title": "SetFlag",
+      "type": "object"
+    },
+    "SpatialDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "nodes": {
+          "maxProperties": 256,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/Node"
+            }
+          },
+          "title": "Nodes",
+          "type": "object"
+        },
+        "connections": {
+          "maxProperties": 1024,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/Connection"
+            }
+          },
+          "title": "Connections",
+          "type": "object"
+        },
+        "points": {
+          "maxProperties": 1024,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/Point"
+            }
+          },
+          "title": "Points",
+          "type": "object"
+        },
+        "items": {
+          "maxProperties": 256,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$": {
+              "$ref": "#/$defs/ItemDefinition"
+            }
+          },
+          "title": "Items",
+          "type": "object"
+        }
+      },
+      "title": "SpatialDefinition",
+      "type": "object"
+    },
+    "Unlock": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "unlock_connection",
+          "title": "Kind",
+          "type": "string"
+        },
+        "connection_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "title": "Connection Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "connection_id"
+      ],
+      "title": "Unlock",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -1481,6 +2519,17 @@
     },
     "progression": {
       "$ref": "#/$defs/ProgressionDefinition"
+    },
+    "spatial": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpatialDefinition"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

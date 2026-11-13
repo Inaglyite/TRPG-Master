@@ -126,7 +126,8 @@ COMMAND_CATALOG_BRIEF = """命令目录（kind → 必填 payload 字段）：
 - keeper_roll: spec, visibility?(keeper|public，默认keeper；仅人类主持主动普通骰，你不得调用或放入草稿；不代替检定/战斗，不产生剧情效果)。
 - publish_message: speaker{kind: keeper|npc|investigator|system, id?}, audience{kind: public|keeper|investigators(+investigator_ids)}, text
   （对全体玩家说话一律用 public；kind=investigators 时 investigator_ids 必填，写全体会被协议拒绝）
-- move_party: destination_scene_id（候选在 snapshot.destinations）, travel_minutes?
+- interact_point: investigator_id, point_id, action_id, check_request_id?（仅启用 spatial 的模组；当前房间动作见 scene_notes.spatial；先对 scene_object 的 point_id:action_id 发起真实检定，不能自报成功；取得信息和实物分别结算，不绕过作者动作；不提前复述私有规则或未发现线索）
+- move_party: destination_scene_id（候选在 snapshot.destinations）, travel_minutes?, investigator_id?（空间通路由该调查员实际持有的物品开锁；省略时使用当前调查员）
 - request_check: investigator_id, skill, difficulty(regular|hard|extreme), attempt（玩家尝试的完整描述，字符串，例如「翻检办公桌抽屉找藏匿物」——不是次数）, visibility(public|keeper); 可选 bonus_penalty/known_cost/target/related_request_id/push_for/time_cost_minutes
 - resolve_check: check_request_id（主持代结算；通常等玩家点击）
 - grant_clue: clue_id, recipient_investigator_ids, basis, present_asset_id?, discovery_rule_index?, discovery_investigator_id?, check_request_id?, acquire_item?（省略发现字段只发信息；发现必须选作者规则编号与发现者，需要检定则关联同目标已成功检定；取得实物须 acquire_item=true，不带走不得设true，不得仅用发卡代替取得）

@@ -841,11 +841,47 @@ export const KEEPER_COMMANDS: KeeperCommandSpec[] = [
     ],
   },
   {
+    kind: "interact_point",
+    label: "结算调查点",
+    group: "发言与线索",
+    help: "仅空间模组可用；按当前房间的作者动作结算。需检定时填写已经实际掷骰的检定请求 ID。",
+    fields: [
+      INVESTIGATOR,
+      {
+        name: "point_id",
+        label: "调查点 ID",
+        kind: "id",
+        required: true,
+        maxLength: 64,
+      },
+      {
+        name: "action_id",
+        label: "动作 ID",
+        kind: "id",
+        required: true,
+        maxLength: 64,
+      },
+      {
+        name: "check_request_id",
+        label: "检定请求 ID",
+        kind: "id",
+        required: false,
+        maxLength: 160,
+      },
+    ],
+  },
+  {
     kind: "move_party",
     label: "整队移动",
     group: "时间与移动",
     help: "只有提交成功的移动才更新公开场景；抵达不等于调查。",
     fields: [
+      {
+        ...INVESTIGATOR,
+        label: "开锁调查员",
+        required: false,
+        help: "空间模组按该调查员的实际持有物检查通行条件；省略时使用当前调查员。",
+      },
       {
         name: "destination_scene_id",
         label: "目的地",

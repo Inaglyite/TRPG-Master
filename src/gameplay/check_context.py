@@ -124,6 +124,10 @@ def record_check_outcome(
     """Bookkeep one check: consume a retried push context, remember a failed
     first attempt, retire contexts obsoleted by success, and append the
     condition key to the repeat-check history."""
+    from src.gameplay.spatial_checks import record_legacy_check
+
+    record_legacy_check(world, skill=skill, result=result, target_id=target_id,
+                        required_success_level=required_success_level)
     contexts = world.setdefault("pc", {}).setdefault("_push_contexts", {})
     if push:
         validate_push(world, skill, push_context_id, approach, target_id)

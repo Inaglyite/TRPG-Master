@@ -1,0 +1,275 @@
+{
+  "$schema": "https://trpg-master.local/schemas/module-v2.json",
+  "format_version": "2.0",
+  "entry_scene_id": "house",
+  "opening_prompt": "调查员抵达旧寓所门厅。只描述门厅的柜子和灯，不提前描述卧室或隐藏区域。使用 spatial_inspect 查看当前可用动作。",
+  "npcs": {},
+  "scenes": {
+    "house": {
+      "name": "旧寓所",
+      "description": "寓所由门厅、卧室和待发现的区域组成。",
+      "exits": [],
+      "npcs_present": []
+    },
+    "foyer": {
+      "name": "门厅",
+      "description": "衣柜旁是一盏未点亮的灯。",
+      "exits": [
+        "bedroom"
+      ],
+      "npcs_present": []
+    },
+    "bedroom": {
+      "name": "卧室",
+      "description": "床边有写字台，壁炉上方嵌着一块金属锁板。",
+      "exits": [
+        "foyer",
+        "secret"
+      ],
+      "npcs_present": []
+    },
+    "secret": {
+      "name": "隐藏房间",
+      "description": "狭小的储藏间里放着编钟盒。",
+      "exits": [
+        "bedroom"
+      ],
+      "npcs_present": []
+    }
+  },
+  "clues": {
+    "score": {
+      "text": "残谱写着一段反复涂改的节拍。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 1,
+      "source": "bedroom",
+      "related_scenes": [
+        "bedroom"
+      ]
+    },
+    "bell": {
+      "text": "编钟盒底留有工匠的印记。",
+      "category": "investigation",
+      "type": "hidden",
+      "tier": 1,
+      "source": "secret",
+      "related_scenes": [
+        "secret"
+      ]
+    }
+  },
+  "endings": {},
+  "rules": {},
+  "assets": {},
+  "initial_state": {
+    "pc": {
+      "name": "调查员",
+      "hp": 10,
+      "max_hp": 10,
+      "san": 60,
+      "skills": {
+        "spot_hidden": 60
+      },
+      "inventory": []
+    },
+    "flags": {
+      "door_found": false
+    },
+    "case_clocks": {
+      "pressure": 0
+    },
+    "case_clock_definitions": {
+      "pressure": {
+        "name": "外界压力",
+        "max": 3,
+        "levels": {
+          "0": "平静",
+          "1": "有人留意",
+          "2": "有人窥探",
+          "3": "压力已满"
+        }
+      }
+    }
+  },
+  "progression": {
+    "essential_clue_ids": [
+      "score",
+      "bell"
+    ]
+  },
+  "spatial": {
+    "version": 1,
+    "nodes": {
+      "house": {
+        "kind": "container",
+        "entry_scene_id": "foyer"
+      },
+      "foyer": {
+        "parent_scene_id": "house"
+      },
+      "bedroom": {
+        "parent_scene_id": "house"
+      },
+      "secret": {
+        "parent_scene_id": "house",
+        "hidden": true
+      }
+    },
+    "connections": {
+      "secret_door": {
+        "source_scene_id": "bedroom",
+        "target_scene_id": "secret",
+        "bidirectional": true,
+        "visible_when": {
+          "op": "flag",
+          "flag_id": "door_found",
+          "value": true
+        },
+        "requires": {
+          "op": "all",
+          "conditions": [
+            {
+              "op": "flag",
+              "flag_id": "door_found",
+              "value": true
+            },
+            {
+              "op": "item",
+              "item_id": "charged_key",
+              "minimum_states": {
+                "charge": 1
+              }
+            }
+          ]
+        },
+        "remember_unlock": true,
+        "costs": [
+          {
+            "kind": "adjust_item_state",
+            "item_id": "charged_key",
+            "state": "charge",
+            "delta": -1
+          }
+        ]
+      }
+    },
+    "items": {
+      "charged_key": {
+        "label": "教学钥匙",
+        "states": {
+          "charge": {
+            "initial": 0,
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "points": {
+      "cabinet": {
+        "scene_id": "foyer",
+        "name": "门边衣柜",
+        "description": "可以打开的普通衣柜。",
+        "actions": {
+          "take": {
+            "intent": "take",
+            "success": [
+              {
+                "kind": "give_item",
+                "item_id": "charged_key"
+              }
+            ]
+          }
+        }
+      },
+      "lamp": {
+        "scene_id": "foyer",
+        "name": "充能灯",
+        "description": "锁板配套的教学装置。",
+        "actions": {
+          "charge": {
+            "intent": "use",
+            "repeat": true,
+            "requires": {
+              "op": "item",
+              "item_id": "charged_key"
+            },
+            "success": [
+              {
+                "kind": "adjust_item_state",
+                "item_id": "charged_key",
+                "state": "charge",
+                "delta": 1
+              }
+            ]
+          }
+        }
+      },
+      "fireplace": {
+        "scene_id": "bedroom",
+        "name": "壁炉与写字台",
+        "description": "需要仔细搜索的调查点。",
+        "actions": {
+          "search": {
+            "intent": "search",
+            "check": {
+              "skill": "spot_hidden",
+              "difficulty": "regular"
+            },
+            "success": [
+              {
+                "kind": "set_flag",
+                "flag_id": "door_found",
+                "value": true
+              },
+              {
+                "kind": "reveal_scene",
+                "scene_id": "secret"
+              },
+              {
+                "kind": "grant_clue",
+                "clue_id": "score"
+              }
+            ],
+            "failure": [
+              {
+                "kind": "advance_clock",
+                "clock_id": "pressure",
+                "amount": 1
+              },
+              {
+                "kind": "set_flag",
+                "flag_id": "door_found",
+                "value": true
+              },
+              {
+                "kind": "reveal_scene",
+                "scene_id": "secret"
+              },
+              {
+                "kind": "grant_clue",
+                "clue_id": "score"
+              }
+            ]
+          }
+        }
+      },
+      "bell_box": {
+        "scene_id": "secret",
+        "name": "编钟盒",
+        "actions": {
+          "examine": {
+            "intent": "examine",
+            "success": [
+              {
+                "kind": "grant_clue",
+                "clue_id": "bell"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

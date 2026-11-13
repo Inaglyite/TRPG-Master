@@ -63,12 +63,14 @@ from .principal import (
 from .rate_limits import ORDINARY_DICE_RATE_LIMITER
 from .registries import ensure_clue_registry, ensure_item_registry
 from .rulings import record_ruling, ruling_projection
+from .spatial_commands import interact_point
 from .validation import validate_command
 
 logger = logging.getLogger("trpg.structured_service")
 
 _KIND_HANDLERS = {
     **COMMAND_HANDLERS,
+    "interact_point": interact_point,
     "request_check": _cmd_request_check,
     "resolve_check": _cmd_resolve_check,
     "control_keeper": cmd_control_keeper,
@@ -219,6 +221,7 @@ class StructuredPlayService:
         if handler is None:
             raise StructuredError("invalid_action", f"未知命令：{kind}")
         if kind in _COMBAT_COMMANDS or kind in {
+            "interact_point",
             "record_ruling",
             "record_condition",
             "keeper_roll",
@@ -1295,6 +1298,11 @@ class StructuredPlayService:
         note(str(current.get("id") or ""), current=True)
         for scene_id in sorted(_known_destinations(state)):
             note(scene_id, current=False)
+        from src.gameplay.spatial import enabled
+        from src.gameplay.spatial_actions import inspect_spatial
+
+        if enabled(state) and notes:
+            notes[0]["spatial"] = inspect_spatial(state)
         return notes
 
     def investigator_sheets_for_agent(self, world_id: str) -> list[dict]:
@@ -1666,6 +1674,7 @@ class StructuredPlayService:
         structured = profile == "structured_v1"
         modes = meta.get("keeper_modes") or ["human", "assisted", "agent"]
         commands = [
+            "interact_point",
             "move_party",
             "request_check",
             "resolve_check",

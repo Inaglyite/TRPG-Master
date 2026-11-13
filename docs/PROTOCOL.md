@@ -547,3 +547,7 @@ token的停止条件。structured调用用当前服务的显式窗口，否则�
 同时核对 schema/fixtures、后端校验与领域授权、Agent 可见命令说明、前端 builder、`server-message.ts` 外层白名单、结构化事件解析、实时投影、快照恢复、错误提示。
 
 参考测试：`tests/test_structured_play_protocol.py`、`test_structured_command_catalog.py`、前端 `protocol/m0-fixtures.test.ts` 及真实后端 E2E。详表中的阶段说明不代表最新完成度；完成度只在 [STATUS](STATUS.md) 更新。
+
+## Spatial v1 命令扩展（开发分支）
+
+命令 schema 增加主持/Agent 的 interact_point，必填 investigator_id、point_id、action_id，可选 check_request_id；move_party 可选 investigator_id 指定开锁者。复用原权限、revision、command_id 幂等、事务与 outbox。玩家不能直接提交调查结算；可见点沿 scene_object 投影，检定目标为 point_id:action_id。详情见[空间契约](SPATIAL_INVESTIGATION.md)。未增加自由 effects/success 输入。

@@ -118,6 +118,7 @@ describe("主持命令字段表（对照 M0 command_request.json）", () => {
         "advance_time",
         "grant_clue",
         "move_party",
+        "interact_point",
         "present_handout",
         "present_information",
         "publish_message",

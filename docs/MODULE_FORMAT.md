@@ -77,3 +77,7 @@ legacy advisory 的 blocking 卡与非阻塞 transition_text 是不同用途。�
 格式校验、引用、素材路径、秘密可见性、失败出口、主线可达性、重复触发、时间/状态一致性与结局都要验证。主线测试允许真实玩家改变做法，但不能改断言掩盖机制缺陷。
 
 按[开发验收](DEVELOPMENT.md)分开记录编译通过、确定性测试、真实人类主持、真实 Agent 与旧主线结果；涉及模型调用先获授权。第三方包及 custom skills 是不可信输入，必须经过安全预检和信任提示，不能绕过安装器直接覆盖运行目录。
+
+## Spatial v1：子场景与声明式调查（开发分支）
+
+`feat/spatial-investigation` 为 v2 增加可选 spatial，提供父子场景、可见/通行条件、调查点动作、物品数值状态和真实检定回执结算。常规空间玩法无需自定义 Skill；旧平面模组保持原路径。字段与运行边界见[开发契约](SPATIAL_INVESTIGATION.md)，编辑器按[交接文档](SPATIAL_EDITOR_HANDOFF.md)同步。本功能未正式发布，不自动改造旧模组或存档。

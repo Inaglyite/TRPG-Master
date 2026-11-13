@@ -64,6 +64,12 @@ def verify_discovery(
     state: dict, clue_id: str, index: int, actor: str, check_id: str, ctx, *, use: bool = False
 ) -> tuple[dict, dict]:
     require_actor(state, actor)
+    from src.gameplay.spatial import SpatialError, require_clue_authorization
+
+    try:
+        require_clue_authorization(state, clue_id)
+    except SpatialError as exc:
+        raise StructuredError(exc.code, str(exc)) from exc
     entry, rule = authored_rule(state, clue_id, index)
     if (rule.get("intent") == "use") != use:
         raise StructuredError("invalid_action", "使用型发现必须通过真实持有物品的使用命令结算。")

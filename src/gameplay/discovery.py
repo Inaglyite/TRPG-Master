@@ -140,7 +140,12 @@ def match_discovery_rules(content: str, world: dict) -> list[DiscoveryMatch]:
     known = _known_clue_ids(world)
     no_take = disclaims_acquisition(text)
     matches: list[DiscoveryMatch] = []
+    from src.gameplay.spatial import enabled, protected_clues
+
+    guarded = protected_clues(world) if enabled(world) else set()
     for clue_id, clue in catalog.items():
+        if str(clue_id) in guarded:
+            continue
         if str(clue_id) in known or not isinstance(clue, dict):
             continue
         related_scenes = clue.get("related_scenes", [])
@@ -187,7 +192,12 @@ def infer_discovery_target_destination(content: str, world: dict) -> str | None:
 
     known = _known_clue_ids(world)
     destinations: set[str] = set()
+    from src.gameplay.spatial import enabled, protected_clues
+
+    guarded = protected_clues(world) if enabled(world) else set()
     for clue_id, clue in catalog.items():
+        if str(clue_id) in guarded:
+            continue
         if str(clue_id) in known or not isinstance(clue, dict):
             continue
         rules = clue.get("discovery_rules", [])

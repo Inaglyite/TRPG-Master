@@ -80,7 +80,8 @@
     },
     {
       "$ref": "#/$defs/record_condition"
-    }
+    },
+    {"$ref": "#/$defs/interact_point"}
   ],
   "$defs": {
     "record_keeper_note": {
@@ -714,6 +715,7 @@
           "required": ["destination_scene_id"],
           "additionalProperties": false,
           "properties": {
+            "investigator_id": {"$ref": "common.json#/$defs/id_string"},
             "destination_scene_id": {
               "$ref": "common.json#/$defs/id_string"
             },
@@ -1334,6 +1336,44 @@
           },
           "required": [],
           "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope_base"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "interact_point": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "kind": {
+          "const": "interact_point"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "investigator_id",
+            "point_id",
+            "action_id"
+          ],
+          "properties": {
+            "investigator_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "point_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "action_id": {
+              "$ref": "common.json#/$defs/id_string"
+            },
+            "check_request_id": {
+              "$ref": "common.json#/$defs/id_string"
+            }
+          }
         }
       },
       "allOf": [

@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from src.ai.model.model_tool_catalog import build_model_catalog_helpers
+from src.ai.tools.spatial_tools import SPATIAL_TOOLS, register_spatial_tools
 from src.ai.tools.tool_aux_handlers import register_auxiliary_handlers
 from src.ai.tools.tool_policy import (
     ENGINE_INTERNAL_CALLER,
@@ -778,7 +779,7 @@ TOOLS = [
 
 # The provider receives a policy-owned projection of ``TOOLS``.  It is built
 # in a separate module so the large handler/schema registry remains only the
-TOOLS.extend(TURN_STATE_TOOLS)
+TOOLS.extend(TURN_STATE_TOOLS + SPATIAL_TOOLS)
 _MODEL_CATALOG = build_model_catalog_helpers(TOOLS)
 TOOL_SCHEMA_BY_NAME = _MODEL_CATALOG.tool_schema_by_name
 MODEL_TOOL_NAMES = _MODEL_CATALOG.model_tool_names
@@ -883,6 +884,12 @@ def _roll_check(
     )
 
     state = context.world_store.load()
+    from src.gameplay.spatial_checks import validate_point_check
+
+    try:
+        validate_point_check(state, target_id, None, check_id, required_success_level)
+    except ValueError as exc:
+        return _json_result({"ok": False, "error": getattr(exc, "code", "invalid_point_check"), "detail": str(exc)})
     value = effective_skill_value(state.get("pc") or {}, check_id)
     if value is None:
         return _json_result({"ok": False, "error": "unknown_skill", "skill": check_id,
@@ -938,13 +945,16 @@ def _roll_check(
     result["check_id"] = f"{session.id if session else uuid.uuid4().hex}:{check_id}"[:80]
     if previous and not result["success"]:
         result["push_consequence"] = previous["push_risk"]
-    context.world_store.update(
-        lambda world: record_check_outcome(
-            world, skill=check_id, result=result, push=push,
-            push_context_id=push_context_id, approach=approach, target_id=target_id,
-            required_success_level=required_success_level, push_risk=push_risk,
+    from src.gameplay.spatial_storage import authored_mutation
+
+    with authored_mutation():
+        context.world_store.update(
+            lambda world: record_check_outcome(
+                world, skill=check_id, result=result, push=push,
+                push_context_id=push_context_id, approach=approach, target_id=target_id,
+                required_success_level=required_success_level, push_risk=push_risk,
+            )
         )
-    )
     return _json_result(result)
 
 
@@ -1052,6 +1062,8 @@ def _state_command(context: RuntimeContext, command: str, *args, **kwargs) -> st
         return _json_result(result_value)
     return "(空)"
 
+
+register_spatial_tools(TOOL_RUNTIME, _state_command)
 
 register_auxiliary_handlers(
     TOOL_RUNTIME,
@@ -1320,21 +1332,6 @@ def _skill_check(args: dict, context: RuntimeContext) -> str:
     )
 
 
-@TOOL_RUNTIME.handler("state_add_clue")
-def _state_add_clue(args: dict, context: RuntimeContext) -> str:
-    state = context.world_store.load()
-    pc = state.get("pc", {}) if isinstance(state, dict) else {}
-    visibility = "private" if args.get("visibility") == "private" else "public"
-    return _state_command(
-        context,
-        "cmd_add_clue",
-        args.get("text", ""),
-        args.get("category", "investigation"),
-        asset_id=args.get("asset_id", "") or "",
-        clue_id=args.get("clue_id", "") or "",
-        visibility=visibility,
-        owner_investigator_id=(pc.get("investigator_id") if visibility == "private" else None),
-    )
 
 
 @TOOL_RUNTIME.handler("create_character")

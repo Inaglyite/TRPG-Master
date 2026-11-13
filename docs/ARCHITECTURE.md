@@ -345,3 +345,7 @@ React → typed transport → HTTP/WS；Zod/协议校验 → Zustand → 组件�
 先定义用户行为、运行模式、效果所有者、权限、事务及恢复，再改 schema/handler/提示词目录/前端 builder，并加正常与拒绝对偶。新增迁移同时核对打包接管表集；新增事件同时核对外层白名单、实时投影与快照恢复。
 
 跨模块任务须给出唯一负责人、文件边界、冻结 SHA、fixtures、验收与交接对象；流程见[开发与协作](DEVELOPMENT.md)。运维与发布授权见[运维](OPERATIONS.md)。架构检查通过仅证明已有静态门禁通过，不代替完整审计。
+
+## Spatial v1 领域边界（开发分支）
+
+空间功能由 `src/gameplay/spatial*.py` 评估条件与原子效果，`src/modules/spatial*.py` 定义/校验/编译作者数据；经典工具与结构化命令只作适配。位置仍唯一取自 current_scene.id，库存复用 item_registry。父路径为派生视图，读档恢复独立于移动结算。详见[开发契约](SPATIAL_INVESTIGATION.md)。

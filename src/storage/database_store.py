@@ -229,6 +229,8 @@ class DatabaseWorldStore:
         *,
         expected_revision: int | None = None,
     ) -> WorldSnapshot:
+        from src.gameplay.spatial_storage import guard_update
+
         if self._turn_state is not None and self._turn_base_revision is not None:
             with self._thread_lock:
                 actual = int(self._turn_state.get("revision", self._turn_base_revision))
@@ -240,6 +242,7 @@ class DatabaseWorldStore:
                     if not isinstance(replacement, dict):
                         raise TypeError("WorldStore mutator 只能返回 dict 或 None")
                     working = replacement
+                guard_update(self._turn_state, working)
                 working, _ = migrate_world_state(working)
                 working["revision"] = actual + 1
                 working["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
@@ -260,6 +263,7 @@ class DatabaseWorldStore:
                 if not isinstance(replacement, dict):
                     raise TypeError("WorldStore mutator 只能返回 dict 或 None")
                 working = replacement
+            guard_update(row.state, working)
             working, _ = migrate_world_state(working)
             working["revision"] = actual + 1
             working["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
@@ -278,6 +282,9 @@ class DatabaseWorldStore:
             before = copy.deepcopy(self._turn_state)
             try:
                 yield self._turn_state
+                from src.gameplay.spatial_storage import guard_update
+
+                guard_update(before, self._turn_state)
             except BaseException:
                 self._turn_state = before
                 raise
@@ -299,6 +306,9 @@ class DatabaseWorldStore:
             current = copy.deepcopy(row.state)
             working = copy.deepcopy(current)
             yield working
+            from src.gameplay.spatial_storage import guard_update
+
+            guard_update(current, working)
             working, _ = migrate_world_state(working)
             if working != current:
                 working["revision"] = actual + 1
@@ -318,9 +328,12 @@ class DatabaseWorldStore:
         source = snapshot.state if isinstance(snapshot, WorldSnapshot) else snapshot
         if not isinstance(source, dict):
             raise TypeError("snapshot 必须是 WorldSnapshot 或 dict")
-        return self.update(
-            lambda _current: copy.deepcopy(source), expected_revision=expected_revision
-        )
+        from src.gameplay.spatial_storage import restoring_snapshot
+
+        with restoring_snapshot():
+            return self.update(
+                lambda _current: copy.deepcopy(source), expected_revision=expected_revision
+            )
 
     def seed_from_snapshot(
         self,

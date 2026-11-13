@@ -197,6 +197,9 @@ def register_auxiliary_handlers(
 
     @runtime.handler("show_handout")
     def show_handout(args: dict, context: RuntimeContext) -> str:
+        from src.structured.spatial_commands import guard_asset
+
+        guard_asset(context.world_store.load(), str(args.get("asset_id") or ""))
         result = state_command(
             context,
             "cmd_show_handout",

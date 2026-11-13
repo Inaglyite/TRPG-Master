@@ -245,6 +245,9 @@ class WorldStore:
                 if not isinstance(replacement, dict):
                     raise TypeError("WorldStore mutator 只能返回 dict 或 None")
                 working = replacement
+            from src.gameplay.spatial_storage import guard_update
+
+            guard_update(current, working)
             working, _ = migrate_world_state(working)
             working["revision"] = actual + 1
             working["schema_version"] = CURRENT_WORLD_SCHEMA_VERSION
@@ -261,6 +264,9 @@ class WorldStore:
                 raise StaleRevisionError(expected_revision, actual)
             working = copy.deepcopy(current)
             yield working
+            from src.gameplay.spatial_storage import guard_update
+
+            guard_update(current, working)
             working, _ = migrate_world_state(working)
             if working != current:
                 working["revision"] = actual + 1

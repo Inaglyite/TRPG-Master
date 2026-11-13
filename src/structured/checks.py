@@ -157,6 +157,14 @@ def cmd_request_check(state: dict, payload: dict, ctx: CommandContext) -> Comman
     if visibility not in {"public", "keeper"}:
         raise StructuredError("invalid_action", "visibility 只支持 public/keeper。")
     target = payload.get("target")
+    if isinstance(target, dict) and target.get("kind") == "scene_object":
+        from src.gameplay.spatial import SpatialError
+        from src.gameplay.spatial_checks import validate_point_check
+
+        try:
+            validate_point_check(state, str(target.get("id") or ""), investigator_id, skill, difficulty)
+        except SpatialError as exc:
+            raise StructuredError(exc.code, str(exc)) from exc
     # 权威角色状态取值：技能值在创建时就按卡校验，防止等待一张永远无法结算的卡。
     _skill_value(state, investigator_id, skill)
     time_cost = payload.get("time_cost_minutes", 0)

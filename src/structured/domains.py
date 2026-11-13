@@ -136,6 +136,11 @@ def _public_targets(state: dict) -> list[dict]:
                     "name": str(name or investigator_id),
                 }
             )
+    from src.gameplay.spatial import enabled
+    from src.gameplay.spatial_actions import public_points
+
+    if enabled(state):
+        targets.extend(public_points(state))
     return targets
 
 
@@ -152,6 +157,10 @@ def _stat_projection(sheet: dict, investigator_id: str) -> dict:
 
 def _known_destinations(state: dict) -> dict[str, str]:
     """玩家已知可选目的地：当前场景出口 + 到过的场景（遭遇史为凭）。不泄露完整地图。"""
+    from src.gameplay.spatial import enabled, visible_destinations
+
+    if enabled(state):
+        return visible_destinations(state)
     scenes = state.get("scene_catalog", {})
     if not isinstance(scenes, dict):
         return {}
@@ -277,7 +286,16 @@ def cmd_adjust_stat(state: dict, payload: dict, ctx: CommandContext) -> CommandR
 
 
 def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
+    from src.gameplay.spatial import SpatialError, authorize_transition, enabled, settle_transition
+
+    spatial_before = copy.deepcopy(state) if enabled(state) else None
     destination = _require_text(payload, "destination_scene_id", limit=160)
+    actor = str(payload.get("investigator_id") or "") or None
+    if spatial_before is not None:
+        try:
+            destination = authorize_transition(state, destination, actor)[0]
+        except SpatialError as exc:
+            raise StructuredError(exc.code, str(exc)) from exc
     scenes = state.get("scene_catalog", {})
     scene = scenes.get(destination) if isinstance(scenes, dict) else None
     if not isinstance(scene, dict):
@@ -307,6 +325,11 @@ def cmd_move_party(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     }
     catalog_entry["id"] = destination
     state["current_scene"] = catalog_entry
+    if spatial_before is not None:
+        try:
+            settle_transition(spatial_before, state, destination, actor)
+        except SpatialError as exc:
+            raise StructuredError(exc.code, str(exc)) from exc
     _recompute_presence(state)
     travel = payload.get("travel_minutes", 0)
     travel = travel if isinstance(travel, int) and not isinstance(travel, bool) else 0
@@ -406,6 +429,9 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
     from .discoveries import advance_clue_clock, apply_discovery, verify_discovery
 
     clue_id = _require_text(payload, "clue_id", limit=160)
+    from .spatial_commands import guard_grant
+
+    guard_grant(state, clue_id)
     recipients = payload.get("recipient_investigator_ids")
     if not isinstance(recipients, list) or not recipients:
         raise StructuredError("invalid_action", "recipient_investigator_ids 不能为空。")
@@ -552,6 +578,9 @@ def cmd_grant_clue(state: dict, payload: dict, ctx: CommandContext) -> CommandRe
 
 def cmd_present_handout(state: dict, payload: dict, ctx: CommandContext) -> CommandResult:
     asset_id = _require_text(payload, "asset_id", limit=160)
+    from .spatial_commands import guard_asset
+
+    guard_asset(state, asset_id)
     recipients = payload.get("recipient_investigator_ids")
     if not isinstance(recipients, list) or not recipients:
         raise StructuredError("invalid_action", "recipient_investigator_ids 不能为空。")

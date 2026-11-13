@@ -1,0 +1,21 @@
+{
+  "title": "低语档案馆",
+  "subtitle": "The Whispering Archive",
+  "description": "一份失踪手稿，一口封死的井，以及雨夜里不属于任何人的低语。",
+  "colors": {
+    "bg": "#11100d",
+    "bg2": "#1d1b16",
+    "text": "#e4dccb",
+    "textDim": "#a99f8b",
+    "gold": "#bda66a",
+    "goldBright": "#ead79a",
+    "red": "#8f3f3f",
+    "border": "#3f3a30",
+    "borderBright": "#6b604d"
+  },
+  "fonts": {
+    "body": "Georgia, 'Noto Serif SC', serif",
+    "mono": "'Courier New', monospace"
+  },
+  "startButtonText": "进入档案馆"
+}

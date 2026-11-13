@@ -88,3 +88,7 @@ CI 修复包括：日志载荷 `event` 与函数参数撞名；E2E 的旧 Key �
 本次更新前的完整状态页已[原样归档](../../mid_product/trpg-master/2026-11-11-docs-refresh/originals/docs/STATUS.md)，保留 10 月各阶段成功、失败、费用及当时的交付状态；各专项原始证据继续由[索引](INDEX.md#归档资料)进入。历史文档中的“未提交/未推送/实验分支”是当时记录，不再作为当前 master 状态。
 
 交付注明 SHA、环境、命令、结果、跳过原因与真实模型范围。新过程产物进入同级 `mid_product`，本页只维护当前结论和未解决项。更新文档不改玩家数据库、既有模型配置或正式环境，也不替代发布授权。
+
+## 2026-11-13 子场景开发批次
+
+分支 `feat/spatial-investigation` 独立于上述 master/发布基线。已实现可选 Spatial v1 本体、经典与结构化适配和无自定义 Skill 的教学示例；编辑器交由 Kimi 在独立分支实现。按本次授权仅做最小确定性机制/协议专项、打包和静态门禁，无付费模型、全量主线或生产验证。功能及局限见[开发契约](SPATIAL_INVESTIGATION.md)和[编辑器交接](SPATIAL_EDITOR_HANDOFF.md)。

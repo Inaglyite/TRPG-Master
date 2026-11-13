@@ -45,6 +45,10 @@ def player_scene_view(world_state: Any) -> dict | None:
         label = _field(scene, "name") or _field(definition, "name")
     if not label or label == scene_id:
         return None
+    from src.gameplay.spatial import enabled, scene_label
+
+    if enabled(world_state):
+        label = scene_label(world_state, scene_id)
     return {"name": label[:_MAX_NAME_LENGTH]}
 
 

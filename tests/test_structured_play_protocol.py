@@ -59,6 +59,7 @@ COMMAND_KINDS = {
     "adjust_stat",
     "advance_time",
     "move_party",
+    "interact_point",
     "resolve_intent",
     "present_handout",
     "set_npc_presence",

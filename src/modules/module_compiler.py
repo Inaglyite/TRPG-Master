@@ -258,6 +258,9 @@ def compile_world_state(manifest: ModuleManifest, module: ModuleDefinition) -> d
     }
     world.update(copy.deepcopy(module.initial_state.extensions))
     world.update(copy.deepcopy(module.extensions))
+    from src.modules.spatial_compiler import compile_spatial
+
+    compile_spatial(world, module, manifest)
     return world
 
 
@@ -270,7 +273,9 @@ def render_keeper_prompt(
     payload = module.model_dump(by_alias=True, exclude_none=True)
     payload.get("initial_state", {}).pop("pc", None)
     structured = json.dumps(payload, ensure_ascii=False, indent=2)
-    notes = keeper_notes.strip() or "（本模组没有额外守秘人正文。）"
+    from src.modules.spatial_compiler import keeper_instructions
+
+    notes = (keeper_notes.strip() or "（本模组没有额外守秘人正文。）") + keeper_instructions(module)
     frontmatter = {
         "module": manifest.id,
         "version": manifest.version,
@@ -402,6 +407,15 @@ def _build_trace(
                 f"module.assets.{group_name}.{asset_id}",
                 "normalize asset path",
             ))
+    if getattr(module, "spatial", None) is not None:
+        leaf = world["current_scene"]["id"]
+        trace = [entry for entry in trace if entry.output_path != "world_state.current_scene"
+                 and not entry.output_path.startswith("world_state.scene_cache.")]
+        trace.extend([
+            TraceEntry("world_state.current_scene", f"module.scenes.{leaf}", "resolve container to entry leaf"),
+            TraceEntry(f"world_state.scene_cache.{leaf}", f"module.scenes.{leaf}.description", "seed leaf scene cache"),
+            TraceEntry("world_state.spatial_definition", "module.spatial", "validate and compile spatial v1"),
+        ])
     return tuple(trace)
 
 
@@ -529,6 +543,14 @@ def compile_payload(
             message="当前运行时会保留但不会执行 use_regex 条目",
         ))
     if manifest is None or module is None or has_blocking_diagnostics(tuple(diagnostics)):
+        return CompilationPreview(diagnostics=tuple(diagnostics))
+    from src.modules.spatial_validation import validate_spatial
+
+    try:
+        validate_spatial(module, manifest)
+    except ValueError as exc:
+        diagnostics.append(ModuleDiagnostic(phase="compatibility", level="error",
+                           code="invalid_spatial_contract", path="module.spatial", message=str(exc)))
         return CompilationPreview(diagnostics=tuple(diagnostics))
     result = compile_module(manifest, module, keeper_notes)
     if diagnostics:

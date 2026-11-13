@@ -156,6 +156,9 @@ def prepare_model_request(
             allowed=allowed_tools,
             skill_allowlist=skill_allowlist,
         )
+    from src.ai.tools.spatial_tools import filter_spatial_tools
+
+    request_tools = filter_spatial_tools(request_tools, getattr(host, "context", None))
     request_step = int(getattr(host, "_tool_request_step", 0)) + 1
     if consume_request_step:
         host._tool_request_step = request_step

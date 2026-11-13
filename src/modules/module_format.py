@@ -7,8 +7,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.modules.spatial_format import SpatialDefinition
+
 MODULE_FORMAT_VERSION = "1.0"
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 MANIFEST_SCHEMA_URI = "https://trpg-master.local/schemas/module-manifest-v1.json"
 MODULE_SCHEMA_URI = "https://trpg-master.local/schemas/module-v1.json"
 MANIFEST_V2_SCHEMA_URI = "https://trpg-master.local/schemas/module-manifest-v2.json"
@@ -22,7 +24,7 @@ _SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_CAPABILITIES = {"custom_skills", "bundled_characters", "scene_documents"}
+_CAPABILITIES = {"custom_skills", "bundled_characters", "scene_documents", "spatial_investigation"}
 CLUE_CATEGORIES = ("investigation", "event", "task", "npc")
 HANDOUT_REVEAL_EVENTS = (
     "npc_revealed",
@@ -876,9 +878,13 @@ class ModuleDefinitionV2(ModuleDefinition):
     )
     format_version: Literal["2.0"] = "2.0"
     progression: ProgressionDefinition = Field(default_factory=ProgressionDefinition)
+    spatial: SpatialDefinition | None = None
 
     @model_validator(mode="after")
     def validate_progression_safety(self) -> ModuleDefinitionV2:
+        from src.modules.spatial_validation import validate_spatial
+
+        validate_spatial(self)
         clue_ids = set(self.clues)
         missing = sorted(set(self.progression.essential_clue_ids) - clue_ids)
         if missing:
@@ -887,7 +893,12 @@ class ModuleDefinitionV2(ModuleDefinition):
         frontier = [self.entry_scene_id]
         while frontier:
             scene_id = frontier.pop()
-            for target in self.scenes[scene_id].exits:
+            targets = list(self.scenes[scene_id].exits)
+            if self.spatial:
+                from src.modules.spatial_validation import reachable_targets
+
+                targets.extend(reachable_targets(self, scene_id))
+            for target in targets:
                 if target not in reachable:
                     reachable.add(target)
                     frontier.append(target)
@@ -897,6 +908,10 @@ class ModuleDefinitionV2(ModuleDefinition):
         for clue_id in self.progression.essential_clue_ids:
             clue = self.clues[clue_id]
             if clue.initially_known:
+                continue
+            from src.modules.spatial_validation import validates_essential_point
+
+            if validates_essential_point(self, clue_id):
                 continue
             if not clue.discovery_rules:
                 raise ValueError(f"主线线索 {clue_id} 没有发现规则")

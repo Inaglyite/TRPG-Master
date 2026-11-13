@@ -232,3 +232,9 @@ MyProjects/
 9744 个原始文件已逐一核对 SHA256。六份核心文档的整理前版本也保留在 `files/docs/`，不能将其历史措辞当作当前状态。
 
 本机归档不保证在其他开发机或 GitHub 检出中存在。现行契约查源码/schema；需要历史资料时取归档副本，或按归档基线 `2b66a582` 查 Git 中曾提交的资料。未提交的原稿与运行产物只在本机归档中，须另行备份；归档不是独立灾备。
+
+## 子场景开发分支
+
+2026-11-13 的 Spatial v1 在 `feat/spatial-investigation` 开发，尚未合入或正式发布。见[本体开发契约](SPATIAL_INVESTIGATION.md)、[Kimi 编辑器交接](SPATIAL_EDITOR_HANDOFF.md)和[机制示例](SPATIAL_EXAMPLE.md)。本分支仅做确定性专项，不继承本页旧基线的发布/全量验收结论。
+
+本批[最小验收与源码索引](../../mid_product/trpg-master/2026-11-13-spatial-investigation/README.md)保留源码版本、原始日志、失败重试记录与校验和；原始记录仅本机访问，不随 Git 推送。
