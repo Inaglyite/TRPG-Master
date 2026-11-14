@@ -44,3 +44,25 @@
 ## 当前不包含
 
 图形化完整剧情求解器、NPC 日程/派系/法术的数据化、所有旧 Skill 自动迁移、旧存档自动补房间，以及专用的人类主持调查点面板均不在本批。本体提供领域命令与现有目标投影；编辑器完成后再验证真实作者工作流。基础规则由引擎执行，不代表模型不会在自由文本中说错话；真正的模型叙述体验尚未做付费实玩验收。
+
+## 2026-11-14 编辑器提交接入复核
+
+复核对象：编辑器 `feat/editor-spatial-investigation` 的 `0b619528bb73a4d007ec7a952e8e246a21e3c9f8`，本体契约提交 `84024322f4f417161ca738bd377693cf117efb41`。五份 schema 文件与本体及 schema-lock 的 SHA256 全部一致；编辑器实际导出的 edited-roundtrip.trpgmod 通过本体包校验，现有导出/重打包文件哈希一致。尚需编辑器处理以下两个已复现问题，本体未代改编辑器代码。
+
+### 1. 删除规则引用会放宽门锁条件
+
+位置：编辑器 `src/domain/spatial.ts` 的 rewriteCondition/rewriteSpatialReferences，及 `ItemsEditor.tsx` 删除确认。
+
+在本体示例中，secret_door.requires 为 all(door_found=true, 持有 charged_key 且 charge≥1)。调用 removeSpatialEntity/rewriteSpatialReferences 删除 charged_key 后，item 条件被过滤，通路代价也被移除，剩余 all(door_found=true)。准备“已发现暗门、没有钥匙”的状态：删除前本体返回 passage_locked，删除后的工程仍可编译且允许进入 secret。编辑器的完整 validateProject 对两份工程均无 error；这与确认提示“相关条件不会自动变为开放”不符。
+
+建议阻止删除仍被规则引用的物品/状态，或让整个受影响的条件保持关闭并要求作者明确修复。不要仅剔除条件树中的叶节点；应覆盖 all/any/not 嵌套，以及删除 charge 导致 minimum_states 门槛被清空的情况。现有测试只覆盖单个 item 根条件变为 always=false，缺少组合条件用例。
+
+### 2. 缺少数值状态的跨字段范围校验
+
+位置：编辑器 `src/domain/spatial-validation.ts` 的物品/状态校验，及 `ItemsEditor.tsx` 数值输入。
+
+把示例 charged_key.states.charge 改为 initial=2、minimum=0、maximum=1，JSON schema 与编辑器完整 validateProject 均接受，本体 Pydantic NumericState 校验拒绝并报告“物品状态初值不在声明范围内”。共享 schema 不会自动携带这个 model_validator 的跨字段约束。
+
+编辑器需显式检查 minimum≤initial≤maximum，并把错误定位到对应状态；至少覆盖初值越界和下限大于上限。导入、手动改上下界和导出前校验应一致，不应只依赖 input 的 min/max 属性。
+
+本次使用只读源码生成仓库外的临时 JS 来执行实际编辑器函数，并由本体复核三个小型状态，没有运行全量测试或真实模型。原始复现与日志见[接入复核归档](../../mid_product/trpg-master/2026-11-14-spatial-editor-integration/README.md)。示例命令中 validate 的参数差异已在本体文档修正，未改变 schema 或运行协议。

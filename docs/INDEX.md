@@ -240,3 +240,5 @@ MyProjects/
 本批[最小验收与源码索引](../../mid_product/trpg-master/2026-11-13-spatial-investigation/README.md)保留源码版本、原始日志、失败重试记录与校验和；原始记录仅本机访问，不随 Git 推送。
 
 2026-11-14 的[空间分支 CI 契约修复](../../mid_product/trpg-master/2026-11-14-spatial-ci/README.md)保留旧失败、最小复现、普通/空间工具目录及授权快照校验和后续远程结果，不覆盖前一日验收记录。
+
+编辑器 `0b61952` 的[接入复核](../../mid_product/trpg-master/2026-11-14-spatial-editor-integration/README.md)记录 schema 对齐、导出包验证，以及待编辑器修复的组合条件删除和数值状态范围问题；当前复现说明见[编辑器交接](SPATIAL_EDITOR_HANDOFF.md#2026-11-14-编辑器提交接入复核)。

@@ -18,8 +18,13 @@
 打包时把输出放源码仓库外，例如从仓库根运行：
 
 ```bash
-python tools/module_packager.py validate examples/spatial-investigation
-python tools/module_packager.py pack examples/spatial-investigation ../mid_product/trpg-master/work/spatial-investigation.trpgmod
+TRPG_SPATIAL_WORK=../mid_product/trpg-master/work/spatial-example
+mkdir -p -m 700 "$TRPG_SPATIAL_WORK"
+python tools/module_packager.py compile examples/spatial-investigation --output "$TRPG_SPATIAL_WORK/compiled"
+python tools/module_packager.py pack examples/spatial-investigation "$TRPG_SPATIAL_WORK/spatial-investigation.trpgmod"
+python tools/module_packager.py validate "$TRPG_SPATIAL_WORK/spatial-investigation.trpgmod"
 ```
+
+`compile` 接收源码工程目录，`validate` 接收已经生成的 `.trpgmod` 文件。
 
 夹具只验证局部机制；并不证明任意作者条件组合都可通关。若压力已满且本次仍失败，代价无法支付会整批拒绝，不能先给线索；正式模组应另设可行的无检定替代路径。
