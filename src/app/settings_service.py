@@ -36,6 +36,7 @@ from src.ai.model.provider_adapter import (
 from src.ai.model.provider_profiles import PROVIDER_PRESETS
 from src.ai.model.provider_transport import default_api_format, model_http_client
 from src.ai.model.route_service import EffectiveSettings, RoleBinding
+from src.ai.model.thinking_policy import parse_thinking_mode, thinking_view
 from src.app.config import (
     JUDGEMENT_MODEL,
     MODEL_FLASH,
@@ -181,6 +182,7 @@ def build_payload(
         "room": "当前房间（房主配置，成员只读）",
     }[scope.mode]
     payload = {
+        **thinking_view(settings),
         "provider_presets": [dict(preset) for preset in PROVIDER_PRESETS],
         "type": "model_settings",
         "mode": scope.mode,
@@ -238,26 +240,29 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
     world_key = _scope_world_key(scope, data)
     saved = _load_saved(scope, world_key if not scope.is_local else None)
     allow_private = scope.is_local
-    narrative = route_service.parse_role_binding(
+    thinking_only = "thinking_mode" in data and not {"narrative", "judgement"}.intersection(data)
+    thinking_mode = parse_thinking_mode(data.get("thinking_mode", saved.thinking_mode))
+    narrative = saved.narrative if thinking_only else route_service.parse_role_binding(
         data.get("narrative"),
         role_label=_ROLE_LABELS["narrative"],
         allow_private=allow_private,
         existing=saved.narrative.service,
     )
-    judgement = route_service.parse_role_binding(
+    judgement = saved.judgement if thinking_only else route_service.parse_role_binding(
         data.get("judgement"),
         role_label=_ROLE_LABELS["judgement"],
         allow_private=allow_private,
         existing=saved.judgement.service,
     )
-    if (narrative.mode == "custom" or judgement.mode == "custom") and not data.get(
+    if not thinking_only and (narrative.mode == "custom" or judgement.mode == "custom") and not data.get(
         "confirm_data_sharing"
     ):
         raise ValueError("请先确认：故事与角色上下文将发送到你配置的服务商，额度由你的 Key 承担")
 
     if scope.is_local:
         updated = EffectiveSettings(
-            narrative=narrative, judgement=judgement, revision=saved.revision + 1
+            narrative=narrative, judgement=judgement, revision=saved.revision + 1,
+            thinking_mode=thinking_mode,
         )
         route_service.save_local_settings(scope.local_path, updated)
     else:
@@ -267,7 +272,8 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
             scope.db_url,
             scope.user_id or "",
             world_key,
-            EffectiveSettings(narrative=narrative, judgement=judgement, revision=0),
+            EffectiveSettings(narrative=narrative, judgement=judgement, revision=0,
+                              thinking_mode=thinking_mode),
         )
         from src.auth.service import audit
 
@@ -280,12 +286,14 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
                 "scope": world_key or "account",
                 "narrative_mode": narrative.mode,
                 "judgement_mode": judgement.mode,
+                "thinking_mode": thinking_mode,
                 "revision": updated.revision,
             },
         )
     return {
         **build_payload(scope),
         "saved": True,
+        "thinking_only": thinking_only,
         "notice": "配置已保存，将从下一回合生效",
     }
 
@@ -577,6 +585,7 @@ def _record_capabilities(
                     narrative=updated_binding if role == "narrative" else saved.narrative,
                     judgement=updated_binding if role == "judgement" else saved.judgement,
                     revision=saved.revision,
+                    thinking_mode=saved.thinking_mode,
                 ),
             )
         else:
@@ -590,6 +599,7 @@ def _record_capabilities(
                     narrative=updated_binding if role == "narrative" else saved.narrative,
                     judgement=updated_binding if role == "judgement" else saved.judgement,
                     revision=saved.revision,
+                    thinking_mode=saved.thinking_mode,
                 ),
             )
     except Exception:

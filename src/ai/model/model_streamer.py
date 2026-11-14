@@ -333,7 +333,7 @@ class ModelStreamer:
             text_tool_calls=text_tool_calls,
             finish_reason=finish_reason,
             request_snapshot=request_snapshot,
-            reasoning_text=reasoning.text,
+            reasoning_text=reasoning.text, content=full_text,
             log_error=self.log_error,
             on_error=host.cb.on_error,
         )

@@ -300,7 +300,7 @@ def prepare_model_request(
         if reasoning_passback_required():
             # DeepSeek thinking 的 reasoning passback 只写 provider wire 副本；
             # host.messages（持久面/公开面）永远不携带 reasoning_content。
-            provider_kwargs["messages"] = apply_reasoning_passback(host, messages)
+            provider_kwargs["messages"] = apply_reasoning_passback(host, messages, complete=policy.thinking_type == "enabled")
     if enable_tools:
         provider_kwargs.update(tools=request_tools, tool_choice="auto")
         from src.ai.model.combat_request_policy import needs_combat_tool

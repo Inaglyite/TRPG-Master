@@ -248,3 +248,5 @@ MyProjects/
 ## 思维链展示开发分支
 
 `feat/reasoning-display` 的[功能与日志说明](REASONING_DISPLAY.md)记录游戏偏好开关、临时展示权限、独立调试文件与验证范围。[本地验收记录](../../mid_product/trpg-master/2026-11-14-reasoning-display/README.md)保留离线模型与组件专项、隔离 UI 截图和源码索引。
+
+2026-11-14 的[深度思考开关与主线同步记录](../../mid_product/trpg-master/2026-11-14-thinking-mode/README.md)保留专项验证、开关保存截图、本地启动修正及合并版本。

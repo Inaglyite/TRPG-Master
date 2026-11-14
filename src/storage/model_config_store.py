@@ -60,10 +60,13 @@ def _settings_to_row(settings: EffectiveSettings) -> dict:
     return {
         "narrative": _role_to_row(settings.narrative),
         "judgement": _role_to_row(settings.judgement),
+        "thinking_mode": settings.thinking_mode,
     }
 
 
 def _settings_from_row(payload: dict, revision: int) -> EffectiveSettings:
+    from ..ai.model.thinking_policy import parse_thinking_mode
+
     def role(raw: object) -> RoleBinding:
         if not isinstance(raw, dict) or raw.get("mode") != "custom":
             return RoleBinding(mode="default", service=None)
@@ -73,6 +76,7 @@ def _settings_from_row(payload: dict, revision: int) -> EffectiveSettings:
         narrative=role(payload.get("narrative")),
         judgement=role(payload.get("judgement")),
         revision=revision,
+        thinking_mode=parse_thinking_mode(payload.get("thinking_mode", "auto")),
     )
 
 
@@ -119,6 +123,7 @@ def save_scope(
         narrative=settings_no_revision.narrative,
         judgement=settings_no_revision.judgement,
         revision=revision,
+        thinking_mode=settings_no_revision.thinking_mode,
     )
 
 
@@ -199,6 +204,14 @@ def resolve_cloud_settings(
         judgement=pick("judgement"),
         revision=revision,
         byok_required=True,
+        thinking_mode=next(
+            (
+                layer.thinking_mode
+                for layer in (world_settings, account)
+                if layer is not None and layer.thinking_mode != "auto"
+            ),
+            "auto",
+        ),
     )
 
 

@@ -17,6 +17,7 @@ import {
   onTurnPerformance,
   restoreDefaultSettings,
   saveSettings,
+  setThinkingMode,
   testConnection,
   updateServiceDraft,
   resetSettings,
@@ -75,6 +76,35 @@ const view: ModelSettingsView = {
 };
 
 describe("settings commands", () => {
+  it("saves thinking separately without sending drafts or secrets and waits for acknowledgment", () => {
+    useModelStore.setState({
+      view: { ...view, thinking_supported: true, thinking_enabled: false },
+      loading: false,
+      saving: false,
+    });
+    setThinkingMode(true);
+    expect(JSON.parse(safeSendMock.mock.calls.at(-1)![0])).toMatchObject({
+      type: "model_settings_update",
+      thinking_mode: "enabled",
+    });
+    expect(JSON.parse(safeSendMock.mock.calls.at(-1)![0])).not.toHaveProperty(
+      "narrative",
+    );
+    expect(useModelStore.getState().view?.thinking_enabled).toBe(false);
+    onModelSettings({
+      ...view,
+      thinking_supported: true,
+      thinking_enabled: true,
+      thinking_mode: "enabled",
+      saved: true,
+      thinking_only: true,
+    });
+    expect(useModelStore.getState().view?.thinking_enabled).toBe(true);
+    useModelStore.setState({ view: { ...view, can_edit: false } });
+    safeSendMock.mockClear();
+    setThinkingMode(false);
+    expect(safeSendMock).not.toHaveBeenCalled();
+  });
   it("厂商预设填入地址与接口格式，清空旧 Key 和规格并重新确认目的地", () => {
     const presetView = {
       ...view,

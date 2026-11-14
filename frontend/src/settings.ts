@@ -302,6 +302,33 @@ export function saveSettings() {
   );
 }
 
+export function setThinkingMode(enabled: boolean) {
+  const state = useModelStore.getState();
+  if (
+    state.loading ||
+    state.saving ||
+    !state.view?.can_edit ||
+    !state.view.thinking_supported
+  )
+    return;
+  useModelStore.setState({
+    saving: true,
+    status: "正在保存思考模式…",
+    statusKind: "working",
+  });
+  armOperationTimer();
+  safeSend(
+    JSON.stringify({
+      type: "model_settings_update",
+      thinking_mode: enabled ? "enabled" : "disabled",
+      scope:
+        state.view.mode === "solo" && state.view.world_override
+          ? "world"
+          : state.scopeDraft,
+    }),
+  );
+}
+
 export function restoreDefaultSettings() {
   const state = useModelStore.getState();
   useModelStore.setState({
@@ -356,6 +383,7 @@ export function testConnection(role: "narrative" | "judgement") {
 export function onModelSettings(
   data: Partial<ModelSettingsView> & {
     saved?: boolean;
+    thinking_only?: boolean;
     notice?: string;
   },
 ) {
@@ -384,6 +412,7 @@ export function onModelSettings(
     state.view !== null &&
     (state.view.revision !== view.revision || state.view.mode !== view.mode);
   const shouldSyncDrafts =
+    !data.thinking_only &&
     !unconfirmedOperation &&
     (state.loading ||
       !state.open ||

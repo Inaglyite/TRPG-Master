@@ -67,11 +67,13 @@ def build_byok_caller(
         # DeepSeek 的 thinking 默认开启：推理 token 会计入 max_tokens 预算，
         # 可能把 JSON 决策正文整个挤没（2026-09-16 真机验收出现 66K 字符
         # reasoning → finish=length、content 为空 → 运行暂停）。结构化决策
-        # 调用必须显式关 thinking（与 legacy story 路径同一教训）；其他
+        # 默认关闭；用户显式开启时遵从保存的模式；其他
         # 服务商不认识该参数，只在确认是 DeepSeek 时发送。
         thinking_off = (
             role.provider_kind == "deepseek" or "deepseek.com" in (role.base_url_host or "").lower()
         )
+        thinking_mode = getattr(settings, "thinking_mode", "auto")
+        thinking_type = thinking_mode if thinking_mode != "auto" else "disabled"
 
         def _call():
             response = role.client.chat.completions.create(
@@ -80,7 +82,7 @@ def build_byok_caller(
                 response_format={"type": "json_object"},
                 temperature=0.4,
                 max_tokens=effective_max_tokens,
-                **({"extra_body": {"thinking": {"type": "disabled"}}} if thinking_off else {}),
+                **({"extra_body": {"thinking": {"type": thinking_type}}} if thinking_off else {}),
             )
             choice = response.choices[0]
             content = str(choice.message.content or "")

@@ -84,6 +84,9 @@ export type RoleView = {
 };
 
 export type ModelSettingsView = {
+  thinking_mode?: "auto" | "enabled" | "disabled";
+  thinking_enabled?: boolean;
+  thinking_supported?: boolean;
   provider_presets?: ProviderPreset[];
   mode: "local" | "solo" | "room";
   can_edit: boolean;

@@ -377,7 +377,9 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
     其他服务商不认识该参数，不得发送。
     """
 
-    async def _capture(self, provider_kind: str, base_url_host: str) -> dict:
+    async def _capture(self, provider_kind: str, base_url_host: str, thinking_mode="auto") -> dict:
+        from types import SimpleNamespace
+
         from src.ai.model.route_service import ModelRoutes, ResolvedRole
         from src.structured.agent_runtime import build_byok_caller
 
@@ -400,7 +402,7 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch(
                 "src.storage.model_config_store.room_route_resolver",
-                lambda *args: lambda: None,
+                lambda *args: lambda: SimpleNamespace(thinking_mode=thinking_mode),
             ),
             patch("src.ai.model.route_service.resolve_routes", lambda *args: routes),
         ):
@@ -411,6 +413,10 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
     async def test_deepseek_disables_thinking(self):
         kwargs = await self._capture("deepseek", "api.deepseek.com")
         self.assertEqual({"thinking": {"type": "disabled"}}, kwargs.get("extra_body"))
+
+    async def test_deepseek_honors_explicit_thinking_mode(self):
+        kwargs = await self._capture("deepseek", "api.deepseek.com", "enabled")
+        self.assertEqual({"thinking": {"type": "enabled"}}, kwargs.get("extra_body"))
 
     async def test_deepseek_by_host_also_disabled(self):
         # server_default 指向 DeepSeek 时同样关闭（按 host 兜底判定）

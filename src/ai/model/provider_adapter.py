@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -142,14 +143,19 @@ def register_reasoning_passback(host: Any, call_ids: list[str], reasoning: str) 
         store.pop(next(iter(store)))
 
 
-def apply_reasoning_passback(host: Any, messages: list[dict]) -> list[dict]:
+def _content_reasoning_key(content: str) -> str:
+    return "text:" + hashlib.sha256(content.encode()).hexdigest()
+
+
+def apply_reasoning_passback(host: Any, messages: list[dict], *, complete: bool = False) -> list[dict]:
     """返回 provider wire 副本：带 tool_calls 的 assistant 消息补 reasoning_content。
 
     不修改 host.messages 本体；没有登记记录时原样返回（零拷贝）。
     """
     store = getattr(host, "__dict__", {}).get(_PASSBACK_KEY)
-    if not store:
+    if not store and not complete:
         return messages
+    store = store or {}
     wire: list[dict] = []
     for message in messages:
         calls = message.get("tool_calls") if isinstance(message, dict) else None
@@ -162,7 +168,12 @@ def apply_reasoning_passback(host: Any, messages: list[dict]) -> list[dict]:
                 if hit:
                     reasoning = hit
                     break
-        wire.append({**message, "reasoning_content": reasoning} if reasoning else message)
+        if message.get("role") == "assistant" and reasoning is None:
+            reasoning = store.get(_content_reasoning_key(str(message.get("content") or "")))
+        # History from non-thinking mode / a restarted session has no retained
+        # private reasoning. Supply the required field without inventing text.
+        wire.append({**message, "reasoning_content": reasoning or ""}
+                    if reasoning or (complete and message.get("role") == "assistant") else message)
     return wire
 
 
@@ -191,6 +202,7 @@ def finalize_stream_tool_calls(
     reasoning_text: str,
     log_error: Any,
     on_error: Any,
+    content: str = "",
 ) -> list[dict]:
     """收口一次流的工具调用：截断 fail-closed、id 重写、快照绑定、reasoning 登记。
 
@@ -219,6 +231,8 @@ def finalize_stream_tool_calls(
         register_reasoning_passback(
             host, [str(call.get("id") or "") for call in tool_calls], reasoning_text
         )
+    if reasoning_text and content and not tool_calls:
+        register_reasoning_passback(host, [_content_reasoning_key(content)], reasoning_text)
     return tool_calls
 
 

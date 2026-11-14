@@ -101,6 +101,7 @@ class EffectiveSettings:
     # 否则 resolve_routes 抛 RouteNotConfiguredError。仅由作用域解析方烧入，
     # 不参与本地/云端持久化序列化。
     byok_required: bool = False
+    thinking_mode: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,7 @@ class ModelRoutes:
     narrative: ResolvedRole
     judgement: ResolvedRole
     revision: int
+    thinking_mode: str = "auto"
 
     def role(self, slot: str) -> ResolvedRole:
         return self.narrative if slot == "narrative" else self.judgement
@@ -346,6 +348,7 @@ def resolve_routes(settings: EffectiveSettings) -> ModelRoutes:
         narrative=_resolve_role(settings.narrative, slot="narrative", revision=settings.revision),
         judgement=_resolve_role(settings.judgement, slot="judgement", revision=settings.revision),
         revision=settings.revision,
+        thinking_mode=settings.thinking_mode,
     )
 
 
@@ -520,12 +523,15 @@ def settings_to_json(settings: EffectiveSettings, *, include_secrets: bool) -> d
 
     return {
         "revision": settings.revision,
+        "thinking_mode": settings.thinking_mode,
         "narrative": role_json(settings.narrative),
         "judgement": role_json(settings.judgement),
     }
 
 
 def settings_from_json(raw: dict, *, allow_private: bool) -> EffectiveSettings:
+    from .thinking_policy import parse_thinking_mode
+
     def role(raw_role: object, role_label: str) -> RoleBinding:
         if not isinstance(raw_role, dict):
             return RoleBinding(mode="default", service=None)
@@ -535,6 +541,7 @@ def settings_from_json(raw: dict, *, allow_private: bool) -> EffectiveSettings:
         narrative=role(raw.get("narrative"), "叙述模型"),
         judgement=role(raw.get("judgement"), "裁决模型"),
         revision=int(raw.get("revision") or 0),
+        thinking_mode=parse_thinking_mode(raw.get("thinking_mode", "auto")),
     )
 
 

@@ -27,6 +27,7 @@ from src.ai.model.model_streamer import (
     sanitize_visible_narrative,
 )
 from src.ai.model.route_service import activate_route_slot, apply_pending_routes
+from src.ai.model.thinking_policy import thinking_for_host
 from src.ai.skills import skill_activation
 from src.ai.tools.registry import dice_summary, execute_function
 from src.ai.tools.tool_pipeline import ToolExecutionLedger
@@ -897,9 +898,8 @@ class GameEngine:
                 dynamic_tools=ENABLE_DYNAMIC_TOOLS,
                 stream_usage=ENABLE_STREAM_USAGE,
                 prompt_profile=prompt_profile or PROMPT_PROFILE,
-                thinking_type=_thinking_type_for_request(
-                    model, "combat" if system_overlay else "story"
-                ),
+                thinking_type=thinking_for_host(self, "combat" if system_overlay else "story",
+                    _thinking_type_for_request(model, "combat" if system_overlay else "story")),
             ),
             system_overlay=system_overlay,
             system_prompt_override=system_prompt_override,

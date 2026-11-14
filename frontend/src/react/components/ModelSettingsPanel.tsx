@@ -14,6 +14,7 @@ import {
   requestTurnDiagnostics,
   restoreDefaultSettings,
   saveSettings,
+  setThinkingMode,
   testConnection,
   updateRoleDraft,
   updateServiceDraft,
@@ -416,6 +417,9 @@ function RoleCard({
 }
 
 function GeneralTab() {
+  const view = useModelStore((state) => state.view);
+  const saving = useModelStore((state) => state.saving);
+  const loading = useModelStore((state) => state.loading);
   const showReasoning = useGamePreferences((state) => state.showReasoning);
   const setShowReasoning = useGamePreferences(
     (state) => state.setShowReasoning,
@@ -458,6 +462,26 @@ function GeneralTab() {
         aria-labelledby="model-thinking-title"
       >
         <h3 id="model-thinking-title">模型思考</h3>
+        <label className="game-setting-toggle">
+          <span>
+            <strong>开启深度思考</strong>
+            <small>让模型先思考再回答。可能增加等待时间和用量。</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="开启深度思考"
+            checked={Boolean(view?.thinking_enabled)}
+            disabled={
+              loading || saving || !view?.can_edit || !view.thinking_supported
+            }
+            onChange={(event) => setThinkingMode(event.target.checked)}
+          />
+        </label>
+        <p className="narration-speed-hint">
+          保存到当前模型配置，从下一回合生效。支持
+          DeepSeek；其他模型沿用服务商设置。多人房间由房主修改。
+        </p>
         <label className="game-setting-toggle">
           <span>
             <strong>显示思维链</strong>
@@ -1037,9 +1061,11 @@ export function ModelSettingsPanel() {
           id="model-settings-status"
           role="status"
           aria-live="polite"
-          data-state={tab === "general" ? undefined : statusKind || undefined}
+          data-state={statusKind || undefined}
         >
-          {tab === "general" ? "游戏偏好在本机保存，修改后立即生效。" : status}
+          {tab === "general"
+            ? status || "显示偏好在本机保存，思考模式保存到模型配置。"
+            : status}
         </div>
         <footer className="model-settings-actions">
           {tab === "models" && !readOnly && (

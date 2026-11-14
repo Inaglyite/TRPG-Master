@@ -70,6 +70,18 @@ def room_scope(db_url: str, user_id: str, role: str) -> SettingsScope:
 
 
 class TestRoomPermissions:
+    def test_thinking_mode_is_owner_scoped_and_preserves_services(self, db):
+        owner = room_scope(db, "owner-1", "owner")
+        apply_update(owner, {"narrative": CUSTOM_FORM, "judgement": CUSTOM_FORM,
+                             "confirm_data_sharing": True})
+        result = apply_update(owner, {"thinking_mode": "enabled"})
+        assert result["thinking_enabled"]
+        loaded = resolve_cloud_settings(db, owner_user_id="owner-1", world_id="world-1")
+        assert loaded.thinking_mode == "enabled"
+        assert loaded.narrative.service.api_key == CUSTOM_FORM["service"]["api_key"]
+        with pytest.raises(PermissionError):
+            apply_update(room_scope(db, "member-1", "player"), {"thinking_mode": "disabled"})
+
     def test_member_cannot_edit_but_reads_sanitized(self, db):
         owner = room_scope(db, "owner-1", "owner")
         apply_update(

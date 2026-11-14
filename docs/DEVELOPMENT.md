@@ -225,6 +225,8 @@ README 实际引用的公开截图保留在 `docs/screenshots/`，来源与用�
 只复制最终选用的图片到文档目录。标注日期、开发版/发布版和演示数据范围，
 实际打开中英文页面检查图片、说明及链接；截图不替代功能验收。
 
-### 显示思维链与调试文件（开发分支）
+### 思维链展示、思考模式与调试文件
 
 `feat/reasoning-display` 在游戏偏好中增加默认关闭的“显示思维链”。仅展示接口实际返回的思考内容，不改变模型的 thinking 参数。独立的 `reasoning-debug.jsonl` 按用户要求记录脱敏思考内容，位置与现有日志目录一致；`TRPG_REASONING_DEBUG=0` 可关闭，与界面展示开关互不影响。权限、长度限制及已知边界见[说明](REASONING_DISPLAY.md)。
+
+游戏偏好新增独立“开启深度思考”，把 `thinking_mode` 保存到现有模型配置作用域；下回合冻结生效，DeepSeek 支持 enabled/disabled，其他厂商不透传专属参数。显示与生成互不代替，具体协议与边界见 [思考说明](REASONING_DISPLAY.md#开启深度思考)。
