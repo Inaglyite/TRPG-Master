@@ -24,7 +24,9 @@ logger = logging.getLogger("trpg.structured_agent")
 _active_runs: dict[str, asyncio.Task] = {}
 
 
-def build_byok_caller(database_url: str, world_id: str):
+def build_byok_caller(
+    database_url: str, world_id: str, *, reasoning_deliver=None, trigger_request_id=""
+):
     """按房间 BYOK 路由构造模型 caller；未配置时抛错（调用方负责降级为暂停）。"""
 
     async def caller(system: str, user: str) -> str:
@@ -71,7 +73,7 @@ def build_byok_caller(database_url: str, world_id: str):
             role.provider_kind == "deepseek" or "deepseek.com" in (role.base_url_host or "").lower()
         )
 
-        def _call() -> str:
+        def _call():
             response = role.client.chat.completions.create(
                 model=role.model_id,
                 messages=messages,
@@ -97,17 +99,19 @@ def build_byok_caller(database_url: str, world_id: str):
                 len(content),
                 len(str(reasoning or "")),
             )
-            if not content.strip():
-                # 空内容：把 finish_reason / 生效预算 / usage 交给运行器分类记录，
-                # 不在这里退化成「解析失败」。
-                raise EmptyModelOutput(
-                    finish_reason=getattr(choice, "finish_reason", None),
-                    max_tokens=effective_max_tokens,
-                    usage=usage,
-                )
-            return content
+            return content, reasoning, getattr(choice, "finish_reason", None), usage
 
-        return await asyncio.to_thread(_call)
+        content, reasoning, finish, usage = await asyncio.to_thread(_call)
+        from .reasoning_runtime import publish_reasoning
+
+        await publish_reasoning(
+            world_id, role.model_id, reasoning, reasoning_deliver,
+            trigger_request_id=trigger_request_id,
+            status="interrupted" if finish == "length" or not content.strip() else "completed",
+        )
+        if not content.strip():
+            raise EmptyModelOutput(finish_reason=finish, max_tokens=effective_max_tokens, usage=usage)
+        return content
 
     return caller
 
@@ -132,10 +136,15 @@ async def _run_keeper_agent(
     trigger_request_id: str,
     deliver,
     broadcast,
+    reasoning_deliver=None,
 ) -> None:
     gateway = StructuredGateway(database_url)
     try:
-        caller = build_byok_caller(database_url, world_id)
+        options = (
+            {"reasoning_deliver": reasoning_deliver, "trigger_request_id": trigger_request_id}
+            if reasoning_deliver is not None else {}
+        )
+        caller = build_byok_caller(database_url, world_id, **options)
         # 先探测一次路由可用性（不消耗模型）：直接构造 caller 不解析路由，
         # 真正的 fail-closed 在第一次模型调用时发生；为避免浪费一次调用，
         # 这里先同步解析一次。
@@ -216,6 +225,7 @@ def maybe_schedule_keeper_agent(
     trigger_request_id: str = "",
     deliver=None,
     broadcast=None,
+    reasoning_deliver=None,
 ) -> bool:
     """keeper_mode 为 assisted/agent 时调度一次运行；同世界已有活动运行则跳过。"""
     keeper_mode = keeper_agent_needed(database_url, world_id)
@@ -232,6 +242,7 @@ def maybe_schedule_keeper_agent(
             trigger_request_id=trigger_request_id,
             deliver=deliver,
             broadcast=broadcast,
+            reasoning_deliver=reasoning_deliver,
         )
     )
     _active_runs[world_id] = task

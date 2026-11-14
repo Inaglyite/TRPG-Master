@@ -24,12 +24,12 @@ from src.ai.model.model_stream_helpers import (
 from src.ai.model.provider_adapter import (
     accumulate_tool_call_deltas,
     classify_provider_error,
-    extract_reasoning_text,
     finalize_stream_tool_calls,
     maybe_record_stream,
     note_model_retry,
     raise_for_blocked_route,
 )
+from src.ai.model.reasoning_display import ReasoningDisplay
 from src.ai.tools.tool_protocol import ToolProtocolFilter
 from src.ai.tools.tool_request_authority import issue_model_request
 from src.gameplay.speaker_parser import SpeakerStreamParser
@@ -182,13 +182,12 @@ class ModelStreamer:
             host.cb.on_error("模型服务暂时不可用，请稍后重试。")
             raise ModelResponseError("模型服务暂时不可用") from exc
 
-        full_text = ""
-        pending_visible = ""
+        full_text = pending_visible = ""
         initial_sentence_released = False
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
         usage_data: dict = {}
-        reasoning_text = ""
+        reasoning = ReasoningDisplay(host, request_snapshot.request_id, model, request_role)
         stream_error_class: str | None = None
         protocol_filter = ToolProtocolFilter()
         # A provider stream can fail only once iteration has started.  Never
@@ -211,7 +210,7 @@ class ModelStreamer:
             host.raise_if_turn_cancelled()
             for chunk in provider_stream:
                 host.raise_if_turn_cancelled()
-                reasoning_text += extract_reasoning_text(chunk)
+                reasoning.consume(chunk)
                 chunk_usage = stream_usage_dict(getattr(chunk, "usage", None))
                 if chunk_usage:
                     usage_data = chunk_usage
@@ -262,6 +261,7 @@ class ModelStreamer:
                 self.log_error(f"API 流式响应中断: {type(exc).__name__}")
                 host.cb.on_error("模型连接中断，已保留本轮收到的内容。")
         finally:
+            reasoning.finish("interrupted" if stream_error_class or host.turn_cancellation_requested() or finish_reason == "length" else "completed")
             host._clear_active_stream(provider_stream)
             if llm_slot is not None:
                 # Hold the global slot across the whole stream, not just connect.
@@ -333,7 +333,7 @@ class ModelStreamer:
             text_tool_calls=text_tool_calls,
             finish_reason=finish_reason,
             request_snapshot=request_snapshot,
-            reasoning_text=reasoning_text,
+            reasoning_text=reasoning.text,
             log_error=self.log_error,
             on_error=host.cb.on_error,
         )

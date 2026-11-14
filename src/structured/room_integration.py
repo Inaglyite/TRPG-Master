@@ -81,6 +81,11 @@ async def handle_room_structured_frame(
                 continue
             await room.hub.send_direct(other_id, wire)
 
+    from src.app.reasoning_events import deliver_room_reasoning
+
+    async def reasoning_deliver(payload):
+        await deliver_room_reasoning(room, payload)
+
     await gateway.handle_frame(
         world_id=world_id,
         user_id=user.id,
@@ -88,6 +93,7 @@ async def handle_room_structured_frame(
         deliver=deliver,
         broadcast=broadcast,
         agent_broadcast=broadcast_all,
+        reasoning_deliver=reasoning_deliver,
         admission_guard=lambda: (
             not (
                 getattr(room, "control_action_active", False)

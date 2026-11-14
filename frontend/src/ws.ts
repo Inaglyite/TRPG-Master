@@ -14,6 +14,10 @@ import {
   interactionPath,
 } from "./protocol/structured";
 import { useAppStore, type ConnectionState } from "./state/app-store";
+import {
+  useReasoningStore,
+  type ReasoningFrame,
+} from "./state/reasoning-store";
 import { useMessageStore } from "./state/message-store";
 import { useStartStore } from "./state/start-store";
 import { useStructuredStore } from "./state/structured-store";
@@ -310,6 +314,7 @@ export function recoverRejectedRoomAction(): boolean {
 
 /** 离开多人房间时丢弃仍绑定旧房间的流式/乐观回合状态。 */
 export function resetRoomGameSession(): void {
+  useReasoningStore.getState().reset();
   acknowledgePendingAction();
   resetTurnActionButtons();
   deferredHandouts = [];
@@ -762,7 +767,11 @@ export function handleServerPayload(raw: unknown) {
       // 服务端系统提示（如玩家 /skill 命令结果）：不进叙事，仅聊天区可见。
       addMsg("system", String(data.message || ""), true);
       break;
+    case "model_reasoning":
+      useReasoningStore.getState().receive(data as ReasoningFrame);
+      break;
     case "gm_turn_start":
+      useReasoningStore.getState().reset(activeTurnId);
       gmTurnActive = true;
       activeTurnKind = String(data.turn_kind || "gameplay");
       rewriteSourceTurnId =

@@ -31,6 +31,7 @@ import {
   useTimelineCapabilities,
 } from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
+import { ReasoningPanel } from "./ReasoningPanel";
 import gmAvatarUrl from "../../assets/ui/gm_avatar.webp";
 import gmDiceUrl from "../../assets/ui/gm_dice.webp";
 import gmThinkingUrl from "../../assets/ui/gm_thinking.webp";
@@ -467,6 +468,7 @@ export function MessageList() {
           }
         />
       ))}
+      <ReasoningPanel />
     </div>
   );
 }

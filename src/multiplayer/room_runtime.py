@@ -589,6 +589,11 @@ class RoomDriverTransport:
         if room is None:
             return
         wire = dict(payload)
+        if wire.get("type") == "model_reasoning":
+            from src.app.reasoning_events import deliver_room_reasoning
+
+            await deliver_room_reasoning(room, wire)
+            return
         visibility = "public"
         if wire.get("type") == "private_event":
             target_user_id = str(wire.pop("target_user_id", ""))

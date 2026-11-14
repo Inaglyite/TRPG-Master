@@ -265,6 +265,7 @@ class StructuredGateway:
         deliver: Deliver,
         broadcast: Broadcast | None = None,
         agent_broadcast: Broadcast | None = None,
+        reasoning_deliver: Deliver | None = None,
         admission_guard: Callable[[], bool] | None = None,
     ) -> None:
         """处理一帧：错误只回发起方；已提交事件按各连接 principal 过滤投递。"""
@@ -367,6 +368,7 @@ class StructuredGateway:
                 ),
                 deliver=deliver if broadcast is None else None,
                 broadcast=agent_broadcast if agent_broadcast is not None else broadcast,
+                reasoning_deliver=reasoning_deliver,
             )
 
     # ------------------------------------------------------------------

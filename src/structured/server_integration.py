@@ -43,6 +43,7 @@ class StructuredLocalWire:
                 user_id=self.user_id,
                 frame=data,
                 deliver=self.outbound.send,
+                reasoning_deliver=self.outbound.send,
             )
 
         for frame_type in STRUCTURED_FRAME_TYPES:

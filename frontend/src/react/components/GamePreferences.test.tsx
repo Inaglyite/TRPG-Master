@@ -14,7 +14,7 @@ import { withoutActionHints } from "../../action-hints";
 
 beforeEach(() => {
   localStorage.clear();
-  useGamePreferences.setState({ showActionHints: true });
+  useGamePreferences.setState({ showActionHints: true, showReasoning: false });
   useAppStore.setState({
     mode: "local",
     inputEnabled: true,
@@ -46,8 +46,10 @@ describe("game preferences", () => {
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "模型配置" }));
     fireEvent.click(screen.getByRole("tab", { name: "游戏偏好" }));
-    expect(screen.getByRole("switch")).not.toBeChecked();
-    fireEvent.click(screen.getByRole("switch"));
+    expect(
+      screen.getByRole("switch", { name: "显示行动提示" }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByRole("switch", { name: "显示行动提示" }));
     expect(readActionHintsPreference()).toBe(true);
   });
 

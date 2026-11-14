@@ -244,3 +244,7 @@ MyProjects/
 编辑器 `0b61952` 的[接入复核](../../mid_product/trpg-master/2026-11-14-spatial-editor-integration/README.md)记录 schema 对齐、导出包验证，以及待编辑器修复的组合条件删除和数值状态范围问题；当前复现说明见[编辑器交接](SPATIAL_EDITOR_HANDOFF.md#2026-11-14-编辑器提交接入复核)。
 
 上述两项问题已在编辑器 `48041b7` 通过[13 项修复复查](../../mid_product/trpg-master/2026-11-14-spatial-editor-followup/README.md)。最新状态见[交接文档](SPATIAL_EDITOR_HANDOFF.md#2026-11-14-修复提交专项复查48041b7)，初次失败记录保持原样。
+
+## 思维链展示开发分支
+
+`feat/reasoning-display` 的[功能与日志说明](REASONING_DISPLAY.md)记录游戏偏好开关、临时展示权限、独立调试文件与验证范围。[本地验收记录](../../mid_product/trpg-master/2026-11-14-reasoning-display/README.md)保留离线模型与组件专项、隔离 UI 截图和源码索引。

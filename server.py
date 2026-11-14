@@ -108,6 +108,7 @@ from src.app.game_application import (
 )
 from src.app.logger import redact as redact_log
 from src.app.player_notes_handlers import register_player_notes_handlers
+from src.app.reasoning_events import private_event_sink
 from src.app.runtime import RuntimeContext, default_world_id
 from src.app.settings_service import (
     SettingsScope,
@@ -835,8 +836,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     def on_glm_summary(text: str):
         emit({"type": "glm_summary", "text": text})
 
-    def on_private_event(info: dict):
-        emit({"type": "private_event", **info})
+    on_private_event = private_event_sink(outbound, emit)
 
     def on_suggest(info: dict) -> bool:
         """向客户端发起检定确认，工作线程经 threading.Event 阻塞等待回复。"""

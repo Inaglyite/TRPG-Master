@@ -731,3 +731,50 @@
     opacity: 1;
   }
 }
+
+/* Provider reasoning is an explicit private debugging view, separate from story. */
+.model-reasoning-panel {
+  margin: 12px 18px;
+  color: var(--text-secondary, #aaa89b);
+  font-size: 13px;
+  min-width: 0;
+}
+.model-reasoning-panel > p {
+  margin: 0;
+}
+.model-reasoning-block {
+  border: 1px solid var(--border-color, #4b4738);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+.model-reasoning-block summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.model-reasoning-block summary span {
+  margin-left: 12px;
+  font-size: 12px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.model-reasoning-block pre {
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.65;
+  user-select: text;
+}
+@media (max-width: 640px) {
+  .model-reasoning-panel {
+    margin: 8px;
+  }
+  .model-reasoning-block {
+    padding: 8px 10px;
+  }
+}

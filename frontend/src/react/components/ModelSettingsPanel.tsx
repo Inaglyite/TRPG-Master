@@ -416,6 +416,10 @@ function RoleCard({
 }
 
 function GeneralTab() {
+  const showReasoning = useGamePreferences((state) => state.showReasoning);
+  const setShowReasoning = useGamePreferences(
+    (state) => state.setShowReasoning,
+  );
   const [narrationSpeed, setNarrationSpeedState] = useState<NarrationSpeed>(
     () => getNarrationSpeed(),
   );
@@ -447,6 +451,30 @@ function GeneralTab() {
         </label>
         <p className="narration-speed-hint">
           立即生效并保存在本机，单机与联机共用。必要的确认与检定交互仍会显示。
+        </p>
+      </section>
+      <section
+        className="game-hints-section"
+        aria-labelledby="model-thinking-title"
+      >
+        <h3 id="model-thinking-title">模型思考</h3>
+        <label className="game-setting-toggle">
+          <span>
+            <strong>显示思维链</strong>
+            <small>
+              显示模型返回的思考内容，可能包含剧情秘密。多人房间仅主持可见。
+            </small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="显示思维链"
+            checked={showReasoning}
+            onChange={(event) => setShowReasoning(event.target.checked)}
+          />
+        </label>
+        <p className="narration-speed-hint">
+          立即生效并保存在本机。仅控制展示，不改变模型的深度思考设置；关闭后清除临时展示内容。调试日志独立记录。
         </p>
       </section>
       <section

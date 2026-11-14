@@ -3,6 +3,7 @@ import { STRUCTURED_EVENT_TYPES } from "./structured";
 
 export const serverMessageTypes = [
   "narrative_chunk",
+  "model_reasoning",
   "narrative_segment",
   "narrative_segments",
   "chat_events",
@@ -276,6 +277,24 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   }
   const result = serverMessageSchema.safeParse(decoded);
   if (!result.success) return null;
+  if (result.data.type === "model_reasoning") {
+    const frame = z
+      .object({
+        type: z.literal("model_reasoning"),
+        phase: z.enum(["start", "delta", "end"]),
+        request_id: z.string().min(1).max(160),
+        model: z.string().max(200),
+        role: z.string().max(80),
+        text: z.string().max(4096).optional(),
+        status: z.enum(["completed", "interrupted"]).optional(),
+        truncated: z.boolean().optional(),
+        world_id: z.string().max(160).optional(),
+        turn_id: z.string().max(160).optional(),
+        seq: z.number().int().nonnegative().optional(),
+      })
+      .safeParse(decoded);
+    return frame.success ? (frame.data as ServerMessage) : null;
+  }
   // Last-resort display boundary: a backend regression must still never render
   // textual tool calls or their private arguments in Electron.
   if (containsToolProtocol(decoded)) return null;

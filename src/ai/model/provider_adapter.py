@@ -7,6 +7,7 @@
 - reasoning passback：DeepSeek thinking 模式要求带工具调用的 assistant
   历史回传 reasoning_content。adapter 以 call id 为键做最小生命周期保管，
   只写进 provider wire 副本，永不落 host.messages、公开历史、审计或遥测；
+  用户显式要求的 reasoning-debug.jsonl 为独立脱敏调试记录；
 - 录制：``TRPG_RECORD_MODEL_STREAMS=<dir>`` 时把归一化 chunk 序列写成
   JSON fixture（默认关；Pi/生产不设），供离线 replay 与故障注入测试。
 """
@@ -231,7 +232,7 @@ def normalize_chunk_record(chunk: Any) -> dict:
 
     只保留重放当前全部行为所需的字段：content / reasoning / tool 增量 /
     finish_reason / usage。这正是"内部事件流"的持久形态；reasoning 只存在
-    于显式开启录制的本地 fixture 目录，不进入任何运行期日志或历史。
+    于显式开启录制的本地 fixture 目录，不进入普通运行期日志或历史；独立 reasoning-debug.jsonl 按其设置记录。
     """
     record: dict[str, Any] = {}
     reasoning = extract_reasoning_text(chunk)
