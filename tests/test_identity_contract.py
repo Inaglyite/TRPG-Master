@@ -289,24 +289,47 @@ class IdentityContractTests(unittest.TestCase):
                 stream_chunk(finish_reason="stop"),
             ]
 
-        engine = GameEngine.__new__(GameEngine)
-        engine.client = SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
-        )
-        engine.messages = []
-        engine.cb = SimpleNamespace(
-            on_narrative=lambda _text: None,
-            on_error=lambda _message: None,
-        )
-
-        with (
-            patch("src.app.engine.ENABLE_DYNAMIC_TOOLS", True),
-            patch("src.app.engine.log_model_call"),
+        catalog_names = {tool["function"]["name"] for tool in model_tools_for("story")}
+        spatial_names = {"spatial_inspect", "spatial_interact"}
+        self.assertTrue(spatial_names <= catalog_names)
+        # The registered role catalog includes optional capabilities; the wire
+        # request must expose them only when the current world enables them.
+        for label, world in (
+            ("without_context", None),
+            ("legacy_world", {}),
+            ("spatial_world", {"spatial_definition": {"version": 1}}),
         ):
-            engine._stream_llm("test-model")
+            with self.subTest(world=label):
+                captured.clear()
+                engine = GameEngine.__new__(GameEngine)
+                engine.client = SimpleNamespace(
+                    chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+                )
+                engine.messages = []
+                engine.cb = SimpleNamespace(
+                    on_narrative=lambda _text: None,
+                    on_error=lambda _message: None,
+                )
+                engine.npc_speaker_aliases = lambda: {}
+                if world is not None:
+                    engine.context = SimpleNamespace(
+                        world_store=SimpleNamespace(load=lambda world=world: world)
+                    )
 
-        names = {tool["function"]["name"] for tool in captured["tools"]}
-        self.assertEqual(names, {tool["function"]["name"] for tool in model_tools_for("story")})
+                with (
+                    patch("src.app.engine.ENABLE_DYNAMIC_TOOLS", True),
+                    patch("src.app.engine.log_model_call"),
+                ):
+                    engine._stream_llm("test-model")
+
+                names = {tool["function"]["name"] for tool in captured["tools"]}
+                expected = catalog_names if label == "spatial_world" else catalog_names - spatial_names
+                self.assertEqual(names, expected)
+                # Authorization must freeze the same filtered catalog that the
+                # provider received, including the exact schemas.
+                issued = engine.__dict__["_issued_model_tool_request"]
+                self.assertSetEqual(set(issued.snapshot.allowed_tool_names), names)
+                self.assertEqual(issued.catalog_copy(), captured["tools"])
 
     def test_opening_request_replaces_system_and_omits_tools_without_mutation(self):
         captured = {}

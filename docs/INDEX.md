@@ -238,3 +238,5 @@ MyProjects/
 2026-11-13 的 Spatial v1 在 `feat/spatial-investigation` 开发，尚未合入或正式发布。见[本体开发契约](SPATIAL_INVESTIGATION.md)、[Kimi 编辑器交接](SPATIAL_EDITOR_HANDOFF.md)和[机制示例](SPATIAL_EXAMPLE.md)。本分支仅做确定性专项，不继承本页旧基线的发布/全量验收结论。
 
 本批[最小验收与源码索引](../../mid_product/trpg-master/2026-11-13-spatial-investigation/README.md)保留源码版本、原始日志、失败重试记录与校验和；原始记录仅本机访问，不随 Git 推送。
+
+2026-11-14 的[空间分支 CI 契约修复](../../mid_product/trpg-master/2026-11-14-spatial-ci/README.md)保留旧失败、最小复现、普通/空间工具目录及授权快照校验和后续远程结果，不覆盖前一日验收记录。
