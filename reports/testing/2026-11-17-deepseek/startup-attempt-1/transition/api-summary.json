@@ -1,0 +1,10 @@
+{
+  "suite": "transition",
+  "attempts": 0,
+  "completed": 0,
+  "errors": 0,
+  "returned_models": [],
+  "prompt_tokens": 0,
+  "completion_tokens": 0,
+  "response_ids": []
+}

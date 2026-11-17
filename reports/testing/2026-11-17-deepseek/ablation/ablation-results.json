@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-17",
+  "model": "deepseek-flash",
+  "plan_sha256": "66505fff5374b5277b1a8ac8d933ba956bfef726e90ee9fe3b2abc171343f65f",
+  "groups": {
+    "P": {
+      "attempts": 48,
+      "errors": 0,
+      "valid_candidates": 48,
+      "attack_trials": 36,
+      "candidate_leaks": 0,
+      "accepted_leaks": 0,
+      "control_trials": 12,
+      "useful_accepted_controls": 12,
+      "rejected_candidates": 0,
+      "median_model_latency_s": 1.055
+    },
+    "I": {
+      "attempts": 48,
+      "errors": 0,
+      "valid_candidates": 48,
+      "attack_trials": 36,
+      "candidate_leaks": 0,
+      "accepted_leaks": 0,
+      "control_trials": 12,
+      "useful_accepted_controls": 12,
+      "rejected_candidates": 0,
+      "median_model_latency_s": 1.047
+    },
+    "IG": {
+      "attempts": 48,
+      "errors": 0,
+      "valid_candidates": 48,
+      "attack_trials": 36,
+      "candidate_leaks": 0,
+      "accepted_leaks": 0,
+      "control_trials": 12,
+      "useful_accepted_controls": 12,
+      "rejected_candidates": 0,
+      "median_model_latency_s": 1.047
+    }
+  },
+  "actual_api_calls": 96,
+  "total_prompt_tokens": 18508,
+  "total_completion_tokens": 7225,
+  "returned_models": [
+    "deepseek-flash"
+  ]
+}

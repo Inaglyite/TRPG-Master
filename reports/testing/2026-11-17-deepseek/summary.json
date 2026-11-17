@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-17",
+  "base_commit": "0bedf6591bb8a245b84c13592211bb3ad0828fc6",
+  "tested_tree_dirty": true,
+  "live_suites": {
+    "classic": {
+      "suite": "classic",
+      "attempts": 90,
+      "completed": 90,
+      "errors": 0,
+      "returned_models": [
+        "deepseek-flash"
+      ],
+      "prompt_tokens": 5755621,
+      "completion_tokens": 32772,
+      "cases": 0,
+      "cases_passed": 0
+    },
+    "transition": {
+      "suite": "transition",
+      "attempts": 15,
+      "completed": 15,
+      "errors": 0,
+      "returned_models": [
+        "deepseek-flash"
+      ],
+      "prompt_tokens": 153419,
+      "completion_tokens": 2184,
+      "cases": 7,
+      "cases_passed": 5
+    },
+    "memory": {
+      "suite": "memory",
+      "attempts": 18,
+      "completed": 18,
+      "errors": 0,
+      "returned_models": [
+        "deepseek-flash"
+      ],
+      "prompt_tokens": 162399,
+      "completion_tokens": 1524,
+      "cases": 5,
+      "cases_passed": 3
+    }
+  },
+  "classic": {
+    "turns": 35,
+    "beat_goals_passed": 17,
+    "beat_goals_total": 17,
+    "checks_passed": 33,
+    "checks_total": 33,
+    "acceptance_passed": true,
+    "errors": [],
+    "anomalies": []
+  },
+  "new_live_api_calls": 123,
+  "previous_ablation_api_calls": 96,
+  "all_real_api_calls": 219,
+  "live_prompt_tokens": 6071439,
+  "live_completion_tokens": 36480,
+  "prior_automated": {
+    "pytest_passed": 2552,
+    "pytest_subtests_passed": 175,
+    "pytest_skipped": 8,
+    "vitest_passed": 1430,
+    "vitest_files": 139,
+    "playwright_passed": 4
+  }
+}

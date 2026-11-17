@@ -1,0 +1,18 @@
+{
+  "suite": "transition",
+  "model": "deepseek-flash",
+  "endpoint": "https://api.deepseek.com",
+  "credential_present": true,
+  "project_root": "<LIVE_TEST_WORK>/transition/project",
+  "initial_runtime_root": "<LIVE_TEST_WORK>/transition/runtime",
+  "max_output_tokens": 8000,
+  "thinking": "disabled",
+  "git_commit": "0bedf6591bb8a245b84c13592211bb3ad0828fc6",
+  "fingerprints": {
+    "src/structured/agent.py": "0e1cfdd4317aa64fa0a03400d5ba5d5d1b3464bc194e7604da5c8223b3b44ad1",
+    "src/app/agent_graph.py": "19e6dbd84f2688385bc28655410ef5e185b7d7b8298f8ffe4aca6a879737a3a4",
+    "src/ai/model/model_request.py": "da5f990611b09c5166b69628840bdeec40d99838179454348792cd22bb1ed85a",
+    "src/structured/service.py": "8b9a06cea709aea10efaad5fa04cbbd17c4846f82004552edc5730c832cf8449",
+    "src/ai/context/history_compactor.py": "255f1ec051e0dd1f68a65bbab7e039e677d142038256a88f47171c863f190b06"
+  }
+}

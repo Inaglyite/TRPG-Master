@@ -1,0 +1,31 @@
+{
+  "suite": "memory",
+  "attempts": 18,
+  "completed": 18,
+  "errors": 0,
+  "returned_models": [
+    "deepseek-flash"
+  ],
+  "prompt_tokens": 162399,
+  "completion_tokens": 1524,
+  "response_ids": [
+    "355c415e-9cc1-43a4-8f27-005379dd16d2",
+    "eb385288-8039-495c-a820-3a38bf03e095",
+    "eb3bcbae-59ac-4fe4-9fa8-9d1c5b5c3872",
+    "163b773f-9c92-4973-9f47-2da156c4c4ce",
+    "1730fc22-5250-4003-aebf-4b0f259562c3",
+    "ea8d9821-5304-4dfd-9c6a-af644becd336",
+    "45e36a91-f0d9-4bc6-9e10-09fe3322113d",
+    "2e1f5ba9-d129-4c2c-9442-10985597e4aa",
+    "3228df2d-e54e-4c95-8cd8-88c2dbb48d38",
+    "48a7d9fc-4ff0-4e81-b9d5-0aa4c2502fb1",
+    "3ee12e4f-c494-4bbb-9041-34f8b158bfba",
+    "0a7ab091-a678-4022-8384-3f38efd3bd2e",
+    "3bc60911-66c1-4b65-80f2-1765e27c8e84",
+    "97433076-00e8-4b66-ba78-8ddf6affd03c",
+    "0e731463-a30b-41c1-9107-8b7f5add0590",
+    "52f8b491-51d6-48e1-b40b-e1a15839cafb",
+    "26bb9246-7072-4609-9504-c0a193f0e4b8",
+    "f6851ab0-e75d-42bd-a71c-3f220135783b"
+  ]
+}

@@ -1,0 +1,44 @@
+INFO trpg: GAME  新游戏 | world=local-猩红文档-20261117-093813-3b60 | 模组=猩红文档
+{"suite": "memory", "attempts": 0, "completed": 0, "errors": 0, "returned_models": [], "prompt_tokens": 0, "completion_tokens": 0}
+Traceback (most recent call last):
+  File "<REPO_ROOT>/src/storage/persistence.py", line 270, in _catalog_skill_parts
+    catalog = catalog_for(context)
+              ^^^^^^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/src/ai/skills/skill_manifest.py", line 349, in catalog_for
+    catalog = load_official_catalog(context.project_root)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/src/ai/skills/skill_manifest.py", line 341, in load_official_catalog
+    raise CatalogError(f"{entry.id}: 文件不存在: {entry.path}")
+src.ai.skills.skill_manifest.CatalogError: core.trpg_master: 文件不存在: skills/core/trpg_master.skill
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<LIVE_TEST_WORK>/run_suite.py", line 70, in <module>
+    report=asyncio.run(m.run(report_path=S/'report.json',timeout=240))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<LOCAL_HOME>/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "<LOCAL_HOME>/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<LOCAL_HOME>/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/tools/memory_real_model_check.py", line 442, in run
+    context, world_id, byok = build_agent_world()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/tools/transition_real_model_check.py", line 399, in build_agent_world
+    engine.reset(dict(CHARACTER))
+  File "<REPO_ROOT>/src/app/engine.py", line 752, in reset
+    self.prepare_session()
+  File "<REPO_ROOT>/src/app/engine.py", line 207, in prepare_session
+    self.messages = [{"role": "system", "content": load_system_prompt(self.context)}]
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/src/storage/persistence.py", line 387, in load_system_prompt
+    official_parts, mod_skill_contents, catalog = _catalog_skill_parts(
+                                                  ^^^^^^^^^^^^^^^^^^^^^
+  File "<REPO_ROOT>/src/storage/persistence.py", line 277, in _catalog_skill_parts
+    raise PinUnavailable(f"世界尚未冻结 Skill 且 catalog 不可用：{exc}") from exc
+src.ai.skills.skill_pins.PinUnavailable: 世界尚未冻结 Skill 且 catalog 不可用：core.trpg_master: 文件不存在: skills/core/trpg_master.skill

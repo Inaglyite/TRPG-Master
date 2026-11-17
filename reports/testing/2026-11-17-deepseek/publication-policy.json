@@ -1,0 +1,38 @@
+{
+  "scope": "本次毕业论文测试报告及相关脱敏原始日志",
+  "sanitization": [
+    "不含凭据、请求认证头、数据库、真实玩家存档和完整工作树补丁",
+    "本机绝对路径替换为占位符",
+    "移除模型返回的reasoning_content，保留可见输出、调用参数与用量",
+    "压缩仅为存储，不改变JSON/JSONL记录结构"
+  ],
+  "path_redacted_files": [
+    "automated/pytest.log.gz",
+    "automated/pytest.xml.gz",
+    "automated/pytest-initial.log.gz",
+    "automated/pytest-initial.xml.gz",
+    "automated/vitest.log.gz",
+    "automated/vitest.json.gz",
+    "automated/e2e.json.gz",
+    "live/classic/manifest.json",
+    "live/classic/console.log.gz",
+    "startup-attempt-1/classic/manifest.json",
+    "startup-attempt-1/classic/console.log",
+    "live/transition/report.json",
+    "live/transition/manifest.json",
+    "startup-attempt-1/transition/manifest.json",
+    "startup-attempt-1/transition/console.log",
+    "live/memory/manifest.json",
+    "startup-attempt-1/memory/manifest.json",
+    "startup-attempt-1/memory/console.log"
+  ],
+  "api_audit": "实际调用OpenAI兼容SDK原方法，未替换模型响应；started与completed以call_id配对。每条成功调用保留服务端response_id。",
+  "reproduction_adaptations": "公开runner调整了目录参数、凭据读取和冻结harness导入路径，业务决策与验收代码未修改。",
+  "not_uploaded": [
+    ".env.json",
+    "runtime数据库",
+    "真实用户/世界文件",
+    "source-working-tree.patch",
+    "整个mid_product目录"
+  ]
+}
