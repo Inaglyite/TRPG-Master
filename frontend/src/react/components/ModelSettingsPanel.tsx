@@ -451,6 +451,9 @@ function GeneralTab() {
   const [narrationSpeed, setNarrationSpeedState] = useState<NarrationSpeed>(
     () => getNarrationSpeed(),
   );
+  const speedIndex = NARRATION_SPEED_OPTIONS.findIndex(
+    (option) => option.value === narrationSpeed,
+  );
   const showActionHints = useGamePreferences((state) => state.showActionHints);
   const setShowActionHints = useGamePreferences(
     (state) => state.setShowActionHints,
@@ -556,7 +559,13 @@ function GeneralTab() {
         aria-labelledby="narration-speed-title"
       >
         <h3 id="narration-speed-title">叙述速度</h3>
-        <div id="narration-speed-control" className="model-preset-control">
+        <div
+          id="narration-speed-control"
+          className="model-preset-control settings-segments settings-segments-filled"
+          role="group"
+          aria-labelledby="narration-speed-title"
+          style={segmentStyle(NARRATION_SPEED_OPTIONS.length, speedIndex)}
+        >
           {NARRATION_SPEED_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -573,11 +582,7 @@ function GeneralTab() {
           ))}
         </div>
         <p className="narration-speed-hint">
-          {
-            NARRATION_SPEED_OPTIONS.find(
-              (option) => option.value === narrationSpeed,
-            )?.hint
-          }
+          {NARRATION_SPEED_OPTIONS[speedIndex].hint}
           ；立即生效并保存在本机，单机与联机共用。
         </p>
       </section>
@@ -1046,7 +1051,7 @@ export function ModelSettingsPanel() {
           </button>
         </header>
         <div
-          className="model-settings-tabs settings-segments"
+          className="model-settings-tabs settings-segments settings-segments-filled"
           style={segmentStyle(settingsTabs.length, tabIndex)}
           role="tablist"
           aria-label="游戏设置分页"

@@ -2722,6 +2722,20 @@
   border-bottom: 2px solid var(--platform-brass);
   transform: translate(var(--segment-x), var(--segment-y));
 }
+.settings-segments-filled {
+  isolation: isolate;
+  background: var(--bg);
+}
+.settings-segments-filled::after {
+  z-index: -1;
+  background: var(--bg4);
+}
+.settings-folder .settings-segments-filled button {
+  background: transparent;
+}
+.settings-folder .settings-segments-filled button:hover {
+  color: var(--gold);
+}
 .settings-folder .settings-segments button.selected {
   box-shadow: none;
 }

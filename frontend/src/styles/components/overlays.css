@@ -513,11 +513,9 @@
 .model-settings-tabs {
   display: grid;
   align-self: flex-start;
-  isolation: isolate;
   overflow: hidden;
   border: 1px solid var(--platform-rule);
   border-radius: var(--r-md);
-  background: var(--bg);
 }
 .model-settings-tabs [role="tab"] {
   min-height: 38px;
@@ -535,10 +533,6 @@
 }
 .model-settings-tabs [aria-selected="true"] {
   color: var(--gold-bright);
-}
-.model-settings-tabs::after {
-  z-index: -1;
-  background: var(--bg4);
 }
 .model-settings-tab-body {
   display: flex;
