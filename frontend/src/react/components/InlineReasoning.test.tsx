@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ReasoningPanel } from "./ReasoningPanel";
+import { MessageList } from "./MessageList";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import {
   useGamePreferences,
@@ -48,13 +48,11 @@ describe("private model reasoning", () => {
     render(
       <>
         <ModelSettingsPanel />
-        <ReasoningPanel />
+        <MessageList />
       </>,
     );
     expect(readReasoningPreference()).toBe(false);
-    expect(
-      screen.queryByRole("region", { name: "模型思考内容" }),
-    ).not.toBeInTheDocument();
+    expect(document.querySelector(".inline-reasoning")).not.toBeInTheDocument();
     const toggle = screen.getByRole("switch", { name: "显示思维链" });
     fireEvent.click(toggle);
     expect(readReasoningPreference()).toBe(true);
@@ -68,6 +66,36 @@ describe("private model reasoning", () => {
     expect(useReasoningStore.getState().entries).toEqual([]);
     expect(screen.queryByText("模型的私有分析")).not.toBeInTheDocument();
   });
+  it("keeps thinking above its reply as loading is replaced and respects manual collapse", () => {
+    useGamePreferences.getState().setShowReasoning(true);
+    const action = { id: "action", kind: "player", text: "检查书架" };
+    useMessageStore.setState({
+      messages: [action, { id: "loading", kind: "loading", text: "等待" }],
+    });
+    render(<MessageList />);
+    expect(document.querySelector(".inline-reasoning")).toBeNull();
+    act(() => handleServerPayload(frame("delta", { text: "先观察书架。" })));
+    const summary = screen.getByText("正在思考");
+    const details = summary.closest("details")!;
+    expect(details.previousElementSibling).toHaveAttribute("id", "action");
+    fireEvent.click(summary);
+    expect(details.open).toBe(false);
+    act(() => {
+      handleServerPayload(frame("delta", { text: "再检查书脊。" }));
+      useMessageStore
+        .getState()
+        .replaceMessages([
+          action,
+          { id: "reply", kind: "gm", text: "书架上有一本日记。" },
+        ]);
+      handleServerPayload(frame("end"));
+    });
+    expect(details.nextElementSibling).toHaveAttribute("id", "reply");
+    expect(details.open).toBe(false);
+    fireEvent.click(screen.getByText("已思考"));
+    expect(screen.getByText("先观察书架。再检查书脊。")).toBeVisible();
+  });
+
   it("drops incoming thinking while off and does not persist raw text", () => {
     handleServerPayload(frame("start"));
     handleServerPayload(frame("delta", { text: "不缓存" }));
@@ -88,7 +116,7 @@ describe("private model reasoning", () => {
   });
   it("renders plain text, ends interrupted streams and ignores late/foreign frames", () => {
     useGamePreferences.getState().setShowReasoning(true);
-    render(<ReasoningPanel />);
+    render(<MessageList />);
     act(() => {
       handleServerPayload(frame("start"));
       handleServerPayload(frame("delta", { text: "<script>秘密</script>" }));
@@ -99,8 +127,8 @@ describe("private model reasoning", () => {
       );
     });
     expect(screen.getByText("<script>秘密</script>")).toBeVisible();
-    expect(document.querySelector(".model-reasoning-panel script")).toBeNull();
-    expect(screen.getByText("已中断")).toBeVisible();
+    expect(document.querySelector(".inline-reasoning script")).toBeNull();
+    expect(screen.getByText("思考已中断")).toBeVisible();
     expect(useReasoningStore.getState().entries).toHaveLength(1);
     expect(useReasoningStore.getState().entries[0].text).not.toContain("迟到");
     act(() => useAppStore.setState({ activeWorldId: "other" }));

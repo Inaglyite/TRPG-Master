@@ -31,7 +31,11 @@ import {
   useTimelineCapabilities,
 } from "../../state/online-store";
 import { AvatarDisc } from "./AvatarDisc";
-import { ReasoningPanel } from "./ReasoningPanel";
+import { InlineReasoning } from "./InlineReasoning";
+import {
+  useReasoningStore,
+  type ReasoningEntry,
+} from "../../state/reasoning-store";
 import gmAvatarUrl from "../../assets/ui/gm_avatar.webp";
 import gmDiceUrl from "../../assets/ui/gm_dice.webp";
 import gmThinkingUrl from "../../assets/ui/gm_thinking.webp";
@@ -425,6 +429,23 @@ export function MessageList() {
   const historyPrependRequest = useMessageStore(
     (state) => state.historyPrependRequest,
   );
+  const reasoning = useReasoningStore((state) => state.entries);
+  const slots = new Map<number, ReasoningEntry[]>();
+  for (const entry of reasoning) {
+    const anchor = entry.anchor;
+    const index = anchor
+      ? messages.findIndex((m) => m.id === anchor.messageId)
+      : 0;
+    if (index < 0) continue;
+    const slot = anchor?.side === "after" ? index + 1 : index;
+    const existing = slots.get(slot);
+    if (existing) existing.push(entry);
+    else slots.set(slot, [entry]);
+  }
+  const reasoningAt = (index: number) =>
+    (slots.get(index) ?? []).map((entry) => (
+      <InlineReasoning key={`reasoning:${entry.id}`} entry={entry} />
+    ));
   const container = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const lastForce = useRef(forceScrollRequest);
@@ -442,7 +463,13 @@ export function MessageList() {
       pinned.current = false;
     } else if (forced || pinned.current)
       element.scrollTop = element.scrollHeight;
-  }, [messages, scrollRequest, forceScrollRequest, historyPrependRequest]);
+  }, [
+    messages,
+    reasoning,
+    scrollRequest,
+    forceScrollRequest,
+    historyPrependRequest,
+  ]);
 
   return (
     <div
@@ -456,19 +483,21 @@ export function MessageList() {
     >
       <NarrativeHistoryControl />
       <InheritedHistoryControl />
-      {messages.map((message, index) => (
-        <Message
-          key={message.id}
-          message={message}
-          actionReset={actionReset}
-          sameTurn={
-            index > 0 &&
-            Boolean(message.turnId) &&
-            message.turnId === messages[index - 1].turnId
-          }
-        />
-      ))}
-      <ReasoningPanel />
+      {messages
+        .flatMap((message, index) => [
+          ...reasoningAt(index),
+          <Message
+            key={message.id}
+            message={message}
+            actionReset={actionReset}
+            sameTurn={
+              index > 0 &&
+              Boolean(message.turnId) &&
+              message.turnId === messages[index - 1].turnId
+            }
+          />,
+        ])
+        .concat(reasoningAt(messages.length))}
     </div>
   );
 }

@@ -732,49 +732,50 @@
   }
 }
 
-/* Provider reasoning is an explicit private debugging view, separate from story. */
-.model-reasoning-panel {
-  margin: 12px 18px;
-  color: var(--text-secondary, #aaa89b);
-  font-size: 13px;
+/* Private thinking follows the reading column and scrolls with the conversation. */
+.inline-reasoning {
+  align-self: flex-start;
+  flex: none;
   min-width: 0;
-}
-.model-reasoning-panel > p {
-  margin: 0;
-}
-.model-reasoning-block {
-  border: 1px solid var(--border-color, #4b4738);
-  border-radius: 6px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  min-width: 0;
-}
-.model-reasoning-block summary {
-  cursor: pointer;
-  overflow-wrap: anywhere;
+  max-width: min(100%, 730px);
+  color: #aaa9a6;
+  font-size: 14px;
   line-height: 1.7;
 }
-.model-reasoning-block summary span {
-  margin-left: 12px;
-  font-size: 12px;
-  opacity: 0.75;
+.inline-reasoning summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  min-height: 28px;
+  padding: 2px 4px;
+  font-size: 13px;
   white-space: nowrap;
+  list-style: none;
+  cursor: pointer;
 }
-.model-reasoning-block pre {
-  margin: 8px 0 0;
-  max-height: 160px;
-  overflow: auto;
+.inline-reasoning summary::-webkit-details-marker {
+  display: none;
+}
+.inline-reasoning summary:hover,
+.inline-reasoning summary:focus-visible {
+  color: var(--text);
+}
+.reasoning-chevron {
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: rotate(-45deg);
+}
+.inline-reasoning[open] .reasoning-chevron {
+  transform: rotate(45deg);
+}
+.reasoning-text {
+  margin: 4px 0 0 5px;
+  padding-left: 14px;
+  border-left: 1px solid #777674;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: inherit;
-  line-height: 1.65;
   user-select: text;
-}
-@media (max-width: 640px) {
-  .model-reasoning-panel {
-    margin: 8px;
-  }
-  .model-reasoning-block {
-    padding: 8px 10px;
-  }
 }

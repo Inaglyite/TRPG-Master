@@ -20,6 +20,7 @@ export type ReasoningEntry = {
   model: string;
   role: string;
   text: string;
+  anchor: { messageId: string; side: "before" | "after" } | null;
   status: "running" | "completed" | "interrupted";
   truncated: boolean;
 };
@@ -47,9 +48,6 @@ export const useReasoningStore = create<{
       frame.turn_id !== get().activeTurnId
     )
       return;
-    const hadRequest = get().entries.some(
-      (entry) => entry.id === frame.request_id,
-    );
     set((state) => {
       const existing = state.entries.find(
         (entry) => entry.id === frame.request_id,
@@ -59,11 +57,29 @@ export const useReasoningStore = create<{
         (!existing && frame.phase === "delta" && frame.text)
       ) {
         if (existing) return state;
+        const messages = useMessageStore.getState().messages;
+        // Loading and roll placeholders disappear as soon as narration arrives.
+        const rewrite = messages.find((m) => m.rewriteTarget && !m.hidden);
+        const last = [...messages]
+          .reverse()
+          .find(
+            (m) =>
+              !m.hidden && m.kind !== "loading" && m.kind !== "roll-pending",
+          );
+        const message = rewrite ?? last;
+        const anchor: ReasoningEntry["anchor"] = message
+          ? {
+              messageId: message.id,
+              side:
+                message.kind === "gm" && message.streaming ? "before" : "after",
+            }
+          : null;
         return {
           entries: [
             ...state.entries,
             {
               id: frame.request_id,
+              anchor,
               model: frame.model,
               role: frame.role,
               text: (frame.text || "").slice(0, LIMIT),
@@ -94,11 +110,6 @@ export const useReasoningStore = create<{
         ),
       };
     });
-    if (
-      !hadRequest &&
-      get().entries.some((entry) => entry.id === frame.request_id)
-    )
-      useMessageStore.getState().requestScroll();
   },
 }));
 
