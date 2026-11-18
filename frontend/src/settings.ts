@@ -218,7 +218,12 @@ function optionalInt(raw: string): number | undefined {
 }
 
 function rolePayload(draft: RoleDraft): Record<string, unknown> {
-  if (draft.mode !== "custom") return { mode: "default" };
+  if (draft.mode !== "custom") {
+    const maxOutput = optionalInt(draft.defaultOutput ?? "");
+    return maxOutput
+      ? { mode: "default", max_output_tokens: maxOutput }
+      : { mode: "default" };
+  }
   const service: Record<string, unknown> = {
     label: draft.service.label.trim(),
     provider_kind: draft.service.provider_kind,
@@ -237,12 +242,28 @@ function rolePayload(draft: RoleDraft): Record<string, unknown> {
 }
 
 function validateDrafts(): string | null {
-  const { drafts } = useModelStore.getState();
+  const { drafts, view } = useModelStore.getState();
   for (const [role, label] of [
     ["narrative", "叙述模型"],
     ["judgement", "裁决模型"],
   ] as const) {
     const draft = drafts[role];
+    const output = (
+      draft.mode === "custom"
+        ? draft.service.max_output_tokens
+        : draft.defaultOutput
+    )?.trim();
+    if (output) {
+      const value = optionalInt(output);
+      if (value === undefined || value < 64 || value > 131072)
+        return `${label}：最大输出须为 64 至 131072 之间的整数`;
+      const window =
+        draft.mode === "custom"
+          ? optionalInt(draft.service.window_tokens)
+          : view?.server_defaults.window_tokens;
+      if (window && value >= window)
+        return `${label}：最大输出须小于上下文窗口，给输入留出空间`;
+    }
     if (draft.mode !== "custom") continue;
     if (!draft.service.base_url.trim()) return `${label}：请填写 Base URL`;
     if (!/^https?:\/\//i.test(draft.service.base_url.trim()))
@@ -254,11 +275,6 @@ function validateDrafts(): string | null {
       optionalInt(draft.service.window_tokens) === undefined
     )
       return `${label}：上下文窗口必须是正整数`;
-    if (
-      draft.service.max_output_tokens.trim() &&
-      optionalInt(draft.service.max_output_tokens) === undefined
-    )
-      return `${label}：最大输出必须是正整数`;
   }
   return null;
 }

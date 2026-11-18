@@ -392,7 +392,7 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
             model_id="deepseek-flash",
             window_tokens=None,
             window_source="manual",
-            max_output_tokens=8000,
+            max_output_tokens=65536,
             provider_kind=provider_kind,
             binding_id="b1",
             base_url_host=base_url_host,
@@ -419,6 +419,7 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
         kwargs = await self._capture("deepseek", "api.deepseek.com", "enabled")
         self.assertEqual({"thinking": {"type": "enabled"}}, kwargs.get("extra_body"))
         self.assertEqual("max", kwargs.get("reasoning_effort"))
+        self.assertEqual(65536, kwargs["max_tokens"])
 
     async def test_deepseek_by_host_also_disabled(self):
         # server_default 指向 DeepSeek 时同样关闭（按 host 兜底判定）

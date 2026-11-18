@@ -203,6 +203,8 @@ def finalize_stream_tool_calls(
     log_error: Any,
     on_error: Any,
     content: str = "",
+    max_output_tokens: int,
+    request_role: str,
 ) -> list[dict]:
     """收口一次流的工具调用：截断 fail-closed、id 重写、快照绑定、reasoning 登记。
 
@@ -211,13 +213,18 @@ def finalize_stream_tool_calls(
     """
     from src.ai.tools.tool_policy import attach_request_snapshot
 
-    if finish_reason == "length" and (tool_calls_acc or text_tool_calls):
-        log_error("模型输出在工具调用途中被截断，已丢弃本轮工具调用")
-        on_error("模型输出被截断，本轮工具调用未执行；请重试。")
-        tool_calls_acc = {}
-        text_tool_calls = []
-    elif finish_reason == "length":
-        on_error("（叙述过长被截断，请重试或继续）")
+    if finish_reason == "length":
+        role_label = "裁决模型" if request_role == "combat" else "叙述模型"
+        truncated = "模型回复被截断"
+        if tool_calls_acc or text_tool_calls:
+            log_error("模型输出在工具调用途中被截断，已丢弃本轮工具调用")
+            truncated += "，本轮工具调用未执行"
+            tool_calls_acc = {}
+            text_tool_calls = []
+        on_error(
+            f"{truncated}。本次最大输出为 {max_output_tokens} token，思考与正文共用。"
+            f"可在「游戏设置 → 模型配置 → {role_label}」调高最大输出，保存后重试。"
+        )
     raw_tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc)] + text_tool_calls
     tool_calls: list[dict] = []
     for index, raw_call in enumerate(raw_tool_calls):

@@ -135,7 +135,7 @@ def _host(chunks):
     return host
 
 
-def _stream(host, policy=_POLICY):
+def _stream(host, policy=_POLICY, *, retry_on_empty=False):
     streamer = ModelStreamer(
         host,
         log_error=lambda _m: None,
@@ -146,7 +146,7 @@ def _stream(host, policy=_POLICY):
         "test-model",
         policy=policy,
         enable_tools=True,
-        retry_on_empty=False,
+        retry_on_empty=retry_on_empty,
     )
 
 
@@ -177,6 +177,13 @@ def test_stream_truncated_tool_calls_fail_closed():
     with pytest.raises(ModelResponseError, match="length"):
         _stream(host)
     assert any("截断" in message for message in host.errors)
+
+
+def test_reasoning_only_length_reports_budget_once_without_repeating_request():
+    host = _host([_chunk(reasoning="测试片段"), _chunk(finish="length")])
+    with pytest.raises(ModelResponseError, match="length"):
+        _stream(host, retry_on_empty=True)
+    assert sum("最大输出" in message and "叙述模型" in message for message in host.errors) == 1
 
 
 def test_prepare_request_passback_only_on_wire_copy():

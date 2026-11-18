@@ -178,6 +178,9 @@ function RoleCard({
   const testingRole = useModelStore((state) => state.testingRole);
   const testing = testingRole === role;
   const service = draft.service;
+  const defaultOutput = useModelStore(
+    (state) => state.view?.server_defaults.max_output_tokens,
+  );
   const presets = useModelStore((state) => state.view?.provider_presets);
   const preset = presets?.find((item) => item.id === service.provider_kind);
   const canKeepKey =
@@ -225,6 +228,30 @@ function RoleCard({
           自定义服务
         </button>
       </div>
+      {(draft.mode === "custom" || !byokRequired) && (
+        <label className="model-role-field">
+          <span>最大输出（token）</span>
+          <input
+            inputMode="numeric"
+            value={
+              draft.mode === "custom"
+                ? service.max_output_tokens
+                : (draft.defaultOutput ?? "")
+            }
+            disabled={disabled}
+            placeholder={`跟随默认（${defaultOutput ?? "—"}）`}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (draft.mode === "custom")
+                updateServiceDraft(role, { max_output_tokens: value });
+              else updateRoleDraft(role, { defaultOutput: value });
+            }}
+          />
+          <small className="model-service-hint">
+            每次回复中思考与正文共用此额度。留空跟随默认，保存后从下回合生效。
+          </small>
+        </label>
+      )}
       {draft.mode === "custom" ? (
         <div className="model-service-form">
           <label className="model-role-field">
@@ -331,36 +358,20 @@ function RoleCard({
                 ))}
             </datalist>
           </label>
-          <div className="model-role-field-pair">
-            <label className="model-role-field">
-              <span>上下文窗口（高级，可选）</span>
-              <input
-                value={service.window_tokens}
-                disabled={disabled}
-                inputMode="numeric"
-                placeholder="例如 262144（256K）"
-                onChange={(event) =>
-                  updateServiceDraft(role, {
-                    window_tokens: event.target.value,
-                  })
-                }
-              />
-            </label>
-            <label className="model-role-field">
-              <span>最大输出 token（高级，可选）</span>
-              <input
-                value={service.max_output_tokens}
-                disabled={disabled}
-                inputMode="numeric"
-                placeholder="例如 4096"
-                onChange={(event) =>
-                  updateServiceDraft(role, {
-                    max_output_tokens: event.target.value,
-                  })
-                }
-              />
-            </label>
-          </div>
+          <label className="model-role-field">
+            <span>上下文窗口（高级，可选）</span>
+            <input
+              value={service.window_tokens}
+              disabled={disabled}
+              inputMode="numeric"
+              placeholder="例如 262144（256K）"
+              onChange={(event) =>
+                updateServiceDraft(role, {
+                  window_tokens: event.target.value,
+                })
+              }
+            />
+          </label>
           <p className="model-service-hint">
             不填窗口时上下文占比显示为“未知”，不猜厂商规格。云端仅允许公网 https
             地址；本地可选本机 http 推理服务。

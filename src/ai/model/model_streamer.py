@@ -102,7 +102,6 @@ class ModelStreamer:
                 world_id=str(getattr(getattr(host, "context", None), "world_id", "") or ""),
             )
             provider_stream = host.client.chat.completions.create(**kwargs)
-            # H4 录制（默认关）：归一化 chunk 序列落本地 fixture 目录。
             provider_stream = maybe_record_stream(
                 host, provider_stream, request_snapshot.request_id
             )
@@ -333,6 +332,7 @@ class ModelStreamer:
             finish_reason=finish_reason,
             request_snapshot=request_snapshot,
             reasoning_text=reasoning.text, content=full_text,
+            max_output_tokens=kwargs["max_tokens"], request_role=request_role,
             log_error=self.log_error,
             on_error=host.cb.on_error,
         )
@@ -403,7 +403,7 @@ class ModelStreamer:
         if structured_dialogue and full_text and not tool_calls:
             return finish_structured_dialogue(self, model, full_text, speaker_parser, finish_reason=finish_reason,
                 request_options=dict(required_tool=kwargs.get("tool_choice") == "required", policy=policy, system_overlay=system_overlay, system_prompt_override=system_prompt_override, enable_tools=enable_tools, temperature=temperature, buffer_if_tools=buffer_if_tools, messages_override=messages_override, retry_on_empty=retry_on_empty, _overflow_retried=_overflow_retried, _capacity_compaction_attempted=_capacity_compaction_attempted))
-        if not full_text and not tool_calls and retry_on_empty:
+        if not full_text and not tool_calls and retry_on_empty and finish_reason != "length":
             self.log_error("API 返回空响应，正在重试一次")
             note_model_retry(host, "empty_response", "unknown", 400)
             self.sleep(0.4)

@@ -38,9 +38,8 @@ def build_byok_caller(
         routes = resolve_routes(settings)  # BYOK 缺绑定在此 fail-closed
         role = routes.narrative
 
-        # 生效预算：尊重房主配置（store 已校验 ≤131072），只做防御性封顶；
-        # 原先硬顶 4000 会静默忽略用户配置的更大值。
-        effective_max_tokens = min(role.max_output_tokens or 8000, 32768)
+        # 容量预检和请求共用角色配置的输出预算。
+        effective_max_tokens = role.max_output_tokens
 
         from src.ai.context.context_capacity import STATUS_IRREDUCIBLE, evaluate
         from src.ai.context.lorebook import estimate_text_tokens

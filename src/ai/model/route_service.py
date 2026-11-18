@@ -90,6 +90,7 @@ class ServiceSpec:
 class RoleBinding:
     mode: str  # "default" | "custom"
     service: ServiceSpec | None
+    default_max_output_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -148,10 +149,9 @@ def _parse_window(raw: object, field: str) -> int | None:
 def _parse_max_output(raw: object) -> int | None:
     if raw in (None, ""):
         return None
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        raise ValueError("最大输出 token 必须是整数") from None
+    if type(raw) is not int and not (isinstance(raw, str) and raw.strip().isdecimal()):
+        raise ValueError("最大输出 token 必须是整数")
+    value = int(raw)
     if not MAX_OUTPUT_MIN <= value <= MAX_OUTPUT_MAX:
         raise ValueError(f"最大输出 token 超出允许范围 {MAX_OUTPUT_MIN}-{MAX_OUTPUT_MAX}")
     return value
@@ -208,7 +208,9 @@ def parse_role_binding(
         raise ValueError(f"{role_label} 绑定格式不合法")
     mode = str(raw.get("mode") or "default").strip()
     if mode == "default":
-        return RoleBinding(mode="default", service=None)
+        # 云端 default 表示未绑定服务；本地允许单独调整默认模型的输出预算。
+        budget = _parse_max_output(raw.get("max_output_tokens")) if allow_private else None
+        return RoleBinding(mode="default", service=None, default_max_output_tokens=budget)
     if mode != "custom":
         raise ValueError(f"{role_label} 绑定模式不合法")
     service_raw = raw.get("service")
@@ -300,7 +302,7 @@ def _resolve_role(binding: RoleBinding, *, slot: str, revision: int) -> Resolved
             model_id=NARRATIVE_MODEL if slot == "narrative" else JUDGEMENT_MODEL,
             window_tokens=context_window_tokens(),
             window_source="legacy_default",
-            max_output_tokens=max_output_tokens(),
+            max_output_tokens=binding.default_max_output_tokens or max_output_tokens(),
             provider_kind="server_default",
             binding_id="server_default",
             base_url_host="",
@@ -505,7 +507,9 @@ def default_settings() -> EffectiveSettings:
 def settings_to_json(settings: EffectiveSettings, *, include_secrets: bool) -> dict:
     def role_json(binding: RoleBinding) -> dict:
         if binding.mode != "custom" or binding.service is None:
-            return {"mode": "default"}
+            if binding.default_max_output_tokens is None:
+                return {"mode": "default"}
+            return {"mode": "default", "max_output_tokens": binding.default_max_output_tokens}
         service = binding.service
         data = {
             "mode": "custom",

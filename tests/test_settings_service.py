@@ -69,6 +69,37 @@ def room_scope(db_url: str, user_id: str, role: str) -> SettingsScope:
     )
 
 
+def test_default_role_output_budget_is_editable_and_clearable(tmp_path):
+    from test_provider_adapter import _host
+
+    from src.ai.model.model_request import StreamPolicy, prepare_model_request
+    from src.ai.model.route_service import load_local_settings, resolve_routes
+
+    path = tmp_path / "models.json"
+    scope = SettingsScope(mode="local", can_edit=True, local_path=path)
+    roles = {"narrative": {"mode": "default"}, "judgement": {"mode": "default"}}
+    before = build_payload(scope)["narrative"]
+    assert before["configured_max_output_tokens"] is None
+    roles["narrative"]["max_output_tokens"] = 32768
+    updated = apply_update(scope, roles)
+    assert updated["narrative"]["max_output_tokens"] == 32768
+    assert updated["judgement"]["configured_max_output_tokens"] is None
+    host = _host([])
+    host._model_routes = resolve_routes(load_local_settings(path))
+    request = prepare_model_request(
+        host, "deepseek-flash", policy=StreamPolicy(False, False, "test", "enabled"),
+        system_overlay=None, system_prompt_override=None, enable_tools=False,
+        temperature=0.7, messages_override=None,
+    )
+    assert request.provider_kwargs["max_tokens"] == request.capacity.plan.max_output_tokens == 32768
+    roles["narrative"]["max_output_tokens"] = 1.5
+    with pytest.raises(ValueError):
+        apply_update(scope, roles)
+    assert build_payload(scope)["narrative"]["max_output_tokens"] == 32768
+    del roles["narrative"]["max_output_tokens"]
+    assert apply_update(scope, roles)["narrative"] == before
+
+
 class TestRoomPermissions:
     def test_thinking_mode_is_owner_scoped_and_preserves_services(self, db):
         owner = room_scope(db, "owner-1", "owner")

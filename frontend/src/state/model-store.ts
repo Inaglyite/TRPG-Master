@@ -80,6 +80,7 @@ export type RoleView = {
   window_tokens: number | null;
   window_source: string;
   max_output_tokens: number;
+  configured_max_output_tokens?: number | null;
   capabilities: { streaming?: boolean; tool_calling?: boolean } | null;
   service: ServiceView | null;
 };
@@ -124,7 +125,11 @@ export type ServiceDraft = {
   max_output_tokens: string;
 };
 
-export type RoleDraft = { mode: "default" | "custom"; service: ServiceDraft };
+export type RoleDraft = {
+  mode: "default" | "custom";
+  service: ServiceDraft;
+  defaultOutput?: string;
+};
 
 export type ProviderPreset = {
   id: string;
@@ -181,7 +186,11 @@ export function emptyServiceDraft(): ServiceDraft {
 
 export function draftFromView(role: RoleView | undefined): RoleDraft {
   if (!role || role.mode !== "custom" || !role.service) {
-    return { mode: "default", service: emptyServiceDraft() };
+    return {
+      mode: "default",
+      service: emptyServiceDraft(),
+      defaultOutput: String(role?.configured_max_output_tokens ?? ""),
+    };
   }
   return {
     mode: "custom",
@@ -193,9 +202,11 @@ export function draftFromView(role: RoleView | undefined): RoleDraft {
       api_key: "",
       model_id: role.model_id || "",
       window_tokens: role.window_tokens ? String(role.window_tokens) : "",
-      max_output_tokens: role.max_output_tokens
-        ? String(role.max_output_tokens)
-        : "",
+      max_output_tokens: String(
+        (role.configured_max_output_tokens === undefined
+          ? role.max_output_tokens
+          : role.configured_max_output_tokens) ?? "",
+      ),
     },
   };
 }

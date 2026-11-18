@@ -18,6 +18,7 @@ import {
   restoreDefaultSettings,
   saveSettings,
   setThinkingMode,
+  updateRoleDraft,
   setReasoningEffort,
   testConnection,
   updateServiceDraft,
@@ -376,6 +377,26 @@ describe("settings commands", () => {
     expect(payload.narrative.service.api_key).toBeUndefined();
     expect(payload.judgement).toEqual({ mode: "default" });
     expect(payload.confirm_data_sharing).toBe(true);
+  });
+
+  it("保存默认叙述模型的预算，留空时恢复跟随默认", () => {
+    updateRoleDraft("narrative", { mode: "default", defaultOutput: "32768" });
+    saveSettings();
+    const payload = JSON.parse(safeSendMock.mock.calls[0][0]);
+    expect(payload.narrative).toEqual({
+      mode: "default",
+      max_output_tokens: 32768,
+    });
+    const draft = draftFromView({
+      ...view.judgement,
+      configured_max_output_tokens: 32768,
+    });
+    expect(draft.defaultOutput).toBe("32768");
+    updateRoleDraft("narrative", { defaultOutput: "" });
+    saveSettings();
+    expect(JSON.parse(safeSendMock.mock.calls.at(-1)![0]).narrative).toEqual({
+      mode: "default",
+    });
   });
 
   it("自定义但未勾选确认：拒绝发送并提示", () => {

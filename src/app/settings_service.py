@@ -145,7 +145,8 @@ def _role_view(binding: RoleBinding, slot: str, *, reveal_url: bool) -> dict:
             "model_id": NARRATIVE_MODEL if slot == "narrative" else JUDGEMENT_MODEL,
             "window_tokens": context_window_tokens(),
             "window_source": "legacy_default",
-            "max_output_tokens": max_output_tokens(),
+            "max_output_tokens": binding.default_max_output_tokens or max_output_tokens(),
+            "configured_max_output_tokens": binding.default_max_output_tokens,
             "capabilities": None,
             "service": None,
         }
@@ -157,6 +158,7 @@ def _role_view(binding: RoleBinding, slot: str, *, reveal_url: bool) -> dict:
         "window_tokens": service.window_tokens,
         "window_source": "manual" if service.window_tokens else "unknown",
         "max_output_tokens": service.max_output_tokens or max_output_tokens(),
+        "configured_max_output_tokens": service.max_output_tokens,
         "capabilities": service.capabilities,
         "service": {
             "label": service.label,
