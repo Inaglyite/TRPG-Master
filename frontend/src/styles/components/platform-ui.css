@@ -2635,8 +2635,7 @@
   padding: 0 12px;
 }
 .settings-folder .model-settings-tabs {
-  padding: 8px 6px 0;
-  border-color: var(--platform-rule);
+  margin: 8px 6px 0;
 }
 .settings-folder .model-settings-tabs [role="tab"] {
   min-height: 44px;

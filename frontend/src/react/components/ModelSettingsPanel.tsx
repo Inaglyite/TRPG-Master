@@ -988,6 +988,12 @@ function LoreBlock({ data }: { data: TurnDiagnostics }) {
 
 /* ---------------------------------------------------------------- 面板主体 */
 
+const settingsTabs = [
+  { id: "general", label: "游戏偏好" },
+  { id: "models", label: "模型配置" },
+  { id: "context", label: "上下文" },
+] as const;
+
 export function ModelSettingsPanel() {
   const panel = useRef<HTMLElement>(null);
   const open = useModelStore((state) => state.open);
@@ -1003,6 +1009,7 @@ export function ModelSettingsPanel() {
   const { rendered, closing } = useDelayedClose(open);
   useDialogKeyboard(panel, open && rendered, saving, closeSettings);
   if (!rendered) return <div id="model-settings-overlay" className="hidden" />;
+  const tabIndex = settingsTabs.findIndex(({ id }) => id === tab);
   const readOnly = Boolean(view) && !view!.can_edit;
   const blocked = Boolean(view?.blocked);
   return (
@@ -1039,7 +1046,8 @@ export function ModelSettingsPanel() {
           </button>
         </header>
         <div
-          className="model-settings-tabs"
+          className="model-settings-tabs settings-segments"
+          style={segmentStyle(settingsTabs.length, tabIndex)}
           role="tablist"
           aria-label="游戏设置分页"
           onKeyDown={(event) => {
@@ -1049,58 +1057,37 @@ export function ModelSettingsPanel() {
             )
               return;
             event.preventDefault();
-            const tabs = ["general", "models", "context"] as const;
             const offset = event.key === "ArrowLeft" ? -1 : 1;
             const next =
               event.key === "Home"
-                ? "general"
+                ? 0
                 : event.key === "End"
-                  ? "context"
-                  : tabs[
-                      (tabs.indexOf(tab) + offset + tabs.length) % tabs.length
-                    ];
-            useModelStore.setState({ tab: next });
+                  ? settingsTabs.length - 1
+                  : (tabIndex + offset + settingsTabs.length) %
+                    settingsTabs.length;
+            const nextTab = settingsTabs[next].id;
+            useModelStore.setState({ tab: nextTab });
             panel.current
-              ?.querySelector<HTMLButtonElement>(`#model-settings-tab-${next}`)
+              ?.querySelector<HTMLButtonElement>(
+                `#model-settings-tab-${nextTab}`,
+              )
               ?.focus();
           }}
         >
-          <button
-            type="button"
-            role="tab"
-            id="model-settings-tab-general"
-            aria-controls="model-settings-tab-panel"
-            tabIndex={tab === "general" ? 0 : -1}
-            aria-selected={tab === "general"}
-            className={tab === "general" ? "selected" : ""}
-            onClick={() => useModelStore.setState({ tab: "general" })}
-          >
-            游戏偏好
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="model-settings-tab-models"
-            aria-controls="model-settings-tab-panel"
-            tabIndex={tab === "models" ? 0 : -1}
-            aria-selected={tab === "models"}
-            className={tab === "models" ? "selected" : ""}
-            onClick={() => useModelStore.setState({ tab: "models" })}
-          >
-            模型配置
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="model-settings-tab-context"
-            aria-controls="model-settings-tab-panel"
-            tabIndex={tab === "context" ? 0 : -1}
-            aria-selected={tab === "context"}
-            className={tab === "context" ? "selected" : ""}
-            onClick={() => useModelStore.setState({ tab: "context" })}
-          >
-            上下文
-          </button>
+          {settingsTabs.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`model-settings-tab-${id}`}
+              aria-controls="model-settings-tab-panel"
+              tabIndex={tab === id ? 0 : -1}
+              aria-selected={tab === id}
+              onClick={() => useModelStore.setState({ tab: id })}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div
           key={tab}
