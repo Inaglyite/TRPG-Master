@@ -54,10 +54,21 @@ class ProviderTransport(httpx.BaseTransport):
         body = normalize_chat_body(body, provider)
         prefix = request.url.path.removesuffix("/chat/completions")
         if self.api_format == "anthropic_messages":
-            body = anthropic_protocol.request_body(body, self.history)
+            converted = anthropic_protocol.request_body(body, self.history)
+            if provider == "deepseek":
+                if "thinking" in body:
+                    converted["thinking"] = body["thinking"]
+                if "reasoning_effort" in body:
+                    converted.setdefault("output_config", {})["effort"] = body["reasoning_effort"]
+            body = converted
             path = prefix + ("/messages" if prefix.endswith("/v1") else "/v1/messages")
         elif self.api_format == "responses":
-            body = responses_protocol.request_body(body, self.history)
+            converted = responses_protocol.request_body(body, self.history)
+            if provider == "deepseek":
+                converted.pop("include", None)  # encrypted reasoning is OpenAI-specific
+                if body.get("thinking", {}).get("type") == "disabled":
+                    converted["reasoning"] = {"effort": "none"}
+            body = converted
             path = prefix + "/responses"
         else:
             path = request.url.path

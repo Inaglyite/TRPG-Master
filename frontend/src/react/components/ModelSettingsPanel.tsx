@@ -15,6 +15,7 @@ import {
   restoreDefaultSettings,
   saveSettings,
   setThinkingMode,
+  setReasoningEffort,
   testConnection,
   updateRoleDraft,
   updateServiceDraft,
@@ -27,6 +28,7 @@ import {
   useModelStore,
   type ModelCallDiagnostic,
   type RoleDraft,
+  type ReasoningEffort,
   type RoleView,
   type TurnDiagnostics,
 } from "../../state/model-store";
@@ -482,6 +484,32 @@ function GeneralTab() {
           保存到当前模型配置，从下一回合生效。支持
           DeepSeek；其他模型沿用服务商设置。多人房间由房主修改。
         </p>
+        <label className="game-setting-toggle">
+          <span>
+            <strong>思考强度</strong>
+            <small>最高档适合复杂推理，可能增加耗时和用量。</small>
+          </span>
+          <select
+            aria-label="思考强度"
+            className="thinking-effort-select"
+            value={view?.reasoning_effort ?? "high"}
+            disabled={
+              loading ||
+              saving ||
+              !view?.can_edit ||
+              !view.thinking_supported ||
+              !view.thinking_enabled ||
+              !view.reasoning_effort
+            }
+            onChange={(event) =>
+              setReasoningEffort(event.target.value as ReasoningEffort)
+            }
+          >
+            <option value="low">低</option>
+            <option value="high">高（默认）</option>
+            <option value="max">最高</option>
+          </select>
+        </label>
         <label className="game-setting-toggle">
           <span>
             <strong>显示思维链</strong>

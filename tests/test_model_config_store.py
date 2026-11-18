@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from cryptography.fernet import Fernet
 
@@ -104,6 +106,15 @@ def test_world_override_beats_account_default(db):
     # 别的世界回落账号默认
     other = resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-2")
     assert other.narrative.service.model_id == "deepseek-flash"
+
+
+def test_world_inherits_effort_until_overridden(db):
+    settings = _custom_settings()
+    save_scope(db, "user-a", ACCOUNT_SCOPE, replace(settings, reasoning_effort="max"))
+    save_scope(db, "user-a", "world-1", settings)
+    assert resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-1").reasoning_effort == "max"
+    save_scope(db, "user-a", "world-1", replace(settings, reasoning_effort="low"))
+    assert resolve_cloud_settings(db, owner_user_id="user-a", world_id="world-1").reasoning_effort == "low"
 
 
 def test_owner_transfer_blocks_old_room_config(db):

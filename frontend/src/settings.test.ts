@@ -18,6 +18,7 @@ import {
   restoreDefaultSettings,
   saveSettings,
   setThinkingMode,
+  setReasoningEffort,
   testConnection,
   updateServiceDraft,
   resetSettings,
@@ -104,6 +105,39 @@ describe("settings commands", () => {
     safeSendMock.mockClear();
     setThinkingMode(false);
     expect(safeSendMock).not.toHaveBeenCalled();
+  });
+  it("saves only the effort once thinking is enabled and waits for the server", () => {
+    const initial = {
+      ...view,
+      thinking_supported: true,
+      thinking_enabled: false,
+      reasoning_effort: "high" as const,
+    };
+    useModelStore.setState({
+      view: initial,
+      saving: false,
+      loading: false,
+      scopeDraft: "account",
+    });
+    safeSendMock.mockClear();
+    setReasoningEffort("max");
+    expect(safeSendMock).not.toHaveBeenCalled();
+    useModelStore.setState({ view: { ...initial, thinking_enabled: true } });
+    setReasoningEffort("max");
+    expect(JSON.parse(safeSendMock.mock.calls.at(-1)![0])).toEqual({
+      type: "model_settings_update",
+      reasoning_effort: "max",
+      scope: "account",
+    });
+    expect(useModelStore.getState().view?.reasoning_effort).toBe("high");
+    onModelSettings({
+      ...initial,
+      thinking_enabled: true,
+      reasoning_effort: "max",
+      saved: true,
+      thinking_only: true,
+    });
+    expect(useModelStore.getState().view?.reasoning_effort).toBe("max");
   });
   it("厂商预设填入地址与接口格式，清空旧 Key 和规格并重新确认目的地", () => {
     const presetView = {

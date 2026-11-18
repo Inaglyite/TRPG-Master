@@ -69,6 +69,29 @@ def test_provider_wire_parameters(kind, model, required, absent):
     assert all(key not in seen[0] for key in absent)
 
 
+@pytest.mark.parametrize("protocol,field,expected", [
+    ("chat_completions", "reasoning_effort", "max"),
+    ("responses", "reasoning", {"effort": "max"}),
+    ("anthropic_messages", "output_config", {"effort": "max"}),
+])
+def test_deepseek_effort_at_http_boundary(protocol, field, expected):
+    def handler(request):
+        body = json.loads(request.read())
+        assert body[field] == expected
+        assert body.get("max_output_tokens", body.get("max_tokens")) == 2048
+        if protocol == "responses":
+            return httpx.Response(200, json={"id": "r", "model": body["model"], "status": "completed", "output": []})
+        if protocol == "anthropic_messages":
+            assert body["thinking"] == {"type": "enabled"}
+            return httpx.Response(200, json={"id": "m", "model": body["model"], "content": [], "stop_reason": "end_turn"})
+        return httpx.Response(200, json=chat_reply())
+
+    with client(handler, kind="deepseek", protocol=protocol) as sdk:
+        sdk.chat.completions.create(model="deepseek-flash", max_tokens=2048, reasoning_effort="max",
+                                    messages=[{"role": "user", "content": "测试"}],
+                                    extra_body={"thinking": {"type": "enabled"}})
+
+
 def test_known_host_overrides_old_provider_hint_without_changing_destination():
     seen = []
 

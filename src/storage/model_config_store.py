@@ -61,11 +61,12 @@ def _settings_to_row(settings: EffectiveSettings) -> dict:
         "narrative": _role_to_row(settings.narrative),
         "judgement": _role_to_row(settings.judgement),
         "thinking_mode": settings.thinking_mode,
+        "reasoning_effort": settings.reasoning_effort,
     }
 
 
 def _settings_from_row(payload: dict, revision: int) -> EffectiveSettings:
-    from ..ai.model.thinking_policy import parse_thinking_mode
+    from ..ai.model.thinking_policy import parse_reasoning_effort, parse_thinking_mode
 
     def role(raw: object) -> RoleBinding:
         if not isinstance(raw, dict) or raw.get("mode") != "custom":
@@ -77,6 +78,7 @@ def _settings_from_row(payload: dict, revision: int) -> EffectiveSettings:
         judgement=role(payload.get("judgement")),
         revision=revision,
         thinking_mode=parse_thinking_mode(payload.get("thinking_mode", "auto")),
+        reasoning_effort=parse_reasoning_effort(payload.get("reasoning_effort", "auto")),
     )
 
 
@@ -124,6 +126,7 @@ def save_scope(
         judgement=settings_no_revision.judgement,
         revision=revision,
         thinking_mode=settings_no_revision.thinking_mode,
+        reasoning_effort=settings_no_revision.reasoning_effort,
     )
 
 
@@ -204,6 +207,11 @@ def resolve_cloud_settings(
         judgement=pick("judgement"),
         revision=revision,
         byok_required=True,
+        reasoning_effort=next(
+            (s.reasoning_effort for s in (world_settings, account)
+             if s is not None and s.reasoning_effort != "auto"),
+            "auto",
+        ),
         thinking_mode=next(
             (
                 layer.thinking_mode

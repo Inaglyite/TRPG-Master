@@ -398,7 +398,7 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
             base_url_host=base_url_host,
             config_revision=1,
         )
-        routes = ModelRoutes(narrative=role, judgement=role, revision=1)
+        routes = ModelRoutes(narrative=role, judgement=role, revision=1, reasoning_effort="max")
         with (
             patch(
                 "src.storage.model_config_store.room_route_resolver",
@@ -413,15 +413,18 @@ class ByokCallerThinkingTests(unittest.IsolatedAsyncioTestCase):
     async def test_deepseek_disables_thinking(self):
         kwargs = await self._capture("deepseek", "api.deepseek.com")
         self.assertEqual({"thinking": {"type": "disabled"}}, kwargs.get("extra_body"))
+        self.assertNotIn("reasoning_effort", kwargs)
 
     async def test_deepseek_honors_explicit_thinking_mode(self):
         kwargs = await self._capture("deepseek", "api.deepseek.com", "enabled")
         self.assertEqual({"thinking": {"type": "enabled"}}, kwargs.get("extra_body"))
+        self.assertEqual("max", kwargs.get("reasoning_effort"))
 
     async def test_deepseek_by_host_also_disabled(self):
         # server_default 指向 DeepSeek 时同样关闭（按 host 兜底判定）
         kwargs = await self._capture("server_default", "api.deepseek.com")
         self.assertEqual({"thinking": {"type": "disabled"}}, kwargs.get("extra_body"))
+        self.assertNotIn("reasoning_effort", kwargs)
 
     async def test_other_provider_untouched(self):
         kwargs = await self._capture("openai_compatible", "example.com")

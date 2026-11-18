@@ -206,6 +206,7 @@ def model_call(
     tool_schema_chars: int | None = None,
     prompt_profile: str | None = None,
     thinking_mode: str | None = None,
+    reasoning_effort: str | None = None,
 ):
     ttft = f"{first_token:.2f}s" if first_token is not None else "-"
     parts = [
@@ -219,6 +220,8 @@ def model_call(
         parts.append(f"prompt={prompt_profile}")
     if thinking_mode:
         parts.append(f"thinking={thinking_mode}")
+    if reasoning_effort:
+        parts.append(f"reasoning_effort={reasoning_effort}")
     if system_chars is not None:
         parts.append(f"system_chars={system_chars}")
     if tool_schema_chars is not None:

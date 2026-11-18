@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+export type ReasoningEffort = "low" | "high" | "max";
 export type ModelOption = { id: string; label?: string };
 export type ContextSection = { chars?: number; estimated_tokens?: number };
 export type ModelCallDiagnostic = {
@@ -84,6 +85,7 @@ export type RoleView = {
 };
 
 export type ModelSettingsView = {
+  reasoning_effort?: ReasoningEffort;
   thinking_mode?: "auto" | "enabled" | "disabled";
   thinking_enabled?: boolean;
   thinking_supported?: boolean;

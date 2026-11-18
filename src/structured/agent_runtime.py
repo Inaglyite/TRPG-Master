@@ -31,6 +31,7 @@ def build_byok_caller(
 
     async def caller(system: str, user: str) -> str:
         from src.ai.model.route_service import resolve_routes
+        from src.ai.model.thinking_policy import supports_thinking
         from src.storage.model_config_store import room_route_resolver
 
         settings = await asyncio.to_thread(room_route_resolver(database_url, world_id))
@@ -69,11 +70,13 @@ def build_byok_caller(
         # reasoning → finish=length、content 为空 → 运行暂停）。结构化决策
         # 默认关闭；用户显式开启时遵从保存的模式；其他
         # 服务商不认识该参数，只在确认是 DeepSeek 时发送。
-        thinking_off = (
-            role.provider_kind == "deepseek" or "deepseek.com" in (role.base_url_host or "").lower()
-        )
+        deepseek = supports_thinking(role)
         thinking_mode = getattr(settings, "thinking_mode", "auto")
         thinking_type = thinking_mode if thinking_mode != "auto" else "disabled"
+
+        thinking_args = {"extra_body": {"thinking": {"type": thinking_type}}} if deepseek else {}
+        if deepseek and thinking_type == "enabled" and routes.reasoning_effort != "auto":
+            thinking_args["reasoning_effort"] = routes.reasoning_effort
 
         def _call():
             response = role.client.chat.completions.create(
@@ -82,7 +85,7 @@ def build_byok_caller(
                 response_format={"type": "json_object"},
                 temperature=0.4,
                 max_tokens=effective_max_tokens,
-                **({"extra_body": {"thinking": {"type": thinking_type}}} if thinking_off else {}),
+                **thinking_args,
             )
             choice = response.choices[0]
             content = str(choice.message.content or "")
@@ -93,13 +96,14 @@ def build_byok_caller(
             }
             reasoning = getattr(choice.message, "reasoning_content", None)
             logger.info(
-                "agent 模型调用 model=%s max_tokens=%s finish=%s usage=%s content_chars=%d reasoning_chars=%d",
+                "agent 模型调用 model=%s max_tokens=%s finish=%s usage=%s content_chars=%d reasoning_chars=%d reasoning_effort=%s",
                 role.model_id,
                 effective_max_tokens,
                 getattr(choice, "finish_reason", None),
                 usage,
                 len(content),
                 len(str(reasoning or "")),
+                thinking_args.get("reasoning_effort", "provider"),
             )
             return content, reasoning, getattr(choice, "finish_reason", None), usage
 

@@ -311,6 +311,14 @@ def prepare_model_request(
         provider_kwargs["stream_options"] = {"include_usage": True}
     if policy.thinking_type:
         provider_kwargs["extra_body"] = {"thinking": {"type": policy.thinking_type}}
+    routes = getattr(host, "_model_routes", None)
+    effort = getattr(routes, "reasoning_effort", "auto")
+    if effort != "auto" and policy.thinking_type != "disabled":
+        from src.ai.model.thinking_policy import supports_thinking
+
+        role = routes.judgement if request_role == "combat" else routes.narrative
+        if supports_thinking(role):
+            provider_kwargs["reasoning_effort"] = effort
     return PreparedModelRequest(
         messages=messages,
         request_role=request_role,

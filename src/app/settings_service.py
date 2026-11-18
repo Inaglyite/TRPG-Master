@@ -36,7 +36,7 @@ from src.ai.model.provider_adapter import (
 from src.ai.model.provider_profiles import PROVIDER_PRESETS
 from src.ai.model.provider_transport import default_api_format, model_http_client
 from src.ai.model.route_service import EffectiveSettings, RoleBinding
-from src.ai.model.thinking_policy import parse_thinking_mode, thinking_view
+from src.ai.model.thinking_policy import parse_reasoning_effort, parse_thinking_mode, thinking_view
 from src.app.config import (
     JUDGEMENT_MODEL,
     MODEL_FLASH,
@@ -240,7 +240,8 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
     world_key = _scope_world_key(scope, data)
     saved = _load_saved(scope, world_key if not scope.is_local else None)
     allow_private = scope.is_local
-    thinking_only = "thinking_mode" in data and not {"narrative", "judgement"}.intersection(data)
+    thinking_only = bool({"thinking_mode", "reasoning_effort"}.intersection(data)) and not {"narrative", "judgement"}.intersection(data)
+    effort = parse_reasoning_effort(data.get("reasoning_effort", saved.reasoning_effort))
     thinking_mode = parse_thinking_mode(data.get("thinking_mode", saved.thinking_mode))
     narrative = saved.narrative if thinking_only else route_service.parse_role_binding(
         data.get("narrative"),
@@ -262,7 +263,7 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
     if scope.is_local:
         updated = EffectiveSettings(
             narrative=narrative, judgement=judgement, revision=saved.revision + 1,
-            thinking_mode=thinking_mode,
+            thinking_mode=thinking_mode, reasoning_effort=effort,
         )
         route_service.save_local_settings(scope.local_path, updated)
     else:
@@ -273,7 +274,7 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
             scope.user_id or "",
             world_key,
             EffectiveSettings(narrative=narrative, judgement=judgement, revision=0,
-                              thinking_mode=thinking_mode),
+                              thinking_mode=thinking_mode, reasoning_effort=effort),
         )
         from src.auth.service import audit
 
@@ -287,6 +288,7 @@ def apply_update(scope: SettingsScope, data: dict) -> dict:
                 "narrative_mode": narrative.mode,
                 "judgement_mode": judgement.mode,
                 "thinking_mode": thinking_mode,
+                "reasoning_effort": effort,
                 "revision": updated.revision,
             },
         )
@@ -585,7 +587,7 @@ def _record_capabilities(
                     narrative=updated_binding if role == "narrative" else saved.narrative,
                     judgement=updated_binding if role == "judgement" else saved.judgement,
                     revision=saved.revision,
-                    thinking_mode=saved.thinking_mode,
+                    thinking_mode=saved.thinking_mode, reasoning_effort=saved.reasoning_effort,
                 ),
             )
         else:
@@ -599,7 +601,7 @@ def _record_capabilities(
                     narrative=updated_binding if role == "narrative" else saved.narrative,
                     judgement=updated_binding if role == "judgement" else saved.judgement,
                     revision=saved.revision,
-                    thinking_mode=saved.thinking_mode,
+                    thinking_mode=saved.thinking_mode, reasoning_effort=saved.reasoning_effort,
                 ),
             )
     except Exception:

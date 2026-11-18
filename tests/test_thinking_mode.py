@@ -7,6 +7,7 @@ import pytest
 from test_provider_adapter import _chunk, _host, _stream
 
 from src.ai.model import route_service
+from src.ai.model.model_request import StreamPolicy, prepare_model_request
 from src.ai.model.provider_adapter import apply_reasoning_passback
 from src.ai.model.thinking_policy import parse_thinking_mode, thinking_for_host
 from src.app.settings_service import SettingsScope, apply_update, build_payload
@@ -54,6 +55,35 @@ def test_non_deepseek_route_does_not_receive_deepseek_switch():
         _model_routes=SimpleNamespace(narrative=other, judgement=other, thinking_mode="enabled")
     )
     assert thinking_for_host(host, "story", "disabled") is None
+
+
+@pytest.mark.parametrize("effort", ["low", "high", "max"])
+def test_effort_reaches_next_turn_and_respects_mode_and_route(tmp_path, effort):
+    path = tmp_path / "models.json"
+    scope = SettingsScope(mode="local", can_edit=True, local_path=path)
+    assert build_payload(scope)["reasoning_effort"] == "high"
+    host = _host([])
+    host.route_resolver = lambda: route_service.load_local_settings(path)
+    route_service.apply_pending_routes(host)
+    assert apply_update(scope, {"reasoning_effort": effort})["thinking_only"]
+    assert host._model_routes.reasoning_effort == "auto"
+    route_service.apply_pending_routes(host)
+
+    def kwargs(mode):
+        return prepare_model_request(
+            host, "deepseek-flash", policy=StreamPolicy(False, False, "test", mode),
+            system_overlay=None, system_prompt_override=None, enable_tools=False,
+            temperature=0.7, messages_override=None,
+        ).provider_kwargs
+
+    assert kwargs("enabled")["reasoning_effort"] == effort
+    assert "reasoning_effort" not in kwargs("disabled")
+    other = replace(host._model_routes.narrative, provider_kind="openai", base_url_host="api.openai.com")
+    host._model_routes = replace(host._model_routes, narrative=other)
+    assert "reasoning_effort" not in kwargs(None)
+    with pytest.raises(ValueError):
+        apply_update(scope, {"reasoning_effort": "xhigh"})
+    assert build_payload(scope)["reasoning_effort"] == effort
 
 
 def test_thinking_passback_includes_text_only_assistant_without_public_leak():

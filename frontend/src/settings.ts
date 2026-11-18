@@ -7,6 +7,7 @@ import {
   type ContextSummary,
   type ModelSettingsView,
   type RoleDraft,
+  type ReasoningEffort,
   type TestResult,
   type TurnDiagnostics,
 } from "./state/model-store";
@@ -303,12 +304,26 @@ export function saveSettings() {
 }
 
 export function setThinkingMode(enabled: boolean) {
+  saveThinkingPreference({ thinking_mode: enabled ? "enabled" : "disabled" });
+}
+
+export function setReasoningEffort(effort: ReasoningEffort) {
+  saveThinkingPreference({ reasoning_effort: effort });
+}
+
+function saveThinkingPreference(
+  preference:
+    | { thinking_mode: "enabled" | "disabled" }
+    | { reasoning_effort: ReasoningEffort },
+) {
   const state = useModelStore.getState();
   if (
     state.loading ||
     state.saving ||
     !state.view?.can_edit ||
-    !state.view.thinking_supported
+    !state.view.thinking_supported ||
+    ("reasoning_effort" in preference &&
+      (!state.view.thinking_enabled || !state.view.reasoning_effort))
   )
     return;
   useModelStore.setState({
@@ -320,7 +335,7 @@ export function setThinkingMode(enabled: boolean) {
   safeSend(
     JSON.stringify({
       type: "model_settings_update",
-      thinking_mode: enabled ? "enabled" : "disabled",
+      ...preference,
       scope:
         state.view.mode === "solo" && state.view.world_override
           ? "world"

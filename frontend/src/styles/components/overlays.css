@@ -862,6 +862,19 @@
   color: var(--text-dim);
   line-height: 1.6;
 }
+.thinking-effort-select {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--r-md);
+  background: var(--bg2);
+  color: var(--text);
+  font: inherit;
+}
+.thinking-effort-select:disabled {
+  opacity: .6;
+}
 .game-setting-toggle input {
   appearance: none;
   flex: 0 0 auto;

@@ -84,8 +84,7 @@ class ModelStreamer:
         if prepared is None:
             raise ModelResponseError("模型上下文容量不足")
         _context_shadow.record_prepared_request(host, prepared)
-        # Issue authority only after capacity preflight has selected the final wire
-        # request; provisional estimates never consume a request step or capability.
+        # Issue authority only for the final wire request after capacity preflight.
         issue_model_request(host, prepared.request_snapshot, prepared.request_tools)
         messages = prepared.messages
         request_role = prepared.request_role
@@ -382,6 +381,7 @@ class ModelStreamer:
             tool_schema_chars=tool_schema_chars,
             prompt_profile=policy.prompt_profile,
             thinking_mode=policy.thinking_type or "provider",
+            reasoning_effort=kwargs.get("reasoning_effort"),
         )
         record_model_diagnostic(
             host,
