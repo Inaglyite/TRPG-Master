@@ -2707,6 +2707,55 @@
   color: var(--platform-text);
   box-shadow: inset 0 -2px var(--platform-brass);
 }
+/* One brass underline follows the active cell, including wrapped role filters. */
+.settings-folder .settings-segments {
+  position: relative;
+  grid-template-columns: repeat(var(--segment-columns), minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+}
+.settings-segments::after {
+  content: "";
+  position: absolute;
+  grid-column: 1 / 2;
+  grid-row: 1 / 2;
+  inset: 0;
+  pointer-events: none;
+  border-bottom: 2px solid var(--platform-brass);
+  transform: translate(var(--segment-x), var(--segment-y));
+}
+.settings-folder .settings-segments button.selected {
+  box-shadow: none;
+}
+.settings-folder .settings-segments button:focus-visible {
+  outline: 1px solid var(--gold-bright);
+  outline-offset: -3px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .settings-segments::after {
+    transition: transform var(--motion-indicator) var(--motion-easing);
+  }
+  .settings-folder .model-settings-tabs [role="tab"],
+  .settings-segments button {
+    transition:
+      background-color var(--motion-feedback) var(--motion-easing),
+      border-color var(--motion-feedback) var(--motion-easing),
+      color var(--motion-feedback) var(--motion-easing);
+  }
+  .settings-folder .model-settings-body > *,
+  .settings-folder .settings-content-enter {
+    animation: settings-content-enter var(--motion-content) var(--motion-easing);
+  }
+}
+@keyframes settings-content-enter {
+  from {
+    opacity: 0.5;
+    transform: translateY(var(--sp-1));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .settings-folder .model-scope-select .model-preset-control {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

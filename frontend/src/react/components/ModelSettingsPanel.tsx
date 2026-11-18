@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 
 import {
   getNarrationSpeed,
@@ -157,6 +157,16 @@ function tokens(value?: number | null) {
 
 /* ---------------------------------------------------------------- 模型配置页 */
 
+// Position the shared underline in the same equal-sized cells as the buttons.
+function segmentStyle(count: number, selected: number): CSSProperties {
+  const columns = Math.min(count, 3);
+  return {
+    "--segment-columns": columns,
+    "--segment-x": `${(selected % columns) * 100}%`,
+    "--segment-y": `${Math.floor(selected / columns) * 100}%`,
+  } as CSSProperties;
+}
+
 function RoleCard({
   role,
   title,
@@ -205,7 +215,8 @@ function RoleCard({
             : `平台默认 · ${view?.model_id ?? "--"}`}
       </p>
       <div
-        className="model-preset-control"
+        className="model-preset-control settings-segments"
+        style={segmentStyle(2, draft.mode === "default" ? 0 : 1)}
         role="group"
         aria-label={`${title}来源`}
       >
@@ -253,7 +264,7 @@ function RoleCard({
         </label>
       )}
       {draft.mode === "custom" ? (
-        <div className="model-service-form">
+        <div className="model-service-form settings-content-enter">
           <label className="model-role-field">
             <span>配置名称（可选）</span>
             <input
@@ -419,7 +430,7 @@ function RoleCard({
           )}
         </div>
       ) : (
-        <p className="model-service-hint">
+        <p className="model-service-hint settings-content-enter">
           {byokRequired
             ? "未配置：云端为自带 Key 模式，平台不兜底计费。请切换到“自定义服务”完成配置后才能开始游戏。"
             : `使用平台默认模型${view?.model_id ? `（当前 ${view.model_id}）` : ""}，窗口为运行配置默认。`}
@@ -806,10 +817,13 @@ function ContextTab() {
   const rolesPresent = Array.from(
     new Set(calls.map((call) => call.role || "").filter(Boolean)),
   );
+  const roles = ["all", ...rolesPresent];
+  const selectedIndex = Math.max(0, roles.indexOf(roleFilter));
+  const selectedRole = roles[selectedIndex];
   const visibleCalls =
-    roleFilter === "all"
+    selectedRole === "all"
       ? calls
-      : calls.filter((call) => call.role === roleFilter);
+      : calls.filter((call) => call.role === selectedRole);
   const staleForNewModel =
     view &&
     summary?.config_revision != null &&
@@ -907,16 +921,17 @@ function ContextTab() {
         <div className="context-calls-header">
           <h3>本回合调用</h3>
           <div
-            className="model-preset-control"
+            className="model-preset-control settings-segments"
+            style={segmentStyle(roles.length, selectedIndex)}
             role="group"
             aria-label="角色筛选"
           >
-            {["all", ...rolesPresent].map((role) => (
+            {roles.map((role) => (
               <button
                 key={role}
                 type="button"
-                className={roleFilter === role ? "selected" : ""}
-                aria-pressed={roleFilter === role}
+                className={selectedRole === role ? "selected" : ""}
+                aria-pressed={selectedRole === role}
                 onClick={() => setRoleFilter(role)}
               >
                 {role === "all" ? "全部" : ROLE_LABELS[role] || role}
@@ -936,9 +951,15 @@ function ContextTab() {
         {!loading && calls.length === 0 && (
           <p className="model-service-hint">暂无调用数据</p>
         )}
-        {visibleCalls.map((call, index) => (
-          <CallCard key={`${call.model}-${index}`} call={call} index={index} />
-        ))}
+        <div key={selectedRole} className="settings-content-enter">
+          {visibleCalls.map((call, index) => (
+            <CallCard
+              key={`${call.model}-${index}`}
+              call={call}
+              index={index}
+            />
+          ))}
+        </div>
       </section>
       {diagnostics?.lorebook && <LoreBlock data={diagnostics} />}
     </div>
@@ -1082,6 +1103,7 @@ export function ModelSettingsPanel() {
           </button>
         </div>
         <div
+          key={tab}
           className="model-settings-body"
           data-dialog-scroll
           id="model-settings-tab-panel"

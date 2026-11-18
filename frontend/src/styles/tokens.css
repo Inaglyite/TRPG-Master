@@ -80,6 +80,12 @@
   --sp-5: 24px;
   --sp-6: 32px;
 
+  /* 设置、工具栏等操作界面的短过渡 */
+  --motion-feedback: 150ms;
+  --motion-content: 160ms;
+  --motion-indicator: 180ms;
+  --motion-easing: ease-out;
+
   /* ---- 字体阶梯 ---- */
   --fs-eyebrow: 10.5px; /* 眉题/档案标签 */
   --fs-aux: 12px; /* 辅助说明 */

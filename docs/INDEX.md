@@ -19,6 +19,7 @@
 
 | 需求 | 入口 |
 | --- | --- |
+| 设计菜单、按钮、弹窗和切换动画 | [游戏界面设计标准](UI_DESIGN.md) |
 | 开始游戏、选择客户端 | [中文 README](../README.md#安装与启动) / [English guide](en/README.md) |
 | 导入、删除并重新导入模组 | [模组管理](MODULE_FORMAT.md#删除并重新导入) |
 | 关闭“你可以——”行动建议 | [游戏显示偏好](DEVELOPMENT.md#游戏显示偏好) |
