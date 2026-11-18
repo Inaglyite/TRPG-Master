@@ -539,7 +539,12 @@ const viewports = [
   { width: 640, height: 520 },
   { width: 390, height: 360 },
 ];
-async function verifyFooter(page: Page, panelId: string, selector: string) {
+async function verifyFooter(
+  page: Page,
+  panelId: string,
+  selector: string,
+  minBottomInset = 0,
+) {
   const metrics = await page.locator(panelId).evaluate((panel, selector) => {
     const box = panel.getBoundingClientRect();
     return Array.from(panel.querySelectorAll<HTMLButtonElement>(selector)).map(
@@ -556,6 +561,7 @@ async function verifyFooter(page: Page, panelId: string, selector: string) {
           bottom: b.bottom,
           panelLeft: box.left,
           panelRight: box.right,
+          bottomInset: box.bottom - b.bottom,
           padding: parseFloat(style.paddingLeft),
           whiteSpace: style.whiteSpace,
           hit: button.contains(
@@ -577,6 +583,9 @@ async function verifyFooter(page: Page, panelId: string, selector: string) {
     expect(metric.right).toBeLessThanOrEqual(metric.panelRight + 1);
     expect(metric.top).toBeGreaterThanOrEqual(0);
     expect(metric.bottom).toBeLessThanOrEqual(page.viewportSize()!.height);
+    expect(metric.bottomInset, metric.label).toBeGreaterThanOrEqual(
+      minBottomInset,
+    );
   }
 }
 
@@ -607,6 +616,7 @@ test("档案夹游戏设置：四种窗口、真实配置读取、键盘分页�
       page,
       "#model-settings-panel",
       ".model-settings-actions button",
+      32,
     );
     const body = await page
       .locator(".model-settings-body")

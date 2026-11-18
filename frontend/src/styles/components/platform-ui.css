@@ -2601,6 +2601,8 @@
   width: min(920px, calc(100vw - 32px));
   height: min(830px, calc(100dvh - 32px));
   max-height: none;
+  /* The folder skin's bottom slice occupies 24px of the panel box. */
+  padding-bottom: 38px;
 }
 #module-import-panel.module-folder {
   width: min(650px, calc(100vw - 32px));
@@ -2787,6 +2789,7 @@
   }
   #model-settings-panel.settings-folder {
     height: calc(100dvh - 24px);
+    padding-bottom: 32px;
   }
   .settings-folder .model-settings-header,
   .module-folder .module-import-header {
@@ -2825,6 +2828,7 @@
 @media (max-height: 420px) {
   .settings-folder .model-settings-actions {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding-top: 6px;
   }
   .settings-folder #model-settings-save {
     grid-column: auto;
