@@ -585,6 +585,7 @@
 /* Short windows keep edge tools in normal document flow, with vertical scroll if needed. */
 @media (max-height: 560px) {
   #start-overlay { overflow-y: auto; align-items: flex-start; }
+  .solo-home > :is(.module-page-frame, .module-page-flip) { align-items: flex-start; }
   #start-box { max-height: none; margin: 14px 0; }
   #start-menu-view {
     height: auto;

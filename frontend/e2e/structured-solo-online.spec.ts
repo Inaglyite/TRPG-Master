@@ -2,8 +2,7 @@ import { startStructuredSoloFixture } from "./helpers/structured-solo";
 /**
  * 云端单人（账号化私密世界）的结构化模式验收。
  *
- * 覆盖需求「本地、云端单人和多人均暴露相应模式和按钮，human 不被游戏设置门禁挡住」：
- * - 云端单人创建冒险时可勾选“结构化操作模式（人类主持）”；
+ * 夹具在创建世界时指定人类主持，验证结构化世界的选角、操作和恢复。
  * - human 结构化世界**不需要 BYOK**：不配置任何模型也能直接开局（对比：
  *   `model-settings-online.spec.ts` 证明 legacy/BYOK 世界未配置会被拒）；
  * - 按钮发出的是 M0 结构请求（前往 → action_request、掷骰 → free_roll_request、
@@ -186,7 +185,7 @@ function framesOf(frames: string[], type: string): string[] {
   return frames.filter((frame) => frame.includes(`"type":"${type}"`));
 }
 
-test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且零模型调用", async ({
+test("云端单人结构化：人类主持无 Key 开局，按钮发结构请求且零模型调用", async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -246,7 +245,7 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
     timeout: 30_000,
   });
 
-  // ---- 创建冒险：勾选结构化操作模式（人类主持） ----
+  // 在指定模组上创建人类主持的结构化测试世界。
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   await startStructuredSoloFixture(page);
@@ -1171,7 +1170,7 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
       exact: true,
     });
     await rename.click();
-    const input = branchRow.locator("input");
+    const input = branchRow.locator(".save-rename-input");
     await expect(input).toBeFocused();
     await input.fill("取消后不得保存的新名字");
     await input.press("Escape");
@@ -1300,7 +1299,6 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
       body: JSON.stringify({ error: "退出验收：服务不可用" }),
     }),
   );
-  await page.getByRole("button", { name: /返回单人首页/ }).click();
   await page.getByRole("button", { name: "个人中心" }).click();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
   await expect(page.getByTestId("solo-home")).toBeVisible();

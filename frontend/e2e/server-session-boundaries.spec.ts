@@ -564,7 +564,8 @@ test("云端首页六个直达工具，个人模组和上传角色卡按账号�
   await toolbar.getByRole("button", { name: "模组管理" }).click();
   const manager = page.getByRole("dialog", { name: /模组管理/ });
   await expect(manager.getByText("低语档案馆", { exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
+  await manager.getByRole("button", { name: "关闭模组管理" }).click();
+  await expect(manager).toBeHidden();
   await page.locator("#btn-start").click();
   await expect(page.locator("#btn-character-confirm")).toBeVisible();
   const worlds = (await (await page.request.get(origin + "/api/worlds")).json())
