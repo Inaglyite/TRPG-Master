@@ -31,7 +31,6 @@ import { expect, request, test, type Page } from "@playwright/test";
 const port = 8782;
 const baseUrl = `https://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const screenshotsDir = resolve(repositoryRoot, "docs/screenshots");
 const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 let runtimeRoot = "";
 let server: ChildProcess | null = null;
@@ -313,7 +312,7 @@ test("云端单人结构化：从当前进度创建分支真的成功（不依�
   ).toBeVisible({ timeout: 30_000 });
   await page.locator(".timeline-branch-input").fill("云端分支");
   await page.screenshot({
-    path: `${screenshotsDir}/branch-online-entry.png`,
+    path: test.info().outputPath("branch-online-entry.png"),
   });
 
   const rejectedBefore = framesOf(frames, "room_action_rejected").length;
@@ -363,7 +362,7 @@ test("云端单人结构化：从当前进度创建分支真的成功（不依�
   expect(branchFrames).toHaveLength(1);
   expect(branchFrames[0]).not.toContain("turn_id");
   await page.screenshot({
-    path: `${screenshotsDir}/branch-online-created.png`,
+    path: test.info().outputPath("branch-online-created.png"),
   });
   // 结构化 human 世界：开局之后一次模型调用都不该有
   expect(modelRequests.length).toBe(modelCallsAfterBoot);

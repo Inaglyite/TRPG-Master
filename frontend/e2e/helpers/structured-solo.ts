@@ -5,7 +5,6 @@ export async function startStructuredSoloFixture(page: Page) {
   const url = "**/api/worlds";
   async function seed(route: Route) {
     if (route.request().method() !== "POST") return route.fallback();
-    await page.unroute(url, seed);
     await route.continue({
       postData: JSON.stringify({
         ...route.request().postDataJSON(),
@@ -15,5 +14,16 @@ export async function startStructuredSoloFixture(page: Page) {
     });
   }
   await page.route(url, seed);
-  await page.locator("#btn-start").click();
+  try {
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/worlds" &&
+          response.request().method() === "POST",
+      ),
+      page.locator("#btn-start").click(),
+    ]);
+  } finally {
+    await page.unroute(url, seed);
+  }
 }

@@ -60,10 +60,7 @@ const WsClient = require("ws") as new (
 const port = 8876;
 const baseUrl = `http://127.0.0.1:${port}`;
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const evidenceDir = resolve(
-  repositoryRoot,
-  "docs/evidence/keeper-combat-lifecycle",
-);
+let evidenceDir: string;
 const MODULE = "猩红文档";
 const PASSWORD = "combat lifecycle e2e";
 const runId = Math.random().toString(36).slice(2, 8);
@@ -167,7 +164,6 @@ async function stopServer(): Promise<void> {
 }
 
 test.beforeAll(async () => {
-  mkdirSync(evidenceDir, { recursive: true });
   // 模型陷阱：任何到 OPENAI_BASE_URL 的连接都被计数并立即断开。
   modelTrap = createTcpServer((socket) => {
     modelCalls += 1;
@@ -183,7 +179,9 @@ test.beforeAll(async () => {
   modelTrapUrl = `http://127.0.0.1:${address.port}/v1`;
 });
 
-test.beforeEach(() => {
+test.beforeEach(({}, testInfo) => {
+  evidenceDir = testInfo.outputPath("evidence");
+  mkdirSync(evidenceDir, { recursive: true });
   modelCallsAtStart = modelCalls;
 });
 

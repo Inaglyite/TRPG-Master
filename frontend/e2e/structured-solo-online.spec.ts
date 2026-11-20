@@ -1022,6 +1022,7 @@ async function checkAccountLayout(page: Page) {
     for (const button of await account
       .locator("button:not(.personal-center-module)")
       .all()) {
+      await button.scrollIntoViewIfNeeded();
       const geometry = await button.evaluate((node) => {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);

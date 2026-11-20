@@ -449,6 +449,12 @@ def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
         user = getattr(request.state, "user", None)
         if user is None:
             return JSONResponse({"detail": "请先登录"}, status_code=401)
+        try:
+            record = await asyncio.to_thread(deps.registry().resolve_for_account, module_key, user.id)
+            if record.source != "account":
+                raise FileNotFoundError(module_key)
+        except FileNotFoundError:
+            return JSONResponse({"detail": "个人模组不存在"}, status_code=404)
         if deps.prepare_module_removal is not None:
             await deps.prepare_module_removal(module_key)
         if reason := removal_block(module_key):
