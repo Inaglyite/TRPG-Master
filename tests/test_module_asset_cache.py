@@ -84,3 +84,50 @@ def test_installed_module_asset_version_defaults_to_manifest_version(tmp_path):
         format_version="2.0",
     )
     assert record.to_dict()["asset_version"] == "2.3.0"
+
+
+def test_cloud_menu_exposes_only_the_selected_cover(tmp_path):
+    import json
+
+    directory = tmp_path / "mod" / "demo"
+    (directory / "assets").mkdir(parents=True)
+    (directory / "module.md").write_text("keeper")
+    (directory / "world_state_initial.json").write_text("{}")
+    (directory / "assets" / "cover.png").write_bytes(b"cover")
+    (directory / "assets" / "clue.png").write_bytes(b"private clue")
+    theme = directory / "theme.json"
+    theme.write_text(
+        json.dumps(
+            {
+                "backgroundImage": "cover.png",
+                "subtitle": "故事",
+                "startButtonText": "开始调查",
+                "keeper": "secret",
+            }
+        )
+    )
+    registry = ModuleRegistry(tmp_path, tmp_path)
+    app = FastAPI()
+    app.include_router(
+        create_module_http_router(
+            ModuleHttpDependencies(
+                registry=lambda: registry,
+                project_root=tmp_path,
+                runtime_root=lambda: tmp_path,
+                active_context=lambda: SimpleNamespace(module_name="demo"),
+                set_active_context=lambda _: None,
+                auth_required=lambda: True,
+            )
+        )
+    )
+    with TestClient(app) as client:
+        (entry,) = client.get("/api/modules").json()["modules"]
+        assert entry["subtitle"] == "故事" and entry["start_button_text"] == "开始调查"
+        assert entry["has_cover"] and "keeper" not in entry
+        assert client.get("/api/modules/demo/cover?filename=clue.png").content == b"cover"
+        assert client.get("/api/assets/demo/clue.png").status_code == 404
+        (tmp_path / "outside.png").write_bytes(b"private")
+        (directory / "assets" / "linked.png").symlink_to(tmp_path / "outside.png")
+        for name in ("linked.png", "../outside.png", "/outside.png", "missing.png"):
+            theme.write_text(json.dumps({"backgroundImage": name}))
+            assert client.get("/api/modules/demo/cover").status_code == 404

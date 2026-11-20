@@ -102,11 +102,14 @@ async def create_owned_world(
 ) -> dict:
     """Create the control-plane rows before materializing runtime files."""
     module = str(data.get("module") or default_module_name).strip()
+    play_mode, max_players = _play_mode_and_max_players(data)
     try:
-        module_record = module_registry.resolve(module)
+        if module.startswith("personal~"):
+            module_record = module_registry.resolve_for_account(module, creator_id)
+        else:
+            module_record = module_registry.resolve(module)
     except (FileNotFoundError, ValueError) as exc:
         raise MultiplayerError("module_not_found", "模组不存在", 404) from exc
-    play_mode, max_players = _play_mode_and_max_players(data)
     execution_profile, keeper_mode = _profile_and_keeper_mode(data)
     name = str(data.get("name") or "").strip()[:120]
     name = name or f"{creator_username} 的房间"
@@ -132,6 +135,7 @@ async def create_owned_world(
             )
         metadata = {
             "name": name,
+            "module_title": module_record.title,
             "room_status": "lobby",
             "max_players": max_players,
             "play_mode": play_mode,
@@ -184,6 +188,7 @@ async def create_owned_world(
         world.metadata_json = {
             **dict(world.metadata_json or {}),
             "name": name,
+            "module_title": module_record.title,
             "room_status": "lobby",
             "max_players": max_players,
             "play_mode": play_mode,

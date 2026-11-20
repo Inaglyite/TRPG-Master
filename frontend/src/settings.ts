@@ -1,5 +1,12 @@
 /** Model routing and diagnostics commands for the React settings panel. */
 
+import {
+  requestAccountSettings,
+  type SettingsCommand,
+} from "./api/modelSettings";
+import { apiHttpOrigin } from "./api/client";
+import { subscribeCloudRequests } from "./api/request-context";
+import { useOnlineStore } from "./state/online-store";
 import { useAppStore } from "./state/app-store";
 import {
   draftFromView,
@@ -25,6 +32,52 @@ function clearDiagnosticsTimer() {
 let operationTimer: ReturnType<typeof setTimeout> | null = null;
 let unconfirmedOperation = false;
 
+function atCloudHome(): boolean {
+  return (
+    useAppStore.getState().mode === "online" &&
+    useOnlineStore.getState().view !== "room"
+  );
+}
+
+let accountRequest = 0;
+async function sendSettings(
+  command: SettingsCommand,
+  body: Record<string, unknown> = {},
+) {
+  if (!atCloudHome()) {
+    safeSend(JSON.stringify({ type: command, ...body }));
+    return;
+  }
+  const { user, authStatus, authOrigin } = useOnlineStore.getState();
+  if (!user || authStatus !== "authenticated") {
+    onModelSettingsError("请先登录账号");
+    return;
+  }
+  if (authOrigin !== apiHttpOrigin()) {
+    onModelSettingsError("服务器地址已变化，请重新登录后配置模型");
+    return;
+  }
+  const request = ++accountRequest;
+  try {
+    const reply = await requestAccountSettings(command, body);
+    if (accountRequest !== request) return;
+    if (reply.type === "model_settings_test_result")
+      onModelSettingsTestResult(reply);
+    else onModelSettings(reply);
+  } catch (error) {
+    if (accountRequest === request) {
+      onModelSettingsError(
+        error instanceof Error ? error.message : "无法读取账号模型配置",
+      );
+    }
+  }
+}
+
+// 退出账号、切换服务器或进入世界时丢弃旧页面的草稿与未完成的响应。
+subscribeCloudRequests(() => {
+  if (atCloudHome()) resetSettings();
+});
+
 function clearOperationTimer() {
   if (operationTimer) clearTimeout(operationTimer);
   operationTimer = null;
@@ -32,6 +85,7 @@ function clearOperationTimer() {
 
 function armOperationTimer(timeoutMs = 15000) {
   clearOperationTimer();
+  if (atCloudHome()) return; // HTTP 请求自己处理读写期限。
   unconfirmedOperation = false;
   operationTimer = setTimeout(() => {
     operationTimer = null;
@@ -50,6 +104,11 @@ function armOperationTimer(timeoutMs = 15000) {
 }
 
 useAppStore.subscribe((state, previous) => {
+  if (previous.mode !== state.mode) {
+    resetSettings();
+    return;
+  }
+  if (atCloudHome()) return;
   if (previous.connection === "connected" && state.connection !== "connected") {
     const current = useModelStore.getState();
     if (current.saving || current.testingRole) {
@@ -75,6 +134,7 @@ function clearLoadTimer() {
 
 /** Room/account departure revokes cached diagnostics and write-only secrets. */
 export function resetSettings() {
+  accountRequest++;
   clearDiagnosticsTimer();
   clearLoadTimer();
   clearOperationTimer();
@@ -98,6 +158,10 @@ export function fetchSettings() {
     statusKind: "working",
   });
   clearLoadTimer();
+  if (atCloudHome()) {
+    void sendSettings("model_settings_get");
+    return;
+  }
   loadTimer = setTimeout(() => {
     const state = useModelStore.getState();
     if (state.loading) {
@@ -113,7 +177,7 @@ export function fetchSettings() {
       });
     }
   }, LOAD_TIMEOUT_MS);
-  safeSend(JSON.stringify({ type: "model_settings_get" }));
+  void sendSettings("model_settings_get");
 }
 
 export function openSettings(tab?: "general" | "models" | "context") {
@@ -129,6 +193,12 @@ export function openSettings(tab?: "general" | "models" | "context") {
 
 export function closeSettings() {
   if (useModelStore.getState().saving) return;
+  if (atCloudHome()) {
+    const tab = useModelStore.getState().tab;
+    resetSettings();
+    useModelStore.setState({ tab });
+    return;
+  }
   clearLoadTimer();
   clearDiagnosticsTimer();
   useModelStore.setState({
@@ -143,6 +213,10 @@ export function closeSettings() {
 
 export function requestTurnDiagnostics() {
   clearDiagnosticsTimer();
+  if (atCloudHome()) {
+    onTurnDiagnostics(null);
+    return;
+  }
   useModelStore.setState({ diagnosticsLoading: true, diagnosticsError: null });
   diagnosticsTimer = setTimeout(() => {
     diagnosticsTimer = null;
@@ -288,7 +362,13 @@ function hasCustomDraft(): boolean {
 
 export function saveSettings() {
   const current = useModelStore.getState();
-  if (current.loading || !current.view) return;
+  if (
+    current.loading ||
+    (atCloudHome() && current.saving) ||
+    current.testingRole ||
+    !current.view
+  )
+    return;
   const invalid = validateDrafts();
   if (invalid) {
     useModelStore.setState({ status: invalid, statusKind: "error" });
@@ -308,15 +388,12 @@ export function saveSettings() {
     statusKind: "working",
   });
   armOperationTimer();
-  safeSend(
-    JSON.stringify({
-      type: "model_settings_update",
-      narrative: rolePayload(state.drafts.narrative),
-      judgement: rolePayload(state.drafts.judgement),
-      scope: state.scopeDraft,
-      confirm_data_sharing: state.confirmSharing,
-    }),
-  );
+  void sendSettings("model_settings_update", {
+    narrative: rolePayload(state.drafts.narrative),
+    judgement: rolePayload(state.drafts.judgement),
+    scope: state.scopeDraft,
+    confirm_data_sharing: state.confirmSharing,
+  });
 }
 
 export function setThinkingMode(enabled: boolean) {
@@ -336,6 +413,7 @@ function saveThinkingPreference(
   if (
     state.loading ||
     state.saving ||
+    state.testingRole ||
     !state.view?.can_edit ||
     !state.view.thinking_supported ||
     ("reasoning_effort" in preference &&
@@ -348,39 +426,34 @@ function saveThinkingPreference(
     statusKind: "working",
   });
   armOperationTimer();
-  safeSend(
-    JSON.stringify({
-      type: "model_settings_update",
-      ...preference,
-      scope:
-        state.view.mode === "solo" && state.view.world_override
-          ? "world"
-          : state.scopeDraft,
-    }),
-  );
+  void sendSettings("model_settings_update", {
+    ...preference,
+    scope:
+      state.view.mode === "solo" && state.view.world_override
+        ? "world"
+        : state.scopeDraft,
+  });
 }
 
 export function restoreDefaultSettings() {
   const state = useModelStore.getState();
+  if (state.saving || state.testingRole || state.loading || !state.view) return;
   useModelStore.setState({
     saving: true,
     status: "正在恢复默认…",
     statusKind: "working",
   });
   armOperationTimer();
-  safeSend(
-    JSON.stringify({
-      type: "model_settings_restore_default",
-      scope: state.scopeDraft,
-    }),
-  );
+  void sendSettings("model_settings_restore_default", {
+    scope: state.scopeDraft,
+  });
 }
 
 export function testConnection(role: "narrative" | "judgement") {
   const state = useModelStore.getState();
+  if (state.saving || state.testingRole || state.loading || !state.view) return;
   const draft = state.drafts[role];
   const payload: Record<string, unknown> = {
-    type: "model_settings_test",
     role,
     scope: state.scopeDraft,
     confirm_data_sharing: state.confirmSharing,
@@ -408,7 +481,7 @@ export function testConnection(role: "narrative" | "judgement") {
     statusKind: "working",
   });
   armOperationTimer(90000);
-  safeSend(JSON.stringify(payload));
+  void sendSettings("model_settings_test", payload);
 }
 
 export function onModelSettings(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { StartMenuIcon } from "./StartMenuIcon";
 
@@ -8,18 +8,41 @@ import {
 } from "../../api/modulePackages";
 import { useAppStore } from "../../state/app-store";
 import { useStartStore } from "../../state/start-store";
+import { useOnlineStore } from "../../state/online-store";
+import {
+  currentCloudRequestGeneration,
+  subscribeCloudRequests,
+} from "../../api/request-context";
 import { safeSend } from "../../ws";
 import { useDelayedClose } from "./transitions";
 import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
 import { useDialogKeyboard } from "./useDialogKeyboard";
 
 const maxBytes = 64 * 1024 * 1024;
-export function ModuleImporter() {
+type ImportProps = { onCloudImported?: (id: string) => Promise<void> };
+
+export function ModuleImporter({ onCloudImported }: ImportProps = {}) {
   const mode = useAppStore((state) => state.mode);
-  return mode === "local" ? <LocalModuleImporter /> : null;
+  const user = useOnlineStore((state) => state.user?.id);
+  const origin = useOnlineStore((state) => state.authOrigin);
+  const generation = useSyncExternalStore(
+    subscribeCloudRequests,
+    currentCloudRequestGeneration,
+  );
+  if (mode === "local") return <PackageImporter key="local" />;
+  if (mode === "online" && user && onCloudImported)
+    return (
+      <PackageImporter
+        key={JSON.stringify([origin, user, generation])}
+        onCloudImported={onCloudImported}
+      />
+    );
+  return null;
 }
 
-function LocalModuleImporter() {
+function PackageImporter({ onCloudImported }: ImportProps) {
+  const cloud = Boolean(onCloudImported);
+  const generation = currentCloudRequestGeneration();
   const trigger = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const panel = useRef<HTMLElement>(null);
@@ -47,6 +70,7 @@ function LocalModuleImporter() {
     () =>
       useAppStore.subscribe((state, previous) => {
         if (
+          !cloud &&
           previous.connection === "connected" &&
           state.connection !== "connected"
         ) {
@@ -84,8 +108,11 @@ function LocalModuleImporter() {
   const isCurrent = (current: number) =>
     alive.current &&
     current === sequence.current &&
-    useAppStore.getState().mode === "local" &&
-    !useStartStore.getState().gameStarted;
+    (cloud
+      ? useAppStore.getState().mode === "online" &&
+        generation === currentCloudRequestGeneration()
+      : useAppStore.getState().mode === "local" &&
+        !useStartStore.getState().gameStarted);
   const inspect = async (selected: File) => {
     if (!selected.name.toLowerCase().endsWith(".trpgmod")) {
       setStatus("请选择扩展名为 .trpgmod 的模组包");
@@ -107,7 +134,12 @@ function LocalModuleImporter() {
     setStatus(`正在检查 ${selected.name}`);
     setStatusKind("working");
     try {
-      const payload = await uploadModulePackage("inspect", selected, signal);
+      const payload = await uploadModulePackage(
+        "inspect",
+        selected,
+        signal,
+        cloud ? "account" : "local",
+      );
       if (!isCurrent(current)) return;
       setSummary(payload.module);
       setStatus(`已通过格式与安全检查：${payload.module.title}`);
@@ -131,7 +163,7 @@ function LocalModuleImporter() {
       !file ||
       !summary ||
       busy ||
-      useAppStore.getState().connection !== "connected"
+      (!cloud && useAppStore.getState().connection !== "connected")
     )
       return;
     const current = ++sequence.current;
@@ -141,7 +173,12 @@ function LocalModuleImporter() {
     setStatus(`正在安装 ${summary.title}`);
     setStatusKind("working");
     try {
-      const payload = await uploadModulePackage("import", file, signal);
+      const payload = await uploadModulePackage(
+        "import",
+        file,
+        signal,
+        cloud ? "account" : "local",
+      );
       if (!isCurrent(current)) return;
       const imported = payload.module;
       setStatus(
@@ -151,7 +188,11 @@ function LocalModuleImporter() {
       );
       setStatusKind("success");
       setOpen(false);
-      safeSend(JSON.stringify({ type: "switch_module", module: imported.id }));
+      if (onCloudImported) await onCloudImported(imported.id);
+      else
+        safeSend(
+          JSON.stringify({ type: "switch_module", module: imported.id }),
+        );
       setFile(null);
       setSummary(null);
     } catch (reason) {
@@ -173,7 +214,7 @@ function LocalModuleImporter() {
       <button
         id="btn-import-module"
         aria-label="导入模组"
-        title="导入 .trpgmod 模组包"
+        data-tooltip="导入模组"
         ref={trigger}
         type="button"
         disabled={busy}
@@ -242,7 +283,7 @@ function LocalModuleImporter() {
               </div>
               <div className="module-import-body" data-dialog-scroll>
                 <p className="module-import-source">
-                  本地模组库 · .trpgmod · 最大 64 MiB
+                  {cloud ? "个人模组库" : "本地模组库"} · .trpgmod · 最大 64 MiB
                 </p>
                 <h3 id="module-import-name">
                   {summary?.title ||

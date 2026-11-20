@@ -1,7 +1,12 @@
 import { create } from "zustand";
 
-export type ReasoningEffort = "low" | "high" | "max";
-export type ModelOption = { id: string; label?: string };
+import type { ModelSettingsView, TestResult } from "../api/modelSettings";
+export type { ModelSettingsView, TestResult } from "../api/modelSettings";
+export type ReasoningEffort = NonNullable<
+  ModelSettingsView["reasoning_effort"]
+>;
+export type ModelOption =
+  ModelSettingsView["server_defaults"]["available_models"][number];
 export type ContextSection = { chars?: number; estimated_tokens?: number };
 export type ModelCallDiagnostic = {
   model?: string;
@@ -64,53 +69,8 @@ export type TurnDiagnostics = {
 
 // ---- 模型配置视图（服务端权威，永不包含密钥） ----
 
-export type ServiceView = {
-  label: string;
-  provider_kind: string;
-  api_format?: string;
-  /** 仅配置所有者可见完整 URL；成员为 null。 */
-  base_url: string | null;
-  base_url_host: string;
-  has_key: boolean;
-};
-
-export type RoleView = {
-  mode: "default" | "custom";
-  model_id: string;
-  window_tokens: number | null;
-  window_source: string;
-  max_output_tokens: number;
-  configured_max_output_tokens?: number | null;
-  capabilities: { streaming?: boolean; tool_calling?: boolean } | null;
-  service: ServiceView | null;
-};
-
-export type ModelSettingsView = {
-  reasoning_effort?: ReasoningEffort;
-  thinking_mode?: "auto" | "enabled" | "disabled";
-  thinking_enabled?: boolean;
-  thinking_supported?: boolean;
-  provider_presets?: ProviderPreset[];
-  mode: "local" | "solo" | "room";
-  can_edit: boolean;
-  /** 云端为 true：default 绑定 = 未配置，平台不兜底，开局前必须配齐。 */
-  byok_required?: boolean;
-  scope_label: string;
-  world_override: boolean;
-  revision: number;
-  applied_revision: number | null;
-  blocked: string | null;
-  narrative: RoleView;
-  judgement: RoleView;
-  server_defaults: {
-    narrative_model: string;
-    judgement_model: string;
-    available_models: ModelOption[];
-    window_tokens: number;
-    window_source: string;
-    max_output_tokens: number;
-  };
-};
+export type RoleView = ModelSettingsView["narrative"];
+export type ServiceView = NonNullable<RoleView["service"]>;
 
 // ---- 编辑草稿（api_key 只进不出：提交后清空，永不回显） ----
 
@@ -131,29 +91,10 @@ export type RoleDraft = {
   defaultOutput?: string;
 };
 
-export type ProviderPreset = {
-  id: string;
-  label: string;
-  base_url: string;
-  model_id: string;
-  hint: string;
-};
-
-export type TestCheck = {
-  name: string;
-  ok: boolean;
-  detail: string;
-  optional?: boolean;
-};
-export type TestResult = {
-  role: string;
-  ok: boolean;
-  target_host: string;
-  checks: TestCheck[];
-  capabilities: { streaming?: boolean; tool_calling?: boolean } | null;
-  elapsed_ms: number;
-  model_options?: string[];
-};
+export type ProviderPreset = NonNullable<
+  ModelSettingsView["provider_presets"]
+>[number];
+export type TestCheck = TestResult["checks"][number];
 
 /** 主界面上下文摘要（turn_performance 附带，纯数字）。 */
 export type ContextSummary = {

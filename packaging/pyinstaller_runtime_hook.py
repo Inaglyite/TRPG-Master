@@ -52,6 +52,7 @@ LATER_TABLES = {
 # baseline fingerprint: an old unversioned database legitimately lacks them
 # until ``upgrade head`` runs.
 LATER_COLUMNS = {
+    "users": {"display_name", "module_order"},  # 0022
     "worlds": {"root_world_id"},  # 0010
     "world_members": {"can_keeper"},  # 0015
 }

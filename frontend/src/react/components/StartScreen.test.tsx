@@ -105,7 +105,7 @@ describe("StartScreen", () => {
     expect(buttons).toHaveLength(names.length);
     buttons.forEach((button, index) => {
       expect(button).toHaveAccessibleName(names[index]);
-      expect(button).toHaveAttribute("title");
+      expect(button).toHaveAttribute("data-tooltip", names[index]);
       const icon = button.querySelector("img[data-menu-icon]");
       expect(icon).toHaveAttribute("src", expect.stringMatching(/\.png$/));
       expect(icon).toHaveAttribute("alt", "");
@@ -130,7 +130,7 @@ describe("StartScreen", () => {
       ).toBeInTheDocument();
       const exitButton = within(tools).getAllByRole("button").at(-1)!;
       expect(exitButton).toHaveAttribute("id", "btn-exit");
-      expect(exitButton).toHaveAttribute("title", "退出游戏");
+      expect(exitButton).toHaveAttribute("data-tooltip", "退出游戏");
       expect(exitButton.querySelector("img")).toHaveAttribute(
         "data-menu-icon",
         "exit",

@@ -1,3 +1,4 @@
+import { startStructuredSoloFixture } from "./helpers/structured-solo";
 import { modelDialogueContent } from "./helpers/model-dialogue";
 /**
  * 后端缺口 #2 的独立、可重复验收：**云端（账号化单人房间）的结构化世界分支**。
@@ -241,7 +242,7 @@ async function registerAndOpenAdventures(page: Page, username: string) {
     .fill("structured branch password");
   await page.getByLabel("确认密码").fill("structured branch password");
   await page.getByRole("button", { name: "注册并登录" }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible({
+  await expect(page.getByTestId("solo-home")).toBeVisible({
     timeout: 30_000,
   });
 }
@@ -250,12 +251,9 @@ async function registerAndOpenAdventures(page: Page, username: string) {
 async function bootCloudStructured(page: Page): Promise<string> {
   await registerAndOpenAdventures(page, `branch_owner_${runId}`);
 
-  await page.getByText("开始新冒险", { exact: true }).first().click();
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
-  await expect(page.getByRole("radio", { name: "人类主持" })).toBeVisible();
-  await page.getByRole("radio", { name: "人类主持" }).click();
-  await page.getByRole("button", { name: /创建冒险/ }).click();
+  await startStructuredSoloFixture(page);
 
   const confirmCharacter = page.locator("#btn-character-confirm");
   await expect(confirmCharacter).toBeVisible({ timeout: 30_000 });
@@ -404,11 +402,10 @@ async function configureByokToStub(page: Page) {
 
 async function bootCloudLegacy(page: Page): Promise<string> {
   await registerAndOpenAdventures(page, `branch_legacy_${runId}`);
-  await page.getByText("开始新冒险", { exact: true }).first().click();
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
   // 不勾「结构化操作模式」→ legacy 世界（开场回合走模型桩）
-  await page.getByRole("button", { name: /创建冒险/ }).click();
+  await page.locator("#btn-start").click();
   const confirmCharacter = page.locator("#btn-character-confirm");
   await expect(confirmCharacter).toBeVisible({ timeout: 30_000 });
   await page.locator(".character-card").first().click();

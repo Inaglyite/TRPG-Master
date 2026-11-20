@@ -260,7 +260,7 @@ def resolve_character(
 
     if source == "library":
         # 角色库条目在数据库中按 owner 隔离；解析时校验归属（本地=空 owner，
-        # 账号模式=当前世界创建者），见 character_library.resolve_library_card。
+        # 账号模式=世界创建者或当前世界中认领该卡的本人），见 character_library.resolve_library_card。
         from src.gameplay.character_library import resolve_library_card
 
         entry_id = str(ref.get("id") or "")
@@ -368,8 +368,8 @@ def list_character_options(
     """列出开局可选角色。
 
     ``library_scope``：``"local"`` 表示本地模式（owner 为空串的库条目）；
-    传入用户 id 表示账号模式下列出该用户的角色库（云端单人）；
-    ``None`` 不带角色库分组（多人房间——私有角色不进共享房间列表）。
+    传入用户 id 表示列出当前连接对应账号的角色库；
+    ``None`` 用于没有账号上下文的公共角色列表。
     """
     context = _runtime_context(context, module_name)
     ensure_character_dirs(context)

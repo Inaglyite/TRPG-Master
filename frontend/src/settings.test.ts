@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./ws", () => ({ safeSend: vi.fn() }));
 vi.mock("./state/app-store", async (importOriginal) => {
@@ -6,10 +6,13 @@ vi.mock("./state/app-store", async (importOriginal) => {
   return actual;
 });
 
+import { apiHttpOrigin } from "./api/client";
+import { resetOnlineState, useOnlineStore } from "./state/online-store";
 import { safeSend } from "./ws";
 import {
   chooseProviderPreset,
   fetchSettings,
+  openSettings,
   closeSettings,
   onModelSettings,
   onModelSettingsError,
@@ -524,5 +527,109 @@ describe("settings commands", () => {
       { world_id: "w1", utilization: 0.5, from_narrative: true },
     );
     expect(useModelStore.getState().contextSummary?.utilization).toBe(0.5);
+  });
+});
+
+describe("云端首页的账号模型设置", () => {
+  const accountView = {
+    ...view,
+    mode: "account",
+    scope_label: "当前账号默认配置",
+    type: "model_settings",
+    byok_required: true,
+  };
+  beforeEach(() => {
+    resetSettings();
+    vi.clearAllMocks();
+    useAppStore.setState({ mode: "online" });
+    useOnlineStore.setState({
+      view: "solo",
+      user: { id: "tester", username: "tester" },
+      authStatus: "authenticated",
+      authOrigin: apiHttpOrigin(),
+      activeWorldId: null,
+    });
+  });
+  afterEach(() => {
+    resetOnlineState();
+    useAppStore.setState({ mode: "select" });
+    vi.unstubAllGlobals();
+  });
+
+  it("首页读取、保存、测试和清除使用账号接口；没有世界时不请求上下文", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (url: string, init: RequestInit) => {
+        if (url.endsWith("/test"))
+          return Response.json({
+            type: "model_settings_test_result",
+            role: "judgement",
+            ok: false,
+            target_host: "未配置",
+            elapsed_ms: 0,
+            capabilities: null,
+            checks: [],
+          });
+        return Response.json({ ...accountView, saved: init.method !== "GET" });
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    openSettings();
+    await vi.waitFor(() =>
+      expect(useModelStore.getState().loading).toBe(false),
+    );
+    expect(useModelStore.getState().view?.mode).toBe("account");
+    expect(useModelStore.getState().diagnosticsLoading).toBe(false);
+    updateRoleDraft("narrative", { mode: "default" });
+    saveSettings();
+    await vi.waitFor(() => expect(useModelStore.getState().saving).toBe(false));
+    testConnection("judgement");
+    await vi.waitFor(() =>
+      expect(useModelStore.getState().testResult?.ok).toBe(false),
+    );
+    restoreDefaultSettings();
+    await vi.waitFor(() => expect(useModelStore.getState().saving).toBe(false));
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [
+        new URL(url).pathname,
+        init.method,
+        init.credentials,
+      ]),
+    ).toEqual([
+      ["/api/account/model-settings", "GET", "include"],
+      ["/api/account/model-settings", "PUT", "include"],
+      ["/api/account/model-settings/test", "POST", "include"],
+      ["/api/account/model-settings/restore", "POST", "include"],
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+      scope: "account",
+      narrative: { mode: "default" },
+    });
+    expect(safeSendMock).not.toHaveBeenCalled();
+  });
+
+  it("账号切换后不采用上个账号的迟到响应或 Key 草稿", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    openSettings();
+    updateServiceDraft("narrative", { api_key: "unsaved-test-value" });
+    resetOnlineState({
+      view: "solo",
+      authStatus: "authenticated",
+      authOrigin: apiHttpOrigin(),
+      user: { id: "next", username: "next" },
+    });
+    finish(Response.json(accountView));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useModelStore.getState().view).toBeNull();
+    expect(useModelStore.getState().drafts.narrative.service.api_key).toBe("");
+    expect(useModelStore.getState().loadError).toBeNull();
   });
 });

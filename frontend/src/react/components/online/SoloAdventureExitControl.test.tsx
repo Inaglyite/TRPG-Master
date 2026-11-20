@@ -53,7 +53,7 @@ describe("SoloAdventureExitControl", () => {
     const safe = screen.getByRole("button", { name: "继续调查" });
     expect(safe).toHaveFocus();
     const first = screen.getByRole("button", {
-      name: "返回我的冒险（保留进度）",
+      name: "返回首页（保留进度）",
     });
     const last = safe;
     last.focus();
@@ -152,7 +152,7 @@ describe("SoloAdventureExitControl", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("返回会保留当前进度");
 
     fireEvent.click(
-      screen.getByRole("button", { name: "返回我的冒险（保留进度）" }),
+      screen.getByRole("button", { name: "返回首页（保留进度）" }),
     );
     await waitFor(() => expect(enterSoloLobby).toHaveBeenCalledTimes(1));
     expect(abandonSoloWorld).not.toHaveBeenCalled();

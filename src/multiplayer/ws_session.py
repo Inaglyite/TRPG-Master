@@ -1,8 +1,8 @@
 """Concurrency primitives for a single WebSocket game session.
 
 This module deliberately contains no FastAPI or game-domain imports.  The
-server owns protocol policy; these types own the much smaller concurrency
-contracts that can otherwise become implicit in a large message loop.
+server owns protocol policy; these types own concurrency and request preferences
+frozen at reservation, without importing game or model implementations.
 """
 
 from __future__ import annotations
@@ -150,6 +150,8 @@ class WsSessionContext:
 
     outbound: Any
     turn_gate: SessionTurnGate
+    generation_target: Any = field(default=None, kw_only=True)
+    request_action_hints: bool = field(default=True, init=False)
     suggest_reply: PendingReply[bool] = field(
         default_factory=lambda: PendingReply(False)
     )
@@ -158,6 +160,11 @@ class WsSessionContext:
     )
     active_lease: TurnLease | None = None
     close_requested: bool = False
+
+    async def dispatch(self, wire: Any, router: Any, payload: dict[str, Any]) -> Any:
+        """The session receive loop dispatches one frame at a time."""
+        self.request_action_hints = payload.get("generate_action_hints") is not False
+        return await wire.dispatch(router, payload)
 
     async def reserve_turn(self) -> bool:
         """Acquire a turn lease and emit the stable protocol rejection if busy."""
@@ -182,6 +189,9 @@ class WsSessionContext:
             })
             return False
         self.active_lease = lease
+        if self.generation_target is not None:
+            # Only a reserved operation may change the active turn's preference.
+            self.generation_target._turn_generate_action_hints = self.request_action_hints
         return True
 
     def release_turn(self) -> None:

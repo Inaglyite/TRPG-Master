@@ -615,8 +615,19 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
         capture_output=True,
         text=True,
     )
-    owner = create_user(url, "legacy_owner", "legacy password 123")
+    owner_id = new_id("user")
     with session_scope(url) as session:
+        # 0004 的 users 还没有 0022 加的昵称与模组顺序列，和下面的旧表一样
+        # 使用原生 SQL 构造迁移前数据，正式服务仍必须先执行完整迁移。
+        session.execute(
+            text(
+                "INSERT INTO users "
+                "(id, username, password_hash, status, created_at, updated_at) "
+                "VALUES (:id, 'legacy_owner', 'legacy-password-hash', 'active', "
+                "'2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+            ),
+            {"id": owner_id},
+        )
         # Insert the legacy world with raw SQL: the pre-0010 schema lacks the
         # ``root_world_id`` column, so the ORM model cannot be used here.
         session.execute(
@@ -633,7 +644,7 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
                 "INSERT INTO world_members (id, world_id, user_id, role, created_at) "
                 "VALUES (:id, 'legacy-action-world', :user_id, 'owner', '2026-01-01T00:00:00')"
             ),
-            {"id": new_id("member"), "user_id": owner.id},
+            {"id": new_id("member"), "user_id": owner_id},
         )
         # These ORM models deliberately do not expose relationships. Flush the
         # parent rows before the RoomAction child so SQLite exercises the same
@@ -644,7 +655,7 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
                 id=new_id("room_action"),
                 world_id="legacy-action-world",
                 action_id="already-executed",
-                submitted_by=owner.id,
+                submitted_by=owner_id,
                 action_type="action",
                 status="accepted",
             )
@@ -670,7 +681,7 @@ def test_room_action_migration_fails_closed_for_legacy_accepted_rows(tmp_path: P
             url,
             "legacy-action-world",
             "already-executed",
-            owner.id,
+            owner_id,
             "action",
         )
     assert duplicate.value.code == "duplicate_action"

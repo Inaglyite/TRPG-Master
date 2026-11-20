@@ -141,7 +141,7 @@ describe("SoloCharacterSelectScreen", () => {
       });
     });
     fireEvent.click(screen.getByRole("button", { name: "以此调查员开始" }));
-    fireEvent.click(screen.getByRole("button", { name: /返回我的冒险/ }));
+    fireEvent.click(screen.getByRole("button", { name: /返回主菜单/ }));
     expect(startGame).toHaveBeenCalledTimes(1);
     expect(enterSoloLobby).toHaveBeenCalledTimes(1);
   });

@@ -14,6 +14,7 @@ import { apiFetch } from "./client";
 
 export const worldMetadataSchema = z.looseObject({
   name: z.string().optional(),
+  module_title: z.string().optional(),
   room_status: z.string().optional(),
   max_players: z.number().int().optional(),
   // 云端私密单人世界为 "solo"；缺省按多人处理。
@@ -181,6 +182,7 @@ export function archiveSoloTimeline(
 export const memberInvestigatorSchema = z.looseObject({
   id: z.string(),
   character_key: z.string(),
+  display_name: z.string().optional(),
   status: z.string().optional(),
 });
 export type MemberInvestigator = z.infer<typeof memberInvestigatorSchema>;

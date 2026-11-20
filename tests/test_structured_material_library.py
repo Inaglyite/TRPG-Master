@@ -317,7 +317,7 @@ def test_guide_rejects_external_symlinks_and_oversize_without_silent_truncation(
     (root / "scenes" / "超大.md").write_text("x" * (MAX_DOCUMENT_BYTES + 1), encoding="utf8")
     # Registry resolves an installed record independently of untrusted content.
     record = SimpleNamespace(path=root, title="安全测试", version="1")
-    deps.module_registry = SimpleNamespace(resolve=lambda _: record)
+    deps.module_registry = SimpleNamespace(resolve_world_module=lambda _: record)
     guide = read_keeper_guide(deps, context.world_id, "u-keeper")
     assert guide["documents"] == []
     assert len(guide["warnings"]) == 2

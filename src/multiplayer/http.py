@@ -350,12 +350,7 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
                 module_name,
                 context=context,
                 include_personal=False,
-                # 与 options 端点同一口径：仅云端单人房间可认领本人角色库角色。
-                library_scope=(
-                    user.id
-                    if str((world.metadata_json or {}).get("play_mode") or "") == "solo"
-                    else None
-                ),
+                library_scope=user.id,
             )
             selected = next(
                 (
@@ -376,7 +371,7 @@ def create_multiplayer_http_router(deps: MultiplayerHttpDependencies) -> APIRout
                 world_id,
                 character_key,
                 user.id,
-                character_ref=selected["ref"],
+                character_ref={**selected["ref"], "display_name": selected["name"]},
             )
         except MultiplayerError as exc:
             return _error(exc)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
+from src.auth.account_http import create_account_router, user_payload
 from src.auth.service import (
     LOGIN_LIMITER,
     SESSION_COOKIE,
@@ -64,7 +65,7 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
             path="/",
         )
         audit(db_url(), "register", user_id=user.id, ip_address=ip)
-        return {"id": user.id, "username": user.username}
+        return user_payload(user)
 
     @router.post("/api/auth/login")
     def login(data: dict, request: Request, response: Response):
@@ -93,7 +94,7 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
             path="/",
         )
         audit(db_url(), "login", user_id=user.id, ip_address=ip)
-        return {"id": user.id, "username": user.username}
+        return user_payload(user)
 
     @router.post("/api/auth/logout", status_code=204)
     async def logout(request: Request, response: Response):
@@ -111,6 +112,7 @@ def create_auth_router(deps: AuthHttpDependencies) -> APIRouter:
         user = request_user(request, db_url())
         if user is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
-        return {"id": user.id, "username": user.username, "status": user.status}
+        return user_payload(user)
 
+    router.include_router(create_account_router(db_url, deps.disconnect_session))
     return router

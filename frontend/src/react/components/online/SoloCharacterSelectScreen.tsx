@@ -71,8 +71,8 @@ export function SoloCharacterSelectScreen() {
       ];
 
   // 预览焦点：默认跟随已认领角色，否则第一个可用候选；点卡即预览 + 认领。
-  // 注意房间模式 include_personal=False 时 profile/custom 组为空，必须取
-  // 第一个非空组的角色，否则焦点落空、档案卡永远停在加载文案。
+  // include_personal=False 不包含自定义目录；账号角色库由 library_scope
+  // 单独提供。预览必须取第一个非空组，避免焦点停在加载文案。
   const allCards = rosterGroups.flatMap((group) => group.characters);
   const firstId = allCards[0]?.id ?? null;
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -126,7 +126,7 @@ export function SoloCharacterSelectScreen() {
           disabled={roomBusy}
           onClick={() => void enterSoloLobby()}
         >
-          ← 返回我的冒险
+          ← 返回主菜单
         </button>
         <div className="character-select-heading">
           <h2>选择调查员</h2>
@@ -275,7 +275,7 @@ export function SoloCharacterSelectScreen() {
           disabled={!claimedKey || claimedKey !== focusedId || !canChoose}
           onClick={() => void startGame()}
         >
-          {roomConnection === "connected" ? "以此调查员开始" : "正在连接房间…"}
+          {roomConnection === "connected" ? "以此调查员开始" : "正在连接…"}
         </button>
       </footer>
     </div>

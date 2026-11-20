@@ -193,8 +193,15 @@ export function renderAdventurePanel(
     useOnlineStore.getState().pendingTimelinePanel
   ) {
     useOnlineStore.setState({ pendingTimelinePanel: false });
-    const rootId = String(list[0]?.root_world_id || "");
-    if (list.length === 1 && rootId) {
+    const current = list.find(
+      (item) =>
+        item.root_world_id === activeWorldId ||
+        item.timelines?.some((t) => t.world_id === activeWorldId),
+    );
+    const rootId =
+      current?.root_world_id ||
+      (list.length === 1 ? list[0]?.root_world_id : "");
+    if (rootId) {
       useAppStore.setState({
         savePanelView: { name: "timelines", rootId },
       });
@@ -228,10 +235,14 @@ export function resumeTimeline(worldId: string, active: boolean) {
 }
 
 export function resumeAdventure(adventure: AdventureEntry) {
-  resumeTimeline(
-    String(adventure.resume_world_id || ""),
-    Boolean(adventure.active),
-  );
+  const target = String(adventure.resume_world_id || "");
+  if (!target) return;
+  if (useAppStore.getState().mode === "online") {
+    closeSavePanel();
+    void import("./online").then(({ enterRoom }) => enterRoom(target));
+    return;
+  }
+  resumeTimeline(target, Boolean(adventure.active));
 }
 
 /** world_switched 后若仍在开局页，立即读取自动存档完成"继续游戏"。 */

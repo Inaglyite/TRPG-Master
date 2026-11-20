@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -12,7 +13,7 @@ import threading
 import uuid
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
@@ -278,6 +279,57 @@ class ModuleRegistry:
             if record.key == module_key:
                 return record
         raise FileNotFoundError(f"模组不存在: {module_key}")
+
+    @staticmethod
+    def _account_scope(user_id: str) -> str:
+        return hashlib.sha256(user_id.encode()).hexdigest()[:32]
+
+    def _account_store(self, scope: str) -> ModuleRegistry:
+        root = self.runtime_root / ".account-modules" / scope
+        return ModuleRegistry(root, root)
+
+    @staticmethod
+    def _account_record(record: ModuleRecord, scope: str) -> ModuleRecord:
+        version_key = hashlib.sha256(record.key.encode()).hexdigest()[:32]
+        return replace(record, key=f"personal~{scope}~{version_key}", source="account")
+
+    def account_modules(self, user_id: str) -> list[ModuleRecord]:
+        scope = self._account_scope(user_id)
+        return [
+            self._account_record(record, scope)
+            for record in self._account_store(scope).list_modules()
+            if not (record.path / ".removed").exists()
+        ]
+
+    def install_for_account(self, user_id: str, package: Path):
+        scope = self._account_scope(user_id)
+        with self._install_lock:
+            record, inspection, existing = self._account_store(scope).install(package)
+            hidden = record.path / ".removed"
+            restored = hidden.exists()
+            hidden.unlink(missing_ok=True)
+            return self._account_record(record, scope), inspection, existing and not restored
+
+    def resolve_for_account(self, key: str, user_id: str) -> ModuleRecord:
+        if key.startswith("personal~"):
+            for record in self.account_modules(user_id):
+                if record.key == key:
+                    return record
+            raise FileNotFoundError(key)
+        return self.resolve(key)
+
+    def resolve_world_module(self, key: str) -> ModuleRecord:
+        """Resolve a persisted world's binding after world authorization, including archived packages."""
+        if not key.startswith("personal~"):
+            return self.resolve(key)
+        match = re.fullmatch(r"personal~([0-9a-f]{32})~[0-9a-f]{32}", key)
+        if match:
+            scope = match.group(1)
+            for installed in self._account_store(scope).list_modules():
+                record = self._account_record(installed, scope)
+                if record.key == key:
+                    return record
+        raise FileNotFoundError(key)
 
     def install(self, package_path: Path) -> tuple[ModuleRecord, PackageInspection, bool]:
         with self._install_lock:

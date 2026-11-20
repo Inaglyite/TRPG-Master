@@ -141,6 +141,102 @@ class EditorApiTests(unittest.TestCase):
             self.assertEqual("# 房规\n\n测试正文", project["skills"][0]["body"])
             self.assertEqual("0", project["skills"][0]["version"])
 
+    def test_import_edit_export_preserves_package_files_and_uploads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = FastAPI()
+            store = EditorProjectStore(Path(temp))
+            app.include_router(create_editor_router(store))
+            client = TestClient(app)
+            source = template_project()
+            created = client.post("/api/editor/projects", json={"project": source})
+            base_package = client.post(
+                f"/api/editor/projects/{created.json()['session_id']}/export"
+            ).content
+
+            source_path = Path(temp) / "source.trpgmod"
+            with zipfile.ZipFile(source_path, "w") as output:
+                import io
+                with zipfile.ZipFile(io.BytesIO(base_package)) as archive:
+                    manifest = json.loads(archive.read("manifest.json"))
+                    module = json.loads(archive.read("module.json"))
+                    manifest["capabilities"] = sorted(set(manifest["capabilities"]) | {
+                        "bundled_characters", "scene_documents"
+                    })
+                    manifest["checksums"] = {}
+                    module["assets"]["clues"]["photo"] = {
+                        "file": "assets/clues/photo.png", "label": "照片", "alt": "照片",
+                        "media_type": "image/png", "reveal_on": [],
+                    }
+                    first_scene = next(iter(module["scenes"]))
+                    module["scenes"][first_scene]["document"] = "scenes/arrival.md"
+                    for info in archive.infolist():
+                        if info.filename == "manifest.json":
+                            payload = json.dumps(manifest).encode()
+                        elif info.filename == "module.json":
+                            payload = json.dumps(module).encode()
+                        else:
+                            payload = archive.read(info.filename)
+                        output.writestr(info, payload)
+                    output.writestr("assets/clues/photo.png", b"\x89PNG\r\noriginal-image")
+                    output.writestr("characters/investigator.json", b'{"name":"Investigator"}')
+                    output.writestr("scenes/arrival.md", b"# Arrival\n")
+
+            imported = client.post(
+                "/api/editor/projects/import",
+                content=source_path.read_bytes(),
+                headers={"X-Module-Filename": "with-files.trpgmod"},
+            )
+            self.assertEqual(201, imported.status_code, imported.text)
+            record = imported.json()
+            session_id = record["session_id"]
+            self.assertEqual([
+                "assets/clues/photo.png", "characters/investigator.json", "scenes/arrival.md"
+            ], [item["path"] for item in record["files"]])
+            original = client.get(f"/api/editor/projects/{session_id}/files/assets/clues/photo.png")
+            self.assertEqual(b"\x89PNG\r\noriginal-image", original.content)
+
+            uploaded = client.put(
+                f"/api/editor/projects/{session_id}/files/assets/clues/replacement.webp",
+                content=b"replacement-image",
+            )
+            self.assertEqual(200, uploaded.status_code, uploaded.text)
+            edited = record["project"]
+            edited["manifest"]["title"] = "保留素材后的版本"
+            edited["module"]["assets"]["clues"]["photo"]["file"] = "assets/clues/replacement.webp"
+            saved = client.patch(
+                f"/api/editor/projects/{session_id}",
+                json={"expected_revision": 0, "project": edited},
+            )
+            self.assertEqual(200, saved.status_code, saved.text)
+            exported = client.post(f"/api/editor/projects/{session_id}/export")
+            self.assertEqual(200, exported.status_code, exported.text)
+            with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+                self.assertEqual(b"\x89PNG\r\noriginal-image", archive.read("assets/clues/photo.png"))
+                self.assertEqual(b"replacement-image", archive.read("assets/clues/replacement.webp"))
+                self.assertEqual(b'{"name":"Investigator"}', archive.read("characters/investigator.json"))
+                self.assertEqual(b"# Arrival\n", archive.read("scenes/arrival.md"))
+                self.assertEqual("保留素材后的版本", json.loads(archive.read("manifest.json"))["title"])
+
+            rejected = client.put(
+                f"/api/editor/projects/{session_id}/files/../manifest.json", content=b"bad"
+            )
+            self.assertIn(rejected.status_code, {400, 404})
+            self.assertFalse((store.root / "files" / session_id / "manifest.json").exists())
+
+    def test_file_upload_cors_preflight_allows_put(self):
+        from server import app
+        client = TestClient(app)
+        response = client.options(
+            "/api/editor/projects/editor_0123456789abcdef01234567/files/assets/clues/photo.png",
+            headers={
+                "Origin": "http://127.0.0.1:4179",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertIn("PUT", response.headers["access-control-allow-methods"])
+
     def test_import_package_rejects_invalid_archive(self):
         with tempfile.TemporaryDirectory() as temp:
             app = FastAPI()

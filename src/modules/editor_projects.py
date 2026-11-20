@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import secrets
+import shutil
 import zipfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -14,7 +17,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from src.ai.skills.skill_manifest import TOOL_NAME_RE
-from src.storage.world_store import atomic_write_json, file_lock
+from src.storage.world_store import atomic_write_bytes, atomic_write_json, file_lock
 
 MAX_EDITOR_PROJECT_BYTES = 8 * 1024 * 1024
 _MAX_SKILL_BODY_BYTES = 256 * 1024
@@ -76,14 +79,32 @@ def _write_json(path: Path, payload: object) -> None:
     )
 
 
-def export_project_package(project: object, work_dir: Path) -> tuple[Path, Any]:
-    """把 editor 工程编译为可导入的 .trpgmod（H3.1 作者契约的导出路径）。
+def _editor_file_name(value: object) -> str:
+    from src.modules.module_registry import (
+        ModulePackageError,
+        _is_allowed_package_file,
+        _safe_archive_name,
+    )
 
-    工程键映射：manifest/module → 根 JSON；keeperDocument/theme/lorebook 仅当
-    manifest 声明对应文件时写出；skills → skills/<name>.skill 并自动补声明
-    custom_skills capability。所有内容校验由 build_package 重做，这里的
-    合成只负责键映射，不放宽任何包约束。
-    """
+    try:
+        name = _safe_archive_name(value) if isinstance(value, str) else None
+    except ModulePackageError as exc:
+        raise EditorProjectError(exc.message) from exc
+    if (
+        not name
+        or PurePosixPath(name).parts[0] not in {"assets", "characters", "scenes"}
+        or not _is_allowed_package_file(name)
+    ):
+        raise EditorProjectError("工程文件只能位于 assets/、characters/ 或 scenes/，且扩展名受支持")
+    return name
+
+
+def export_project_package(
+    project: object,
+    work_dir: Path,
+    package_files: Mapping[str, Path] | None = None,
+) -> tuple[Path, Any]:
+    """把工程文本与独立保存的包内文件编译为可导入的 .trpgmod。"""
     from src.modules.module_registry import build_package
 
     validated = EditorProjectStore._validate_project(project)
@@ -92,14 +113,23 @@ def export_project_package(project: object, work_dir: Path) -> tuple[Path, Any]:
     source.mkdir(parents=True, exist_ok=True)
     manifest = copy.deepcopy(validated["manifest"])
     skills = validated.get("skills") or []
+    capabilities = {str(item) for item in manifest.get("capabilities") or []}
     if skills:
-        capabilities = {str(item) for item in manifest.get("capabilities") or []}
         capabilities.add("custom_skills")
-        manifest["capabilities"] = sorted(capabilities)
+    for raw_name, source_path in (package_files or {}).items():
+        name = _editor_file_name(raw_name)
+        if not source_path.is_file():
+            raise EditorProjectError(f"工程文件不存在: {name}")
+        target = source / Path(*PurePosixPath(name).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, target)
+    if any(name.startswith("characters/") for name in (package_files or {})):
+        capabilities.add("bundled_characters")
+    if any(name.startswith("scenes/") for name in (package_files or {})):
+        capabilities.add("scene_documents")
+    manifest["capabilities"] = sorted(capabilities)
     _write_json(source / "manifest.json", manifest)
     _write_json(source / "module.json", validated["module"])
-    # manifest 声明了但工程内容为空的部分，写安全的最小默认值；包校验只关心
-    # 声明与文件的一致性和内容合法性，不为空草稿制造缺失引用错误。
     keeper_text = validated.get("keeperDocument")
     if manifest.get("keeper_document"):
         (source / "keeper.md").write_text(
@@ -124,15 +154,8 @@ def export_project_package(project: object, work_dir: Path) -> tuple[Path, Any]:
     return package_path, inspection
 
 
-def project_from_package(package_path: Path) -> dict:
-    """把 .trpgmod 反向映射为 editor 工程（E3 反向导入）。
-
-    inspect_package 先做权威包校验（fail closed）；随后只按已验证的条目名
-    读取原始文件，保留 authoring 形态的 JSON——不在导入时隐式做
-    format_version 迁移，迁移由编辑器侧的 v1→v2 功能显式触发。包内不含
-    editor 专属元数据，skills 只有正文：name 取自文件名，其余字段由
-    EditorSkillDraft 默认值补齐。assets/ 等二进制不进入工程模型。
-    """
+def read_project_package(package_path: Path) -> tuple[dict, dict[str, bytes]]:
+    """校验并拆分模组包；JSON 进入工程，其余文件保持原始字节。"""
     from src.modules.module_registry import inspect_package
 
     inspection = inspect_package(package_path)
@@ -163,7 +186,16 @@ def project_from_package(package_path: Path) -> dict:
                 })
         if skills:
             project["skills"] = skills
-    return project
+        files = {
+            name: archive.read(name)
+            for name in sorted(names)
+            if PurePosixPath(name).parts[0] in {"assets", "characters", "scenes"}
+        }
+    return project, files
+
+
+def project_from_package(package_path: Path) -> dict:
+    return read_project_package(package_path)[0]
 
 
 class EditorProjectError(RuntimeError):
@@ -233,7 +265,23 @@ class EditorProjectStore:
     def _path(self, session_id: str) -> Path:
         return self.root / f"{self._session_id(session_id)}.json"
 
-    def create(self, project: object) -> dict:
+    def _files_root(self, session_id: str) -> Path:
+        return self.root / "files" / self._session_id(session_id)
+
+    def _file_path(self, session_id: str, name: object) -> Path:
+        safe_name = _editor_file_name(name)
+        root = self._files_root(session_id).resolve()
+        path = (root / Path(*PurePosixPath(safe_name).parts)).resolve()
+        if not path.is_relative_to(root):
+            raise EditorProjectError("工程文件路径不安全")
+        return path
+
+    def create(
+        self,
+        project: object,
+        files: Mapping[str, bytes] | None = None,
+        source_session_id: object = None,
+    ) -> dict:
         now = _now()
         record = {
             "session_id": f"editor_{secrets.token_hex(12)}",
@@ -243,7 +291,18 @@ class EditorProjectStore:
             "project": self._validate_project(project),
         }
         with file_lock(self.lock_path):
-            atomic_write_json(self._path(record["session_id"]), record)
+            try:
+                atomic_write_json(self._path(record["session_id"]), record)
+                if source_session_id is not None:
+                    source_files = self._file_paths_unlocked(str(source_session_id))
+                    for name, path in source_files.items():
+                        self._write_file_unlocked(record["session_id"], name, path.read_bytes())
+                for name, payload in (files or {}).items():
+                    self._write_file_unlocked(record["session_id"], name, payload)
+            except BaseException:
+                self._path(record["session_id"]).unlink(missing_ok=True)
+                shutil.rmtree(self._files_root(record["session_id"]), ignore_errors=True)
+                raise
         return copy.deepcopy(record)
 
     def get(self, session_id: str) -> dict:
@@ -272,12 +331,89 @@ class EditorProjectStore:
             atomic_write_json(path, current)
             return copy.deepcopy(current)
 
+    def _file_paths_unlocked(self, session_id: str) -> dict[str, Path]:
+        if not self._path(session_id).is_file():
+            raise EditorProjectNotFound("工程会话不存在")
+        root = self._files_root(session_id)
+        if not root.is_dir():
+            return {}
+        return {
+            path.relative_to(root).as_posix(): path
+            for path in root.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        }
+
+    def file_paths(self, session_id: str) -> dict[str, Path]:
+        with file_lock(self.lock_path):
+            return self._file_paths_unlocked(session_id)
+
+    def list_files(self, session_id: str) -> list[dict]:
+        return [
+            {
+                "path": name,
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for name, path in sorted(self.file_paths(session_id).items())
+        ]
+
+    def _write_file_unlocked(self, session_id: str, name: object, payload: bytes) -> dict:
+        from src.modules.module_registry import (
+            MAX_PACKAGE_FILES,
+            MAX_SINGLE_FILE_BYTES,
+            MAX_UNCOMPRESSED_BYTES,
+        )
+
+        if not isinstance(payload, bytes):
+            raise EditorProjectError("工程文件必须是二进制内容")
+        if len(payload) > MAX_SINGLE_FILE_BYTES:
+            raise EditorProjectError("单个工程文件超过 32 MiB 上限")
+        path = self._file_path(session_id, name)
+        safe_name = _editor_file_name(name)
+        existing = self._file_paths_unlocked(session_id)
+        collision = next(
+            (item for item in existing if item.casefold() == safe_name.casefold() and item != safe_name),
+            None,
+        )
+        if collision:
+            raise EditorProjectError(f"文件路径与现有文件冲突: {collision}")
+        total = sum(item.stat().st_size for key, item in existing.items() if key != safe_name)
+        if safe_name not in existing and len(existing) >= MAX_PACKAGE_FILES:
+            raise EditorProjectError("工程文件数量超过上限")
+        if total + len(payload) > MAX_UNCOMPRESSED_BYTES:
+            raise EditorProjectError("工程文件解压后总大小超过 256 MiB 上限")
+        atomic_write_bytes(path, payload)
+        return {"path": safe_name, "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+
+    def write_file(self, session_id: str, name: object, payload: bytes) -> dict:
+        with file_lock(self.lock_path):
+            if not self._path(session_id).is_file():
+                raise EditorProjectNotFound("工程会话不存在")
+            return self._write_file_unlocked(session_id, name, payload)
+
+    def delete_file(self, session_id: str, name: object) -> None:
+        with file_lock(self.lock_path):
+            if not self._path(session_id).is_file():
+                raise EditorProjectNotFound("工程会话不存在")
+            path = self._file_path(session_id, name)
+            if not path.is_file() or path.is_symlink():
+                raise EditorProjectNotFound("工程文件不存在")
+            path.unlink()
+            for parent in path.parents:
+                if parent == self._files_root(session_id):
+                    break
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+
     def delete(self, session_id: str) -> None:
         with file_lock(self.lock_path):
             path = self._path(session_id)
             if not path.is_file():
                 raise EditorProjectNotFound("工程会话不存在")
             path.unlink()
+            shutil.rmtree(self._files_root(session_id), ignore_errors=True)
 
     def list(self) -> list[dict]:
         with file_lock(self.lock_path):

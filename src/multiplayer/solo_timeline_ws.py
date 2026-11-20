@@ -158,8 +158,8 @@ async def _send_timeline_lists(controller: Any, ws: Any, room: GameRoom, user_id
     """按本地会话的线协议形状回发 world_list + adventure_list。
 
     与本地 ``send_save_panels`` 的纪律一致：两个列表成对刷新，前端存档面板
-    因此可以原样复用本地的时间线渲染路径。adventure_list 只保留当前房间
-    所属的存档位（树），云端大厅的“我的冒险”列表不归这里管。
+    因此可以原样复用本地的时间线渲染路径。world_list 描述当前存档位内的
+    时间线，adventure_list 则包含当前账号在该模组下的全部存档位。
     """
     worlds = _tree_entries(controller, room)
     await ws.send_json(
@@ -169,7 +169,6 @@ async def _send_timeline_lists(controller: Any, ws: Any, room: GameRoom, user_id
             "worlds": worlds,
         }
     )
-    tree_ids = {entry["world_id"] for entry in worlds}
     with session_scope(controller.deps.database_url()) as session:
         allowed = {
             row.world_id for row in session.query(WorldMember).filter_by(user_id=user_id).all()
@@ -179,15 +178,28 @@ async def _send_timeline_lists(controller: Any, ws: Any, room: GameRoom, user_id
         module_name=room.engine.context.module_name,
         allowed_world_ids=allowed,
     )
-    adventures = [
-        adventure
-        for adventure in adventures
-        if any(t["world_id"] in tree_ids for t in adventure["timelines"])
-    ]
+    with session_scope(controller.deps.database_url()) as session:
+        roots = {
+            adventure["root_world_id"]: session.get(World, adventure["root_world_id"])
+            for adventure in adventures
+        }
     module_titles = {mod["id"]: mod.get("title") for mod in controller.deps.list_modules()}
+    current_title = getattr(
+        getattr(room.engine.context, "module_record", None), "title", None
+    )
     for adventure in adventures:
+        root = roots.get(adventure["root_world_id"])
+        metadata = dict(root.metadata_json or {}) if root is not None else {}
+        adventure["slot_name"] = str(
+            metadata.get("slot_name") or metadata.get("name") or ""
+        )
+        if root is not None:
+            adventure["created_at"] = root.created_at.isoformat()
+            adventure["resume_world_id"] = resolve_solo_current_world_id(
+                controller.deps.database_url(), root.id
+            )
         adventure["module_title"] = module_titles.get(
-            adventure["module_name"], adventure["module_name"]
+            adventure["module_name"], current_title or adventure["module_name"]
         )
     await ws.send_json(
         {

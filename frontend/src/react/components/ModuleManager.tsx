@@ -10,6 +10,7 @@ import { useStartStore } from "../../state/start-store";
 import { StartMenuIcon } from "./StartMenuIcon";
 import { ArchiveFolderPanel } from "./ArchiveFolderPanel";
 import { useDialogKeyboard } from "./useDialogKeyboard";
+import { useDelayedClose } from "./transitions";
 
 export function ModuleManager() {
   const mode = useAppStore((state) => state.mode);
@@ -30,6 +31,7 @@ function LocalModuleManager() {
   }, [selected]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const { rendered, closing } = useDelayedClose(open, 140);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -86,7 +88,7 @@ function LocalModuleManager() {
         ref={trigger}
         type="button"
         className="start-menu-button"
-        title="模组管理"
+        data-tooltip="模组管理"
         onClick={() => {
           setOpen(true);
           setStatus("");
@@ -97,10 +99,10 @@ function LocalModuleManager() {
         <StartMenuIcon kind="modules" />
         <span>模组管理</span>
       </button>
-      {open &&
+      {rendered &&
         createPortal(
           <div
-            className="module-manager-overlay"
+            className={`module-manager-overlay${closing ? " overlay-closing" : ""}`}
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) close();
             }}

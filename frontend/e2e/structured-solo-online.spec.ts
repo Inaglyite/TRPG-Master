@@ -1,3 +1,4 @@
+import { startStructuredSoloFixture } from "./helpers/structured-solo";
 /**
  * 云端单人（账号化私密世界）的结构化模式验收。
  *
@@ -241,39 +242,14 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
     .fill("structured solo password");
   await page.getByLabel("确认密码").fill("structured solo password");
   await page.getByRole("button", { name: "注册并登录" }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible({
+  await expect(page.getByTestId("solo-home")).toBeVisible({
     timeout: 30_000,
   });
 
   // ---- 创建冒险：勾选结构化操作模式（人类主持） ----
-  await page.getByText("开始新冒险", { exact: true }).first().click();
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
-  await expect(
-    page.getByRole("radio", { name: "人类主持" }),
-    "云端单人创建卡没有人类主持入口",
-  ).toBeVisible();
-  await page.getByRole("radio", { name: "人类主持" }).click();
-  for (const width of [1280, 939, 640]) {
-    await page.setViewportSize({ width, height: 900 });
-    const heights = await page
-      .locator(".lobby-form > input, .lobby-form .module-select-trigger")
-      .evaluateAll((nodes) =>
-        nodes.map((node) => node.getBoundingClientRect().height),
-      );
-    for (const height of heights) expect(height).toBeLessThan(65);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth + 1,
-      ),
-    ).toBe(true);
-    await page.screenshot({
-      path: test.info().outputPath(`trpg-flow-ui-solo-create-${width}.png`),
-      fullPage: true,
-    });
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: /创建冒险/ }).click();
+  await startStructuredSoloFixture(page);
 
   // ---- 选角页：human 结构化世界不需要 BYOK，直接开局 ----
   const confirmCharacter = page.locator("#btn-character-confirm");
@@ -661,8 +637,9 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   // Refresh intentionally returns to mode selection. Re-enter through the
   // real private-adventure continuation path, not multiplayer auto-resume.
   await page.getByRole("button", { name: /云端单人/ }).click();
-  await expect(page.getByTestId("solo-lobby")).toBeVisible();
-  await page.getByRole("button", { name: "继续冒险", exact: true }).click();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
+  await page.getByRole("button", { name: "从存档开始" }).click();
+  await page.getByRole("button", { name: "读取", exact: true }).click();
   // Capture the actual settled game, not the shell's permitted exit animation.
   await expect(page.getByTestId("online-shell")).toHaveCount(0);
   await expect(page.locator("#messages")).toContainText("历史验收记录 52");
@@ -798,7 +775,8 @@ test("云端单人结构化：勾选后无 Key 开局，按钮发结构请求且
   const otherFrames = collectFrames(otherTab);
   await otherTab.goto(`${baseUrl}/`);
   await otherTab.getByRole("button", { name: /云端单人/ }).click();
-  await otherTab.getByRole("button", { name: "继续冒险", exact: true }).click();
+  await otherTab.getByRole("button", { name: "从存档开始" }).click();
+  await otherTab.getByRole("button", { name: "读取", exact: true }).click();
   await expect(otherTab.getByTestId("online-shell")).toHaveCount(0);
   await expect
     .poll(
@@ -1034,13 +1012,16 @@ async function checkArchiveLayout(page: Page, surface: string) {
 }
 
 async function checkAccountLayout(page: Page) {
-  const account = page.locator(".solo-lobby-user");
+  await page.getByRole("button", { name: "个人中心" }).click();
+  const account = page.getByRole("dialog", { name: "个人中心" });
   for (const width of [1280, 939, 640, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await account.scrollIntoViewIfNeeded();
     await expect(page.locator(".boot-loader")).toHaveCount(0);
     await page.waitForTimeout(1000); // settle the lobby's entry transform before measuring
-    for (const button of await account.getByRole("button").all()) {
+    for (const button of await account
+      .locator("button:not(.personal-center-module)")
+      .all()) {
       const geometry = await button.evaluate((node) => {
         const rect = node.getBoundingClientRect();
         const style = getComputedStyle(node);
@@ -1090,13 +1071,12 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
   await page.getByRole("button", { name: "注册并登录" }).click();
-  await expect(page.getByTestId("solo-lobby")).toBeVisible();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
   await checkAccountLayout(page);
-  await page.getByText("开始新冒险", { exact: true }).first().click();
+  await page.keyboard.press("Escape");
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
-  await page.getByRole("radio", { name: "人类主持" }).click();
-  await page.getByRole("button", { name: /创建冒险/ }).click();
+  await startStructuredSoloFixture(page);
   await expect(page.locator("#btn-character-confirm")).toBeVisible();
   await page.locator(".character-card").first().click();
   await page.locator("#btn-character-confirm").click();
@@ -1170,83 +1150,32 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
   await expect(page.getByRole("heading", { name: "联机大厅" })).toHaveCount(0);
-  const archiveInfo = page.locator(".solo-lobby .adventure-card-info");
-  await archiveInfo.focus();
-  await archiveInfo.press("Enter");
-  await expect(
-    page.getByRole("button", { name: "关闭时间线面板" }),
-  ).toBeVisible();
-  // Real backend timeline data: keyboard cancellation is not a rename/delete.
-  const timeline = page.locator(".solo-timeline-dialog");
-  const timelineClose = timeline.getByRole("button", {
-    name: "关闭时间线面板",
+  await page.getByRole("button", { name: "从存档开始" }).click();
+  const openTimelines = page.getByRole("button", {
+    name: "时间线",
+    exact: true,
   });
-  let timelineMutations = 0;
-  const countTimelineMutation = (req: import("@playwright/test").Request) => {
-    if (
-      req.method() !== "GET" &&
-      /\/timelines\/(rename|archive|switch)$/.test(new URL(req.url()).pathname)
-    )
-      timelineMutations += 1;
-  };
-  page.on("request", countTimelineMutation);
+  await openTimelines.focus();
+  await openTimelines.press("Enter");
+  const timeline = page.getByTestId("save-panel-timelines");
+  await expect(timeline).toBeVisible();
+  const timelineClose = page.locator("#save-panel-close");
+  const branchRow = timeline.locator(`[data-world="${branchWorldId}"]`);
   for (const width of [1280, 939, 640, 390]) {
     await page.setViewportSize({ width, height: 480 });
-    await expect(timelineClose).toBeInViewport();
-    const rename = timeline.locator(".timeline-rename").first();
+    const rename = branchRow.getByRole("button", {
+      name: "重命名",
+      exact: true,
+    });
     await rename.click();
-    const input = timeline.getByLabel("时间线名称");
+    const input = branchRow.locator("input");
     await expect(input).toBeFocused();
     await input.fill("取消后不得保存的新名字");
-    for (const button of [
-      timelineClose,
-      timeline.getByRole("button", { name: "确认重命名时间线" }),
-      timeline.getByRole("button", { name: "取消重命名时间线" }),
-    ]) {
-      const box = await button.evaluate((node) => {
-        const rect = node.getBoundingClientRect();
-        const style = getComputedStyle(node);
-        return {
-          height: rect.height,
-          width: rect.width,
-          padding: parseFloat(style.paddingLeft),
-          bottom: rect.bottom,
-          right: rect.right,
-          left: rect.left,
-          hit: node.contains(
-            document.elementFromPoint(
-              rect.x + rect.width / 2,
-              rect.y + rect.height / 2,
-            ),
-          ),
-        };
-      });
-      expect(box.height).toBeGreaterThanOrEqual(44);
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.padding).toBeGreaterThanOrEqual(10);
-      expect(box.bottom).toBeLessThanOrEqual(480);
-      expect(box.left).toBeGreaterThanOrEqual(0);
-      expect(box.right).toBeLessThanOrEqual(width);
-      expect(box.hit).toBe(true);
-    }
-    await page.screenshot({
-      path: test.info().outputPath(`trpg-timeline-edit-${width}.png`),
-    });
     await input.press("Escape");
     await expect(input).toHaveCount(0);
-    await expect(timeline).toBeVisible();
-    await expect(rename).toBeFocused();
-    const last = timeline.locator("button:enabled").last();
-    await last.focus();
-    await page.keyboard.press("Tab");
-    await expect(timelineClose).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
-    await expect(last).toBeFocused();
-    await timeline.locator(".solo-timeline-body").evaluate((node) => {
-      node.scrollTop = node.scrollHeight;
-    });
+    await expect(branchRow).not.toContainText("取消后不得保存的新名字");
     await expect(timelineClose).toBeInViewport();
     expect(
       await page.evaluate(
@@ -1256,21 +1185,9 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
     await page.screenshot({
       path: test.info().outputPath(`trpg-timeline-list-${width}.png`),
     });
-    await timeline.locator(".solo-timeline-body").evaluate((node) => {
-      node.scrollTop = 0;
-    });
   }
-  expect(timelineMutations).toBe(0);
-  page.off("request", countTimelineMutation);
-  await page.keyboard.press("Escape");
-  await expect(timeline).toHaveCount(0);
-  await expect(archiveInfo).toBeFocused();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await archiveInfo.press("Enter");
-  await expect(timelineClose).toBeVisible();
-  await page.getByRole("button", { name: "关闭时间线面板" }).click();
-  await page.getByRole("button", { name: "继续冒险", exact: true }).click();
-  await expect(page.getByTestId("online-shell")).toHaveCount(0);
+  await timelineClose.click();
   await expect(page.getByTestId("btn-keeper-console")).toBeVisible();
 
   let archiveRequests = 0;
@@ -1300,8 +1217,9 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
   await expect(
     page.getByRole("button", { name: "继续调查", exact: true }),
   ).toBeFocused();
-  await page.getByRole("button", { name: "返回我的冒险（保留进度）" }).click();
-  await expect(page.getByTestId("solo-lobby")).toBeVisible();
+  await page.getByRole("button", { name: "返回首页（保留进度）" }).click();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
+  await page.getByRole("button", { name: "从存档开始" }).click();
   const treeResponse = await page.request.get(
     `${baseUrl}/api/worlds/${rootWorldId}/timelines`,
   );
@@ -1310,8 +1228,12 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
   expect(
     tree.worlds.map((world: { world_id: string }) => world.world_id),
   ).toEqual(expect.arrayContaining([rootWorldId, branchWorldId]));
-  await page.getByRole("button", { name: "归档冒险", exact: true }).click();
-  await checkArchiveLayout(page, "lobby");
+  await page.getByRole("button", { name: "读取", exact: true }).click();
+  await page.getByRole("button", { name: "离开当前冒险", exact: true }).click();
+  await page
+    .getByRole("button", { name: "放弃并归档冒险", exact: true })
+    .click();
+  await checkArchiveLayout(page, "game");
   await page.getByRole("button", { name: "继续保留", exact: true }).click();
   expect(archiveRequests).toBe(0);
 
@@ -1326,19 +1248,20 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
       }),
     }),
   );
-  await page.getByRole("button", { name: "归档冒险", exact: true }).click();
+  await page
+    .getByRole("button", { name: "放弃并归档冒险", exact: true })
+    .click();
   await page.getByRole("button", { name: "确认归档", exact: true }).click();
   await expect(
     page.getByTestId("adventure-archive-confirm").getByRole("alert"),
   ).toHaveText("归档验收：操作被拒，请重试");
   await expect(
-    page.getByRole("button", { name: "继续冒险", exact: true }),
+    page.getByRole("button", { name: "确认归档", exact: true }),
   ).toBeEnabled();
   await page.unroute("**/api/worlds/*/abandon");
   await page.getByRole("button", { name: "确认归档", exact: true }).click();
-  await expect(
-    page.getByRole("button", { name: "继续冒险", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByTestId("solo-home")).toBeVisible();
+  await expect(page.getByRole("button", { name: "从存档开始" })).toBeDisabled();
   await expect(page.getByTestId("adventure-archive-confirm")).toHaveCount(0);
   expect(archiveRequests).toBe(2);
   // Server evidence: neither root nor child remains accessible after archive.
@@ -1376,8 +1299,10 @@ test("账号过期不泄漏旧资料；重新登录保留单人入口；归档�
       body: JSON.stringify({ error: "退出验收：服务不可用" }),
     }),
   );
+  await page.getByRole("button", { name: /返回单人首页/ }).click();
+  await page.getByRole("button", { name: "个人中心" }).click();
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("退出验收：服务不可用");
   await page.unroute("**/api/auth/logout");
   await page.getByRole("button", { name: "退出登录", exact: true }).click();

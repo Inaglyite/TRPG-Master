@@ -11,11 +11,13 @@ from src.app.runtime import RuntimeContext
 from src.modules.module_deletion import delete_module, module_usage
 from src.modules.module_registry import ModulePackageError, ModuleRegistry, build_package
 from src.storage.database import (
+    Base,
     ContextSession,
     SaveSlot,
     Snapshot,
     World,
     WorldState,
+    get_engine,
     session_scope,
 )
 from src.web.module_http import ModuleHttpDependencies, create_module_http_router
@@ -121,3 +123,86 @@ def test_builtin_cannot_be_removed(tmp_path):
     with pytest.raises(ModulePackageError, match="内置"):
         delete_module(ModuleRegistry(tmp_path, tmp_path), "builtin")
     assert path.exists()
+
+
+def test_account_delete_http_removes_exact_worlds_saves_and_package(tmp_path):
+    registry = ModuleRegistry(tmp_path, tmp_path)
+    package = tmp_path / "personal.trpgmod"
+    build_package(TEMPLATE, package)
+    personal, _, _ = registry.install_for_account("user-a", package)
+    other_personal, _, _ = registry.install_for_account("user-b", package)
+    root = RuntimeContext.create("account-root", personal.key, project_root=tmp_path, runtime_root=tmp_path)
+    branch = RuntimeContext.create("account-branch", personal.key, project_root=tmp_path, runtime_root=tmp_path)
+    other = RuntimeContext.create("other-account", other_personal.key, project_root=tmp_path, runtime_root=tmp_path)
+    with session_scope(root.database_url) as session:
+        session.add(Snapshot(id="account-snapshot", world_id=root.world_id, revision=1, state={}))
+        session.flush()
+        session.add(SaveSlot(id="account-save", world_id=root.world_id, slot_key="auto", snapshot_id="account-snapshot"))
+        session.add(Snapshot(id="other-snapshot", world_id=other.world_id, revision=1, state={}))
+        session.flush()
+        session.add(SaveSlot(id="other-save", world_id=other.world_id, slot_key="auto", snapshot_id="other-snapshot"))
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def account(request, call_next):
+        request.state.user = SimpleNamespace(id="user-a")
+        return await call_next(request)
+
+    app.include_router(create_module_http_router(ModuleHttpDependencies(
+        registry=lambda: registry,
+        project_root=tmp_path,
+        runtime_root=lambda: tmp_path,
+        active_context=lambda: SimpleNamespace(module_name="other"),
+        set_active_context=lambda value: None,
+        auth_required=lambda: True,
+        database_url=lambda: root.database_url,
+    )))
+    with TestClient(app) as client:
+        response = client.delete(f"/api/me/modules/{personal.key}")
+
+    assert response.status_code == 200
+    assert response.json().get("world_count") == 2
+    assert response.json().get("save_count") == 1
+    assert response.json().get("cleanup_pending") is False
+    assert not personal.path.exists()
+    assert other_personal.path.exists()
+    with session_scope(root.database_url) as session:
+        assert set(session.scalars(select(World.id))) == {other.world_id}
+        assert session.query(SaveSlot).filter_by(world_id=other.world_id).count() == 1
+    assert not (tmp_path / "worlds" / root.world_id).exists()
+    assert not (tmp_path / "worlds" / branch.world_id).exists()
+    assert (tmp_path / "worlds" / other.world_id).exists()
+
+
+def test_account_delete_rejects_module_in_use(tmp_path):
+    registry = ModuleRegistry(tmp_path, tmp_path)
+    package = tmp_path / "personal.trpgmod"
+    build_package(TEMPLATE, package)
+    personal, _, _ = registry.install_for_account("user-a", package)
+    db_url = f"sqlite:///{tmp_path / 'unused.db'}"
+    Base.metadata.create_all(get_engine(db_url))
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def account(request, call_next):
+        request.state.user = SimpleNamespace(id="user-a")
+        return await call_next(request)
+
+    app.include_router(create_module_http_router(ModuleHttpDependencies(
+        registry=lambda: registry,
+        project_root=tmp_path,
+        runtime_root=lambda: tmp_path,
+        active_context=lambda: SimpleNamespace(module_name="other"),
+        set_active_context=lambda value: None,
+        auth_required=lambda: True,
+        modules_in_use=lambda: {personal.key},
+        database_url=lambda: db_url,
+    )))
+    with TestClient(app) as client:
+        response = client.delete(f"/api/me/modules/{personal.key}")
+
+    assert response.status_code == 409
+    assert "正在使用" in response.json()["error"]
+    assert personal.path.exists()
+    assert [item.key for item in registry.account_modules("user-a")] == [personal.key]

@@ -15,7 +15,7 @@ import { ModelSettingsTrigger } from "./ModelSettingsPanel";
 import { StartMenuIcon } from "./StartMenuIcon";
 import { ModuleManager } from "./ModuleManager";
 import { ModuleImporter } from "./ModuleImporter";
-import { ModuleSelect } from "./ModuleSelect";
+import { SoloStartMenu } from "./SoloStartMenu";
 import { useModuleTransition } from "./module-transition";
 import { useDelayedClose } from "./transitions";
 
@@ -160,7 +160,7 @@ export function StartScreen() {
             <button
               type="button"
               className="btn-ghost module-workshop-link"
-              title="模组工坊：创作或编辑模组"
+              data-tooltip="模组工坊"
               onClick={openModWorkshop}
             >
               <StartMenuIcon kind="workshop" />
@@ -170,7 +170,7 @@ export function StartScreen() {
             <button
               type="button"
               className="start-menu-button"
-              title="角色库"
+              data-tooltip="角色库"
               onClick={() =>
                 useAppStore.getState().setCharacterLibraryOpen(true)
               }
@@ -183,7 +183,7 @@ export function StartScreen() {
               <button
                 id="btn-exit"
                 className="start-menu-button start-menu-exit"
-                title="退出游戏"
+                data-tooltip="退出游戏"
                 onClick={() => window.close()}
               >
                 <StartMenuIcon kind="exit" />
@@ -191,55 +191,26 @@ export function StartScreen() {
               </button>
             )}
           </nav>
-          <div className="start-menu-main">
-            <div className="start-brand">
-              <div id="start-title" className="fx-glow">
-                {shown.title}
-              </div>
-              <div id="start-subtitle">{shown.subtitle}</div>
-              {shown.description && (
-                <div id="start-description">{shown.description}</div>
-              )}
-            </div>
-            <div id="module-selector">
-              <label id="module-select-label">当前模组</label>
-              <div className="module-select-row">
-                <ModuleSelect
-                  options={state.modules}
-                  value={shown.activeModule}
-                  disabled={state.moduleSwitchPending}
-                  labelledBy="module-select-label"
-                  onSelect={(id) => void startCommand("switchModule", id)}
-                />
-              </div>
-            </div>
-            <nav className="start-menu-actions">
-              <button
-                id="btn-start"
-                className="start-art-button"
-                disabled={
-                  state.gameStarting ||
-                  state.moduleSwitchPending ||
-                  !state.charactersReady ||
-                  !characters.length
-                }
-                onClick={() => useStartStore.setState({ view: "characters" })}
-              >
-                <span className="start-art-label">
-                  {shown.startButtonText || "开始新游戏"}
-                </span>
-              </button>
-              <button
-                id="btn-continue"
-                className="start-art-button art-plaque"
-                disabled={!state.hasSaves || state.gameStarting}
-                onClick={() => void startCommand("continueGame")}
-              >
-                <span className="start-art-label">从存档开始</span>
-              </button>
-            </nav>
-            <div id="start-hint">{state.hint}</div>
-          </div>
+          <SoloStartMenu
+            title={shown.title}
+            subtitle={shown.subtitle}
+            description={shown.description}
+            modules={state.modules}
+            activeModule={shown.activeModule}
+            selectingDisabled={state.moduleSwitchPending}
+            onSelect={(id) => void startCommand("switchModule", id)}
+            startLabel={shown.startButtonText || "开始新游戏"}
+            startDisabled={
+              state.gameStarting ||
+              state.moduleSwitchPending ||
+              !state.charactersReady ||
+              !characters.length
+            }
+            onStart={() => useStartStore.setState({ view: "characters" })}
+            continueDisabled={!state.hasSaves || state.gameStarting}
+            onContinue={() => void startCommand("continueGame")}
+            hint={state.hint}
+          />
         </section>
         <section
           id="character-select-view"

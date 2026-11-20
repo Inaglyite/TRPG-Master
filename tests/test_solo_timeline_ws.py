@@ -290,6 +290,24 @@ def test_solo_timeline_requires_owner_role(tmp_path: Path):
 
 def test_solo_world_list_returns_tree_with_local_wire_shape(tmp_path: Path):
     url, owner, _ = seed_tree(tmp_path, pointer="world-root")
+    with session_scope(url) as session:
+        session.add(
+            World(
+                id="world-other",
+                module_name="mansion_of_madness",
+                created_by=owner.id,
+                metadata_json={"name": "另一段调查", "play_mode": "solo"},
+            )
+        )
+        session.add(WorldState(world_id="world-other", schema_version=1, state={}))
+        session.add(
+            WorldMember(
+                id=new_id("member"), world_id="world-other", user_id=owner.id, role="owner"
+            )
+        )
+    other_save = tmp_path / "worlds" / "world-other" / "saves" / "slot_000"
+    other_save.mkdir(parents=True)
+    (other_save / "messages.json").write_text("[]", encoding="utf-8")
     room = _room("world-root", owner.id)
     socket = _QueueSocket([{"type": "solo_world_list"}])
     try:
@@ -304,10 +322,16 @@ def test_solo_world_list_returns_tree_with_local_wire_shape(tmp_path: Path):
     assert branch["is_branch"] is True
     assert branch["resumable"] is True
     adventure_list = next(m for m in socket.sent if m["type"] == "adventure_list")
-    assert len(adventure_list["adventures"]) == 1
-    adventure = adventure_list["adventures"][0]
-    assert adventure["root_world_id"] == "world-root"
+    assert len(adventure_list["adventures"]) == 2
+    adventures = {item["root_world_id"]: item for item in adventure_list["adventures"]}
+    adventure = adventures["world-root"]
     assert {t["world_id"] for t in adventure["timelines"]} == ids
+    assert adventure["slot_name"] == "私密单人世界"
+    assert adventure["created_at"]
+    other = adventures["world-other"]
+    assert other["slot_name"] == "另一段调查"
+    assert other["resume_world_id"] == "world-other"
+    assert other["module_title"] == "疯狂宅邸"
 
 
 def test_solo_world_switch_commits_pointer_and_claims(tmp_path: Path):

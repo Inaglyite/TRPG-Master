@@ -12,11 +12,15 @@ import {
   type VisualDie,
 } from "./state/message-store";
 import { getNarrationSpeed, narrationTickMs } from "./narration-speed";
+import { withoutActionHints } from "./action-hints";
+import { useGamePreferences } from "./state/game-preferences";
 
 let messageCounter = 0;
 let displayTurnId: string | null = null;
 let streamMessageId: string | null = null;
 let streamBuffer = "";
+let hintPlaybackCandidate = false;
+let hintProbeTail = "";
 let playbackTimer: number | null = null;
 let networkStreamFinished = false;
 let authoritativeSegments: NarrativeSegment[] | null = null;
@@ -606,6 +610,8 @@ function pushStreamPiece(text: string, npcId: string | null) {
 
 function ensureStreamMessage() {
   if (streamMessageId) return;
+  hintPlaybackCandidate = false;
+  hintProbeTail = "";
   streamMessageId = nextId();
   streamSegments = [];
   streamNpc = null;
@@ -681,6 +687,7 @@ function schedulePlayback(delay = baseTickMs()) {
 
 function playbackStep() {
   playbackTimer = null;
+  skipHiddenMenuTail();
   const piece = playbackQueue[0];
   if (!piece) {
     if (networkStreamFinished) finalizePresentedStream();
@@ -700,6 +707,26 @@ function playbackStep() {
   } else if (networkStreamFinished) {
     finalizePresentedStream();
   }
+}
+
+/** Old servers/history can still send menus: don't type their invisible tail. */
+function skipHiddenMenuTail() {
+  if (!hintPlaybackCandidate || useGamePreferences.getState().showActionHints)
+    return;
+  const last = streamSegments.at(-1);
+  const prefix = last?.kind === "narration" ? last.text : "";
+  const pieces: PlaybackPiece[] = [];
+  for (const piece of playbackQueue) {
+    if (piece.npcId) break;
+    pieces.push(piece);
+  }
+  const tail = pieces.map((piece) => piece.chars.join("")).join("");
+  if (!tail || withoutActionHints(prefix + tail) !== withoutActionHints(prefix))
+    return;
+  playbackQueue.splice(0, pieces.length);
+  // Keep the complete presentation source for re-enabling hints, but update
+  // once instead of scheduling a scroll/render for every hidden character.
+  renderPlaybackText(tail, null);
 }
 
 export function flushNarrativeStream() {
@@ -746,12 +773,20 @@ export function onNarrativeChunk(text: string, npcId?: string | null) {
   if (!text) return;
   removeLoading();
   ensureStreamMessage();
+  if (!npcId) probeActionHints(text);
   // 不再依据"你可以/选项"标记切换播放速度；分块只负责进入缓存。
   playbackQueue.push({
     chars: Array.from(text),
     npcId: npcId || null,
   });
   schedulePlayback();
+}
+
+function probeActionHints(text: string) {
+  if (hintPlaybackCandidate) return;
+  const probe = hintProbeTail + text;
+  hintPlaybackCandidate = /你可以|可选行动|请选择/.test(probe);
+  hintProbeTail = probe.slice(-16);
 }
 
 /** 长按叙述区域临时加速（约 3 倍）；松开/移出/取消/失焦恢复所选档位。 */
@@ -819,6 +854,9 @@ export function onNarrativeSegments(segments: NarrativeSegment[]) {
       `turn-${displayTurnId || "unknown"}-${segmentIndex}`,
     ),
   );
+  for (const segment of normalized) {
+    if (segment.kind === "narration") probeActionHints(segment.text);
+  }
   let consumed = 0;
   if (sealedNarrativeBeats.length) {
     const sealed = sealedNarrativeBeats.map((beat) => {

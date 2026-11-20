@@ -401,7 +401,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["null"],
     allow_origin_regex=r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?",
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     # X-TRPG-Local-Token 由桌面壳主进程注入（见 authentication_gate 的本地信任校验）。
     allow_headers=["Content-Type", "X-Module-Filename", "X-TRPG-Local-Token"],
     # 最后注册使 CORS 位于认证外层，401/403 可读且预检可达；不替代认证/CSRF。
@@ -455,9 +455,9 @@ app.include_router(
             project_root=PROJECT_ROOT,
             runtime_root=lambda: RUNTIME_ROOT,
             active_context=lambda: _active_context,
-            modules_in_use=lambda: {engine.context.module_name for engine in _local_session_engines},
+            modules_in_use=lambda: {engine.context.module_name for engine in _local_session_engines} | ROOM_MANAGER.module_names_in_use(),
             set_active_context=_set_active_context,
-            auth_required=lambda: auth_required(),
+            auth_required=lambda: auth_required(), database_url=lambda: DATABASE_URL, prepare_module_removal=ROOM_MANAGER.remove_idle_module,
         )
     )
 )
@@ -511,7 +511,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
     loop = asyncio.get_running_loop()
     outbound = OrderedTurnEventStream(ws, loop)
     turn_gate = SessionTurnGate(_world_turn_lock(engine.context))
-    session = WsSessionContext(outbound=outbound, turn_gate=turn_gate)
+    session = WsSessionContext(outbound=outbound, turn_gate=turn_gate, generation_target=engine)
     game_app = GameApplication.for_engine(engine, auto_slot=AUTO_SAVE_SLOT)
     suggest_reply = session.suggest_reply
     decision_reply = session.decision_reply
@@ -1532,7 +1532,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                 continue
 
             try:
-                routed = await structured_wire.dispatch(router, data)
+                routed = await session.dispatch(structured_wire, router, data)
             except Exception as exc:
                 # A malformed save/state/control operation must not terminate the
                 # shared room driver for every connected player. Turn workers

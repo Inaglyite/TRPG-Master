@@ -38,7 +38,16 @@ class EditorProjectStoreTests(unittest.TestCase):
             store = EditorProjectStore(Path(temp))
             created = store.create(project())
             self.assertEqual(created["session_id"], store.list()[0]["session_id"])
+            file = store.write_file(created["session_id"], "assets/scenes/room.png", b"image")
+            self.assertEqual("assets/scenes/room.png", file["path"])
+            self.assertEqual(5, file["size"])
+            self.assertEqual([file], store.list_files(created["session_id"]))
+            cloned = store.create(project("副本"), source_session_id=created["session_id"])
+            clone_path = store.file_paths(cloned["session_id"])["assets/scenes/room.png"]
+            self.assertEqual(b"image", clone_path.read_bytes())
             store.delete(created["session_id"])
+            self.assertEqual(b"image", clone_path.read_bytes())
+            self.assertFalse((store.root / "files" / created["session_id"]).exists())
             with self.assertRaises(EditorProjectNotFound):
                 store.get(created["session_id"])
 

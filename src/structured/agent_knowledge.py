@@ -83,7 +83,7 @@ class AgentKnowledge:
             from src.app.config import PROJECT_ROOT, RUNTIME_ROOT
             from src.modules.module_registry import ModuleRegistry
 
-            resolver = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT).resolve
+            resolver = ModuleRegistry(PROJECT_ROOT, RUNTIME_ROOT).resolve_world_module
         try:
             record = resolver(world.module_name)
         except (OSError, ValueError):

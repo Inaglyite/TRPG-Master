@@ -352,6 +352,8 @@ def catalog_for(context) -> SkillCatalog:
     skills_dir = module_dir / "skills" if module_dir is not None else None
     if skills_dir is not None and skills_dir.is_dir():
         module_name = str(getattr(context, "module_name", "") or "module")
+        if getattr(getattr(context, "module_record", None), "source", None) == "account":
+            module_name = context.module_record.package_id
         slug = re.sub(r"[^a-z0-9_]+", "_", module_name.lower()).strip("_")
         if not slug:
             # 非 ASCII 模组名（如中文目录）用稳定哈希保证 id 合法且唯一。
@@ -370,7 +372,7 @@ def catalog_for(context) -> SkillCatalog:
             record = getattr(context, "module_record", None)
             # H3.1 信任分级：项目 builtin mod/ = bundled-module；runtime
             # user_root（本机安装/作者目录）= local-author，不因篇幅提升信任。
-            is_local_author = str(getattr(record, "source", "") or "") == "user"
+            is_local_author = str(getattr(record, "source", "") or "") in {"user", "account"}
             entry = SkillEntry(
                 id=f"module.{slug}.{stem}",
                 # Never persist an absolute installed-module path.  The
@@ -520,11 +522,19 @@ def _trusted_module_dir(context) -> Path | None:
             raise CatalogError("运行时 ModuleRecord 路径不可解析") from exc
 
     source = str(getattr(record, "source", "") or "")
-    if source == "user":
+    if source in {"user", "account"}:
         runtime_root = getattr(context, "runtime_root", None)
         if not runtime_root:
             raise CatalogError("已安装模组缺少受信 runtime_root")
-        user_root = (Path(runtime_root).resolve() / "modules").resolve()
+        if source == "account":
+            binding = re.fullmatch(r"personal~([0-9a-f]{32})~[0-9a-f]{32}", context.module_name)
+            if not binding or record.key != context.module_name:
+                raise CatalogError("个人模组缺少有效账号绑定")
+            user_root = Path(runtime_root).resolve() / ".account-modules" / binding.group(1) / "modules"
+            if module_dir != user_root / record.package_id / record.version:
+                raise CatalogError("个人模组路径与账号安装位置不一致")
+        else:
+            user_root = (Path(runtime_root).resolve() / "modules").resolve()
         if not _is_relative_to(module_dir, user_root):
             raise CatalogError("已安装模组路径越出 runtime modules/ 边界")
         capabilities = {str(item) for item in (getattr(record, "capabilities", ()) or ())}

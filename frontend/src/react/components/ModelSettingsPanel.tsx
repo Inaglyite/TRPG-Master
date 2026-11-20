@@ -90,7 +90,7 @@ export function ModelSettingsTrigger() {
       id="btn-settings"
       className="start-menu-button"
       type="button"
-      title="游戏设置"
+      data-tooltip="游戏设置"
       onClick={() => openSettings()}
     >
       <StartMenuIcon kind="settings" />
@@ -469,7 +469,7 @@ function GeneralTab() {
           <span>
             <strong>显示行动提示</strong>
             <small>
-              显示“你可以——”菜单和建议行动按钮。关闭后可自行输入行动。
+              关闭后隐藏“你可以——”和建议按钮，并从下一次生成起要求模型不再生成行动提示。
             </small>
           </span>
           <input
@@ -833,6 +833,13 @@ function ContextTab() {
     view &&
     summary?.config_revision != null &&
     summary.config_revision !== view.revision;
+  if (view?.mode === "account") {
+    return (
+      <p className="model-service-hint">
+        开始冒险后，可在这里查看当前回合的上下文。
+      </p>
+    );
+  }
   return (
     <div className="model-settings-tab-body">
       <section className="context-overview">
@@ -1005,6 +1012,7 @@ export function ModelSettingsPanel() {
   const tab = useModelStore((state) => state.tab);
   const view = useModelStore((state) => state.view);
   const saving = useModelStore((state) => state.saving);
+  const testing = useModelStore((state) => Boolean(state.testingRole));
   const loading = useModelStore((state) => state.loading);
   const loadError = useModelStore((state) => state.loadError);
   const status = useModelStore((state) => state.status);
@@ -1105,7 +1113,7 @@ export function ModelSettingsPanel() {
           {tab === "general" ? (
             <GeneralTab />
           ) : tab === "models" ? (
-            <ModelsTab disabled={readOnly || saving} />
+            <ModelsTab disabled={readOnly || saving || testing} />
           ) : (
             <ContextTab />
           )}
@@ -1125,7 +1133,7 @@ export function ModelSettingsPanel() {
             <button
               id="model-settings-restore"
               className="btn-ghost"
-              disabled={saving || loading || !view}
+              disabled={saving || testing || loading || !view}
               onClick={() => restoreDefaultSettings()}
             >
               {view?.byok_required ? "清除配置" : "恢复默认"}
@@ -1143,7 +1151,7 @@ export function ModelSettingsPanel() {
             <button
               id="model-settings-save"
               title="保存配置（下回合生效）"
-              disabled={saving || loading || blocked || !view}
+              disabled={saving || testing || loading || blocked || !view}
               onClick={() => saveSettings()}
             >
               {saving ? (

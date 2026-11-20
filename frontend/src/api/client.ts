@@ -99,6 +99,10 @@ type UnauthorizedListener = () => void;
 const unauthorizedListeners = new Set<UnauthorizedListener>();
 
 /** 任何云端 API 响应 401 时触发；认证状态机据此降级为“会话过期”。 */
+export function notifyUnauthorized(): void {
+  unauthorizedListeners.forEach((listener) => listener());
+}
+
 export function onUnauthorized(listener: UnauthorizedListener): () => void {
   unauthorizedListeners.add(listener);
   return () => {
@@ -227,7 +231,7 @@ export async function apiFetch<S extends z.ZodTypeAny>(
         path,
       )
     ) {
-      unauthorizedListeners.forEach((listener) => listener());
+      notifyUnauthorized();
     }
     if (!response.ok) {
       const { message, code, details } = await deadline.wait(

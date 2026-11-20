@@ -103,21 +103,17 @@ function moduleAssetUrl(path: string): string | null {
   return version ? `${base}?v=${encodeURIComponent(version)}` : base;
 }
 
-export function applyTheme(theme: any) {
-  if (!theme || typeof theme !== "object") return;
-  const root = document.documentElement;
-
-  // 先清掉上一个模组注入的全部受管变量与特效开关，再应用新主题。
-  MANAGED_VARS.forEach((name) => root.style.removeProperty(name));
-  FX_FLAGS.forEach((flag) => root.removeAttribute(`data-fx-${flag}`));
-  resetDice3DTheme();
-
+export function menuThemeVariables(theme: {
+  colors?: Record<string, unknown>;
+  fonts?: Record<string, unknown>;
+}) {
+  const variables: Record<string, string> = {};
   const colors = theme.colors;
   if (colors && typeof colors === "object") {
     Object.entries(colors).forEach(([key, value]) => {
       const cssVar = COLOR_VAR_MAP[key];
       if (cssVar && isSafeThemeColor(value)) {
-        root.style.setProperty(cssVar, value);
+        variables[cssVar] = value;
       }
     });
   }
@@ -127,9 +123,25 @@ export function applyTheme(theme: any) {
     Object.entries(FONT_VAR_MAP).forEach(([key, cssVar]) => {
       const value = (fonts as Record<string, unknown>)[key];
       if (isSafeFontFamily(value)) {
-        root.style.setProperty(cssVar, value);
+        variables[cssVar] = value;
       }
     });
+  }
+
+  return variables;
+}
+
+export function applyTheme(theme: any) {
+  if (!theme || typeof theme !== "object") return;
+  const root = document.documentElement;
+
+  // 先清掉上一个模组注入的全部受管变量与特效开关，再应用新主题。
+  MANAGED_VARS.forEach((name) => root.style.removeProperty(name));
+  FX_FLAGS.forEach((flag) => root.removeAttribute(`data-fx-${flag}`));
+  resetDice3DTheme();
+
+  for (const [key, value] of Object.entries(menuThemeVariables(theme))) {
+    root.style.setProperty(key, value);
   }
 
   const store = useAppStore.getState();

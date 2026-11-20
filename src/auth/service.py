@@ -278,6 +278,53 @@ def authenticate(db_url: str, username: object, password: object) -> User | None
         return user
 
 
+def update_display_name(db_url: str, user_id: str, value: object) -> User:
+    if value is not None and not isinstance(value, str):
+        raise HTTPException(400, "昵称须为字符串")
+    display_name = (value or "").strip()
+    if len(display_name) > 40:
+        raise HTTPException(400, "昵称长度不能超过 40 个字符")
+    with session_scope(db_url) as session:
+        user = session.get(User, user_id)
+        if user is None or user.status != "active":
+            raise HTTPException(401, "未登录或会话已过期")
+        user.display_name = display_name
+        user.updated_at = utcnow()
+        return user
+
+
+def change_password(
+    db_url: str,
+    user_id: str,
+    current_password: object,
+    new_password: object,
+    *,
+    current_token_hash: str,
+) -> list[str]:
+    replacement = validate_password(new_password)
+    revoked_hashes: list[str] = []
+    with session_scope(db_url) as session:
+        user = session.get(User, user_id)
+        if user is None or user.status != "active":
+            raise HTTPException(401, "未登录或会话已过期")
+        try:
+            PASSWORD_HASHER.verify(user.password_hash, str(current_password or ""))
+        except (VerifyMismatchError, InvalidHashError):
+            raise HTTPException(403, "当前密码错误") from None
+        now = utcnow()
+        user.password_hash = PASSWORD_HASHER.hash(replacement)
+        user.updated_at = now
+        for login in session.query(LoginSession).filter_by(
+            user_id=user_id, revoked_at=None
+        ):
+            if login.token_hash == current_token_hash:
+                continue
+            login.revoked_at = now
+            revoked_hashes.append(login.token_hash)
+    _remember_revoked_sessions(revoked_hashes)
+    return revoked_hashes
+
+
 def create_login_session(db_url: str, user: User, *, user_agent="", ip_address="") -> str:
     token = secrets.token_urlsafe(48)
     with session_scope(db_url) as session:
@@ -327,6 +374,15 @@ def resolve_session(db_url: str, token: str | None) -> User | None:
     return identity.user if identity is not None else None
 
 
+def _remember_revoked_sessions(digests: list[str]) -> None:
+    with _REVOKED_SESSION_LOCK:
+        for digest in digests:
+            _REVOKED_SESSION_HASHES[digest] = time.time()
+        while len(_REVOKED_SESSION_HASHES) > 100_000:
+            oldest = next(iter(_REVOKED_SESSION_HASHES))
+            _REVOKED_SESSION_HASHES.pop(oldest, None)
+
+
 def revoke_session(db_url: str, token: str | None) -> None:
     if not token:
         return
@@ -338,11 +394,7 @@ def revoke_session(db_url: str, token: str | None) -> None:
     # Existing WebSockets cannot consult the database for every outbound chunk.
     # Keep an in-process revocation fence so a revoked session immediately stops
     # receiving broadcasts even before its socket close finishes.
-    with _REVOKED_SESSION_LOCK:
-        _REVOKED_SESSION_HASHES[digest] = time.time()
-        if len(_REVOKED_SESSION_HASHES) > 100_000:
-            oldest = next(iter(_REVOKED_SESSION_HASHES))
-            _REVOKED_SESSION_HASHES.pop(oldest, None)
+    _remember_revoked_sessions([digest])
 
 
 def authorize_world(db_url: str, user_id: str, world_id: str, permission: str) -> str:

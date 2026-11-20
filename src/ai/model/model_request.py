@@ -129,6 +129,18 @@ def prepare_model_request(
             else message
             for message in messages
         ]
+    from src.ai.model.action_hint_policy import generation_instruction, history_without_choices
+
+    hint_instruction = generation_instruction(host)
+    if hint_instruction:
+        messages = [dict(message) for message in messages]
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = f"{messages[0].get('content', '')}\n\n{hint_instruction}"
+        else:
+            messages.insert(0, {"role": "system", "content": hint_instruction})
+        messages = [dict(message, content=history_without_choices(message["content"]))
+                    if message.get("role") == "assistant" and isinstance(message.get("content"), str)
+                    else message for message in messages]
     skill_allowlist: tuple[tuple[str, str], ...] = ()
     required_tools: frozenset[str] = frozenset()
     allowed_tools: frozenset[str] | None = None

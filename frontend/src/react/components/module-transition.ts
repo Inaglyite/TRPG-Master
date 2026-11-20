@@ -190,3 +190,121 @@ export function useModuleTransition(): {
 
   return { phase, outgoingBg, incomingBg };
 }
+
+export function useCloudModuleTransition(
+  selectedId: string,
+  backgrounds: Record<string, string | null>,
+): {
+  displayedId: string;
+  phase: ModuleTransitionPhase;
+  outgoingBg: string | null;
+  incomingBg: string | null | undefined;
+} {
+  const [displayedId, setDisplayedId] = useState(selectedId);
+  const [phaseState, setPhaseState] = useState<ModuleTransitionPhase>("idle");
+  const [incoming, setIncoming] = useState<{
+    id: string;
+    background: string | null;
+  } | null>(null);
+  const backgroundsRef = useRef(backgrounds);
+  backgroundsRef.current = backgrounds;
+
+  const reduced = prefersReducedMotion();
+  const switching = displayedId !== selectedId;
+  const animate = switching && Boolean(displayedId) && !reduced;
+  const phase: ModuleTransitionPhase = animate
+    ? "flipping"
+    : switching || phaseState === "flipping"
+      ? "idle"
+      : phaseState;
+  const visibleId = animate ? displayedId : selectedId;
+
+  useEffect(() => {
+    if (!displayedId || displayedId === selectedId || prefersReducedMotion()) {
+      setDisplayedId(selectedId);
+      setPhaseState("idle");
+      setIncoming(null);
+      return;
+    }
+
+    let cancelled = false;
+    let flipDone = false;
+    let imageReady = false;
+    let flipTimer: number | null = null;
+    let enterTimer: number | null = null;
+    let preloader: HTMLImageElement | null = null;
+    const targetBackground = backgroundsRef.current[selectedId] ?? null;
+    setPhaseState("flipping");
+    setIncoming(null);
+
+    const clearTimers = () => {
+      if (flipTimer !== null) window.clearTimeout(flipTimer);
+      if (enterTimer !== null) window.clearTimeout(enterTimer);
+      flipTimer = null;
+      enterTimer = null;
+    };
+    const startEntering = () => {
+      if (cancelled) return;
+      clearTimers();
+      setDisplayedId(selectedId);
+      setPhaseState("entering");
+      enterTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        setPhaseState("idle");
+        setIncoming(null);
+      }, ENTERING_MS);
+    };
+    const maybeEnter = () => {
+      if (flipDone && imageReady) startEntering();
+    };
+    flipTimer = window.setTimeout(() => {
+      flipTimer = null;
+      flipDone = true;
+      maybeEnter();
+    }, MODULE_FLIP_MS);
+
+    const src = targetBackground ? imageSource(targetBackground) : null;
+    if (!src) {
+      imageReady = true;
+      setIncoming({ id: selectedId, background: null });
+      maybeEnter();
+    } else {
+      const img = new Image();
+      preloader = img;
+      img.onload = () => {
+        if (cancelled || preloader !== img) return;
+        preloader = null;
+        imageReady = true;
+        setIncoming({ id: selectedId, background: targetBackground });
+        maybeEnter();
+      };
+      img.onerror = () => {
+        if (cancelled || preloader !== img) return;
+        preloader = null;
+        imageReady = true;
+        setIncoming({ id: selectedId, background: null });
+        maybeEnter();
+      };
+      img.src = src;
+    }
+
+    return () => {
+      cancelled = true;
+      clearTimers();
+      if (preloader) {
+        preloader.onload = null;
+        preloader.onerror = null;
+      }
+    };
+  }, [selectedId]);
+
+  return {
+    displayedId: visibleId,
+    phase,
+    outgoingBg: backgroundsRef.current[displayedId] ?? null,
+    incomingBg:
+      incoming?.id === selectedId && phase !== "idle"
+        ? incoming.background
+        : undefined,
+  };
+}

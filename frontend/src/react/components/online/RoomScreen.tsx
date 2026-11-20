@@ -119,7 +119,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
   }, []);
 
   const moduleTitle = roomModule
-    ? (modules.find((module) => module.id === roomModule)?.title ?? roomModule)
+    ? (modules.find((module) => module.id === roomModule)?.title ??
+      roomMetadata?.module_title ??
+      roomModule)
     : null;
   const roomTitle = roomMetadata?.name || moduleTitle || "房间";
   const me = members.find((member) => member.user_id === user?.id);
@@ -373,7 +375,8 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                     )}
                     {member.investigator && (
                       <span className="online-badge online-badge--investigator">
-                        {characterKeyName(member.investigator.character_key)}
+                        {member.investigator.display_name ||
+                          characterKeyName(member.investigator.character_key)}
                       </span>
                     )}
                   </span>
@@ -564,6 +567,9 @@ export function RoomScreen({ onClose }: { onClose?: () => void }) {
                   <li key={option.id} className="member-row">
                     <span className="member-name">
                       {option.name}
+                      {option.source === "library" && (
+                        <span className="member-me">（角色库）</span>
+                      )}
                       {option.occupation && (
                         <span className="member-me">
                           （{option.occupation}）

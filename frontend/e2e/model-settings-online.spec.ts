@@ -282,7 +282,9 @@ async function register(page: Page, username: string, solo: boolean) {
   await page.getByLabel("确认密码").fill("settings e2e password");
   await page.getByRole("button", { name: "注册并登录" }).click();
   await expect(
-    page.getByRole("heading", { name: solo ? "我的冒险" : "联机大厅" }),
+    solo
+      ? page.getByTestId("solo-home")
+      : page.getByRole("heading", { name: "联机大厅" }),
   ).toBeVisible({ timeout: 30_000 });
 }
 
@@ -311,10 +313,9 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   await register(page, `e2e_solo_${runId}`, true);
 
   // 创建冒险到选角页
-  await page.getByText("开始新冒险", { exact: true }).first().click();
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: /猩红文档/ }).click();
-  await page.getByRole("button", { name: /创建冒险/ }).click();
+  await page.locator("#btn-start").click();
   const confirmCharacter = page.locator("#btn-character-confirm");
   await expect(confirmCharacter).toBeVisible({ timeout: 30_000 });
   // 云端单人需先点角色卡认领，确认按钮才可用
@@ -381,10 +382,11 @@ test("云端单人 BYOK 闭环：未配置被拒→引导配置→测试→开�
   const page2 = await page.context().newPage();
   await page2.goto(`${baseUrl}/`);
   await page2.getByRole("button", { name: /云端单人/ }).click();
-  await expect(page2.getByRole("heading", { name: "我的冒险" })).toBeVisible({
+  await expect(page2.getByTestId("solo-home")).toBeVisible({
     timeout: 30_000,
   });
-  await page2.getByRole("button", { name: "继续冒险" }).first().click();
+  await page2.getByRole("button", { name: "从存档开始" }).click();
+  await page2.getByRole("button", { name: "读取" }).first().click();
   const settingsEntry = page2.locator("#btn-model-settings");
   await settingsEntry.waitFor({ state: "visible", timeout: 60_000 });
   await settingsEntry.click();

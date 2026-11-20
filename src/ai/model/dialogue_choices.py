@@ -7,7 +7,8 @@ from src.gameplay.choice_policy import filter_choice_targets
 
 
 def prepare_dialogue_choices(output: DialogueOutput, world: dict, *, history_text: str = "",
-                             extra_present: set[str] | None = None) -> tuple[DialogueOutput, list[dict]]:
+                             extra_present: set[str] | None = None,
+                             generate_action_hints: bool = True) -> tuple[DialogueOutput, list[dict]]:
     segments, menu = [], []
     for block in output.segments:
         if isinstance(block, NarrationBlock):
@@ -17,6 +18,9 @@ def prepare_dialogue_choices(output: DialogueOutput, world: dict, *, history_tex
                 segments.append(block.model_copy(update={"text": text}))
         else:
             segments.append(block)
+    if not generate_action_hints:
+        return output.model_copy(update={"segments": segments, "choices": [],
+                                         "choice_skill_hints": [], "choice_targets": []}), []
     choices = list(output.choices) or menu
     # Menus are separate data; they cannot act as their own public evidence.
     public_text = history_text + "\n" + "\n".join(block.text for block in segments)

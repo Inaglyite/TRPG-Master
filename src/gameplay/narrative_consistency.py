@@ -150,6 +150,10 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
         )
         payload["current_scene"] = engine.context.world_store.load().get("current_scene", {})
         messages[1]["content"] = json.dumps(payload, ensure_ascii=False)
+    from src.ai.model.action_hint_policy import action_hints_enabled, generation_instruction
+
+    if hint_instruction := generation_instruction(engine):
+        messages[0]["content"] += "\n\n" + hint_instruction
     model = model_for_role(engine, "consistency")
     started = time.monotonic()
     timeout = min(_REWRITE_TIMEOUT_SECONDS, model_timeout_seconds())
@@ -191,7 +195,8 @@ def apply_narrative_consistency(engine: Any, narrative: str) -> str:
             parsed = parse_dialogue_output(rewritten)
             validate_live_dialogue(parsed)
             checked, choice_drops = prepare_dialogue_choices(
-                parsed, engine.context.world_store.load()
+                parsed, engine.context.world_store.load(),
+                generate_action_hints=action_hints_enabled(engine),
             )
             if choice_drops:
                 engine.__dict__.setdefault("_turn_choice_policy_dropped", []).extend(choice_drops)

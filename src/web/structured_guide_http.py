@@ -52,7 +52,7 @@ def read_keeper_guide(deps, world_id: str, user_id: str | None) -> dict | None:
 
         chapters = valid_chapters(session, world_id, state_row.state or {}) if state_row else []
     try:
-        record = deps.module_registry.resolve(module_name)
+        record = deps.module_registry.resolve_world_module(module_name)
         root = record.path.resolve()
         candidates = [("module", "模组正文", root / "module.md")]
         scenes = root / "scenes"
@@ -181,7 +181,7 @@ def register_structured_guide_routes(router, deps) -> None:
             query = await request.json()
             payload = await asyncio.to_thread(
                 AgentKnowledge(
-                    deps.database_url(), module_resolver=deps.module_registry.resolve
+                    deps.database_url(), module_resolver=deps.module_registry.resolve_world_module
                 ).query,
                 world_id,
                 principal,

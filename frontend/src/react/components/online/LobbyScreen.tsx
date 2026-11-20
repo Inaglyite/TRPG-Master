@@ -176,7 +176,7 @@ export function LobbyScreen() {
                     )}
                   </span>
                   <span className="room-card-module">
-                    {moduleTitle(world.module)}
+                    {world.metadata?.module_title || moduleTitle(world.module)}
                   </span>
                   <span className="room-card-meta">
                     <span

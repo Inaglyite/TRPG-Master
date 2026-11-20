@@ -597,7 +597,7 @@ def test_cloud_library_is_scoped_per_user(cloud_clients):
     assert len(client.get("/api/character-library").json()["entries"]) == 1
 
 
-def test_cloud_solo_options_include_library_multiplayer_excludes(cloud_clients):
+def test_cloud_solo_and_multiplayer_use_only_the_current_users_library(cloud_clients):
     client, url = cloud_clients
     entry_id = client.post(
         "/api/character-library", json=valid_card(), headers=ORIGIN
@@ -624,6 +624,15 @@ def test_cloud_solo_options_include_library_multiplayer_excludes(cloud_clients):
                     role="owner",
                 )
             )
+        user_b = session.query(User).filter_by(username="owner_b").one()
+        session.add(
+            WorldMember(
+                id=new_id("member"),
+                world_id="world-multi",
+                user_id=user_b.id,
+                role="player",
+            )
+        )
 
     solo = client.get("/api/worlds/world-solo/investigators/options")
     assert solo.status_code == 200
@@ -636,19 +645,39 @@ def test_cloud_solo_options_include_library_multiplayer_excludes(cloud_clients):
     multi_group = next(
         group for group in multi.json()["groups"] if group["id"] == "library"
     )
-    assert multi_group["characters"] == []
+    assert [char["id"] for char in multi_group["characters"]] == [entry_id]
 
-    # solo 房间可认领库角色（认领后 ref 由服务端给出，不经客户端伪造）
-    claimed = client.post(
-        "/api/worlds/world-solo/investigators/claim",
-        json={"character_key": entry_id},
-        headers=ORIGIN,
+    # solo 与多人都允许使用本人角色库；ref 由服务端候选记录给出。
+    for world_id in ("world-solo", "world-multi"):
+        claimed = client.post(
+            f"/api/worlds/{world_id}/investigators/claim",
+            json={"character_key": entry_id},
+            headers=ORIGIN,
+        )
+        assert claimed.status_code == 200
+
+    _logout_then_login(client, "owner_b", "password-b-123")
+    other_options = client.get("/api/worlds/world-multi/investigators/options")
+    other_library = next(
+        group for group in other_options.json()["groups"] if group["id"] == "library"
     )
-    assert claimed.status_code == 200
-    # 多人房间认领库角色被拒（不在该房间的候选列表中）
-    rejected = client.post(
+    assert other_library["characters"] == []
+    assert client.post(
         "/api/worlds/world-multi/investigators/claim",
         json={"character_key": entry_id},
         headers=ORIGIN,
-    )
-    assert rejected.status_code == 400
+    ).status_code == 400
+
+    own_card = client.post(
+        "/api/character-library", json=valid_card(), headers=ORIGIN
+    ).json()["entry"]["id"]
+    assert client.post(
+        "/api/worlds/world-multi/investigators/claim",
+        json={"character_key": own_card},
+        headers=ORIGIN,
+    ).status_code == 200
+    with patch.dict(os.environ, {"TRPG_REQUIRE_AUTH": "1"}):
+        assert resolve_library_card(
+            own_card,
+            context=SimpleNamespace(database_url=url, world_id="world-multi"),
+        ) is not None

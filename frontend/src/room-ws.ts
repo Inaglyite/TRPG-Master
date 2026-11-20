@@ -11,6 +11,7 @@ import {
 import { parseServerMessage } from "./protocol/server-message";
 import { parseStructuredEvent } from "./protocol/structured";
 import { useAppStore } from "./state/app-store";
+import { withGenerationPreferences } from "./state/game-preferences";
 import {
   bumpOnlineRequestEpoch,
   PrivateState,
@@ -441,14 +442,14 @@ function sendProtocolFrame(payload: Record<string, unknown>): void {
 
 /** 发送房间消息（对象形式）；未连接时排队，重连成功后按序补发。 */
 export function roomSend(payload: Record<string, unknown>): void {
-  sendRaw(JSON.stringify(payload));
+  sendRaw(withGenerationPreferences(JSON.stringify(payload)));
 }
 
 /** User-initiated room controls must not be silently replayed after reconnect. */
 export function roomSendNow(payload: Record<string, unknown>): boolean {
   return sendRoomFrameNow(
     { worldId: activeWorldId, snapshotApplied: roomSnapshotApplied, socket },
-    injectActionId(JSON.stringify(payload)),
+    injectActionId(withGenerationPreferences(JSON.stringify(payload))),
   );
 }
 

@@ -18,6 +18,7 @@ import {
   useReasoningStore,
   type ReasoningFrame,
 } from "./state/reasoning-store";
+import { withGenerationPreferences } from "./state/game-preferences";
 import { useMessageStore } from "./state/message-store";
 import { useStartStore } from "./state/start-store";
 import { useStructuredStore } from "./state/structured-store";
@@ -356,6 +357,7 @@ export function markRoomConnectionRestored(turnId: string): void {
 
 /** Private writes must never wait in a reconnect queue with an implicit world. */
 export function sendImmediately(payload: string): boolean {
+  payload = withGenerationPreferences(payload);
   try {
     if (activeTransport) return activeTransport.sendNow?.(payload) === true;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -367,6 +369,7 @@ export function sendImmediately(payload: string): boolean {
 }
 
 export function safeSend(payload: string) {
+  payload = withGenerationPreferences(payload);
   if (activeTransport) {
     activeTransport.send(payload);
     return;

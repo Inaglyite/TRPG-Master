@@ -52,7 +52,7 @@ def read_world_asset(deps, world_id: str, asset_id: str, user_id: str | None) ->
             return None
         module_name = world.module_name
     try:
-        record = deps.module_registry.resolve(module_name)
+        record = deps.module_registry.resolve_world_module(module_name)
         root = (record.path / "assets").resolve()
         path = (root / entry["file"]).resolve()
         if not path.is_relative_to(root) or not path.is_file():

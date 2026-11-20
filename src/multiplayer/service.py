@@ -287,6 +287,7 @@ def room_members(db_url: str, world_id: str, user_id: str) -> dict:
                         {
                             "id": claims[member.user_id].id,
                             "character_key": claims[member.user_id].character_key,
+                            "display_name": (claims[member.user_id].character_ref or {}).get("display_name", ""),
                             "status": claims[member.user_id].status,
                         }
                         if member.user_id in claims

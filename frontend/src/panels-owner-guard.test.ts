@@ -9,8 +9,10 @@ import {
   openSavePanel,
   quickSave,
   renameWorld,
+  resumeAdventure,
   resumeTimeline,
 } from "./panels";
+import { enterRoom } from "./online";
 import { addMsg } from "./renderer";
 import { useAppStore } from "./state/app-store";
 import {
@@ -22,6 +24,10 @@ import { safeSend } from "./ws";
 
 vi.mock("./ws", () => ({
   safeSend: vi.fn(),
+}));
+
+vi.mock("./online", () => ({
+  enterRoom: vi.fn(),
 }));
 
 vi.mock("./renderer", () => ({
@@ -298,6 +304,20 @@ describe("云端单人时间线能力", () => {
     expect(safeSend).not.toHaveBeenCalledWith(
       JSON.stringify({ type: "world_list" }),
     );
+  });
+
+  it("online 存档卡片直接打开目标存档位，不发同树切换帧", async () => {
+    setupRoom("owner", "online", "solo");
+    useAppStore.setState({ savePanelOpen: true });
+    resumeAdventure({
+      root_world_id: "other-root",
+      resume_world_id: "other-resume",
+      active: false,
+    });
+    await vi.dynamicImportSettled();
+    expect(enterRoom).toHaveBeenCalledWith("other-resume");
+    expect(useAppStore.getState().savePanelOpen).toBe(false);
+    expect(safeSend).not.toHaveBeenCalled();
   });
 
   it("online 当前时间线只关闭面板，不读 slot_000", () => {

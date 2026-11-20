@@ -56,7 +56,7 @@ class RuntimeContext:
             self, "module_name", _validate_component(self.module_name, "module_name")
         )
         registry = ModuleRegistry(self.project_root, self.runtime_root)
-        object.__setattr__(self, "module_record", registry.resolve(self.module_name))
+        object.__setattr__(self, "module_record", registry.resolve_world_module(self.module_name))
         db_url = database_url(self.runtime_root)
         if db_url.startswith("sqlite:"):
             initialize_database(db_url)

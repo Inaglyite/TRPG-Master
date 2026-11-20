@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { apiHttpOrigin, notifyUnauthorized } from "./client";
+import { currentCloudRequestGeneration } from "./request-context";
+import { useOnlineStore } from "../state/online-store";
 import { backendHttpOrigin } from "../backend-url";
 import { useAppStore } from "../state/app-store";
 
@@ -28,17 +31,24 @@ const importSchema = z.object({
   module: installedSchema,
 });
 
-/** Local-only binary upload. It never routes to a saved cloud origin. */
+/** Local packages use the loopback backend; cloud uploads go to the current account. */
 export async function uploadModulePackage<T extends "inspect" | "import">(
   endpoint: T,
   file: File,
   signal: AbortSignal,
+  scope: "local" | "account" = "local",
 ): Promise<
   T extends "inspect"
     ? z.infer<typeof inspectSchema>
     : z.infer<typeof importSchema>
 > {
-  if (useAppStore.getState().mode !== "local")
+  const cloud = scope === "account";
+  const user = useOnlineStore.getState().user?.id;
+  const generation = currentCloudRequestGeneration();
+  const origin = cloud ? apiHttpOrigin() : backendHttpOrigin();
+  if (cloud && (!user || useAppStore.getState().mode !== "online"))
+    throw new Error("请先登录");
+  if (!cloud && useAppStore.getState().mode !== "local")
     throw new Error("模组导入仅适用于本地模式");
   const controller = new AbortController();
   let rejectAbort!: (reason: DOMException) => void;
@@ -76,9 +86,10 @@ export async function uploadModulePackage<T extends "inspect" | "import">(
         if (signal.aborted)
           throw new DOMException("操作已停止等待", "AbortError");
         const response = await fetch(
-          `${backendHttpOrigin()}/api/modules/${endpoint}`,
+          `${origin}/api/${cloud ? "me/modules" : "modules"}/${endpoint}`,
           {
             method: "POST",
+            credentials: cloud ? "include" : "same-origin",
             signal: controller.signal,
             headers: {
               "Content-Type": "application/vnd.trpg-master.module+zip",
@@ -87,6 +98,15 @@ export async function uploadModulePackage<T extends "inspect" | "import">(
             body: file,
           },
         );
+        if (cloud) {
+          if (
+            generation !== currentCloudRequestGeneration() ||
+            user !== useOnlineStore.getState().user?.id ||
+            origin !== apiHttpOrigin()
+          )
+            throw new Error("会话已变化，请重新选择文件");
+          if (response.status === 401) notifyUnauthorized();
+        }
         let payload: unknown;
         try {
           payload = await response.json();

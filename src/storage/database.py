@@ -56,7 +56,11 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(40), default="", server_default="")
     password_hash: Mapped[str] = mapped_column(Text)
+    module_order: Mapped[list[str]] = mapped_column(
+        JSON_VALUE, default=list, server_default="[]"
+    )
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

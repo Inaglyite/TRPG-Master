@@ -1,3 +1,4 @@
+import { startStructuredSoloFixture } from "./helpers/structured-solo";
 /**
  * 结构化战斗/结案生命周期 —— 真实后端浏览器验收（人类主持，零模型调用）。
  *
@@ -349,22 +350,18 @@ async function registerIntoSoloLobby(
   await page.getByLabel("密码", { exact: true }).fill(PASSWORD);
   await page.getByLabel("确认密码").fill(PASSWORD);
   await page.getByRole("button", { name: "注册并登录" }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
 }
 
 /** 云端单人：创建结构化（人类主持）世界并用指定角色开局，返回 world_id。 */
 async function createSoloStructuredWorld(
   page: Page,
   frames: Frames,
-  name: string,
   characterName: string,
 ): Promise<string> {
-  await page.getByRole("button", { name: "开始新冒险" }).click();
-  await page.getByLabel("冒险名称").fill(name);
   await page.locator(".module-select-trigger").click();
   await page.getByRole("option", { name: new RegExp(MODULE) }).click();
-  await page.getByRole("radio", { name: "人类主持" }).click();
-  await page.getByRole("button", { name: "创建冒险" }).click();
+  await startStructuredSoloFixture(page);
   // 选角 → 进入游戏。同名角色可能同时有「默认调查员」与「模组特色」两张卡，
   // 固定选模组名册那张（模组编写路径）。先等卡出现再数，避免竞态。
   const cards = page.locator(".character-card", { hasText: characterName });
@@ -585,11 +582,12 @@ async function reenterSoloWorld(page: Page, frames: Frames) {
     timeout: 30_000,
   });
   await page.getByRole("button", { name: /云端单人/ }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible({
+  await expect(page.getByTestId("solo-home")).toBeVisible({
     timeout: 30_000,
   });
   const before = snapshotCount(frames);
-  await page.getByRole("button", { name: "继续冒险" }).first().click();
+  await page.getByRole("button", { name: "从存档开始" }).click();
+  await page.getByRole("button", { name: "读取" }).first().click();
   await expect(page.getByTestId("structured-tool-row")).toBeVisible({
     timeout: 90_000,
   });
@@ -669,12 +667,7 @@ test("A 战斗中保存：已结算 HP/弹药/物品 ID 落盘，刷新重连不
   const frames = collectFrames(page);
 
   await registerIntoSoloLobby(page, `solo-a-${runId}`);
-  const worldId = await createSoloStructuredWorld(
-    page,
-    frames,
-    `战斗存档验收${runId}`,
-    "黄千陆",
-  );
+  const worldId = await createSoloStructuredWorld(page, frames, "黄千陆");
   expect(worldId).not.toContain("-branch-");
 
   // 真实开战：医学院的模组 NPC + 黄千陆的 .38 左轮（6 发）。
@@ -975,12 +968,7 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
   const frames = collectFrames(page);
 
   await registerIntoSoloLobby(page, `solo-c-${runId}`);
-  const parentWorldId = await createSoloStructuredWorld(
-    page,
-    frames,
-    `战斗分支验收${runId}`,
-    "黄千陆",
-  );
+  const parentWorldId = await createSoloStructuredWorld(page, frames, "黄千陆");
 
   // 已提交状态：真实开枪一次（弹药 6→5、NPC 掉 HP）。
   const npcId = await moveToNpcScene(page, frames);
@@ -1192,17 +1180,25 @@ test("C 云端单人战斗中分支：已提交状态复制、旧授权不复制
     timeout: 30_000,
   });
   await page.getByRole("button", { name: /云端单人/ }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
+  await page.getByRole("button", { name: "从存档开始" }).click();
   await page
     .locator(".adventure-card")
     .first()
-    .getByRole("button", { name: "管理时间线", exact: true })
+    .getByRole("button", { name: "时间线", exact: true })
     .click();
-  const timelinePanel = page.locator(".solo-timeline-dialog");
+  const timelinePanel = page.getByTestId("save-panel-timelines");
   await expect(timelinePanel).toBeVisible();
   const parentRow = timelinePanel.locator(`[data-world="${parentWorldId}"]`);
   await expect(parentRow).toBeVisible();
-  await parentRow.getByRole("button", { name: "继续游戏" }).click();
+  await parentRow.getByRole("button", { name: "从此处继续" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("trpg-online-world-id")),
+    )
+    .toBe(parentWorldId);
+  await expect(timelinePanel).toBeVisible();
+  await page.locator("#save-panel-close").click();
   await expect(page.getByTestId("structured-tool-row")).toBeVisible({
     timeout: 90_000,
   });
@@ -1240,12 +1236,7 @@ test("D 云端单人结案：非法结局被拒、合法结局与奖励可恢复
   const frames = collectFrames(page);
 
   await registerIntoSoloLobby(page, `solo-d-${runId}`);
-  const worldId = await createSoloStructuredWorld(
-    page,
-    frames,
-    `结案验收${runId}`,
-    "黄千陆",
-  );
+  const worldId = await createSoloStructuredWorld(page, frames, "黄千陆");
 
   // 非法结局：truth_and_seal 的前置事实未满足，必须被拒。
   await openConsole(page);

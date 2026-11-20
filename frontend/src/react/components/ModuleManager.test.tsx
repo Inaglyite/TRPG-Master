@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../../state/app-store";
 import { useStartStore } from "../../state/start-store";
@@ -75,6 +81,27 @@ describe("ModuleManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认删除模组及存档" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("模组正在使用");
     expect(remove).toBeInTheDocument();
+  });
+  it("keeps the closing transition mounted for 140ms before cleanup", async () => {
+    render(<ModuleManager />);
+    fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
+    const remove = await screen.findByRole("button", { name: "删除夜波测试" });
+    await waitFor(() => expect(remove).toBeEnabled());
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "关闭模组管理" }));
+      expect(document.querySelector(".module-manager-overlay")).toHaveClass(
+        "overlay-closing",
+      );
+      act(() => vi.advanceTimersByTime(100));
+      expect(
+        screen.getByRole("dialog", { name: "模组管理" }),
+      ).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(50));
+      expect(screen.queryByRole("dialog", { name: "模组管理" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("hides local management in cloud mode", () => {
     useAppStore.setState({ mode: "online" });

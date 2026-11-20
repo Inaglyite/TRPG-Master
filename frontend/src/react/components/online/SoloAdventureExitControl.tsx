@@ -95,11 +95,11 @@ export function SoloAdventureExitControl() {
     setStep("menu");
   }
 
-  async function returnToAdventureList() {
+  async function returnToHome() {
     if (busy) return;
     setPausing(true);
     // enterSoloLobby 会立即断开当前房间并清理公共叙事；存档仍在服务端，
-    // 玩家可以在“我的冒险”中继续。它不取消已经提交给守秘人的回合。
+    // 玩家稍后可以从首页的“从存档开始”继续。它不取消已提交的回合。
     await enterSoloLobby();
     setPausing(false);
   }
@@ -160,16 +160,16 @@ export function SoloAdventureExitControl() {
             </div>
             <div className="solo-exit-body">
               <p className="solo-adventure-exit-description">
-                返回会保留当前进度。若守秘人已经开始本回合，叙事会在服务器继续完成；你稍后可从“我的冒险”继续调查。
+                返回会保留当前进度。若守秘人已经开始本回合，叙事会在服务器继续完成；你稍后可以从首页的“从存档开始”继续调查。
               </p>
               <div className="solo-adventure-exit-actions">
                 <button
                   type="button"
                   className="btn-primary"
                   disabled={busy}
-                  onClick={() => void returnToAdventureList()}
+                  onClick={() => void returnToHome()}
                 >
-                  {pausing ? "正在返回…" : "返回我的冒险（保留进度）"}
+                  {pausing ? "正在返回…" : "返回首页（保留进度）"}
                 </button>
               </div>
               <button

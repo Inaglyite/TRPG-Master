@@ -161,8 +161,11 @@ def emit_structured_dialogue(
         public_history = "\n".join(str(message.get("content") or "")
                                    for message in getattr(host, "messages", [])[-12:]
                                    if message.get("role") == "assistant" and not message.get("tool_calls"))
+        from src.ai.model.action_hint_policy import action_hints_enabled
+
         parsed, choice_drops = prepare_dialogue_choices(parsed, world, history_text=public_history,
-                                                       extra_present=declared_guest_ids)
+                                                       extra_present=declared_guest_ids,
+                                                       generate_action_hints=action_hints_enabled(host))
         raw = parsed.model_dump_json()
         if choice_drops:
             host.__dict__.setdefault("_turn_choice_policy_dropped", []).extend(choice_drops)

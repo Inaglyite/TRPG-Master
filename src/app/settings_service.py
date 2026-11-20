@@ -76,7 +76,7 @@ class ConnectionProbeError(ValueError):
 class SettingsScope:
     """一次设置读/写的作用域与权限上下文。"""
 
-    mode: str  # "local" | "solo" | "room"
+    mode: str  # "local" | "account" | "solo" | "room"
     can_edit: bool
     user_id: str | None = None
     # 房间/单人世界的当前房主（配置解析以房主为准，成员只见脱敏视图）
@@ -97,6 +97,10 @@ class SettingsScope:
 def _scope_world_key(scope: SettingsScope, data: dict | None) -> str:
     """写入目标作用域：本地无世界维度；solo 可选 account/world；room 固定房间。"""
     if scope.is_local:
+        return ""
+    if scope.mode == "account":
+        if data and data.get("scope", "account") != "account":
+            raise ValueError("在首页只能修改当前账号的默认配置")
         return ""
     if scope.mode == "room":
         return scope.world_id or ""
@@ -180,6 +184,7 @@ def build_payload(
     applied = getattr(getattr(scope.engine, "_model_routes", None), "revision", None)
     scope_label = {
         "local": "本地默认（本机所有冒险共用）",
+        "account": "当前账号默认配置",
         "solo": "当前账号" + ("（此冒险已单独覆盖）" if world_override else ""),
         "room": "当前房间（房主配置，成员只读）",
     }[scope.mode]

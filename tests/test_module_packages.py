@@ -21,6 +21,7 @@ from src.modules.module_compiler import (
     compile_world_state,
     render_keeper_prompt,
 )
+from src.modules.module_deletion import delete_account_module
 from src.modules.module_format import (
     ModuleDefinition,
     ModuleManifest,
@@ -36,6 +37,7 @@ from src.modules.module_registry import (
     build_package,
     inspect_package,
 )
+from src.storage.database import Base, get_engine
 
 TEMPLATE = PROJECT_ROOT / "examples" / "module-template"
 
@@ -837,3 +839,26 @@ class ModuleImportApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_personal_modules_are_owned_even_for_identical_packages(tmp_path):
+    registry = ModuleRegistry(PROJECT_ROOT, tmp_path)
+    package = tmp_path / "author.trpgmod"
+    build_package(TEMPLATE, package)
+    a, _, _ = registry.install_for_account("alice", package)
+    b, _, _ = registry.install_for_account("bob", package)
+    assert a.key != b.key and a.path != b.path
+    assert a.key not in {r.key for r in registry.list_modules()}
+    assert [r.key for r in registry.account_modules("bob")] == [b.key]
+    with unittest.TestCase().assertRaises(FileNotFoundError):
+        registry.resolve_for_account(a.key, "bob")
+    assert registry.install_for_account("alice", package)[2]
+    db_url = f"sqlite:///{tmp_path / 'personal-deletion.db'}"
+    Base.metadata.create_all(get_engine(db_url))
+    delete_account_module(registry, a.key, "alice", db_url)
+    assert registry.account_modules("alice") == []
+    with unittest.TestCase().assertRaises(FileNotFoundError):
+        registry.resolve_world_module(a.key)
+    assert registry.resolve_for_account(b.key, "bob").path == b.path
+    assert not registry.install_for_account("alice", package)[2]
+    assert registry.resolve_for_account(a.key, "alice").key == a.key

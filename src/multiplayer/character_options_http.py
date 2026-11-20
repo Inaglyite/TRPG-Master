@@ -35,12 +35,7 @@ def register_character_options_route(router: APIRouter, deps) -> None:
                 module_name,
                 context=context,
                 include_personal=False,
-                # 云端单人房间按当前用户带角色库分组；多人房间不含私有角色。
-                library_scope=(
-                    user.id
-                    if str((world.metadata_json or {}).get("play_mode") or "") == "solo"
-                    else None
-                ),
+                library_scope=user.id,
             )
         except MultiplayerError as exc:
             return JSONResponse({"detail": exc.message, "code": exc.code}, status_code=exc.status_code)

@@ -311,17 +311,22 @@ export async function refreshWorlds(): Promise<void> {
   }
 }
 
-export async function ensureModules(): Promise<void> {
+let modulesRequestSerial = 0;
+export async function ensureModules(force = false): Promise<void> {
   const { modulesStatus } = useOnlineStore.getState();
-  if (modulesStatus === "loading" || modulesStatus === "ready") return;
+  if (!force && (modulesStatus === "loading" || modulesStatus === "ready"))
+    return;
+  const serial = ++modulesRequestSerial;
   const scope = captureRequestScope();
   useOnlineStore.setState({ modulesStatus: "loading", modulesError: null });
   try {
     const modules = await listModules();
-    if (!requestScopeIsCurrent(scope)) return;
+    if (serial !== modulesRequestSerial || !requestScopeIsCurrent(scope))
+      return;
     useOnlineStore.setState({ modules: modules ?? [], modulesStatus: "ready" });
   } catch (error) {
-    if (!requestScopeIsCurrent(scope)) return;
+    if (serial !== modulesRequestSerial || !requestScopeIsCurrent(scope))
+      return;
     useOnlineStore.setState({
       modulesStatus: "error",
       modulesError: errorMessage(error, "无法读取模组列表，请重试"),
@@ -423,9 +428,40 @@ export async function createSoloWorld(
     keeperMode?: "human" | "assisted" | "agent";
   } = {},
 ): Promise<void> {
+  if (useOnlineStore.getState().createBusy) return;
   const scope = captureRequestScope();
   useOnlineStore.setState({ createBusy: true, createError: null });
   try {
+    const style = options.structured
+      ? (options.keeperMode ?? "human")
+      : "legacy";
+    const previous = useOnlineStore.getState().preparedSoloWorld;
+    if (
+      previous &&
+      previous.module === module &&
+      previous.name === name &&
+      previous.style === style
+    ) {
+      try {
+        const info = await getRoomInfo(previous.worldId);
+        if (!requestScopeIsCurrent(scope)) return;
+        if (
+          info.metadata?.room_status === "lobby" &&
+          info.metadata.play_mode === "solo"
+        ) {
+          useOnlineStore.setState({ createBusy: false });
+          await enterRoom(previous.worldId);
+          return;
+        }
+      } catch (error) {
+        if (!(
+          error instanceof ApiError &&
+          (error.status === 404 || error.status === 403)
+        ))
+          throw error;
+      }
+      if (!requestScopeIsCurrent(scope)) return;
+    }
     const world = await createWorld(module, {
       ...(name.trim() ? { name: name.trim() } : {}),
       max_players: 1,
@@ -439,7 +475,10 @@ export async function createSoloWorld(
         : {}),
     });
     if (!requestScopeIsCurrent(scope)) return;
-    useOnlineStore.setState({ createBusy: false });
+    useOnlineStore.setState({
+      createBusy: false,
+      preparedSoloWorld: { worldId: world.world_id, module, name, style },
+    });
     await enterRoom(world.world_id);
   } catch (error) {
     if (!requestScopeIsCurrent(scope)) return;
@@ -653,12 +692,14 @@ async function loadCharacters(
     const all = (data.groups ?? []).flatMap((group) => group.characters ?? []);
     const byName = new Map<string, (typeof all)[number]>();
     for (const option of all) {
-      const name = option.name || option.id;
-      const existing = byName.get(name);
+      // 个人卡允许同名，保留每张可独立认领的卡。
+      const key =
+        option.source === "library" ? option.id : option.name || option.id;
+      const existing = byName.get(key);
       if (!existing) {
-        byName.set(name, option);
+        byName.set(key, option);
       } else if (existing.source !== "module" && option.source === "module") {
-        byName.set(name, option);
+        byName.set(key, option);
       }
     }
     const options = [...byName.values()];

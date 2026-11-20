@@ -1,6 +1,6 @@
 /** Two independent temporary TLS backends; never connects to production. */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, request, test, type Page } from "@playwright/test";
@@ -67,6 +67,7 @@ test.beforeAll(async () => {
             TRPG_RUNTIME_ROOT: root,
             TRPG_DATABASE_URL: `sqlite:///${join(root, "e2e.db")}`,
             TRPG_REQUIRE_AUTH: "1",
+            TRPG_ADMIN_USERS: `workshop_${runId}`,
             TRPG_ALLOW_REGISTRATION: "1",
             TRPG_ALLOWED_ORIGINS: origins.join(","),
             TRPG_WRITE_COMPAT_EXPORTS: "0",
@@ -130,10 +131,8 @@ async function registerInUi(page: Page, name: string) {
   await page.getByLabel("密码", { exact: true }).fill("isolated test password");
   await page.getByLabel("确认密码").fill("isolated test password");
   await page.getByRole("button", { name: "注册并登录" }).click();
-  await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "刷新", exact: true }),
-  ).toBeEnabled();
+  await expect(page.getByTestId("solo-home")).toBeVisible();
+  await expect(page.locator("#btn-start")).toBeEnabled();
 }
 
 async function inspectConnectionButtons(page: Page, stem: string) {
@@ -205,24 +204,27 @@ test("switching actual servers discards credentials and ignores a delayed real o
   await page.goto(origins[0]);
   await page.getByRole("button", { name: /云端单人/ }).click();
   await registerInUi(page, `server_a_${runId}`);
-  const modules = await (
-    await page.request.get(`${origins[0]}/api/modules`)
-  ).json();
-  const created = await page.request.post(`${origins[0]}/api/worlds`, {
-    headers: { Origin: origins[0] },
-    data: {
-      module: modules.modules[0].id,
-      name: "仅在服务器A的调查",
-      play_mode: "solo",
-      execution_profile: "structured_v1",
-      keeper_mode: "human",
-    },
+  await page.route("**/api/worlds", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.continue({
+      postData: JSON.stringify({
+        ...route.request().postDataJSON(),
+        name: "仅在服务器A的调查",
+        execution_profile: "structured_v1",
+        keeper_mode: "human",
+      }),
+    });
   });
-  expect(created.ok()).toBe(true);
-  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await page.locator("#btn-start").click();
+  await page.locator(".character-card").first().click();
+  await page.locator("#btn-character-confirm").click();
+  await page.getByRole("button", { name: "离开当前冒险", exact: true }).click();
+  await page.getByRole("button", { name: "返回首页（保留进度）" }).click();
+  await page.getByRole("button", { name: "从存档开始" }).click();
   await expect(
     page.getByText("仅在服务器A的调查", { exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "关闭存档管理" }).click();
 
   // Revoke A's cookie at the real server. Its next real /worlds 401 is held
   // in flight, rather than replacing it with a fabricated success/error.
@@ -249,8 +251,9 @@ test("switching actual servers discards credentials and ignores a delayed real o
     await route.fulfill({ response });
   });
   try {
-    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.getByRole("button", { name: "从存档开始" }).click();
     await oldResponseReady;
+    await page.getByRole("button", { name: "个人中心" }).click();
     await page.getByRole("button", { name: "退出登录", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "登录", exact: true }),
@@ -272,16 +275,19 @@ test("switching actual servers discards credentials and ignores a delayed real o
     const done = page.waitForResponse(`${origins[0]}/api/worlds`);
     release();
     expect((await done).status()).toBe(401);
-    await expect(page.getByRole("heading", { name: "我的冒险" })).toBeVisible();
+    await expect(page.getByTestId("solo-home")).toBeVisible();
+    await page.getByRole("button", { name: "个人中心" }).click();
     await expect(page.locator(".online-user")).toHaveText(`server_b_${runId}`);
     await expect(
       page.getByText("仅在服务器A的调查", { exact: true }),
     ).toHaveCount(0);
-    // A current request to B still succeeds after the delayed old 401.
-    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.keyboard.press("Escape");
     await expect(
-      page.getByRole("button", { name: "刷新", exact: true }),
-    ).toBeEnabled();
+      page.getByRole("button", { name: "从存档开始" }),
+    ).toBeDisabled();
+    const worldsB = await page.request.get(origins[1] + "/api/worlds");
+    expect(worldsB.ok()).toBe(true);
+    expect((await worldsB.json()).worlds).toEqual([]);
     expect((await page.request.get(`${origins[1]}/api/auth/me`)).ok()).toBe(
       true,
     );
@@ -467,4 +473,150 @@ test("角色库云端账号隔离：真实会话过期立即隐藏旧档案，�
       await page.request.get(`${origins[0]}/api/character-library/${oldId}`)
     ).status(),
   ).toBe(404);
+});
+
+test("云端首页六个直达工具，个人模组和上传角色卡按账号隔离", async ({
+  page,
+  browser,
+}, testInfo) => {
+  const origin = origins[0];
+  await page.goto(origin + "/?mode=online&intent=solo");
+  await registerInUi(page, `uploader_${runId}`);
+  const toolbar = page.getByRole("navigation", { name: "游戏工具" });
+  for (const width of [1280, 939, 640]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(page.locator(".boot-loader")).toHaveCount(0);
+    await expect(toolbar.getByRole("button")).toHaveCount(6);
+    await page.waitForTimeout(1000);
+    for (const name of [
+      "导入模组",
+      "模组工坊",
+      "模组管理",
+      "角色库",
+      "游戏设置",
+      "退出游戏",
+    ]) {
+      const button = toolbar.getByRole("button", { name, exact: true });
+      expect(
+        await button.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return (
+            r.width >= 32 &&
+            r.height >= 32 &&
+            el.contains(
+              document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
+            )
+          );
+        }),
+      ).toBe(true);
+    }
+    await page.screenshot({
+      path: testInfo.outputPath(`cloud-tools-${width}.png`),
+    });
+  }
+  await toolbar.getByRole("button", { name: "角色库" }).click();
+  const library = page.getByRole("dialog", { name: "角色库" });
+  await library.getByRole("button", { name: "导入角色卡" }).click();
+  await library
+    .locator("input[type=file]")
+    .setInputFiles(
+      join(
+        repositoryRoot,
+        "frontend/public/examples/character-card.example.json",
+      ),
+    );
+  await library.getByRole("button", { name: "确认导入" }).click();
+  await expect(
+    library.locator(".library-row-main", { hasText: "示例调查员" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(library).toBeHidden();
+
+  const file = join(instances[0].root, "template.trpgmod");
+  const build = spawnSync(
+    python,
+    ["tools/module_packager.py", "pack", "examples/module-template", file],
+    { cwd: repositoryRoot },
+  );
+  expect(build.status, String(build.stderr)).toBe(0);
+  const chooser = page.waitForEvent("filechooser");
+  await toolbar.getByRole("button", { name: "导入模组" }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: "template.trpgmod",
+    mimeType: "application/zip",
+    buffer: readFileSync(file),
+  });
+  const review = page.getByRole("dialog", { name: "导入模组" });
+  const imported = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/me/modules/import") &&
+      r.request().method() === "POST",
+  );
+  await review.getByRole("button", { name: /导入并/ }).click();
+  const installed = await imported;
+  expect(installed.status()).toBe(201);
+  const {
+    module: { id },
+  } = await installed.json();
+  await expect(page.locator("#module-selector")).toContainText("低语档案馆");
+  await toolbar.getByRole("button", { name: "模组管理" }).click();
+  const manager = page.getByRole("dialog", { name: /模组管理/ });
+  await expect(manager.getByText("低语档案馆", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.locator("#btn-start").click();
+  await expect(page.locator("#btn-character-confirm")).toBeVisible();
+  const worlds = (await (await page.request.get(origin + "/api/worlds")).json())
+    .worlds;
+  expect(worlds.some((world: { module: string }) => world.module === id)).toBe(
+    true,
+  );
+
+  const other = await browser.newContext({ ignoreHTTPSErrors: true });
+  try {
+    const second = await other.newPage();
+    await second.goto(origin + "/?mode=online&intent=solo");
+    await registerInUi(second, `workshop_${runId}`);
+    const catalog = await (
+      await second.request.get(origin + "/api/modules")
+    ).json();
+    expect(catalog.modules.some((m: { id: string }) => m.id === id)).toBe(
+      false,
+    );
+    expect(
+      (
+        await second.request.get(origin + "/api/modules/" + id + "/cover")
+      ).status(),
+    ).toBe(404);
+    const denied = await second.request.post(origin + "/api/worlds", {
+      headers: { Origin: origin },
+      data: { module: id, play_mode: "solo" },
+    });
+    expect(denied.status()).toBe(404);
+    expect(
+      (
+        await second.request.delete(origin + "/api/me/modules/" + id, {
+          headers: { Origin: origin },
+        })
+      ).status(),
+    ).toBe(404);
+    expect(
+      await (
+        await second.request.get(origin + "/api/character-library")
+      ).text(),
+    ).not.toContain("示例调查员");
+    await second.getByRole("button", { name: "模组工坊", exact: true }).click();
+    const editor = second.frameLocator('iframe[title="模组编辑器"]');
+    await expect(
+      editor.getByRole("heading", { name: "创作总览", exact: true }),
+    ).toBeVisible();
+    await second.getByRole("button", { name: "返回游戏", exact: true }).click();
+    await second.getByRole("button", { name: "退出游戏", exact: true }).click();
+    await expect(
+      second.getByRole("button", { name: /云端单人/ }),
+    ).toBeVisible();
+  } finally {
+    await other.close();
+  }
 });

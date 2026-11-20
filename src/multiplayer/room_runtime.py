@@ -1149,6 +1149,25 @@ class RoomManager:
                 for room in self._rooms.values()
             ]
 
+    def module_names_in_use(self) -> set[str]:
+        # Called on the event loop before deletion moves to a worker thread.
+        return {room.engine.context.module_name for room in self._rooms.values()}
+
+    async def remove_idle_module(self, module_name: str) -> None:
+        async with self._lock:
+            world_ids = [
+                room.world_id
+                for room in self._rooms.values()
+                if room.engine.context.module_name == module_name
+            ]
+        for world_id in world_ids:
+            room = await self.get(world_id)
+            if room is None:
+                continue
+            removed = await self.remove_if_idle(world_id, idle_seconds=0)
+            if removed and room.driver_transport is not None:
+                await room.driver_transport.close_input()
+
     async def disconnect_session(self, session_hash: str) -> int:
         """Disconnect one revoked login from every currently loaded room."""
         async with self._lock:

@@ -776,6 +776,43 @@ async def _driver_assigns_and_broadcasts_next_investigator_after_combat_turn():
     assert bob_socket.messages == alice_socket.messages
 
 
+def test_room_manager_lists_modules_in_use():
+    manager = RoomManager()
+    room = GameRoom(
+        "world-a",
+        SimpleNamespace(context=SimpleNamespace(module_name="personal~scope~version")),
+        RoomEventHub("world-a"),
+        "owner",
+    )
+    manager._rooms[room.world_id] = room
+    assert manager.module_names_in_use() == {"personal~scope~version"}
+
+
+def test_room_manager_evicts_idle_module_before_deletion():
+    async def scenario():
+        manager = RoomManager()
+        idle = GameRoom(
+            "world-idle",
+            SimpleNamespace(context=SimpleNamespace(module_name="personal~scope~version")),
+            RoomEventHub("world-idle"),
+            "owner",
+            last_empty_at=0,
+        )
+        active = GameRoom(
+            "world-active",
+            SimpleNamespace(context=SimpleNamespace(module_name="personal~scope~version")),
+            RoomEventHub("world-active"),
+            "owner",
+        )
+        active.member_connected("owner")
+        manager._rooms = {idle.world_id: idle, active.world_id: active}
+        await manager.remove_idle_module("personal~scope~version")
+        assert idle.world_id not in manager._rooms
+        assert active.world_id in manager._rooms
+
+    asyncio.run(scenario())
+
+
 def test_room_manager_single_flights_concurrent_creation():
     asyncio.run(_room_manager_single_flights_concurrent_creation())
 

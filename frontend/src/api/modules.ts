@@ -8,6 +8,16 @@ export const moduleInfoSchema = z.looseObject({
   package_id: z.string().optional(),
   version: z.string().optional(),
   source: z.string().optional(),
+  menu_title: z.string().optional(),
+  menu_description: z.string().optional(),
+  subtitle: z.string().optional(),
+  description: z.string().optional(),
+  start_button_text: z.string().optional(),
+  fonts: z.record(z.string(), z.string()).optional(),
+  colors: z.record(z.string(), z.string()).optional(),
+  has_cover: z.boolean().optional(),
+  world_count: z.number().int().nonnegative().optional(),
+  save_count: z.number().int().nonnegative().optional(),
 });
 export type ModuleInfo = z.infer<typeof moduleInfoSchema>;
 

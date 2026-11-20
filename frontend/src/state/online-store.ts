@@ -108,6 +108,13 @@ export type OnlineState = {
   playMode: string | null;
   /** 从“我的冒险”点“管理时间线”进房：房间引导完成后打开存档面板并定位到时间线视图。 */
   pendingTimelinePanel: boolean;
+  /** 回到首页再选相同模组和玩法时，可继续尚未开局的选角。随账号会话清空。 */
+  preparedSoloWorld: {
+    worldId: string;
+    module: string;
+    name: string;
+    style: string;
+  } | null;
 };
 
 export const initialOnlineState: OnlineState = {
@@ -158,6 +165,7 @@ export const initialOnlineState: OnlineState = {
   roomOpen: false,
   playMode: null,
   pendingTimelinePanel: false,
+  preparedSoloWorld: null,
 };
 
 export const useOnlineStore = create<OnlineState>(() => ({

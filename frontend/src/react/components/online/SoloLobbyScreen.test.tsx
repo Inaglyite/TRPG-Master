@@ -4,16 +4,13 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createSoloWorld,
-  deleteSoloWorld,
-  enterRoom,
-  refreshWorlds,
-} from "../../../online";
-import { fetchSoloTimelines } from "../../../api/worlds";
+import { createSoloWorld, enterRoom, ensureModules } from "../../../online";
+import { changePassword, updateProfile } from "../../../api/auth";
+import { apiFetch } from "../../../api/client";
 import { useAppStore } from "../../../state/app-store";
 import {
   initialOnlineState,
@@ -23,7 +20,7 @@ import { SoloLobbyScreen } from "./SoloLobbyScreen";
 
 vi.mock("../../../online", () => ({
   createSoloWorld: vi.fn(),
-  deleteSoloWorld: vi.fn(),
+  ensureModules: vi.fn(),
   enterRoom: vi.fn(),
   errorMessage: (error: unknown, fallback: string) =>
     error instanceof Error ? error.message : fallback,
@@ -31,11 +28,14 @@ vi.mock("../../../online", () => ({
   refreshWorlds: vi.fn(),
 }));
 
-vi.mock("../../../api/worlds", () => ({
-  archiveSoloTimeline: vi.fn(),
-  fetchSoloTimelines: vi.fn(),
-  renameSoloTimeline: vi.fn(),
-  switchSoloTimeline: vi.fn(),
+vi.mock("../../../api/auth", () => ({
+  changePassword: vi.fn(),
+  updateProfile: vi.fn(),
+}));
+
+vi.mock("../../../api/client", () => ({
+  apiFetch: vi.fn(),
+  apiHttpOrigin: () => "http://test",
 }));
 
 vi.mock("../../../desktop", () => ({
@@ -76,272 +76,264 @@ function setupOnline(patch: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(fetchSoloTimelines).mockResolvedValue({
-    root_world_id: "w-solo",
-    active_world_id: "w-solo",
-    worlds: [
-      {
-        world_id: "w-solo",
-        label: "",
-        is_branch: false,
-        active: true,
-        resumable: true,
-        scene_name: "门厅",
-        character_name: "黄千陆",
-        updated_at: "2026-08-16T12:00:00Z",
-      },
-    ],
-  });
+  vi.mocked(ensureModules).mockResolvedValue(undefined);
+  vi.mocked(apiFetch).mockResolvedValue({ ok: true });
+  localStorage.clear();
   useAppStore.setState({ mode: "online" });
   setupOnline();
 });
 
-describe("SoloLobbyScreen 冒险列表", () => {
-  it("复用大厅的舒展布局样式", () => {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("SoloLobbyScreen 从存档开始", () => {
+  it("打开当前模组的存档列表，排除较新的未开局世界，读取前不进房", async () => {
+    const branch = {
+      ...soloWorld,
+      world_id: "branched",
+      resume_world_id: "current-branch",
+    };
+    const draft = {
+      ...soloWorld,
+      world_id: "draft",
+      metadata: { play_mode: "solo", room_status: "lobby" },
+      updated_at: "2026-10-01T12:00:00Z",
+    };
+    const worlds = [
+      draft,
+      soloWorld,
+      branch,
+      { ...soloWorld, module: "mod-2" },
+      multiWorld,
+    ];
+    setupOnline({ worlds });
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      if (url === "/api/worlds") return { worlds };
+      if (url === "/api/worlds/current-branch/members")
+        return { metadata: branch.metadata };
+      for (const [root, target] of [
+        ["w-solo", "w-solo"],
+        ["branched", "current-branch"],
+      ]) {
+        if (url === `/api/worlds/${root}/timelines`)
+          return {
+            active_world_id: target,
+            worlds: [{ world_id: target, scene_name: "档案馆" }],
+          };
+      }
+      throw Error("unexpected endpoint " + url);
+    });
     render(<SoloLobbyScreen />);
-    expect(screen.getByTestId("solo-lobby")).toHaveClass("lobby-screen");
+    fireEvent.click(screen.getByRole("button", { name: "从存档开始" }));
+    await waitFor(() =>
+      expect(useAppStore.getState().savePanelOpen).toBe(true),
+    );
+    expect(useAppStore.getState().savePanelMode).toBe("load");
+    expect(
+      useAppStore.getState().adventures.map((s) => s.resume_world_id),
+    ).toEqual(["w-solo", "current-branch"]);
+    expect(enterRoom).not.toHaveBeenCalled();
   });
 
-  it("只列出 play_mode=solo 的世界（名称、模组标题、云端存档标识）", () => {
+  it("没有 solo 存档时禁用读档入口", () => {
+    setupOnline({
+      worlds: [
+        multiWorld,
+        { ...soloWorld, metadata: { play_mode: "solo", room_status: "lobby" } },
+      ],
+    });
     render(<SoloLobbyScreen />);
-    expect(screen.getByText("雾中宅邸")).toBeInTheDocument();
-    expect(screen.getAllByText("猩红文档").length).toBeGreaterThan(0);
-    expect(screen.getByText("云端存档")).toBeInTheDocument();
-    expect(screen.queryByText("周五调查夜")).not.toBeInTheDocument();
-  });
-
-  it("没有 solo 世界时显示空态文案", () => {
-    setupOnline({ worlds: [multiWorld] });
-    render(<SoloLobbyScreen />);
-    expect(screen.getByText(/还没有云端单人冒险/)).toBeInTheDocument();
-  });
-
-  it("读取失败时显示错误并可重试", () => {
-    setupOnline({ worlds: [], worldsStatus: "error", worldsError: "网络错误" });
-    render(<SoloLobbyScreen />);
-    expect(screen.getByRole("alert")).toHaveTextContent("网络错误");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(refreshWorlds).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "从存档开始" })).toBeDisabled();
+    expect(enterRoom).not.toHaveBeenCalled();
   });
 });
 
 describe("SoloLobbyScreen 操作", () => {
-  it("点击存档卡主体打开时间线面板，不进入房间", async () => {
+  it("从首页直接按所选模组准备选角", async () => {
     render(<SoloLobbyScreen />);
-    expect(
-      screen.getByRole("button", { name: "雾中宅邸：管理时间线" }),
-    ).toHaveProperty("tagName", "BUTTON");
-    fireEvent.click(screen.getByText("雾中宅邸"));
-    expect(enterRoom).not.toHaveBeenCalled();
-    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
-    expect(
-      await screen.findByRole("dialog", { name: "雾中宅邸" }),
-    ).toBeInTheDocument();
-  });
-
-  it("继续冒险优先连接 resume_world_id（当前时间线）", () => {
-    setupOnline({
-      worlds: [{ ...soloWorld, resume_world_id: "w-timeline-2" }, multiWorld],
-    });
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "继续冒险" }));
-    expect(enterRoom).toHaveBeenCalledWith("w-timeline-2");
-  });
-
-  it("playing 的存档位显示“管理时间线”，点击后在大厅打开面板（不进房）", async () => {
-    setupOnline({
-      worlds: [{ ...soloWorld, resume_world_id: "w-timeline-2" }, multiWorld],
-    });
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "管理时间线" }));
-    expect(enterRoom).not.toHaveBeenCalled();
-    expect(useOnlineStore.getState().pendingTimelinePanel).toBe(false);
-    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
-    expect(
-      await screen.findByRole("dialog", { name: "雾中宅邸" }),
-    ).toBeInTheDocument();
-  });
-
-  it("非 playing 的存档位同样显示“管理时间线”（纯 HTTP 控制面，不进房）", async () => {
-    setupOnline({
-      worlds: [
-        {
-          ...soloWorld,
-          metadata: { ...soloWorld.metadata, room_status: "lobby" },
-        },
-        multiWorld,
-      ],
-    });
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "管理时间线" }));
-    expect(enterRoom).not.toHaveBeenCalled();
-    expect(fetchSoloTimelines).toHaveBeenCalledWith("w-solo");
-    expect(
-      await screen.findByRole("dialog", { name: "雾中宅邸" }),
-    ).toBeInTheDocument();
-  });
-
-  it("新建冒险：展开表单后使用选中的模组与名字", async () => {
-    render(<SoloLobbyScreen />);
-    // 新建表单默认收起，由木牌次级 CTA 经换场动画展开
-    expect(screen.queryByLabelText("冒险名称")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
-    fireEvent.change(await screen.findByLabelText("冒险名称"), {
-      target: { value: "新的调查" },
-    });
-    // 模组选择是自绘 listbox（ModuleSelect），不是原生 select
-    fireEvent.click(screen.getByRole("button", { name: "选择模组" }));
+    fireEvent.click(screen.getByRole("button", { name: "当前模组" }));
     fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
-    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
-    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "新的调查", {
-      structured: false,
-    });
-  });
-
-  it("勾选结构化操作模式后创建云端单人冒险会带上 execution_profile", async () => {
-    render(<SoloLobbyScreen />);
+    await screen.findByRole("heading", { name: "疯狂公馆" });
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
-    fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
-    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
-    fireEvent.click(screen.getByRole("radio", { name: "人类主持" }));
-    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
-    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
-      structured: true,
-      keeperMode: "human",
-    });
+    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "疯狂公馆");
+    expect(screen.queryByLabelText("冒险名称")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^游玩方式/ })).toBeNull();
   });
 
-  it("云端单人冒险可以选择 AI 辅助主持", async () => {
+  it("六个游戏工具可直接打开，个人中心只处理账号，模组选择用于新建冒险", async () => {
     render(<SoloLobbyScreen />);
+    expect(
+      screen
+        .getByRole("navigation", { name: "游戏工具" })
+        .querySelectorAll("button"),
+    ).toHaveLength(6);
+    fireEvent.click(screen.getByRole("button", { name: "个人中心" }));
+    expect(screen.getByText("alice")).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "个人中心" }).textContent,
+    ).not.toContain("角色库");
+    fireEvent.click(screen.getByRole("button", { name: "关闭个人中心" }));
+    fireEvent.click(screen.getByRole("button", { name: "当前模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
+    expect(
+      await screen.findByRole("heading", { name: "疯狂公馆" }),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
-    fireEvent.click(await screen.findByRole("button", { name: "选择模组" }));
-    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
-    fireEvent.click(screen.getByRole("radio", { name: "AI 辅助主持" }));
-    fireEvent.click(screen.getByRole("button", { name: "创建冒险" }));
-    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "", {
-      structured: true,
-      keeperMode: "assisted",
-    });
+    expect(createSoloWorld).toHaveBeenCalledWith("mod-2", "疯狂公馆");
   });
 
-  it("开始新冒险换场：CTA 先播 leaving，创建卡再播 entering，收起反向播回", () => {
-    vi.useFakeTimers();
-    try {
-      render(<SoloLobbyScreen />);
-      const swap = () => document.querySelector(".solo-lobby-create-swap");
-      expect(swap()).toHaveAttribute("data-phase", "idle");
-
-      fireEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
-      // leaving 阶段仍展示旧 CTA
-      expect(swap()).toHaveAttribute("data-phase", "leaving");
-      expect(
-        screen.getByRole("button", { name: "开始新冒险" }),
-      ).toBeInTheDocument();
-
-      act(() => vi.advanceTimersByTime(160));
-      expect(swap()).toHaveAttribute("data-phase", "entering");
-      expect(screen.getByLabelText("冒险名称")).toBeInTheDocument();
-
-      act(() => vi.advanceTimersByTime(260));
-      expect(swap()).toHaveAttribute("data-phase", "idle");
-
-      fireEvent.click(screen.getByRole("button", { name: "收起" }));
-      expect(swap()).toHaveAttribute("data-phase", "leaving");
-      act(() => vi.advanceTimersByTime(160));
-      expect(
-        screen.getByRole("button", { name: "开始新冒险" }),
-      ).toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("归档需要明确说明整棵时间线影响，再第二次确认", async () => {
-    vi.mocked(deleteSoloWorld).mockResolvedValue(null);
+  it("模组排序不改变当前模组，也不关闭管理面板", async () => {
+    setupOnline({ worlds: [] });
+    vi.mocked(apiFetch).mockResolvedValue({ ok: true });
     render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
-    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
-      "整场冒险及其分支",
-    );
-    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
-      "归档不代表结案或通关",
-    );
-    expect(screen.getByTestId("adventure-archive-confirm")).toHaveTextContent(
-      "当前界面没有恢复入口",
-    );
-    expect(screen.getByRole("button", { name: "继续保留" })).toHaveFocus();
-    expect(deleteSoloWorld).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
-    await waitFor(() => expect(deleteSoloWorld).toHaveBeenCalledWith("w-solo"));
-  });
-
-  it("删除失败时报错内联挂在对应冒险卡上，而不是创建卡片", async () => {
-    vi.mocked(deleteSoloWorld).mockResolvedValue("删除存档失败，请重试");
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("删除存档失败");
-    expect(alert.closest('[data-world="w-solo"]')).not.toBeNull();
-    // Refusal keeps the consequence summary and enables the same confirmation.
-    expect(
-      screen.getByRole("button", { name: "确认归档" }),
-    ).toBeInTheDocument();
-  });
-
-  it("取消二次确认不删除", () => {
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
-    fireEvent.click(screen.getByRole("button", { name: "继续保留" }));
-    expect(deleteSoloWorld).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("button", { name: "归档冒险" }),
-    ).toBeInTheDocument();
-  });
-
-  it("归档处理中不会连点提交，也不能误继续冒险", async () => {
-    let finish!: (result: string | null) => void;
-    vi.mocked(deleteSoloWorld).mockReturnValue(
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-    );
-    render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "归档冒险" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
-    fireEvent.click(screen.getByRole("button", { name: "正在归档…" }));
-    expect(deleteSoloWorld).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "继续冒险" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "继续保留" })).toBeDisabled();
-    await act(async () => finish("归档被拒"));
-    expect(screen.getByRole("button", { name: "确认归档" })).toBeEnabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("归档被拒");
-  });
-
-  it("Escape 取消确认并把焦点还给归档入口", async () => {
-    render(<SoloLobbyScreen />);
-    const trigger = screen.getByRole("button", { name: "归档冒险" });
-    fireEvent.click(trigger);
-    fireEvent.keyDown(screen.getByRole("button", { name: "继续保留" }), {
-      key: "Escape",
-    });
-    // 抽屉收回动画：先标记 closing 保持挂载，动画结束后才卸载。
-    expect(screen.getByTestId("adventure-archive-confirm")).toHaveAttribute(
-      "data-phase",
-      "closing",
-    );
+    fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
     await waitFor(() =>
       expect(
-        screen.queryByTestId("adventure-archive-confirm"),
-      ).not.toBeInTheDocument(),
+        screen.getByRole("button", { name: "将猩红文档下移" }),
+      ).toBeEnabled(),
     );
-    expect(trigger).toHaveFocus();
-    expect(deleteSoloWorld).not.toHaveBeenCalled();
+    vi.mocked(ensureModules).mockImplementation(async () => {
+      useOnlineStore.setState({
+        modulesStatus: "ready",
+        modules: [
+          { id: "mod-2", title: "疯狂公馆" },
+          { id: "mod-1", title: "猩红文档" },
+        ],
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "将猩红文档下移" }));
+
+    await waitFor(() => expect(ensureModules).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "模组管理" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "猩红文档", level: 1 }),
+    ).toBeVisible();
+    expect(document.querySelector("#start-overlay.module-flipping")).toBeNull();
+  });
+
+  it("删除当前预览模组后管理面板保持打开并显示真实结果", async () => {
+    setupOnline({
+      worlds: [],
+      modules: [
+        { id: "mod-1", title: "猩红文档" },
+        {
+          id: "mod-2",
+          title: "疯狂公馆",
+          source: "account",
+          world_count: 1,
+          save_count: 1,
+        },
+      ],
+    });
+    vi.mocked(apiFetch).mockResolvedValue({
+      ok: true,
+      world_count: 1,
+      save_count: 1,
+      cleanup_pending: false,
+    });
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "当前模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
+    await screen.findByRole("heading", { name: "疯狂公馆", level: 1 });
+    await waitFor(() =>
+      expect(document.querySelector("#start-overlay")?.className).toBe(
+        "solo-home",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "从模组库移除疯狂公馆" }),
+      ).toBeEnabled(),
+    );
+    vi.mocked(ensureModules).mockImplementation(async () => {
+      useOnlineStore.setState({
+        modulesStatus: "ready",
+        modules: [{ id: "mod-1", title: "猩红文档" }],
+      });
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "从模组库移除疯狂公馆" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "确认从库中移除" }));
+
+    await waitFor(() => expect(ensureModules).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "模组管理" })).toBeVisible();
+    expect(
+      within(screen.getByRole("dialog", { name: "模组管理" })).getByRole(
+        "status",
+      ),
+    ).toHaveTextContent("已删除「疯狂公馆」及其 1 条时间线、1 个存档点");
+  });
+
+  it("首页切换模组播放翻页动画，旧标题冻结到新页入场", async () => {
+    vi.useFakeTimers();
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "当前模组" }));
+    fireEvent.click(screen.getByRole("option", { name: "疯狂公馆" }));
+
+    expect(
+      document.querySelector("#start-overlay.module-flipping"),
+    ).not.toBeNull();
+    expect(document.querySelector(".module-page-flip")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "猩红文档" })).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(screen.getByRole("heading", { name: "疯狂公馆" })).toBeVisible();
+    expect(document.querySelector("#start-overlay.module-flipping")).toBeNull();
+  });
+
+  it("个人中心可以设置并修改昵称", async () => {
+    vi.mocked(updateProfile).mockResolvedValue({
+      id: "u1",
+      username: "alice",
+      display_name: "调查员小爱",
+    });
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "个人中心" }));
+    fireEvent.change(screen.getByLabelText("昵称"), {
+      target: { value: "  调查员小爱  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith("调查员小爱"),
+    );
+    expect(useOnlineStore.getState().user?.display_name).toBe("调查员小爱");
+    expect(await screen.findByText("昵称已保存。")).toBeVisible();
+  });
+
+  it("个人中心验证当前密码并修改新密码", async () => {
+    vi.mocked(changePassword).mockResolvedValue(undefined);
+    render(<SoloLobbyScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "个人中心" }));
+    fireEvent.change(screen.getByLabelText("当前密码"), {
+      target: { value: "old password 123" },
+    });
+    fireEvent.change(screen.getByLabelText("新密码"), {
+      target: { value: "new password 456" },
+    });
+    fireEvent.change(screen.getByLabelText("确认新密码"), {
+      target: { value: "new password 456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "修改密码" }));
+
+    await waitFor(() =>
+      expect(changePassword).toHaveBeenCalledWith(
+        "old password 123",
+        "new password 456",
+      ),
+    );
+    expect(await screen.findByText(/密码已修改/)).toBeVisible();
   });
 
   it("浏览器环境返回模式选择", () => {
     render(<SoloLobbyScreen />);
-    fireEvent.click(screen.getByRole("button", { name: "← 返回模式选择" }));
+    fireEvent.click(screen.getByRole("button", { name: "个人中心" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回模式选择" }));
     expect(useAppStore.getState().mode).toBe("select");
   });
 });

@@ -31,6 +31,7 @@ def _service_to_row(service: ServiceSpec) -> dict:
     return {
         "label": service.label,
         "provider_kind": service.provider_kind,
+        "api_format": service.api_format,
         "base_url": service.base_url,
         "api_key_enc": encrypt_secret(service.api_key),
         "model_id": service.model_id,

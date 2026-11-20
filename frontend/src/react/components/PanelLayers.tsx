@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import * as panels from "../../panels";
 import { useAppStore, type SaveEntry } from "../../state/app-store";
-import type { TimelineEntry } from "../../state/app-store";
+import type { AdventureEntry, TimelineEntry } from "../../state/app-store";
 import {
   useTimelineCapabilities,
   useOnlineStore,
@@ -329,6 +329,8 @@ export function SavePanel() {
     (state) => interactionPath(state.capabilities) === "structured",
   );
   const seededView = useAppStore((state) => state.savePanelView);
+  const atSoloHome =
+    useOnlineStore((state) => state.view === "solo") && appMode === "online";
   const onlineCaps = useTimelineCapabilities();
   useOnlineStore((state) => state.members);
   useOnlineStore((state) => state.user);
@@ -535,7 +537,7 @@ export function SavePanel() {
   // （会带一条空 adventure_list）但房间本就绑定单一世界且拒绝时间线消息：
   // 这两种情况一律回退到平铺存档列表。云端单人房间（canList）与本地模式
   // 共用下面的两级“存档位 → 时间线”结构。
-  if (!adventuresReady || !caps.canList) {
+  if (!adventuresReady || (!caps.canList && !atSoloHome)) {
     return (
       <div
         id="save-panel-overlay"
@@ -915,6 +917,15 @@ export function SavePanel() {
     );
   };
 
+  function showTimelines(adventure: AdventureEntry) {
+    if (atSoloHome && adventure.resume_world_id) {
+      useOnlineStore.setState({ pendingTimelinePanel: true });
+      void panelCommand("resumeAdventure", adventure);
+    } else {
+      setView({ name: "timelines", rootId: String(adventure.root_world_id) });
+    }
+  }
+
   return (
     <div
       id="save-panel-overlay"
@@ -968,7 +979,9 @@ export function SavePanel() {
                     const title = slotNameShown || moduleTitle;
                     const slotNo = adventure.slot_index
                       ? `SAVE ${String(adventure.slot_index).padStart(2, "0")}`
-                      : "SAVE --";
+                      : atSoloHome
+                        ? "云端存档"
+                        : "SAVE --";
                     const savedTime = formatSaveTime(adventure.updated_at);
                     const progress = [
                       adventure.character_name || "未知调查员",
@@ -997,8 +1010,7 @@ export function SavePanel() {
                               <div
                                 className="adventure-card-info"
                                 onClick={() => {
-                                  if (!renamingSlot)
-                                    setView({ name: "timelines", rootId });
+                                  if (!renamingSlot) showTimelines(adventure);
                                 }}
                               >
                                 <div className="adventure-slot-line">
@@ -1106,9 +1118,7 @@ export function SavePanel() {
                                 <div className="adventure-card-sub-actions">
                                   <button
                                     className="adventure-manage"
-                                    onClick={() =>
-                                      setView({ name: "timelines", rootId })
-                                    }
+                                    onClick={() => showTimelines(adventure)}
                                   >
                                     {manage ? "管理时间线" : "时间线"}
                                   </button>

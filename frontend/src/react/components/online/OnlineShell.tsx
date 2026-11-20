@@ -172,7 +172,7 @@ export function OnlineShell() {
               className="character-back-button solo-start-back"
               onClick={() => void enterSoloLobby()}
             >
-              ← 返回我的冒险
+              ← 返回首页
             </button>
           </div>
         )}

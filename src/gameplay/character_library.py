@@ -23,6 +23,7 @@ from src.auth.service import auth_required
 from src.storage.database import (
     CharacterLibraryEntry,
     World,
+    WorldInvestigator,
     new_id,
     session_scope,
     utcnow,
@@ -658,8 +659,8 @@ def get_export_entry(database_url: str, owner_id: str, entry_id: str) -> dict:
 def resolve_library_card(entry_id: str, *, context: Any) -> dict | None:
     """按 ref 读取库角色卡，带归属校验。
 
-    本地模式（无账号）只认 owner 为空串的条目；账号模式要求条目属于当前
-    世界/房间的创建者——联机房间里其他成员的私有角色因此无法被解析。
+    本地模式只读取本地条目。云端允许创建者的卡，以及其他玩家在此世界
+    已认领的本人卡。玩家退出或释放认领后，世界不能再读取其库条目。
     任何一步不满足都返回 None（上层按「无法读取角色」处理），不抛出细节。
     """
     entry_id = str(entry_id or "").strip()
@@ -675,8 +676,17 @@ def resolve_library_card(entry_id: str, *, context: Any) -> dict | None:
             if auth_required():
                 world = session.get(World, world_id)
                 owner = str(world.created_by or "") if world is not None else ""
-                if not owner or entry.owner_user_id != owner:
+                if not owner or not entry.owner_user_id:
                     return None
+                if entry.owner_user_id != owner:
+                    claim = session.query(WorldInvestigator.id).filter_by(
+                        world_id=world_id,
+                        character_key=entry.id,
+                        controller_user_id=entry.owner_user_id,
+                        status="claimed",
+                    ).first()
+                    if claim is None:
+                        return None
             elif entry.owner_user_id != "":
                 return None
             return copy.deepcopy(entry.card_json)

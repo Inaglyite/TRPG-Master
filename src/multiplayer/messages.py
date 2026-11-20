@@ -532,13 +532,12 @@ async def run_room_message_loop(
             await ws.send_json(
                 {
                     "type": "character_list",
-                    # 角色库分组仅云端单人房间下发（按请求用户隔离）；多人房间
-                    # 不含任何私有角色，与 include_personal=False 同一边界。
+                    # 列表只回送当前连接，角色库按登录用户过滤。
                     **list_character_options(
                         room.engine.context.module_name,
                         context=room.engine.context,
                         include_personal=False,
-                        library_scope=(user.id if room.play_mode == "solo" else None),
+                        library_scope=user.id,
                     ),
                 }
             )
