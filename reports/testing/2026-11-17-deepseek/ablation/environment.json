@@ -1,0 +1,9 @@
+{
+  "Python": "3.12.14",
+  "SQLite": "3.53.1",
+  "OS": "Ubuntu 26.04.1 LTS",
+  "fastapi": "0.139.2",
+  "sqlalchemy": "2.0.51",
+  "pytest": "9.0.3",
+  "openai": "2.46.0"
+}

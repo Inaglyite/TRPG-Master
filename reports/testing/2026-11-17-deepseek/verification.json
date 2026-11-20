@@ -1,0 +1,22 @@
+{
+  "classic": {
+    "requests_and_responses_paired": 90,
+    "http_provider": "deepseek",
+    "response_ids_present": true
+  },
+  "transition": {
+    "requests_and_responses_paired": 15,
+    "http_provider": "deepseek",
+    "response_ids_present": true
+  },
+  "memory": {
+    "requests_and_responses_paired": 18,
+    "http_provider": "deepseek",
+    "response_ids_present": true
+  },
+  "ablation_actual_calls": 96,
+  "unique_new_response_ids": 123,
+  "credentials_found": false,
+  "python_scripts_compile": true,
+  "checksums_valid": true
+}
