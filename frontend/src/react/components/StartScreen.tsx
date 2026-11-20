@@ -160,6 +160,7 @@ export function StartScreen() {
             <button
               type="button"
               className="btn-ghost module-workshop-link"
+              title="模组工坊"
               data-tooltip="模组工坊"
               onClick={openModWorkshop}
             >
@@ -170,6 +171,7 @@ export function StartScreen() {
             <button
               type="button"
               className="start-menu-button"
+              title="角色库"
               data-tooltip="角色库"
               onClick={() =>
                 useAppStore.getState().setCharacterLibraryOpen(true)
@@ -183,6 +185,7 @@ export function StartScreen() {
               <button
                 id="btn-exit"
                 className="start-menu-button start-menu-exit"
+                title="退出游戏"
                 data-tooltip="退出游戏"
                 onClick={() => window.close()}
               >

@@ -244,6 +244,7 @@ export function SoloHome({
               <button
                 type="button"
                 className="start-menu-button"
+                title="模组工坊"
                 data-tooltip="模组工坊"
                 onClick={() => setWorkshopOpen(true)}
               >
@@ -254,6 +255,7 @@ export function SoloHome({
               <button
                 type="button"
                 className="start-menu-button"
+                title="角色库"
                 data-tooltip="角色库"
                 onClick={() =>
                   useAppStore.getState().setCharacterLibraryOpen(true)
@@ -266,6 +268,7 @@ export function SoloHome({
               <button
                 type="button"
                 className="start-menu-button start-menu-exit"
+                title="退出游戏"
                 data-tooltip="退出游戏"
                 onClick={() =>
                   /\bElectron\//.test(navigator.userAgent)

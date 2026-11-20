@@ -88,6 +88,7 @@ function LocalModuleManager() {
         ref={trigger}
         type="button"
         className="start-menu-button"
+        title="模组管理"
         data-tooltip="模组管理"
         onClick={() => {
           setOpen(true);

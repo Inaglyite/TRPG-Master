@@ -90,6 +90,7 @@ export function ModelSettingsTrigger() {
       id="btn-settings"
       className="start-menu-button"
       type="button"
+      title="游戏设置"
       data-tooltip="游戏设置"
       onClick={() => openSettings()}
     >

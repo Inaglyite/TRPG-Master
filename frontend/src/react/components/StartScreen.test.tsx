@@ -105,6 +105,7 @@ describe("StartScreen", () => {
     expect(buttons).toHaveLength(names.length);
     buttons.forEach((button, index) => {
       expect(button).toHaveAccessibleName(names[index]);
+      expect(button).toHaveAttribute("title", names[index]);
       expect(button).toHaveAttribute("data-tooltip", names[index]);
       const icon = button.querySelector("img[data-menu-icon]");
       expect(icon).toHaveAttribute("src", expect.stringMatching(/\.png$/));

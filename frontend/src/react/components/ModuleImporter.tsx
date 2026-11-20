@@ -214,6 +214,7 @@ function PackageImporter({ onCloudImported }: ImportProps) {
       <button
         id="btn-import-module"
         aria-label="导入模组"
+        title="导入模组"
         data-tooltip="导入模组"
         ref={trigger}
         type="button"
