@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from src.ai.context.message_provenance import provider_message
 from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
 from src.gameplay.npc_speaker_aliases import turn_allowed_npc_ids
 
@@ -47,8 +48,11 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
                   if source[i].get("role") == "user" and
                   str(source[i].get("content") or "").startswith("[玩家行动]")), None)
     current = source[start:] if start is not None else source[-1:]
-    facts = [{"role": item.get("role"), "content": item.get("content")}
-             for item in current if item.get("role") in {"user", "tool"}]
+    facts = []
+    for item in current:
+        if item.get("role") in {"user", "tool"}:
+            projected = provider_message(item)
+            facts.append({"role": projected.get("role"), "content": projected.get("content")})
     previous = previous_assistant_narrative(source)
     error_text = str(error)[:1200]
     category = getattr(error, "category", "")

@@ -13,6 +13,11 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
+from src.ai.context.message_provenance import (
+    PLAYER_ACTION_PREFIX,
+    PLAYER_INPUT_LENGTH_KEY,
+    engine_control_message,
+)
 from src.ai.model.llm import glm_quick_summary, tension
 from src.ai.model.route_service import activate_route_slot, engine_byok_only
 from src.ai.skills.skill_activation import note_load_skill_result
@@ -434,7 +439,7 @@ def _prepare_turn_inner(
         )
         retrieve_lore = getattr(engine, "_retrieve_lore_context", None)
         lore_selection = retrieve_lore(user_content) if retrieve_lore and not skip_agent else None
-        content = f"[玩家行动] {original_user_content}"
+        content = PLAYER_ACTION_PREFIX + original_user_content
         if selected_preview_option is not None:
             content += f"\n[行动预演后的选择] {selected_preview_option.label}"
             if selected_preview_option.outcome == "replace":
@@ -518,7 +523,11 @@ def _prepare_turn_inner(
         content += output_instruction
         if lore_selection and lore_selection.context:
             content += f"\n\n{lore_selection.context}"
-        engine.messages.append({"role": "user", "content": content})
+        engine.messages.append({
+            "role": "user",
+            "content": content,
+            PLAYER_INPUT_LENGTH_KEY: len(original_user_content),
+        })
         if not skip_agent:
             engine._detect_content_skill_hint(user_content)
     else:
@@ -833,12 +842,7 @@ def _execute_tools(state: TurnState) -> dict:
         from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
 
         tool_instruction = "[引擎控制指令｜非玩家发言] 根据执行回执结束本轮；不追加玩家新行动。\n" + DIALOGUE_INSTRUCTION
-    engine.messages.append(
-        {
-            "role": "user",
-            "content": tool_instruction,
-        }
-    )
+    engine.messages.append(engine_control_message(tool_instruction))
 
     if tool_outputs:
         # 平台 GLM 快摘要仅本地部署可用；云端 BYOK-only 下平台凭据不参与。

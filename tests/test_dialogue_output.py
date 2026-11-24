@@ -453,7 +453,11 @@ def test_history_narrative_normalized_to_dialogue_json_on_wire_only():
     host.messages = [
         {"role": "system", "content": "s"},
         {"role": "assistant", "content": tagged},
-        {"role": "user", "content": "[玩家行动] 继续"},
+        {
+            "role": "user",
+            "content": "[玩家行动] 继续\n\n本轮未掷骰",
+            "_trpg_player_input_length": len("继续"),
+        },
     ]
     prepared = prepare_model_request(
         host,
@@ -467,7 +471,14 @@ def test_history_narrative_normalized_to_dialogue_json_on_wire_only():
     )
     wire = prepared.provider_kwargs["messages"]
     DialogueOutput.model_validate_json(wire[1]["content"])
+    assert [message["role"] for message in wire] == ["system", "assistant", "user"]
+    assert "输入来源与权限" in wire[0]["content"]
+    assert json.loads(wire[2]["content"]) == {
+        "player_intent": "继续",
+        "engine_context": "本轮未掷骰",
+    }
     assert host.messages[1]["content"] == tagged
+    assert host.messages[2]["content"].startswith("[玩家行动] 继续")
 
 
 @pytest.mark.parametrize("heading", ["**你可以——**", "你可以——", "### 你可以——", "__你可以--__："])

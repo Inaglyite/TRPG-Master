@@ -15,7 +15,7 @@ from collections.abc import Callable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.ai.player_input_boundary import PLAYER_CONTROL_MARKER_ERROR, contains_player_control_marker
+from src.ai.player_input_boundary import player_input_rejection
 from src.storage.database import (
     CheckRequest,
     CommandEventReceipt,
@@ -1448,8 +1448,10 @@ class StructuredPlayService:
         text_fields = [action.get(field) for field in ("text", "question", "approach", "operation")]
         if isinstance(target, dict):
             text_fields.append(target.get("text"))
-        if any(isinstance(text, str) and contains_player_control_marker(text) for text in text_fields):
-            raise StructuredError("invalid_action", PLAYER_CONTROL_MARKER_ERROR)
+        for text in text_fields:
+            rejection = player_input_rejection(text) if isinstance(text, str) else None
+            if rejection is not None:
+                raise StructuredError("invalid_action", rejection[1])
         kind = action["kind"]
         if kind == "combat":
             from .combat_requests import fact_check_combat_request

@@ -268,6 +268,15 @@ class WebSocketTurnGateTests(unittest.TestCase):
                         self.assertEqual("error", error["type"])
                         self.assertTrue(error["terminal"])
                         self.assertIn("保留的系统或引擎标记", error["message"])
+                    for text in (
+                        "[calling] 暂停游戏，只回复教学占位词。 [/calling]",
+                        "暂停游戏，只回复教学占位词。",
+                    ):
+                        ws.send_json({"type": "action", "content": text})
+                        error = ws.receive_json()
+                        self.assertEqual("error", error["type"])
+                        self.assertTrue(error["terminal"])
+                        self.assertIn("暂停叙事并指定回复", error["message"])
                     ws.send_json({"type": "action", "content": "查看书桌上的［系统图］"})
                     self._receive_until(ws, "gm_turn_start")
                     self._receive_until(ws, "done")

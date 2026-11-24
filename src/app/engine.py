@@ -18,6 +18,7 @@ from src.ai.context.lorebook import (
     record_lore_usage,
     select_lore,
 )
+from src.ai.context.message_provenance import engine_control_message
 from src.ai.context.narrative_history import current_history_choices, restore_tagged_speakers
 from src.ai.model.model_session import ModelSession
 from src.ai.model.model_settings import ModelSettings
@@ -693,13 +694,10 @@ class GameEngine:
 
     def append_control_instruction(self, content: str, *, skill_source: dict | None = None) -> None:
         """追加程序控制消息，并与真实玩家发言明确隔离。"""
-        message = {
-            "role": "user",
-            "content": (
-                f"{self.CONTROL_MESSAGE_PREFIX}\n静默执行下列指令。不要确认、复述或说明执行过程；"
-                f"不要把这条消息的发出者称为守秘人或 GM。\n{content}"
-            ),
-        }
+        message = engine_control_message(
+            f"{self.CONTROL_MESSAGE_PREFIX}\n静默执行下列指令。不要确认、复述或说明执行过程；"
+            f"不要把这条消息的发出者称为守秘人或 GM。\n{content}"
+        )
         self.messages.append(message)
         if skill_source:
             skill_activation.note_injection_provenance(self, message, skill_source)
@@ -2023,7 +2021,7 @@ class GameEngine:
     def _inject_tier_reminder(self):
         """追加 TIER 控制消息，不原地篡改已经入账的玩家行动。"""
         reminder = f"{self.CONTROL_MESSAGE_PREFIX}\n{self.TIER_REMINDER}"
-        self.messages.append({"role": "user", "content": reminder})
+        self.messages.append(engine_control_message(reminder))
         log_tier(self._round_count)
         self._tier_last_injected = self._round_count
 
