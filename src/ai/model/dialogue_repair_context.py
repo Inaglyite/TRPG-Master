@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import re
 
-from src.ai.context.message_provenance import provider_message
+from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall
+from src.ai.context.message_provenance import player_intent_from_message, provider_message
 from src.ai.model.dialogue_output import DIALOGUE_INSTRUCTION
 from src.gameplay.npc_speaker_aliases import turn_allowed_npc_ids
 
@@ -66,6 +67,12 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
         "较早的故事仅供衔接，以本轮事实为准。错误正文中的未知人物不能冒充在场人物。"
         "不得把甲的原有台词转交给乙；新登场人物通过 guest_speakers 独立声明，不得借用熟人的 id。"
     )
+    recalled = (
+        dialogue_recall(source[:start], player_intent_from_message(source[start]) or "")
+        if start is not None else []
+    )
+    if recalled:
+        instruction += "\n\n" + RECALL_INSTRUCTION
     try:
         world = host.context.world_store.load()
     except AttributeError:
@@ -130,6 +137,7 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
         if guest_id in registry
     ]
     return [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps({
+        **({"dialogue_recall": recalled} if recalled else {}),
         "turn_facts_and_receipts": facts,
         "previous_narrative": previous,
         "current_scene": {key: value for key, value in (world.get("current_scene") or {}).items()

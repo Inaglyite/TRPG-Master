@@ -8,6 +8,7 @@ from typing import Any
 
 from src.ai.context.context_capacity import CapacityDiagnostic
 from src.ai.context.context_capacity import evaluate as evaluate_capacity
+from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall
 from src.ai.context.lorebook import estimate_text_tokens
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 from src.ai.tools.registry import model_tools_for, tool_catalog_for_names
@@ -102,17 +103,31 @@ def prepare_model_request(
         elif system_overlay:
             messages.insert(0, {"role": "system", "content": system_overlay})
 
-    from src.ai.context.message_provenance import provider_message
+    from src.ai.context.message_provenance import player_intent_from_message, provider_message
 
     # Persist provenance for restore/branch matching, but never transmit private
     # keys (or unknown old prose as an assistant format example) to providers.
-    messages = [provider_message(message) for message in messages]
+    recall_index = None
+    recalled = []
+    current_intent = getattr(host, "_turn_user_content", None)
+    if messages_override is None and isinstance(current_intent, str) and current_intent:
+        for index in range(len(messages) - 1, -1, -1):
+            intent = player_intent_from_message(messages[index])
+            if intent is not None:
+                recall_index = index
+                recalled = dialogue_recall(messages[:index], intent)
+                break
+    messages = [
+        provider_message(message, dialogue_recall=recalled if index == recall_index else None)
+        for index, message in enumerate(messages)
+    ]
+    boundary = PLAYER_ACTION_BOUNDARY + ("\n\n" + RECALL_INSTRUCTION if recalled else "")
     if messages and messages[0].get("role") == "system":
         messages[0] = dict(
-            messages[0], content=f"{messages[0].get('content', '')}\n\n{PLAYER_ACTION_BOUNDARY}"
+            messages[0], content=f"{messages[0].get('content', '')}\n\n{boundary}"
         )
     else:
-        messages.insert(0, {"role": "system", "content": PLAYER_ACTION_BOUNDARY})
+        messages.insert(0, {"role": "system", "content": boundary})
     request_role = "combat" if system_overlay else "story"
     if getattr(host, "_structured_dialogue", False) is True:
         from src.ai.model.dialogue_output import (

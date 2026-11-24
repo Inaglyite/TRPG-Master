@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
@@ -695,10 +696,20 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     if session is not None and session.plan is not None:
         return validate_proposal(session.plan, content, world, fallback, dialogue)
     payload = adjudication_context(world, content, fallback, dialogue)
+    recalled = dialogue_recall(getattr(engine, "messages", []) or [], content)
+    if recalled:
+        payload["dialogue_recall"] = recalled
     from src.gameplay.adjudication_policy import policy_instruction
 
     policy = policy_instruction(engine)
-    instructions = "\n\n".join(part for part in (_PROMPT, PLAYER_ACTION_BOUNDARY, policy) if part)
+    recall_rule = (
+        RECALL_INSTRUCTION + " 只有资料回顾时用 clarify，time_minutes=0，"
+        "不提议任何检定、效果或新的行动。明确授权的其他游戏内行动仍正常裁决。"
+        if recalled else ""
+    )
+    instructions = "\n\n".join(
+        part for part in (_PROMPT, PLAYER_ACTION_BOUNDARY, policy, recall_rule) if part
+    )
     messages = [{"role": "system", "content": instructions},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     model = model_for_role(engine, "adjudication")

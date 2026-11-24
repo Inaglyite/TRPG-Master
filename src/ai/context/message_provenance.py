@@ -46,7 +46,7 @@ def preserve_provenance(source: dict, target: dict) -> dict:
     return target
 
 
-def provider_message(message: dict) -> dict:
+def provider_message(message: dict, *, dialogue_recall: list[dict[str, str]] | None = None) -> dict:
     """Project stored message provenance into provider-visible data fields."""
     result = {key: value for key, value in message.items() if not key.startswith("_trpg_")}
     if message.get(HISTORY_KIND_KEY) == "legacy_unattributed" and message.get("role") == "assistant":
@@ -68,6 +68,8 @@ def provider_message(message: dict) -> dict:
         else:
             engine_context = content[len(PLAYER_ACTION_PREFIX) + len(intent) :].lstrip()
             payload = {"player_intent": intent, "engine_context": engine_context}
+            if dialogue_recall:
+                payload["dialogue_recall"] = dialogue_recall
         result["content"] = json.dumps(payload, ensure_ascii=False)
     elif message.get("role") == "user" and message.get(ENGINE_CONTROL_KEY) is True:
         result["content"] = json.dumps({"engine_control": message.get("content")}, ensure_ascii=False)

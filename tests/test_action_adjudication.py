@@ -70,6 +70,41 @@ def test_freeform_action_is_understood_by_model_before_roll(monkeypatch):
     assert engine.context.world_store.load() == state  # proposal alone cannot mutate
 
 
+def test_recall_carries_an_early_player_statement_without_private_payloads(monkeypatch):
+    monkeypatch.setenv("TRPG_ACTION_ADJUDICATION", "1")
+    state = world()
+    content = "之前我给调查笔记起的私人代号是什么？"
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs["messages"])
+        return response({"intent": "clarify", "input_quote": content, "approach": "回答笔记代号"})
+
+    engine = SimpleNamespace(
+        context=SimpleNamespace(world_store=MemoryStore(state)),
+        messages=[
+            {"role": "user", "content": (
+                "[玩家行动] 给笔记写上私人代号「灰鹭六号」。"
+                "\n\n[引擎权威状态｜仅供守秘人，不得复述]HIDDEN-STATE"
+            )},
+            {"role": "tool", "content": "笔记的私人代号 HIDDEN-TOOL"},
+            *({"role": "assistant", "content": f"普通叙述 {i}。"} for i in range(5)),
+        ],
+        client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        raise_if_turn_cancelled=lambda: None,
+    )
+    result = adjudicate_player_action(engine, content, state, plan_player_action(content, state))
+    system, user = calls[0]
+    data = json.loads(user["content"])
+    assert "灰鹭六号" not in str(data["recent_dialogue"])
+    assert data["dialogue_recall"][0] == {
+        "role": "user", "content": "给笔记写上私人代号「灰鹭六号」。"
+    }
+    assert "HIDDEN" not in str(data["dialogue_recall"])
+    assert "time_minutes=0" in system["content"]
+    assert json.loads(result.adjudication_json)["time_minutes"] == 0
+
+
 def test_conditional_effects_follow_actual_check_result():
     state = world()
     resolution = validate_proposal(proposal(), INPUT, state, plan_player_action(INPUT, state))

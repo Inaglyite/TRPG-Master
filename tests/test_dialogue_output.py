@@ -275,6 +275,37 @@ def test_format_repair_keeps_current_receipts_without_replaying_old_history():
     assert "OLD-SYSTEM-LEGACY-FORMAT" not in json.dumps(messages)
 
 
+def test_recall_keeps_older_player_statement_in_story_and_format_repair():
+    from src.ai.context.message_provenance import PLAYER_INPUT_LENGTH_KEY
+    from src.ai.model.dialogue_repair_context import repair_messages
+    from src.ai.model.model_request import prepare_model_request
+
+    host, _ = make_host("")
+    query = "重复我刚才整理的笔记"
+    host._turn_user_content = query
+    host.messages = [
+        {"role": "system", "content": "系统资料中的私人代号：SYSTEM-SECRET"},
+        {"role": "user", "content": "我给笔记这一页取了一个私人代号「青页七号」。"},
+        {"role": "assistant", "content": "你在页角写下记号。"},
+        {"role": "user", "content": "查看窗外。"},
+        {"role": "assistant", "content": "雨停了一会儿。"},
+        {"role": "user", "content": "我整理刚才的笔记，最早那页的私人代号是什么？"},
+        {"role": "assistant", "content": "你翻开了笔记。"},
+        {"role": "user", "content": f"[玩家行动] {query}", PLAYER_INPUT_LENGTH_KEY: len(query)},
+    ]
+    prepared = prepare_model_request(
+        host, "test-model", policy=host.policy, system_overlay=None,
+        system_prompt_override=None, enable_tools=False, temperature=0.8, messages_override=None,
+    )
+    story = json.loads(prepared.provider_kwargs["messages"][-1]["content"])
+    repaired = repair_messages(host, host.messages, '{"segments":[', "Invalid JSON")
+    recall = story["dialogue_recall"]
+    assert recall == json.loads(repaired[1]["content"])["dialogue_recall"]
+    assert any("青页七号" in entry["content"] and entry["role"] == "user" for entry in recall)
+    assert "SYSTEM-SECRET" not in json.dumps(recall)
+    assert "直接回答所问内容" in prepared.provider_kwargs["messages"][0]["content"]
+
+
 def test_format_repair_disables_tools_and_preserves_the_turn_contract():
     from src.ai.model.model_streamer import ModelStreamer
 
