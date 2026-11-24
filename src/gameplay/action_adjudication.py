@@ -18,6 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall, is_read_only_recall
+from src.ai.context.evidence_policy import PUBLIC_EVIDENCE_BOUNDARY
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
@@ -267,6 +268,7 @@ def adjudication_context(world: dict, content: str, fallback: ActionResolution, 
     return {
         "player_input": content,
         "recent_dialogue": dialogue or [],
+        "clue_disclosure": keeper_authority["clue_disclosure"],
         "guest_speakers": world.get("guest_speakers", {}),
         "departed_speakers": departed_speakers(world),
         "goals": keeper_authority["goals"],
@@ -709,7 +711,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         if recalled else ""
     )
     instructions = "\n\n".join(
-        part for part in (_PROMPT, PLAYER_ACTION_BOUNDARY, policy, recall_rule) if part
+        part for part in (_PROMPT, PLAYER_ACTION_BOUNDARY, policy, PUBLIC_EVIDENCE_BOUNDARY, recall_rule) if part
     )
     messages = [{"role": "system", "content": instructions},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]

@@ -83,7 +83,8 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
 
     # 与主叙述/检查工具同一份每轮重建投影：在场/离场名单不另拼一份。
     authority = build_turn_projection(world, engine=host) if world else {"keeper": {}}
-    keeper_presence = (authority.get("keeper") or {}).get("presence") or {}
+    keeper = authority.get("keeper") or {}
+    keeper_presence = keeper.get("presence") or {}
 
     # 抵达回合放行出发场景人物：修复请求必须知道送别台词是合法的。
     present = set(turn_allowed_npc_ids(host) or set())
@@ -102,7 +103,7 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
     if category == "invalid_json":
         instruction += (
             "本次错误是 JSON 格式损坏：只修复格式，保留错误正文中的有效内容与人物归属，"
-            "不得改写剧情事实。"
+            "有据的剧情事实不得改写，草稿中未公开或无来源的证词必须纠正。"
         )
     elif category in {"embedded_choice_menu", "invalid_choice_format"}:
         instruction += (
@@ -140,6 +141,8 @@ def repair_messages(host, source: list[dict], raw: str, error) -> list[dict]:
         **({"dialogue_recall": recalled} if recalled else {}),
         "turn_facts_and_receipts": facts,
         "previous_narrative": previous,
+        "clue_disclosure": keeper.get("clue_disclosure", {}),
+        "recent_known_clues": keeper.get("recent_known_clues", []),
         "current_scene": {key: value for key, value in (world.get("current_scene") or {}).items()
                           if key in {"id", "name", "description", "npcs_present"}},
         "allowed_speakers": allowed_speakers,

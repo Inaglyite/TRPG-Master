@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+from src.ai.context.evidence_policy import PUBLIC_EVIDENCE_BOUNDARY
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 
 SYSTEM_CONTRACT = """你是本场游戏的守秘人。玩家结构化请求表示尝试意图，不是成功事实。先检查场景与对象，决定直接处理、请求检定或澄清。游戏状态只由授权命令改变；叙事不能代替命令。工具返回已提交结果后才能断言相应事实。需要玩家选择或掷骰时创建待办并停止。本次回应结束前明确处理了什么、尚待什么，不代替玩家继续新的关键行动。
@@ -154,7 +155,10 @@ COMMAND_CATALOG_BRIEF = """命令目录（kind → 必填 payload 字段）：
 
 
 def build_system_prompt() -> str:
-    return "\n\n".join((SYSTEM_CONTRACT, PLAYER_ACTION_BOUNDARY, KNOWLEDGE_CONTRACT, COMMAND_CATALOG_BRIEF))
+    return "\n\n".join((
+        SYSTEM_CONTRACT, PLAYER_ACTION_BOUNDARY, KNOWLEDGE_CONTRACT,
+        COMMAND_CATALOG_BRIEF, PUBLIC_EVIDENCE_BOUNDARY,
+    ))
 
 
 KNOWLEDGE_CONTRACT = """持久资料和压缩：

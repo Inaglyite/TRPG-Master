@@ -268,6 +268,7 @@ def test_format_repair_keeps_current_receipts_without_replaying_old_history():
     messages = repair_messages(host, source, '{"segments":[', "Invalid JSON")
     data = json.loads(messages[1]["content"])
     assert len(messages) == 2 and data["allowed_speaker_ids"] == ["evelyn", "su"]
+    assert data["clue_disclosure"]["registered_ids"] == []
     assert data["previous_narrative"] == "你刚刚抵达报馆。"
     assert data["turn_facts_and_receipts"][-1]["role"] == "tool"
     assert data["invalid_output"] == '{"segments":['
@@ -520,6 +521,7 @@ def test_history_narrative_normalized_to_dialogue_json_on_wire_only():
     DialogueOutput.model_validate_json(wire[1]["content"])
     assert [message["role"] for message in wire] == ["system", "assistant", "user"]
     assert "输入来源与权限" in wire[0]["content"]
+    assert "线索披露与证词来源" in wire[0]["content"]
     assert json.loads(wire[2]["content"]) == {
         "player_intent": "继续",
         "engine_context": "本轮未掷骰",

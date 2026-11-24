@@ -301,15 +301,15 @@ class ModelRequestSnapshotTests(unittest.TestCase):
         envelope = engine._turn_diagnostics[-1]["request_envelope"]
         self.assertEqual(
             envelope["message_digest"],
-            "df6f5c46632165bc9bddb301087f34ad5ec3b5d0598b79333d91232c7874507e",
+            "c986c71c270a4c965f79784162b4b780593181ff3a26f4878178ccdbf598e421",
         )
         self.assertEqual(
             envelope["context_section_digests"]["system"],
-            "d4f92c48bb015c87a41f674b743e05614d4754062dc6326a2638695a8cdddc8f",
+            "aee81141be693870b9494496fb3267b6d62919507060d27cc4e5e44cca581aed",
         )
         self.assertEqual(
             envelope["context_section_digests"]["history"],
-            "1a7b24f5beb9ed0ddddcf61a04a8fdcb084819c92d2d96044039bbeb43173050",
+            "874acc2f7cdf6184d4fb2274314fdd9e001c7dc450ed7d0934112e21166eeea6",
         )
         self.assertEqual(
             envelope["context_section_digests"]["tools"],

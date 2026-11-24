@@ -9,6 +9,7 @@ from typing import Any
 from src.ai.context.context_capacity import CapacityDiagnostic
 from src.ai.context.context_capacity import evaluate as evaluate_capacity
 from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall
+from src.ai.context.evidence_policy import PUBLIC_EVIDENCE_BOUNDARY
 from src.ai.context.lorebook import estimate_text_tokens
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 from src.ai.tools.registry import model_tools_for, tool_catalog_for_names
@@ -121,7 +122,13 @@ def prepare_model_request(
         provider_message(message, dialogue_recall=recalled if index == recall_index else None)
         for index, message in enumerate(messages)
     ]
-    boundary = PLAYER_ACTION_BOUNDARY + ("\n\n" + RECALL_INSTRUCTION if recalled else "")
+    structured_dialogue = getattr(host, "_structured_dialogue", False) is True
+    boundaries = [PLAYER_ACTION_BOUNDARY]
+    if recalled:
+        boundaries.append(RECALL_INSTRUCTION)
+    if structured_dialogue:
+        boundaries.append(PUBLIC_EVIDENCE_BOUNDARY)
+    boundary = "\n\n".join(boundaries)
     if messages and messages[0].get("role") == "system":
         messages[0] = dict(
             messages[0], content=f"{messages[0].get('content', '')}\n\n{boundary}"
@@ -129,7 +136,7 @@ def prepare_model_request(
     else:
         messages.insert(0, {"role": "system", "content": boundary})
     request_role = "combat" if system_overlay else "story"
-    if getattr(host, "_structured_dialogue", False) is True:
+    if structured_dialogue:
         from src.ai.model.dialogue_output import (
             DIALOGUE_INSTRUCTION,
             narrative_history_to_dialogue_json,

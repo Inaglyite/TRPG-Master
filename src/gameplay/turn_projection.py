@@ -500,6 +500,14 @@ def build_turn_projection(
     ):
         entry_beat = None
     known_clues = _recent_known_clues(world)
+    catalog = world.get("clue_catalog")
+    registered_catalog = {
+        str(clue_id): clue for clue_id, clue in catalog.items()
+        if str(clue_id) in discovered_ids and isinstance(clue, dict)
+    } if authored_available and isinstance(catalog, dict) else {}
+    registered_tiers = [
+        clue["tier"] for clue in registered_catalog.values() if type(clue.get("tier")) is int
+    ]
     opening_public_facts = (
         [str(clue.get("text") or "")[:400] for clue in known_clues] if opening else []
     )
@@ -541,6 +549,14 @@ def build_turn_projection(
             world.get("case_clocks"), world.get("case_clock_definitions")
         ),
         "recent_known_clues": known_clues[-20:],
+        "clue_disclosure": {
+            "registered_ids": sorted(discovered_ids),
+            "highest_registered_tier": max(registered_tiers, default=None),
+            "registered_sources": {
+                clue_id: clue["source"] for clue_id, clue in registered_catalog.items()
+                if isinstance(clue.get("source"), str) and clue["source"]
+            },
+        },
         "recent_npc_conversations": {
             npc_id: list(entries[-6:])
             for npc_id, entries in (world.get("npc_conversations") or {}).items()

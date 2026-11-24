@@ -67,6 +67,8 @@ def test_freeform_action_is_understood_by_model_before_roll(monkeypatch):
     assert resolution.preferred_skill == "locksmith"
     assert json.loads(resolution.adjudication_json)["check"]["required_success_level"] == "hard"
     assert "adjudicate_action" in str(captured[0]["tool_choice"])
+    assert "线索披露与证词来源" in captured[0]["messages"][0]["content"]
+    assert json.loads(captured[0]["messages"][1]["content"])["clue_disclosure"]["registered_ids"] == []
     assert engine.context.world_store.load() == state  # proposal alone cannot mutate
 
 

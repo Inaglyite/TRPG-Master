@@ -164,12 +164,13 @@ def test_discovered_clue_with_granted_item_leaves_pending_candidates():
     state = rich_world()
     state["clue_catalog"]["bronze_bell"] = {
         "id": "bronze_bell", "text": "壁炉后的暗格里藏着大吕钟。",
-        "category": "investigation", "source": "hall", "granted_item": "大吕钟",
+        "category": "investigation", "source": "hall", "granted_item": "大吕钟", "tier": 1,
         "discovery_rules": [{"intent": "search", "targets": ["壁炉"],
                              "requires_success": True, "skill": "spot_hidden"}],
     }
     before = authority_payload(make_engine(state))
     assert "bronze_bell" in {clue["id"] for clue in before["available_scene_clues"]}
+    assert "bronze_bell" not in before["clue_disclosure"]["registered_ids"]
     # 落账：线索已知、实物已入随身物品。
     state["clues_found"]["investigation"].append(
         {"catalog_id": "bronze_bell", "text": "壁炉后的暗格里藏着大吕钟。"}
@@ -182,6 +183,10 @@ def test_discovered_clue_with_granted_item_leaves_pending_candidates():
     assert "hidden_safe" in candidate_ids  # 未发现的仍是候选
     assert "bronze_bell" not in {entry["id"] for entry in after["locked_candidates"]}
     assert "bronze_bell" in {clue["id"] for clue in after["recent_known_clues"]}
+    assert "bronze_bell" in after["clue_disclosure"]["registered_ids"]
+    assert "hidden_safe" not in after["clue_disclosure"]["registered_ids"]
+    assert after["clue_disclosure"]["registered_sources"]["bronze_bell"] == "hall"
+    assert after["clue_disclosure"]["highest_registered_tier"] == 1
 
 
 def test_summary_regenerated_from_world_not_compact_output():
