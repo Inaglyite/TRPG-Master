@@ -78,7 +78,14 @@ def test_recall_carries_an_early_player_statement_without_private_payloads(monke
 
     def create(**kwargs):
         calls.append(kwargs["messages"])
-        return response({"intent": "clarify", "input_quote": content, "approach": "回答笔记代号"})
+        return response({
+            "intent": "clarify",
+            "input_quote": content,
+            "approach": "笔记里没有代号",
+            "success_description": "没有任何私人索引代号",
+            "npc_direction": "必须告诉玩家查不到代号",
+            "time_minutes": 10,
+        })
 
     engine = SimpleNamespace(
         context=SimpleNamespace(world_store=MemoryStore(state)),
@@ -102,7 +109,16 @@ def test_recall_carries_an_early_player_statement_without_private_payloads(monke
     }
     assert "HIDDEN" not in str(data["dialogue_recall"])
     assert "time_minutes=0" in system["content"]
-    assert json.loads(result.adjudication_json)["time_minutes"] == 0
+    proposal = json.loads(result.adjudication_json)
+    assert proposal["time_minutes"] == 0
+    assert proposal["npc_direction"] == proposal["success_description"] == ""
+    assert "依据对话原文" in proposal["approach"]
+
+
+def test_history_question_does_not_remove_an_explicit_game_action():
+    from src.ai.context.dialogue_recall import is_read_only_recall
+
+    assert not is_read_only_recall("我拿走手稿。之前说过的私人代号是什么？")
 
 
 def test_conditional_effects_follow_actual_check_result():

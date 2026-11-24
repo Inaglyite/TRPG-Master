@@ -306,6 +306,22 @@ def test_recall_keeps_older_player_statement_in_story_and_format_repair():
     assert "直接回答所问内容" in prepared.provider_kwargs["messages"][0]["content"]
 
 
+def test_repeated_scene_framing_cannot_crowd_out_an_early_code():
+    from src.ai.context.dialogue_recall import dialogue_recall
+
+    history = [{"role": "user", "content": "我给这一页调查笔记取了一个私人代号「青页七号」。"}]
+    for i in range(14):
+        history.extend([
+            {"role": "user", "content": f"第{i}条：我留在书房，只整理笔记。不移动，不改动物品。"},
+            {"role": "assistant", "content": f"整理了第{i}条普通观察。"},
+        ])
+    recall = dialogue_recall(
+        history, "我留在书房，只整理笔记。最早那页的私人索引代号是什么？我现在在哪儿？"
+    )
+    assert len(recall) <= 8
+    assert any("青页七号" in entry["content"] for entry in recall)
+
+
 def test_format_repair_disables_tools_and_preserves_the_turn_contract():
     from src.ai.model.model_streamer import ModelStreamer
 

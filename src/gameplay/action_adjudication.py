@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall
+from src.ai.context.dialogue_recall import RECALL_INSTRUCTION, dialogue_recall, is_read_only_recall
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
 from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
@@ -697,6 +697,7 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
         return validate_proposal(session.plan, content, world, fallback, dialogue)
     payload = adjudication_context(world, content, fallback, dialogue)
     recalled = dialogue_recall(getattr(engine, "messages", []) or [], content)
+    read_only_recall = is_read_only_recall(content)
     if recalled:
         payload["dialogue_recall"] = recalled
     from src.gameplay.adjudication_policy import policy_instruction
@@ -736,6 +737,14 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
                 raise ValueError("裁决响应未完整结束")
             raw_arguments = str(calls[0].function.arguments or "")
             proposal = json.loads(raw_arguments)
+            if read_only_recall and isinstance(proposal, dict) and proposal.get("intent") == "clarify":
+                # The model classifies the request, but its free-text guess
+                # about the contents of history must not become a receipt.
+                proposal = {
+                    "intent": "clarify",
+                    "input_quote": content[:1200],
+                    "approach": "玩家请求回顾已见材料。直接依据对话原文与当前场景回答，本轮不执行新的行动。",
+                }
             resolution = validate_proposal(proposal, content, world, fallback, dialogue)
             from src.gameplay.turn_diagnostics import record_stage
 
