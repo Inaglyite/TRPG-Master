@@ -9,6 +9,7 @@ from typing import Any
 from src.ai.context.context_capacity import CapacityDiagnostic
 from src.ai.context.context_capacity import evaluate as evaluate_capacity
 from src.ai.context.lorebook import estimate_text_tokens
+from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 from src.ai.tools.registry import model_tools_for, tool_catalog_for_names
 from src.ai.tools.tool_pipeline import ContextSection, RequestEnvelope
 from src.ai.tools.tool_policy import MODEL_CALLER, ToolRequestSnapshot, payload_digest
@@ -106,6 +107,12 @@ def prepare_model_request(
     # Persist provenance for restore/branch matching, but never transmit private
     # keys (or unknown old prose as an assistant format example) to providers.
     messages = [provider_message(message) for message in messages]
+    if messages and messages[0].get("role") == "system":
+        messages[0] = dict(
+            messages[0], content=f"{messages[0].get('content', '')}\n\n{PLAYER_ACTION_BOUNDARY}"
+        )
+    else:
+        messages.insert(0, {"role": "system", "content": PLAYER_ACTION_BOUNDARY})
     request_role = "combat" if system_overlay else "story"
     if getattr(host, "_structured_dialogue", False) is True:
         from src.ai.model.dialogue_output import (

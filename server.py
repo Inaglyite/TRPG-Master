@@ -99,6 +99,7 @@ from src.app.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
+from src.app.diagnostic_log import emit as emit_diagnostic
 from src.app.engine import EngineCallbacks, GameEngine
 from src.app.event_stream import OrderedTurnEventStream
 from src.app.game_application import (
@@ -1429,11 +1430,11 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
             return
         actor = None
         try:
+            intent = game_app.perform_action.execute(data.get("content", ""))
             investigator_id = str(data.get("_room_investigator_id") or "")
             if investigator_id:
                 activate_investigator(engine.context, investigator_id)
                 engine._multiplayer_roster_active = True
-            intent = game_app.perform_action.execute(data.get("content", ""))
             actor_user_id = str(data.get("_room_actor_user_id") or "")
             if actor_user_id and investigator_id:
                 state = engine.context.world_store.load()
@@ -1452,6 +1453,7 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     }
         except ApplicationUseCaseError as exc:
             release_turn()
+            emit_diagnostic("action.rejected", engine, code=exc.code, status="rejected")
             await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         except Exception:

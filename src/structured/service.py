@@ -15,6 +15,7 @@ from collections.abc import Callable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from src.ai.player_input_boundary import PLAYER_CONTROL_MARKER_ERROR, contains_player_control_marker
 from src.storage.database import (
     CheckRequest,
     CommandEventReceipt,
@@ -1443,6 +1444,12 @@ class StructuredPlayService:
     # ------------------------------------------------------------------
 
     def _fact_check_action(self, state: dict, action: dict, investigator_id: str) -> None:
+        target = action.get("target")
+        text_fields = [action.get(field) for field in ("text", "question", "approach", "operation")]
+        if isinstance(target, dict):
+            text_fields.append(target.get("text"))
+        if any(isinstance(text, str) and contains_player_control_marker(text) for text in text_fields):
+            raise StructuredError("invalid_action", PLAYER_CONTROL_MARKER_ERROR)
         kind = action["kind"]
         if kind == "combat":
             from .combat_requests import fact_check_combat_request

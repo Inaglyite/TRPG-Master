@@ -1136,6 +1136,9 @@ export function handleServerPayload(raw: unknown) {
       }
       break;
     case "error":
+      if (data.terminal === true) {
+        rollbackPendingAction();
+      }
       if (useStartStore.getState().saveLoading) {
         failSaveLoad("server_error");
         useStartStore.setState({

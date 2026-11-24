@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from src.ai.player_input_boundary import PLAYER_CONTROL_MARKER_ERROR, contains_player_control_marker
+
 
 class GameEnginePort(Protocol):
     def reset(self, character_ref: dict | None = None) -> dict | None: ...
@@ -32,6 +34,13 @@ class SaveNotFoundError(ApplicationUseCaseError):
     def __init__(self, slot_id: str | None):
         self.slot_id = slot_id
         super().__init__("未找到存档")
+
+
+class PlayerControlMarkerError(ApplicationUseCaseError):
+    code = "reserved_player_control_marker"
+
+    def __init__(self):
+        super().__init__(PLAYER_CONTROL_MARKER_ERROR)
 
 
 @dataclass(frozen=True)
@@ -95,6 +104,8 @@ class PerformAction:
             raise ApplicationUseCaseError(
                 f"行动内容不能超过 {self.MAX_ACTION_CHARS} 个字符"
             )
+        if contains_player_control_marker(normalized):
+            raise PlayerControlMarkerError()
         if normalized == self.USER_SKILL_PREFIX or normalized.startswith(
             f"{self.USER_SKILL_PREFIX} "
         ):

@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.ai.model.llm_concurrency import llm_call_slot
 from src.ai.model.route_service import client_for_role, model_for_role, with_route_info
+from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 from src.app.config import _enabled_env
 from src.app.logger import game_event as log_game
 from src.app.logger import model_call as log_model_call
@@ -697,7 +698,8 @@ def adjudicate_player_action(engine: Any, content: str, world: dict, fallback: A
     from src.gameplay.adjudication_policy import policy_instruction
 
     policy = policy_instruction(engine)
-    messages = [{"role": "system", "content": _PROMPT + ("\n\n" + policy if policy else "")},
+    instructions = "\n\n".join(part for part in (_PROMPT, PLAYER_ACTION_BOUNDARY, policy) if part)
+    messages = [{"role": "system", "content": instructions},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     model = model_for_role(engine, "adjudication")
     started = time.monotonic()
