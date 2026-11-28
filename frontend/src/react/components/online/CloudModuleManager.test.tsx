@@ -10,6 +10,7 @@ import { CloudModuleManager } from "./CloudModuleManager";
 
 vi.mock("../../../api/client", () => ({
   apiFetch: vi.fn(),
+  apiHttpOrigin: () => "https://example.test",
 }));
 
 describe("CloudModuleManager", () => {
@@ -38,13 +39,12 @@ describe("CloudModuleManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "将模组甲下移" }),
+        screen.getByRole("button", { name: /调整模组甲顺序/ }),
       ).toBeEnabled(),
     );
 
-    expect(screen.getByRole("button", { name: "将模组甲下移" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "将模组甲上移" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "将模组丙下移" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存排序" })).toBeDisabled();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "从模组库移除模组乙" }));
     const confirmation = screen.getByRole("region", {
       name: "确认从模组库移除",
@@ -72,7 +72,7 @@ describe("CloudModuleManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "将模组甲下移" }),
+        screen.getByRole("button", { name: /调整模组甲顺序/ }),
       ).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole("button", { name: "从模组库移除模组乙" }));
@@ -87,19 +87,25 @@ describe("CloudModuleManager", () => {
     expect(status).toHaveTextContent("重新导入不会恢复");
   });
 
-  it("下移后提交完整显示顺序并刷新账号模组列表", async () => {
+  it("键盘排序只更新草稿，保存失败后可以重试", async () => {
     const onRefresh = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error("连接中断"));
     render(<CloudModuleManager onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
+    const grip = screen.getByRole("button", { name: /调整模组甲顺序/ });
+    const save = screen.getByRole("button", { name: "保存排序" });
+    await waitFor(() => expect(grip).toBeEnabled());
+    fireEvent.keyDown(grip, { key: "ArrowDown" });
+    expect(screen.getAllByRole("listitem")[1]).toHaveTextContent("模组甲");
+    expect(useOnlineStore.getState().modules[0].id).toBe("server-a");
+    expect(apiFetch).not.toHaveBeenCalled();
+    fireEvent.click(save);
+    expect(await screen.findByRole("alert")).toHaveTextContent("连接中断");
+    expect(screen.getAllByRole("listitem")[1]).toHaveTextContent("模组甲");
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "将模组甲下移" }),
-      ).toBeEnabled(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "将模组甲下移" }));
-
-    await waitFor(() =>
-      expect(apiFetch).toHaveBeenCalledWith(
+      expect(apiFetch).toHaveBeenLastCalledWith(
         "/api/me/modules/order",
         expect.anything(),
         {
@@ -108,9 +114,11 @@ describe("CloudModuleManager", () => {
         },
       ),
     );
-    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "已将「模组甲」下移，当前第 2 位",
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("排序已保存"),
     );
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    expect(useOnlineStore.getState().modules[0].id).toBe("personal-b");
+    expect(save).toBeDisabled();
   });
 });

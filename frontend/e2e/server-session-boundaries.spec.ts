@@ -564,6 +564,117 @@ test("云端首页六个直达工具，个人模组和上传角色卡按账号�
   await toolbar.getByRole("button", { name: "模组管理" }).click();
   const manager = page.getByRole("dialog", { name: /模组管理/ });
   await expect(manager.getByText("低语档案馆", { exact: true })).toBeVisible();
+  const moduleCards = manager.getByRole("list", { name: "模组排序" });
+  const saveOrder = manager.getByRole("button", { name: "保存排序" });
+  const getModuleIds = async () => {
+    const catalog = await (
+      await page.request.get(origin + "/api/modules")
+    ).json();
+    return catalog.modules.map((entry: { id: string }) => entry.id);
+  };
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 360 : 800 });
+    await expect(saveOrder).toBeInViewport();
+    await expect(
+      manager.getByRole("button", { name: "关闭模组管理" }),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: test.info().outputPath(`module-cards-${width}.png`),
+    });
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const before = await getModuleIds();
+  const grip = moduleCards.getByRole("button", { name: /调整低语档案馆顺序/ });
+  const firstCard = moduleCards.getByRole("listitem").first();
+  await expect(grip).toBeEnabled();
+  await grip.scrollIntoViewIfNeeded();
+  const from = (await grip.boundingBox())!;
+  const to = (await firstCard.boundingBox())!;
+  const secondCard = moduleCards.getByRole("listitem").nth(1);
+  const secondBefore = (await secondCard.boundingBox())!;
+  const lift = page.locator(".cloud-module-lift");
+  expect(before[0]).not.toBe(id);
+  async function dragToStart() {
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2, secondBefore.y + 12, {
+      steps: 8,
+    });
+    await expect(lift).toContainText("低语档案馆");
+    await expect
+      .poll(async () => (await secondCard.boundingBox())!.y)
+      .toBeGreaterThan(secondBefore.y + 30);
+    expect((await firstCard.boundingBox())!.y).toBeCloseTo(to.y);
+    await page.mouse.move(from.x + from.width / 2 + 24, to.y + 10, {
+      steps: 8,
+    });
+    await expect
+      .poll(async () => (await firstCard.boundingBox())!.y)
+      .toBeGreaterThan(to.y + 30);
+    const lifted = (await lift.boundingBox())!;
+    expect(lifted.x).toBeCloseTo(to.x + 24, 0);
+    expect(lifted.height).toBeGreaterThanOrEqual(from.height);
+  }
+  await dragToStart();
+  await page.screenshot({
+    path: test.info().outputPath("module-card-lift.png"),
+  });
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(manager).toBeVisible();
+  await expect(lift).toHaveCount(0);
+  expect((await firstCard.boundingBox())!.y).toBeCloseTo(to.y);
+  await expect(saveOrder).toBeDisabled();
+  await dragToStart();
+  await page.mouse.up();
+  await expect(firstCard).toContainText("低语档案馆");
+  expect(await getModuleIds()).toEqual(before);
+  await saveOrder.click();
+  await expect(manager.getByRole("status")).toHaveText("排序已保存");
+  expect(await getModuleIds()).toEqual([
+    id,
+    ...before.filter((moduleId: string) => moduleId !== id),
+  ]);
+
+  const touch = await page.context().newCDPSession(page);
+  const firstGrip = (await grip.boundingBox())!;
+  const last = (await moduleCards.getByRole("listitem").last().boundingBox())!;
+  const x = firstGrip.x + firstGrip.width / 2;
+  async function dragToEnd() {
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y: firstGrip.y + firstGrip.height / 2 }],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: last.y + last.height * 0.8 }],
+    });
+    await expect(moduleCards).toHaveAttribute("data-drop-end", "true");
+  }
+  await dragToEnd();
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchCancel",
+    touchPoints: [],
+  });
+  await expect(firstCard).toContainText("低语档案馆");
+  await expect(saveOrder).toBeDisabled();
+  await dragToEnd();
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await expect(moduleCards.getByRole("listitem").last()).toContainText(
+    "低语档案馆",
+  );
+  await expect(saveOrder).toBeEnabled();
+  expect((await getModuleIds())[0]).toBe(id);
+  await touch.detach();
+
+  await manager.getByRole("button", { name: "关闭模组管理" }).click();
+  await expect(manager).toBeHidden();
+  await toolbar.getByRole("button", { name: "模组管理" }).click();
+  await expect(firstCard).toContainText("低语档案馆");
+  await expect(saveOrder).toBeDisabled();
   await manager.getByRole("button", { name: "关闭模组管理" }).click();
   await expect(manager).toBeHidden();
   await page.locator("#btn-start").click();

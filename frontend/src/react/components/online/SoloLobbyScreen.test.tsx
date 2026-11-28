@@ -190,7 +190,7 @@ describe("SoloLobbyScreen 操作", () => {
     fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "将猩红文档下移" }),
+        screen.getByRole("button", { name: /调整猩红文档顺序/ }),
       ).toBeEnabled(),
     );
     vi.mocked(ensureModules).mockImplementation(async () => {
@@ -202,7 +202,13 @@ describe("SoloLobbyScreen 操作", () => {
         ],
       });
     });
-    fireEvent.click(screen.getByRole("button", { name: "将猩红文档下移" }));
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: /调整猩红文档顺序/ }),
+      {
+        key: "ArrowDown",
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存排序" }));
 
     await waitFor(() => expect(ensureModules).toHaveBeenCalled());
     expect(screen.getByRole("dialog", { name: "模组管理" })).toBeVisible();

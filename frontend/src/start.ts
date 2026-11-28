@@ -1,6 +1,7 @@
 /** Start-flow state machine and WebSocket command adapter. */
 
 import { enableInput } from "./options";
+import { orderModules, readLocalModuleOrder } from "./module-order";
 import {
   clearTransientHandouts,
   openSavePanel,
@@ -278,11 +279,15 @@ export function onSaveList(data: any) {
 export function populateModuleList(modules: ModuleOption[], active: string) {
   const state = useStartStore.getState();
   const changed = Boolean(state.activeModule && state.activeModule !== active);
+  const available = Array.isArray(modules) ? modules : [];
   useStartStore.setState({
-    modules: Array.isArray(modules) ? modules : [],
+    modules:
+      useAppStore.getState().mode === "local"
+        ? orderModules(available, readLocalModuleOrder())
+        : available,
     activeModule: active,
     activeModuleTitle:
-      modules.find((module) => module.id === active)?.title || active,
+      available.find((module) => module.id === active)?.title || active,
     moduleSwitchPending: false,
     ...(changed
       ? {
@@ -307,6 +312,49 @@ export function switchModule(module: string) {
     return;
   useStartStore.setState({ moduleSwitchPending: true, hint: "正在切换模组…" });
   safeSend(JSON.stringify({ type: "switch_module", module }));
+}
+
+/** The HTTP delete must wait for this window's game engine to leave the module. */
+export function switchModuleBeforeRemoval(module: string): Promise<void> {
+  const current = useStartStore.getState();
+  if (current.activeModule === module) return Promise.resolve();
+  if (
+    current.moduleSwitchPending ||
+    current.saveLoading ||
+    current.gameStarting
+  ) {
+    return Promise.reject(
+      new Error("当前正在切换模组或载入游戏，请稍后再试。"),
+    );
+  }
+  useStartStore.setState({ moduleSwitchPending: true, hint: "正在切换模组…" });
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => fail("切换模组超时，请重试。"),
+      10_000,
+    );
+    const unsubscribe = useStartStore.subscribe((state) => {
+      if (state.moduleSwitchPending) return;
+      if (state.activeModule !== module) {
+        fail("未能切换模组，请稍后重试。");
+        return;
+      }
+      cleanup();
+      resolve();
+    });
+    function cleanup() {
+      unsubscribe();
+      window.clearTimeout(timeout);
+    }
+    function fail(message: string) {
+      cleanup();
+      if (useStartStore.getState().moduleSwitchPending) resetStartButton();
+      reject(new Error(message));
+    }
+    if (!sendImmediately(JSON.stringify({ type: "switch_module", module }))) {
+      fail("游戏连接已断开，请等待重连后再试。");
+    }
+  });
 }
 
 export function populateCharacterList(groups: CharacterGroup[]) {

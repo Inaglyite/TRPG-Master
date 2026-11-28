@@ -2178,17 +2178,3 @@
   max-width: min(420px, 88vw);
   text-shadow: 0 1px 3px var(--bg);
 }
-
-.cloud-module-manager .module-manager-entry .module-manager-actions {
-  padding: 0;
-  gap: 8px;
-}
-@media (max-width: 640px) {
-  .cloud-module-manager .module-manager-entry {
-    display: grid;
-    gap: 8px;
-  }
-  .cloud-module-manager .module-manager-entry .module-manager-actions {
-    justify-content: flex-start;
-  }
-}

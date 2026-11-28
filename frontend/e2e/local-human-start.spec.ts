@@ -1,11 +1,12 @@
 /** True user creation: no post-start metadata editing, no configured key/model. */
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, request, test } from "@playwright/test";
 import { openLocalStartScreen } from "./readiness";
+import { e2ePython } from "./python-runtime";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const baseUrl = "http://127.0.0.1:8817";
@@ -54,7 +55,7 @@ test.beforeAll(async () => {
         NO_PROXY: "127.0.0.1,localhost",
         TRPG_RUNTIME_ROOT: runtimeRoot,
         TRPG_DATABASE_URL: `sqlite:///${join(runtimeRoot, "e2e.db")}`,
-        TRPG_AUTH_REQUIRED: "0",
+        TRPG_REQUIRE_AUTH: "0",
         TRPG_ALLOWED_ORIGINS: baseUrl,
         TRPG_WRITE_COMPAT_EXPORTS: "0",
         OPENAI_API_KEY: "",
@@ -449,4 +450,116 @@ test("本地人类主持：四窗口选择→无Key真实新建→发言→刷�
   );
   expect(modelRequests).toBe(0);
   expect(sent.filter((frame) => frame.type === "start")).toHaveLength(0);
+});
+
+test("本地模组卡片支持拖动、键盘动效和切换后安全删除", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const pack = join(runtimeRoot, "local-module-order.trpgmod");
+  execFileSync(
+    e2ePython(repositoryRoot),
+    ["tools/module_packager.py", "pack", "examples/module-template", pack],
+    { cwd: repositoryRoot },
+  );
+  const installed = await page.request.post(baseUrl + "/api/modules/import", {
+    data: readFileSync(pack),
+    headers: { "X-Module-Filename": "local-module-order.trpgmod" },
+  });
+  expect(installed.status()).toBe(201);
+  const title = "低语档案馆";
+  const url = baseUrl + "/?mode=local";
+  await openLocalStartScreen(page, url);
+  await page.locator(".module-select-trigger").click();
+  await page.getByRole("option", { name: title }).click();
+  await expect(page.locator("#start-title")).toHaveText(title);
+  const other = await page.context().newPage();
+  await openLocalStartScreen(other, url);
+  await expect(other.locator("#start-title")).toHaveText(title);
+  await page.bringToFront();
+
+  const openManager = () =>
+    page.getByRole("button", { name: "模组管理", exact: true }).click();
+  await openManager();
+  const manager = page.getByRole("dialog", { name: "模组管理" });
+  const cards = manager
+    .getByRole("list", { name: "模组排序" })
+    .getByRole("listitem");
+  const grip = manager.getByRole("button", { name: /调整低语档案馆顺序/ });
+  const save = manager.getByRole("button", { name: "保存排序" });
+  await expect(grip).toBeEnabled();
+  const from = (await grip.boundingBox())!;
+  const last = (await cards.last().boundingBox())!;
+  await page.mouse.move(from.x + 20, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(last.x + 20, last.y + last.height - 10, { steps: 12 });
+  await expect(page.locator(".cloud-module-lift")).toContainText(title);
+  await expect(cards.last()).toHaveAttribute("data-card-shift", "up");
+  await page.mouse.up();
+  await expect(cards.last()).toContainText(title);
+
+  // Record actual Web Animations calls so slow runners need not catch a 150ms frame.
+  await page.evaluate(() => {
+    document.body.dataset.cardAnimations = "0";
+    const original = Element.prototype.animate;
+    Element.prototype.animate = function (keyframes, options) {
+      if (this.classList.contains("module-library-card")) {
+        document.body.dataset.cardAnimations = String(
+          Number(document.body.dataset.cardAnimations) + 1,
+        );
+      }
+      return original.call(this, keyframes, options);
+    };
+  });
+  await grip.press("ArrowDown");
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-card-animations",
+    "0",
+  );
+  await grip.press("ArrowUp");
+  await expect(cards.nth(1)).toContainText(title);
+  await expect(grip).toBeFocused();
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-card-animations",
+    "2",
+  );
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await grip.press("ArrowDown");
+  await expect(cards.last()).toContainText(title);
+  await expect(grip).toBeFocused();
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-card-animations",
+    "2",
+  );
+  await save.click();
+  await expect(manager.getByRole("status")).toHaveText("排序已保存");
+  await page.reload();
+  await openManager();
+  await expect(cards.last()).toContainText(title);
+  await expect(save).toBeDisabled();
+  for (const width of [1280, 939, 640, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 360 : 800 });
+    await expect(save).toBeInViewport();
+    await expect(
+      manager.getByRole("button", { name: "关闭模组管理" }),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: test.info().outputPath(`local-module-cards-${width}.png`),
+    });
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // The first delete switches this window. The other window still keeps the package in use.
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await manager.getByRole("button", { name: "删除" + title }).click();
+  await manager.getByRole("button", { name: "切换并删除模组及存档" }).click();
+  await expect(manager.getByRole("alert")).toContainText("此模组正在使用");
+  await expect(cards.last()).toContainText(title);
+  await expect(page.locator("#start-title")).not.toHaveText(title);
+  await other.close();
+
+  await manager.getByRole("button", { name: "确认删除模组及存档" }).click();
+  await expect(manager.getByRole("status")).toContainText(
+    "已删除「" + title + "」",
+  );
+  await expect(manager.getByRole("heading", { name: title })).toHaveCount(0);
 });

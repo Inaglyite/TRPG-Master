@@ -51,7 +51,7 @@ describe("ModuleManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "模组管理" }));
     const remove = await screen.findByRole("button", { name: "删除夜波测试" });
     await waitFor(() => expect(remove).toBeEnabled());
-    expect(screen.getByRole("button", { name: "删除内置测试" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "删除内置测试" })).toBeNull();
     fireEvent.click(remove);
     expect(deleteModule).not.toHaveBeenCalled();
     expect(

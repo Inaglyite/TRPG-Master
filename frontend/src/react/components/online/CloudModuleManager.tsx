@@ -7,6 +7,8 @@ import type { ModuleInfo } from "../../../api/modules";
 import { useOnlineStore } from "../../../state/online-store";
 import { ArchiveFolderPanel } from "../ArchiveFolderPanel";
 import { StartMenuIcon } from "../StartMenuIcon";
+import { SortableModuleCards, useModuleOrdering } from "../SortableModuleCards";
+import { orderModules } from "../../../module-order";
 import { useDelayedClose } from "../transitions";
 import { useDialogKeyboard } from "../useDialogKeyboard";
 
@@ -43,6 +45,15 @@ export function CloudModuleManager({
   const [status, setStatus] = useState("");
   const { rendered, closing } = useDelayedClose(open, 140);
   const busy = working || modulesStatus === "loading";
+  const ordering = useModuleOrdering(
+    modules,
+    busy || Boolean(pendingRemoval),
+    () => {
+      setStatus("");
+      setError("");
+    },
+  );
+  const { cards, dirty, drag } = ordering;
 
   useEffect(() => {
     alive.current = true;
@@ -58,6 +69,7 @@ export function CloudModuleManager({
 
   const close = () => {
     if (!busy) {
+      drag.cancel();
       setOpen(false);
       setPendingRemoval(null);
     }
@@ -80,26 +92,29 @@ export function CloudModuleManager({
     }
   };
 
-  const move = async (item: ModuleInfo, index: number, offset: -1 | 1) => {
-    const target = index + offset;
-    if (busy || target < 0 || target >= modules.length) return;
-    const ordered = [...modules];
-    ordered.splice(index, 1);
-    ordered.splice(target, 0, item);
+  const saveOrder = async () => {
+    if (busy || !dirty || pendingRemoval) return;
+    const ids = cards.map((item) => item.id);
+    const { user, authOrigin } = useOnlineStore.getState();
     const generation = ++requestGeneration.current;
     setWorking(true);
     setError("");
     setStatus("");
-    setPendingRemoval(null);
     try {
       await apiFetch("/api/me/modules/order", removeResponseSchema, {
         method: "PUT",
-        body: { module_ids: ordered.map((module) => module.id) },
+        body: { module_ids: ids },
       });
-      if (!isCurrent(generation)) return;
-      setStatus(
-        `已将「${item.title}」${offset < 0 ? "上移" : "下移"}，当前第 ${target + 1} 位。`,
-      );
+      const current = useOnlineStore.getState();
+      if (
+        !isCurrent(generation) ||
+        current.user?.id !== user?.id ||
+        current.authOrigin !== authOrigin
+      )
+        return;
+      useOnlineStore.setState({ modules: orderModules(current.modules, ids) });
+      ordering.reset();
+      setStatus("排序已保存");
       try {
         await onRefresh();
       } catch (reason) {
@@ -174,6 +189,7 @@ export function CloudModuleManager({
           setStatus("");
           setError("");
           setPendingRemoval(null);
+          ordering.reset();
           void refresh();
         }}
       >
@@ -190,14 +206,14 @@ export function CloudModuleManager({
           >
             <ArchiveFolderPanel
               ref={panel}
-              className="module-manager-panel cloud-module-manager"
+              className="module-manager-panel module-library-panel"
               role="dialog"
               aria-modal="true"
-              aria-labelledby="cloud-module-manager-title"
+              aria-labelledby="module-library-panel-title"
               tabIndex={-1}
             >
               <header className="module-manager-header">
-                <h2 id="cloud-module-manager-title">模组管理</h2>
+                <h2 id="module-library-panel-title">模组管理</h2>
                 <button
                   type="button"
                   className="btn-ghost"
@@ -209,59 +225,27 @@ export function CloudModuleManager({
                 </button>
               </header>
               <div className="module-manager-body" data-dialog-scroll>
-                {status && <p role="status">{status}</p>}
-                {catalogError && <p role="alert">{catalogError}</p>}
-                {busy && <p role="status">正在处理…</p>}
-                <p className="module-manager-note">
-                  调整主页模组列表的显示顺序，或从库中移除个人上传的模组。选择模组请使用主页下拉框。
+                <p className="module-manager-note" id="cloud-module-order-help">
+                  拖动卡片左侧把手排序，保存后应用到首页。键盘可用 ↑ ↓ 调整。
                 </p>
-                {modules.map((item, index) => (
-                  <article className="module-manager-entry" key={item.id}>
-                    <div className="module-manager-info">
-                      <h3>{item.title}</h3>
-                      <p>
-                        {item.source === "account" ? "个人上传" : "服务器模组"}{" "}
-                        · v{item.version}
-                      </p>
-                      {item.description && <p>{item.description}</p>}
-                    </div>
-                    <div className="module-manager-actions">
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        disabled={busy || index === 0}
-                        aria-label={`将${item.title}上移`}
-                        onClick={() => void move(item, index, -1)}
-                      >
-                        上移
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        disabled={busy || index === modules.length - 1}
-                        aria-label={`将${item.title}下移`}
-                        onClick={() => void move(item, index, 1)}
-                      >
-                        下移
-                      </button>
-                      {item.source === "account" && (
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          disabled={busy}
-                          aria-label={`从模组库移除${item.title}`}
-                          onClick={() => {
+                <SortableModuleCards
+                  ordering={ordering}
+                  helpId="cloud-module-order-help"
+                  blocked={busy || Boolean(pendingRemoval)}
+                  action={(item) =>
+                    item.source === "account"
+                      ? {
+                          label: "从库中移除",
+                          name: `从模组库移除${item.title}`,
+                          onClick: () => {
                             setPendingRemoval(item);
                             setError("");
                             setStatus("");
-                          }}
-                        >
-                          从库中移除
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
+                          },
+                        }
+                      : null
+                  }
+                />
                 {!busy && modules.length === 0 && !catalogError && (
                   <p>暂无可用模组。</p>
                 )}
@@ -299,17 +283,37 @@ export function CloudModuleManager({
                   </section>
                 )}
               </div>
-              <footer className="module-manager-actions">
+              <footer className="module-manager-actions module-library-footer">
+                {catalogError && <p role="alert">{catalogError}</p>}
+                <p role="status">
+                  {busy
+                    ? "正在处理…"
+                    : status || (dirty ? "有未保存的排序" : "")}
+                </p>
                 <button
                   type="button"
                   className="btn-ghost"
-                  disabled={busy}
+                  disabled={
+                    busy || Boolean(pendingRemoval) || Boolean(drag.preview)
+                  }
                   onClick={() => {
-                    setPendingRemoval(null);
                     void refresh();
                   }}
                 >
                   刷新列表
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={
+                    busy ||
+                    !dirty ||
+                    Boolean(pendingRemoval) ||
+                    Boolean(drag.preview)
+                  }
+                  onClick={() => void saveOrder()}
+                >
+                  保存排序
                 </button>
               </footer>
             </ArchiveFolderPanel>

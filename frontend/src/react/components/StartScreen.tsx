@@ -338,19 +338,26 @@ export function StartScreen() {
           style={layerImage(transition.incomingBg ?? null)}
         />
       )}
-      {transition.phase === "flipping" ? (
-        <div className="module-page-flip">
-          <div
-            className="start-bg-layer outgoing"
-            aria-hidden="true"
-            style={layerImage(transition.outgoingBg)}
-          />
-          <div className="module-page-flip-shade" aria-hidden="true" />
-          {startBox}
-        </div>
-      ) : (
-        startBox
-      )}
+      <div
+        className={
+          transition.phase === "flipping" ? "module-page-flip" : undefined
+        }
+        style={
+          transition.phase === "flipping" ? undefined : { display: "contents" }
+        }
+      >
+        {transition.phase === "flipping" && (
+          <>
+            <div
+              className="start-bg-layer outgoing"
+              aria-hidden="true"
+              style={layerImage(transition.outgoingBg)}
+            />
+            <div className="module-page-flip-shade" aria-hidden="true" />
+          </>
+        )}
+        {startBox}
+      </div>
       {transition.phase === "flipping" && (
         <div className="module-page-edge" aria-hidden="true" />
       )}

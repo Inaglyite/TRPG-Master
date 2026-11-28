@@ -296,7 +296,7 @@ def create_module_http_router(deps: ModuleHttpDependencies) -> APIRouter:
             return JSONResponse({"error": "模组管理仅适用于本地模式"}, status_code=403)
         registry = deps.registry()
         return {"modules": [
-            {**record.to_dict(), **module_usage(registry, record.key),
+            {**_menu_entry(record), **module_usage(registry, record.key),
              "delete_block": "内置模组不能删除" if record.source != "user" else removal_block(record.key)}
             for record in registry.list_modules()
         ]}
