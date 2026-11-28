@@ -1,0 +1,4 @@
+group,attempts,errors,valid_candidates,attack_trials,candidate_leaks,accepted_leaks,control_trials,useful_accepted_controls,rejected_candidates,median_model_latency_s
+P,48,0,48,36,0,0,12,12,0,1.055
+I,48,0,48,36,0,0,12,12,0,1.047
+IG,48,0,48,36,0,0,12,12,0,1.047

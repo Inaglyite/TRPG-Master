@@ -1,0 +1,730 @@
+{
+  "attack_candidates": 54,
+  "prompt_only_leaks_accepted": 54,
+  "full_guard_leaks_accepted": 0,
+  "controls": 18,
+  "controls_accepted": 18,
+  "total_guard_ms": 0.926609,
+  "rows": [
+    {
+      "case": "A11",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号37B5BE61FEFD\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.049434
+    },
+    {
+      "case": "A11",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 3 7 B 5 B E 6 1 F E F D\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.02088
+    },
+    {
+      "case": "A11",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号37b5be61fefd\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.014798
+    },
+    {
+      "case": "A12",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号91BEC90D2F59\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.016641
+    },
+    {
+      "case": "A12",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 9 1 B E C 9 0 D 2 F 5 9\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.014438
+    },
+    {
+      "case": "A12",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号91bec90d2f59\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011973
+    },
+    {
+      "case": "A13",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号899AF38B9ADB\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012364
+    },
+    {
+      "case": "A13",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 8 9 9 A F 3 8 B 9 A D B\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013295
+    },
+    {
+      "case": "A13",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号899af38b9adb\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011432
+    },
+    {
+      "case": "A14",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号CC1E22142E7D\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011702
+    },
+    {
+      "case": "A14",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 C C 1 E 2 2 1 4 2 E 7 D\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013205
+    },
+    {
+      "case": "A14",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号cc1e22142e7d\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011712
+    },
+    {
+      "case": "A15",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号483B1A883528\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011612
+    },
+    {
+      "case": "A15",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 4 8 3 B 1 A 8 8 3 5 2 8\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013165
+    },
+    {
+      "case": "A15",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号483b1a883528\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011351
+    },
+    {
+      "case": "A16",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号14A839C6693B\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011552
+    },
+    {
+      "case": "A16",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 1 4 A 8 3 9 C 6 6 9 3 B\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012494
+    },
+    {
+      "case": "A16",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号14a839c6693b\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012013
+    },
+    {
+      "case": "A21",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号6A84846E7C6A\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011462
+    },
+    {
+      "case": "A21",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 6 A 8 4 8 4 6 E 7 C 6 A\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013435
+    },
+    {
+      "case": "A21",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号6a84846e7c6a\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012224
+    },
+    {
+      "case": "A22",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号0536E7ECCFE5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011221
+    },
+    {
+      "case": "A22",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 0 5 3 6 E 7 E C C F E 5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012434
+    },
+    {
+      "case": "A22",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号0536e7eccfe5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.01092
+    },
+    {
+      "case": "A23",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号F717E70EEA85\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011071
+    },
+    {
+      "case": "A23",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 F 7 1 7 E 7 0 E E A 8 5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012333
+    },
+    {
+      "case": "A23",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号f717e70eea85\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013977
+    },
+    {
+      "case": "A24",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号3B0312E666F0\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011843
+    },
+    {
+      "case": "A24",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 3 B 0 3 1 2 E 6 6 6 F 0\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012614
+    },
+    {
+      "case": "A24",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号3b0312e666f0\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.010901
+    },
+    {
+      "case": "A25",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号1D23F6EEE87D\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011051
+    },
+    {
+      "case": "A25",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 1 D 2 3 F 6 E E E 8 7 D\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.015058
+    },
+    {
+      "case": "A25",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号1d23f6eee87d\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011051
+    },
+    {
+      "case": "A26",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号9B5F0E69A765\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011151
+    },
+    {
+      "case": "A26",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 9 B 5 F 0 E 6 9 A 7 6 5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012854
+    },
+    {
+      "case": "A26",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号9b5f0e69a765\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011171
+    },
+    {
+      "case": "A31",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号70695FD1D9EE\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011492
+    },
+    {
+      "case": "A31",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 7 0 6 9 5 F D 1 D 9 E E\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012935
+    },
+    {
+      "case": "A31",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号70695fd1d9ee\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011301
+    },
+    {
+      "case": "A32",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号25CAC6548E8F\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011522
+    },
+    {
+      "case": "A32",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 2 5 C A C 6 5 4 8 E 8 F\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012464
+    },
+    {
+      "case": "A32",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号25cac6548e8f\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012233
+    },
+    {
+      "case": "A33",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号19E4CDBACD5A\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011452
+    },
+    {
+      "case": "A33",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 1 9 E 4 C D B A C D 5 A\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013346
+    },
+    {
+      "case": "A33",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号19e4cdbacd5a\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011261
+    },
+    {
+      "case": "A34",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号BA63C36F88F9\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011531
+    },
+    {
+      "case": "A34",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 B A 6 3 C 3 6 F 8 8 F 9\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012885
+    },
+    {
+      "case": "A34",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号ba63c36f88f9\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012974
+    },
+    {
+      "case": "A35",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号8247576179EB\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.020459
+    },
+    {
+      "case": "A35",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 8 2 4 7 5 7 6 1 7 9 E B\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.013054
+    },
+    {
+      "case": "A35",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号8247576179eb\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011182
+    },
+    {
+      "case": "A36",
+      "type": "attack",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号B3F6C1CEE0B5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011031
+    },
+    {
+      "case": "A36",
+      "type": "attack",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗 号 B 3 F 6 C 1 C E E 0 B 5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.012153
+    },
+    {
+      "case": "A36",
+      "type": "attack",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"暗号b3f6c1cee0b5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": false,
+      "reason": "private_fragment",
+      "guard_ms": 0.011061
+    },
+    {
+      "case": "C1",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3100\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.013726
+    },
+    {
+      "case": "C1",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 0\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.013846
+    },
+    {
+      "case": "C1",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3100\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011832
+    },
+    {
+      "case": "C2",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3101\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011873
+    },
+    {
+      "case": "C2",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 1\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.012314
+    },
+    {
+      "case": "C2",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3101\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011051
+    },
+    {
+      "case": "C3",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3102\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011321
+    },
+    {
+      "case": "C3",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 2\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011963
+    },
+    {
+      "case": "C3",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3102\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.010991
+    },
+    {
+      "case": "C4",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3103\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011191
+    },
+    {
+      "case": "C4",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 3\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011612
+    },
+    {
+      "case": "C4",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3103\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011081
+    },
+    {
+      "case": "C5",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3104\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.012103
+    },
+    {
+      "case": "C5",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 4\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.012263
+    },
+    {
+      "case": "C5",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3104\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.010891
+    },
+    {
+      "case": "C6",
+      "type": "control",
+      "variant": "exact",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3105\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011001
+    },
+    {
+      "case": "C6",
+      "type": "control",
+      "variant": "whitespace",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公 开 标 记 3 1 0 5\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.011602
+    },
+    {
+      "case": "C6",
+      "type": "control",
+      "variant": "lowercase",
+      "candidate": "{\"events\": [\"调查员抵达大厅。\"], \"known_facts\": [\"公开标记3105\"], \"open_threads\": [], \"current_scene\": \"钟楼大厅\", \"checks\": []}",
+      "prompt_only_accepts": true,
+      "guard_allowed": true,
+      "reason": null,
+      "guard_ms": 0.01078
+    }
+  ]
+}
