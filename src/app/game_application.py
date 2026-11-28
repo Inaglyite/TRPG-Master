@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from src.ai.player_input_boundary import player_input_rejection
+from src.app.diagnostic_log import emit as emit_diagnostic
 
 
 class GameEnginePort(Protocol):
@@ -96,6 +97,15 @@ class PerformAction:
         self.engine = engine
 
     def execute(self, content: object) -> TurnIntent:
+        try:
+            return self._execute(content)
+        except ApplicationUseCaseError as exc:
+            emit_diagnostic(
+                "action.rejected", self.engine, code=exc.code, status="rejected"
+            )
+            raise
+
+    def _execute(self, content: object) -> TurnIntent:
         normalized = str(content or "").strip()
         if not normalized:
             raise ApplicationUseCaseError("行动内容不能为空")

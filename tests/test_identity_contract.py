@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.ai.model.model_streamer import ModelResponseError
+from src.ai.player_input_boundary import PLAYER_ACTION_BOUNDARY
 from src.ai.skills.skill_manifest import load_official_catalog
 from src.ai.tools.registry import MODEL_TOOLS, model_tools_for
 from src.app.config import PROJECT_ROOT
@@ -364,7 +365,7 @@ class IdentityContractTests(unittest.TestCase):
 
         self.assertEqual(
             captured["messages"][0]["content"],
-            "public-opening-system",
+            f"public-opening-system\n\n{PLAYER_ACTION_BOUNDARY}",
         )
         self.assertNotIn("tools", captured)
         self.assertNotIn("tool_choice", captured)
@@ -461,10 +462,13 @@ class IdentityContractTests(unittest.TestCase):
             {"include_usage": True},
         )
         self.assertEqual(model_log.call_args.kwargs["usage"]["prompt_tokens"], 1200)
-        self.assertEqual(model_log.call_args.kwargs["system_chars"], 13)
+        system_chars = len(f"stable-prefix\n\n{PLAYER_ACTION_BOUNDARY}")
+        self.assertEqual(model_log.call_args.kwargs["system_chars"], system_chars)
         diagnostic = engine._turn_diagnostics[-1]
         self.assertEqual(diagnostic["usage"]["prompt_tokens"], 1200)
-        self.assertEqual(diagnostic["context_sections"]["system"]["chars"], 13)
+        self.assertEqual(
+            diagnostic["context_sections"]["system"]["chars"], system_chars
+        )
         self.assertGreater(
             diagnostic["context_sections"]["tool_schema"]["estimated_tokens"],
             0,
@@ -685,7 +689,7 @@ class IdentityContractTests(unittest.TestCase):
         for call in calls:
             self.assertEqual(
                 call["messages"][0]["content"],
-                "public-opening-system",
+                f"public-opening-system\n\n{PLAYER_ACTION_BOUNDARY}",
             )
             self.assertEqual(call["temperature"], 0.65)
             self.assertNotIn("tools", call)

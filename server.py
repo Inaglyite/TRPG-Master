@@ -99,7 +99,6 @@ from src.app.config import (
     PROJECT_ROOT,
     RUNTIME_ROOT,
 )
-from src.app.diagnostic_log import emit as emit_diagnostic
 from src.app.engine import EngineCallbacks, GameEngine
 from src.app.event_stream import OrderedTurnEventStream
 from src.app.game_application import (
@@ -1453,7 +1452,6 @@ async def run_ws_session(ws: WebSocket, engine: GameEngine, *, user_id: str | No
                     }
         except ApplicationUseCaseError as exc:
             release_turn()
-            emit_diagnostic("action.rejected", engine, code=exc.code, status="rejected")
             await outbound.send({"type": "error", "message": str(exc), "terminal": True})
             return
         except Exception:
